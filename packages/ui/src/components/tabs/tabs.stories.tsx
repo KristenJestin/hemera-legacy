@@ -1,6 +1,7 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
 import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
 
+import { expectNeverBuried, watchThereAndBack } from '../../../.storybook/sliding-mark.ts'
 import { IconMessages, IconSettings, IconTimelineEvent } from '../../icons.ts'
 import { TooltipProvider } from '../tooltip/tooltip.tsx'
 import { Tabs } from './tabs.tsx'
@@ -27,7 +28,7 @@ const PLACES = [
 ]
 
 const meta = {
-  tags: ['autodocs'],
+  tags: ['autodocs', 'updated'],
   title: 'Components/Tabs',
   component: Tabs,
   // Anchored rather than centred. Each panel is a different height, and a centred story puts
@@ -135,5 +136,26 @@ export const Keyboard: Story = {
     await waitFor(() => {
       expect(canvas.queryByText('The Sessions of the Project.')).toBeNull()
     })
+  },
+}
+
+/**
+ * The mark crossing the strip, out to the last tab and back to the first: on every frame of the
+ * way it is drawn over the tab it crosses and never under it (issue #127).
+ */
+export const MarkCrossing: Story = {
+  parameters: { controls: { disable: true } },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const strip = canvas.getByRole('tablist')
+    const first = canvas.getByRole('tab', { name: /sessions/i })
+    const last = canvas.getByRole('tab', { name: /settings/i })
+    const watched = await watchThereAndBack(
+      strip,
+      () => userEvent.click(last),
+      () => userEvent.click(first),
+    )
+    expect(first).toHaveAttribute('aria-selected', 'true')
+    expectNeverBuried(watched)
   },
 }

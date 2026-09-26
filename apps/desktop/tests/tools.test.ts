@@ -315,6 +315,7 @@ describe('Hemera Auto classifies one admitted tool call before execution', () =>
       Effect.gen(function* () {
         const session = yield* opened
         yield* (yield* ClassifierSettings).select('hemera-auto')
+        yield* (yield* ClassifierSettings).select('hemera-auto')
         const read = yield* calling({
           sessionId: session.sessionId,
           tool: 'fs_read',
@@ -338,6 +339,13 @@ describe('Hemera Auto classifies one admitted tool call before execution', () =>
     expect(human.asked).toHaveLength(1)
     expect(readFileSync(join(root, 'written.md'), 'utf8')).toBe('written once')
     expect(result.lines.filter((line) => line.type === 'classifier.decision')).toHaveLength(2)
+    expect(result.lines.filter((line) => line.type === 'classifier.mode_changed')).toMatchObject([
+      {
+        entityKind: 'profile',
+        author: 'human',
+        payload: { from: 'agent-default', to: 'hemera-auto' },
+      },
+    ])
     const decisions = result.entries.filter((entry) => entry.kind === 'classifier_decision')
     expect(decisions.map((entry) => entry.state)).toEqual(['allowed', 'unavailable'])
     expect(JSON.parse(decisions[1]?.payload ?? '{}')).toMatchObject({
@@ -384,19 +392,39 @@ describe('Hemera Auto classifies one admitted tool call before execution', () =>
         yield* settings.replaceKey('ciphertext', 'private-key')
         yield* settings.setConsent(true)
         yield* settings.select('hemera-auto')
-        return yield* calling({
+        const answer = yield* calling({
           sessionId: session.sessionId,
           tool: 'fs_write',
           arguments: { path: 'jev.md', content: 'safe content', key: 'jev-write' },
         })
+        return {
+          answer,
+          lines: yield* journalLines(session.projectId),
+          entries: yield* threadEntries(session.sessionId),
+        }
       }),
     )
-    expect(result.state).toBe('completed')
+    expect(result.answer.state).toBe('completed')
     expect(human.asked).toHaveLength(0)
     expect(sent).toHaveLength(1)
     expect(sent[0]).toContain('jev.md')
     expect(sent[0]).not.toContain('private-key')
     expect(readFileSync(join(root, 'jev.md'), 'utf8')).toBe('safe content')
+    expect(result.lines.find((line) => line.type === 'classifier.decision')?.payload).toMatchObject(
+      {
+        risk: 1,
+        approval: 0.2,
+        userRequested: 0.9,
+        model: JEV_MODEL,
+      },
+    )
+    expect(
+      JSON.parse(
+        result.entries.find((entry) => entry.kind === 'classifier_decision')?.payload ?? '{}',
+      ),
+    ).toMatchObject({
+      scores: 'risk 1 · approval 0.2 · user requested 0.9',
+    })
   })
 
   it('does not dispatch a valid Jev deny or treat an invalid reply as approval', async () => {
@@ -473,12 +501,20 @@ describe('Hemera Auto classifies one admitted tool call before execution', () =>
           }),
         )
         yield* Effect.promise(() => started)
+        const evaluating = yield* threadEntries(session.sessionId)
         yield* settings.select('agent-default')
         release?.()
-        return yield* Fiber.join(call)
+        const answer = yield* Fiber.join(call)
+        return { answer, evaluating, entries: yield* threadEntries(session.sessionId) }
       }),
     )
-    expect(result.state).toBe('refused')
+    expect(result.answer.state).toBe('refused')
+    expect(result.evaluating.find((entry) => entry.kind === 'classifier_decision')?.state).toBe(
+      'evaluating',
+    )
+    expect(result.entries.find((entry) => entry.kind === 'classifier_decision')?.state).toBe(
+      'cancelled',
+    )
     expect(existsSync(join(root, 'late.md'))).toBe(false)
     expect(human.asked).toHaveLength(0)
   })

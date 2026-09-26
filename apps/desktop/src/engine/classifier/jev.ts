@@ -35,7 +35,16 @@ export interface JevState {
 }
 
 export type JevResult =
-  | { readonly kind: 'evaluated'; readonly verdict: ClassifierVerdict; readonly model: string }
+  | {
+      readonly kind: 'evaluated'
+      readonly verdict: ClassifierVerdict
+      readonly model: string
+      readonly scores: {
+        readonly risk: number
+        readonly approval: number
+        readonly userRequested: number
+      }
+    }
   | { readonly kind: 'unavailable'; readonly reason: 'input' | 'response' | 'network' }
 
 /** Injected so tests never contact a provider. */
@@ -125,6 +134,7 @@ export async function evaluateJev(
         hasHumanContext: state.userContext.length > 0,
       }),
       model: parsed.data.model,
+      scores: { risk: risk.score, approval: approval.noul, userRequested: userRequested.noul },
     }
   } catch {
     return { kind: 'unavailable', reason: 'network' }

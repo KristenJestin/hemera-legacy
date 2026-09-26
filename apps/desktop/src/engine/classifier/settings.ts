@@ -7,6 +7,7 @@ import type { ClassifierMode } from '@hemera/ipc'
 
 import { Database, DatabaseError } from '../storage/database.ts'
 import { appPreferences } from '../storage/schema.ts'
+import { mutate } from '../transaction.ts'
 
 const MODE_KEY = 'classifier.mode'
 const CIPHERTEXT_KEY = 'classifier.jev.ciphertext'
@@ -68,10 +69,45 @@ export const classifierSettingsLayer = Layer.effect(
         return { mode, key, consent: consentRows[0]?.value === 'true', generation }
       }),
       select: (mode) =>
-        write(MODE_KEY, mode).pipe(
-          Effect.tap(() =>
+        mutate('selecting classifier mode', (transaction) =>
+          Effect.gen(function* () {
+            const rows = yield* transaction
+              .select()
+              .from(appPreferences)
+              .where(eq(appPreferences.key, MODE_KEY))
+            const previous = rows[0]?.value === 'hemera-auto' ? 'hemera-auto' : 'agent-default'
+            if (previous === mode) return { result: false, events: [] }
+            yield* transaction
+              .insert(appPreferences)
+              .values({ key: MODE_KEY, value: mode })
+              .onConflictDoUpdate({
+                target: appPreferences.key,
+                set: { value: sql`excluded.value` },
+              })
+            return {
+              result: true,
+              events: [
+                {
+                  type: 'classifier.mode_changed',
+                  entityKind: 'profile' as const,
+                  entityId: 'profile',
+                  source: 'ui' as const,
+                  author: 'human' as const,
+                  payload: { from: previous, to: mode },
+                },
+              ],
+            }
+          }),
+        ).pipe(
+          Effect.mapError((cause) =>
+            cause instanceof DatabaseError
+              ? cause
+              : new DatabaseError({ doing: 'selecting classifier mode', cause }),
+          ),
+          Effect.provideService(Database, database),
+          Effect.tap((changed) =>
             Effect.sync(() => {
-              generation += 1
+              if (changed) generation += 1
             }),
           ),
           Effect.asVoid,

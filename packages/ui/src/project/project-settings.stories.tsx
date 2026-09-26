@@ -55,12 +55,13 @@ const PLAIN = {
   portless: false,
   portlessName: null,
   folder: '',
+  runAtOpen: false,
 } as const
 
 /**
  * The catalogue of a Project that has one command of each of the seven types (D8-07): `dev` in
- * the front, `check` at the root, an `auth` server shared by the Project and run through
- * Portless, and a `seed` whose Windows line is its own.
+ * the front, `check` at the root, an `auth` server shared by the Project, run through Portless
+ * and each time Hemera opens, and a `seed` whose Windows line is its own.
  */
 const COMMANDS: CommandLine[] = [
   { ...PLAIN, id: 'check', name: 'check', command: 'pnpm check', type: 'test', folderBase: null },
@@ -82,6 +83,7 @@ const COMMANDS: CommandLine[] = [
     portless: true,
     portlessName: 'atlas',
     folderBase: './sources/api',
+    runAtOpen: true,
   },
   { ...PLAIN, id: 'lint', name: 'lint', command: 'pnpm lint', type: 'lint', folderBase: null },
   {
@@ -750,11 +752,16 @@ export const Commands: Story = {
     const auth = rowOf(canvasElement, 'pnpm auth:serve')
     await expect(auth.getByText('auth')).toBeVisible()
     await expect(auth.getByText('https://atlas.localhost')).toBeVisible()
-    // Seven commands, and each row its mark: its own type, then the two buttons it carries.
+    // Seven commands, and each row its mark: its own type, then the two buttons it carries; auth
+    // runs when Hemera opens, and says so with one quiet mark and nothing more (#114).
     const rows = canvasElement.querySelectorAll('ul[aria-label="Commands"] > li')
     await expect(rows).toHaveLength(COMMANDS.length)
     const authRow = panel.getByText('pnpm auth:serve').closest('li')!
-    await expect(authRow.querySelectorAll('svg')).toHaveLength(3)
+    await expect(authRow.querySelectorAll('svg')).toHaveLength(4)
+    await expect(auth.getByRole('img', { name: 'auth runs when Hemera opens' })).toBeVisible()
+    await expect(
+      rowOf(canvasElement, 'pnpm dev').queryByRole('img', { name: /runs when Hemera opens/ }),
+    ).toBeNull()
     // The scope, the folder and the four badges the row used to carry are the dialog's now.
     await expect(panel.queryByText('Serve')).toBeNull()
     await expect(panel.queryByText('Project, in main')).toBeNull()

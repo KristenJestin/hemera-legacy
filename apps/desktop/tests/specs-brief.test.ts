@@ -684,3 +684,56 @@ describe('A free Session gets no brief', () => {
     )
   })
 })
+
+describe('A queued sub-agent result survives a quit', () => {
+  test('a result queued before its safe point is handed over once after the application reopens, and recorded once', async () => {
+    const opened = application(dataFolder)
+    const gate = gated(1)
+    const result = 'Two call sites read the Journal: export.ts and feed.ts.'
+    let sessionId = ''
+
+    // Queued while a turn runs, then the application quits before that turn is over.
+    await opened(fakeAgent({ steps: SHAPING, between: gate.between }))(
+      Effect.gen(function* () {
+        sessionId = (yield* defining).sessionId
+        const runtime = yield* AgentRuntime
+        yield* Effect.forkScoped(runtime.prompt(sessionId, 'First turn.'))
+        yield* heldInThread(sessionId, (entries) =>
+          entries.some((entry) => entry.role === 'agent' && entry.body.startsWith('Shaping')),
+        )
+        yield* runtime.deliverInternal(sessionId, result)
+      }),
+    )
+
+    // Reopened: the first safe point hands it over, before the user's text.
+    const reopened = fakeAgent()
+    await opened(reopened)(
+      Effect.gen(function* () {
+        yield* (yield* AgentRuntime).prompt(sessionId, 'Second turn.')
+        const handed = deliveriesTo(reopened).flatMap((one) =>
+          [...one].filter(([uri]) => uri === contextUri('internal')).map(([, text]) => text),
+        )
+        expect(handed).toEqual([internalText(result)])
+        expect(reopened.answers.prompts.at(-1)?.endsWith('Second turn.')).toBe(true)
+        const provided = yield* (yield* AgentContext).provided(sessionId)
+        expect(provided.filter((one) => one.kind === 'internal')).toHaveLength(1)
+
+        // Handed over once: the next turn is the user's text alone.
+        const before = reopened.answers.prompts.length
+        yield* (yield* AgentRuntime).prompt(sessionId, 'Third turn.')
+        expect(reopened.answers.prompts.slice(before)).toEqual(['Third turn.'])
+      }),
+    )
+
+    // And once across a second reopening too.
+    const again = fakeAgent()
+    await opened(again)(
+      Effect.gen(function* () {
+        yield* (yield* AgentRuntime).prompt(sessionId, 'Fourth turn.')
+        expect(deliveriesTo(again).some((one) => one.has(contextUri('internal')))).toBe(false)
+        const provided = yield* (yield* AgentContext).provided(sessionId)
+        expect(provided.filter((one) => one.kind === 'internal')).toHaveLength(1)
+      }),
+    )
+  })
+})

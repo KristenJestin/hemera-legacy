@@ -251,6 +251,7 @@ function WorkspacesCards({
             setCreating(open)
           }}
           root={plan.root}
+          temporary={plan.temporary}
           onBrowse={onBrowse}
           defaultName={plan.name}
           repositories={planLinesOf(plan, reads)}

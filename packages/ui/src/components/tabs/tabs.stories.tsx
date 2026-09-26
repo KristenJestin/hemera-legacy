@@ -108,9 +108,26 @@ export const States: Story = {
   args: { defaultValue: 'journal' },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    expect(canvas.getByRole('tab', { name: /journal/i })).toHaveAttribute('aria-selected', 'true')
+    const chosen = canvas.getByRole('tab', { name: /journal/i })
+    expect(chosen).toHaveAttribute('aria-selected', 'true')
     expect(canvas.getByText('What happened, in order.')).toBeInTheDocument()
+    // The chosen tab says its name in the foreground colour, the others stay muted.
+    const foreground = colourOf(canvasElement, 'text-foreground')
+    expect(getComputedStyle(chosen).color).toBe(foreground)
+    expect(getComputedStyle(canvas.getByRole('tab', { name: /sessions/i })).color).not.toBe(
+      foreground,
+    )
   },
+}
+
+/** The colour a theme class resolves to on this page, read off a probe rather than written. */
+function colourOf(room: HTMLElement, className: string): string {
+  const probe = document.createElement('span')
+  probe.className = className
+  room.append(probe)
+  const colour = getComputedStyle(probe).color
+  probe.remove()
+  return colour
 }
 
 /** Scenario « Tabs aux flèches » of `specs/window-shell/spec.md`. */

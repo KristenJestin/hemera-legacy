@@ -164,9 +164,10 @@ export interface WindowReport {
  *
  * The kinds are the thread's own (design D5-11): a message, a thought, a tool call and a plan
  * are what a turn can be said to be doing at any moment, and the window it is filling is what
- * the agent announced it against; everything else the protocol publishes — the commands it
- * offers, the mode it is in, a compaction — is an update this lot does not draw and so does not
- * carry.
+ * the agent announced it against. `options` says the agent moved one of its options by itself —
+ * a mode it left, a configuration it changed — and carries nothing: what the options now are is
+ * the connection's `options()`. Everything else the protocol publishes — the commands it offers,
+ * a compaction — is an update this lot does not draw and so does not carry.
  *
  * `replay` is true for what the agent sends back while a session is being continued: ACP asks it
  * to stream the whole history again, and those turns are already in Hemera's thread. A replay is
@@ -189,6 +190,7 @@ export type AgentEvent =
   | { readonly type: 'tool_call'; readonly call: ToolCallReport; readonly replay: boolean }
   | { readonly type: 'plan'; readonly entries: readonly PlanLine[]; readonly replay: boolean }
   | { readonly type: 'usage'; readonly window: WindowReport; readonly replay: boolean }
+  | { readonly type: 'options'; readonly replay: boolean }
 
 /** What the agent published about itself at `initialize`. */
 export interface AgentHandshake {
@@ -809,6 +811,22 @@ export function connect(
           : { outcome: { outcome: 'selected' as const, optionId: answer.optionId } }
       },
       sessionUpdate: (notification) => {
+        // An option the agent moved by itself — Claude Code leaving plan mode once its plan is
+        // approved — is one the options held here have to follow, or the composer and what a
+        // restart puts back would both keep the value the agent left.
+        const update = notification.update
+        if (update.sessionUpdate === 'config_option_update') {
+          announced = optionsOf(update.configOptions)
+          options.onEvent({ type: 'options', replay: replaying })
+          return
+        }
+        if (update.sessionUpdate === 'current_mode_update') {
+          announced = announced.map((option) =>
+            isMode(option) ? { ...option, value: update.currentModeId } : option,
+          )
+          options.onEvent({ type: 'options', replay: replaying })
+          return
+        }
         const event = eventOf(notification, replaying)
         if (event !== null) options.onEvent(event)
       },

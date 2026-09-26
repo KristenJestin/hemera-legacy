@@ -803,3 +803,90 @@ describe('A queued sub-agent result survives a quit', () => {
     )
   })
 })
+
+describe('A queued sub-agent result goes as soon as the agent is back', () => {
+  test('after a reopen, the agent resumed idle is handed the result without any prompt of the user', async () => {
+    const opened = application(dataFolder)
+    const gate = gated(1)
+    const result = 'One call site reads the Journal: export.ts.'
+    let sessionId = ''
+
+    // Queued while a turn runs, then the application quits before that turn is over.
+    await opened(fakeAgent({ steps: SHAPING, between: gate.between }))(
+      Effect.gen(function* () {
+        sessionId = (yield* defining).sessionId
+        const runtime = yield* AgentRuntime
+        yield* Effect.forkScoped(runtime.prompt(sessionId, 'First turn.'))
+        yield* heldInThread(sessionId, (entries) =>
+          entries.some((entry) => entry.role === 'agent' && entry.body.startsWith('Shaping')),
+        )
+        yield* runtime.deliverInternal(sessionId, result)
+      }),
+    )
+
+    // Reopened: the Session's agent is taken back, and nobody types.
+    const reopened = fakeAgent({ continues: true })
+    await opened(reopened)(
+      Effect.gen(function* () {
+        yield* (yield* AgentRuntime).resume(sessionId)
+        const context = yield* AgentContext
+        let provided = yield* context.provided(sessionId)
+        for (let look = 0; look < 400 && !provided.some((one) => one.kind === 'internal'); look++) {
+          yield* pause(5)
+          provided = yield* context.provided(sessionId)
+        }
+
+        const handed = deliveriesTo(reopened).flatMap((one) =>
+          [...one].filter(([uri]) => uri === contextUri('internal')).map(([, text]) => text),
+        )
+        expect(handed).toEqual([internalText(result)])
+        expect(reopened.answers.prompts.every((text) => text === DELIVERY_MARKER)).toBe(true)
+        expect(provided.filter((one) => one.kind === 'internal')).toHaveLength(1)
+      }),
+    )
+  })
+})
+
+describe('The Context tab lists the edits and answers a brief carried', () => {
+  test('an edit and an answer made before the first brief are each reported beside it', async () => {
+    const agent = fakeAgent({ steps: SHAPING })
+
+    await application(dataFolder)(agent)(
+      Effect.gen(function* () {
+        const { sessionId, specId } = yield* defining
+        const specs = yield* Specs
+        // Before the agent was ever briefed, the user writes `scope` and answers a question: the
+        // first brief carries both.
+        yield* write(humanOf(sessionId), specId, 'scope', 'CSV only.')
+        const raised = yield* specs.raiseQuestion(
+          { kind: 'agent', sessionId },
+          {
+            specId,
+            body: 'Which format?',
+            blocking: true,
+            phase: 'shape',
+            options: [{ id: 'csv', label: 'CSV', recommended: true }],
+          },
+        )
+        yield* specs.answerQuestion({
+          specId,
+          questionId: raised.questions[0]?.id ?? '',
+          optionId: 'csv',
+        })
+
+        yield* (yield* AgentRuntime).prompt(sessionId, 'First turn.')
+
+        const delivered = deliveriesTo(agent)
+        expect(delivered).toHaveLength(1)
+        expect(delivered[0]?.has(contextUri('brief'))).toBe(true)
+        const provided = yield* (yield* AgentContext).provided(sessionId)
+        const handed = provided.filter((one) => ['brief', 'edit', 'answer'].includes(one.kind))
+        expect(handed.map((one) => [one.kind, one.path])).toEqual([
+          ['answer', 'Which format?'],
+          ['brief', 'shape · revision 1 · writer'],
+          ['edit', 'scope'],
+        ])
+      }),
+    )
+  })
+})

@@ -1,73 +1,93 @@
-import { AnimatePresence, motion, useIsPresent } from 'motion/react'
-import { type ReactNode, useEffect, useRef, useState } from 'react'
+import { AnimatePresence, animate, motion, useIsPresent, useMotionValue } from 'motion/react'
+import { type ReactNode, useEffect, useLayoutEffect, useRef, useState } from 'react'
 
 import { Button } from '../components/button/button.tsx'
 import { IconCheck } from '../icons.ts'
-import { CROSSFADE, collapse, crossfade, expand, morph, useTransition } from '../motion.ts'
-import { MissionPanel } from '../session/mission-panel.tsx'
-import type {
-  PhaseName,
-  ReaderView,
-  SectionName,
-  SectionView,
-  SpecTarget,
-  SpecView,
-} from './model.ts'
-import { QuestionsPart } from './questions-part.tsx'
+import {
+  CROSSFADE,
+  collapse,
+  expand,
+  instant,
+  morph,
+  onTheBeat,
+  slide,
+  swap,
+  useTransition,
+} from '../motion.ts'
+import type { PhaseName, ReaderView, SpecView } from './model.ts'
 import { ReaderBar } from './reader-bar.tsx'
 import { ReworkDialog } from './rework-dialog.tsx'
-import { SectionPart } from './section-part.tsx'
+import { SpecColumn, goToPhase } from './spec-column.tsx'
+import { SpecFrame } from './spec-frame.tsx'
 import { SpecHead } from './spec-head.tsx'
-import { type RailGroup, SpecRail, type StageChoice, railOf } from './spec-rail.tsx'
-import { StoriesPart } from './stories-part.tsx'
-import { TasksPart } from './tasks-part.tsx'
+import type { SpecPartHandlers } from './spec-part.tsx'
+import { phasesOf } from './spec-phases.ts'
 import { WorkspaceActions, type WorkspaceActionsProps } from './workspace-actions.tsx'
 
 /**
- * The Spec panel: the working surface of a `define` Session, beside the chat (lot 19, brief
- * revisions 3 and 4; core.md, "Session view").
+ * The Spec panel: the working surface of a `define` Session, beside the chat (lot 19; issues
+ * #135, #150 and #164).
  *
- * The mission panel (`session/mission-panel.tsx`) is its shell: the fold to a band beside the
- * chat, the width that pushes the chat as it unfolds, the agent unfolding it onto what it starts
- * on unless the hand folded it, and the keyboard across a fold. What is the Spec's is here.
+ * Folded, the Spec is a small frame at the window's edge (`spec-frame.tsx`): the unfold chevron and
+ * the three phases' glyphs, each tinted by how far along it is. Open, it is one frame the height of
+ * the window: on its rim the head — the key, the title, the status, the revisions, `Rework` on a
+ * ready Spec and the fold chevron — then the body, which is the Spec as one column read from top
+ * to bottom, each phase under a heading that sticks while it is read (`spec-column.tsx`), and on
+ * the rim again one footer across the panel: `Mark ready` on a draft, quiet until the agent has
+ * confirmed the Spec complete and primary from then on, and once the Spec is ready the build's
+ * actions in its place, until it is reworked. No readiness is drawn (issue #135): what the draft
+ * lacks is the agent's to say, and `Mark ready`'s to refuse with.
  *
- * Unfolded, a head that stays on top — the key, the title, the status, `Rework` on a ready Spec,
- * and no sentence of what the agent is doing — under it the rail beside the stage, and under both
- * a footer the panel's whole width (issue #150). The stage shows one part, or every part of one
- * phase when its heading in the rail is chosen. Folded, the band is the rail's glyphs and their
- * tints. No readiness is drawn (issue #135): what the draft lacks is the agent's to say, and
- * `Mark ready`'s to refuse with. The footer holds `Mark ready` on a draft — quiet until the agent
- * has confirmed the Spec complete, primary from then on — and once the Spec is ready, the build's
- * actions in its place, until the Spec is reworked.
+ * The two trade places by a swap (the `swap` kind of the preset). Opening, the small frame slides
+ * out by the window's edge and fades, and a beat later, while it is still going, the panel slides
+ * in from that edge and pushes the chat; closing, the panel slides out, and a beat later the small
+ * frame comes back. The two moves always overlap, so there is no frame where neither is there.
  *
- * Which part is on the stage follows one rule. While the reader has chosen nothing, it follows
- * the agent: the part it writes. A row of the rail or a group heading pins the choice, and from
- * then on the agent's part only breathes in the rail.
+ * The panel is a slot of the Session's row and the chat takes the rest: nothing stands over the
+ * chat at any time. What moves is how far open the Spec is, from 0 to 1, which the slot's width
+ * (`spec-slot`) and the panel's place (`spec-panel-in`) are both drawn from, so the chat is pushed
+ * on the very spring the panel slides on and the two can never part. A fold asked half-way turns
+ * that one value round from where it is. The panel is laid at its open width from the first frame
+ * and clipped at the window's edge: nothing in it reflows on the way.
+ *
+ * Who opens it: the chevron and the glyphs; and the agent starting on a part opens it on that
+ * part's phase, unless the hand folded it during this Session — a fold by the hand holds until the
+ * hand unfolds. A Spec just created from the agent's proposal arrives, opening from nothing
+ * (issue #130).
  *
  * Everything it shows is handed to it, and everything it does is reported: the panel holds only
- * what is on the stage, and whether the rework dialog is open; its shell, whether it is folded.
- * The agent writes the Spec; the reader reads it and answers, and edits nothing (issue #135).
+ * whether it is folded and whether the rework dialog is open. The agent writes the Spec; the
+ * reader reads it and answers, and edits nothing (issue #135).
  */
 
-const HEAD = 'flex flex-col gap-1.5 border-b border-border px-5 pt-4 pb-3'
+/** The Spec in the Session's row: its slot, and what is laid over it at the window's edge. */
+const DOCK = 'relative flex h-full min-h-0 shrink-0 py-3 pr-3'
+
+/** The panel's clip, at the window's edge: what the panel slides in and out of. */
+const CLIP =
+  'pointer-events-none absolute inset-y-3 right-3 w-spec-panel overflow-hidden rounded-xl'
+
+/** The open panel: a frame the whole height of the row, its rim around the head, body and foot. */
+const PANEL =
+  'spec-panel-in pointer-events-auto flex size-full flex-col rounded-xl border border-border bg-surface-rim p-1.5'
+
+/** The small frame's place: on the window's edge, centred on its height, over the panel. */
+const FRAME = 'pointer-events-none absolute inset-y-3 right-3 z-1 flex items-center'
+
+/** The head on the rim, above the body. */
+const HEAD = 'flex shrink-0 flex-col gap-1 px-2.5 pt-1 pb-2.5'
 
 const NOW = 'text-sm text-muted-foreground'
+
+/** The body: the column, taking the rest of the panel's height. */
+const BODY =
+  'flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border border-border bg-surface-body shadow-sm'
 
 /** What `Mark ready` was refused with, beside it in the footer, taking the room it leaves. */
 const REFUSED = 'min-w-0 flex-1 text-sm text-destructive-muted-foreground'
 
-const SCROLL = 'min-h-0 min-w-0 flex-1 overflow-y-auto outline-none focus-ring'
-
-const STAGE = 'flex flex-col gap-10 px-10 pt-5 pb-10'
-
-/** The footer of the panel, under the rail and the stage alike, its actions at its end. */
-const FOOT = 'flex items-center justify-end gap-3 border-t border-border px-5 py-3'
-
-/** What a part does with the reader's hand, handed down from the panel. */
-export interface SpecPartHandlers {
-  /** Takes the thread to where an open question is asked. */
-  onGoToQuestion: (id: string) => void
-}
+/** The footer on the rim, under the body, its actions at its end. */
+const FOOT = 'flex items-center justify-end gap-3 px-1 pt-1.5'
 
 export interface SpecPanelProps extends SpecPartHandlers {
   spec: SpecView
@@ -75,13 +95,13 @@ export interface SpecPanelProps extends SpecPartHandlers {
   reader?: ReaderView | undefined
   /** Whether the rework dialog starts open, for the story that shows it. */
   defaultReworkOpen?: boolean | undefined
-  /** Whether the panel starts folded to its band, which it does unless told otherwise. */
+  /** Whether the Spec starts folded to its small frame, which it does unless told otherwise. */
   defaultFolded?: boolean | undefined
   /** Told each time the panel folds or unfolds, by the hand or because the agent writes. */
   onFoldChange?: ((folded: boolean) => void) | undefined
   /**
    * Whether the Spec was just created in this Session, from the agent's proposal: the panel then
-   * arrives, unfolding from nothing on its own spring, rather than standing there (issue #130).
+   * arrives, opening from nothing on the swap's own spring, rather than standing there (#130).
    */
   arrives?: boolean | undefined
   onMarkReady: () => void
@@ -97,13 +117,22 @@ export interface SpecPanelProps extends SpecPartHandlers {
   build?: WorkspaceActionsProps | undefined
 }
 
+/** Where the keyboard goes once the Spec folded or unfolded under it. */
+type Refocus = 'unfold' | 'fold' | PhaseName
+
+/** The control the keyboard lands on: the small frame's unfold, or the head's fold. */
+const LANDINGS = {
+  unfold: '[data-unfold]',
+  fold: '[aria-label="Fold the Spec"]',
+} as const
+
 export function SpecPanel({
   spec,
   reader,
   defaultReworkOpen = false,
   defaultFolded = true,
   onFoldChange,
-  arrives,
+  arrives = false,
   onMarkReady,
   onRework,
   onPickRevision,
@@ -111,10 +140,136 @@ export function SpecPanel({
   build,
   ...handlers
 }: SpecPanelProps): ReactNode {
-  // What the reader chose, which pins the stage; `null` while they have chosen nothing.
-  const [pinned, setPinned] = useState<StageChoice | null>(null)
+  const startsFolded = arrives ? false : defaultFolded
+  const [folded, setFolded] = useState(startsFolded)
+  // Whether the swap is on its way. Folding, the panel stays in the slot until it has left.
+  const [moving, setMoving] = useState(false)
   const [reworking, setReworking] = useState(defaultReworkOpen)
-  const shown: StageChoice = pinned ?? { part: spec.focus ?? 'problem' }
+  // The fold as it is now, read by the several hands one click may bubble through.
+  const isFolded = useRef(startsFolded)
+  // Whether the last fold was the hand's: it holds against the agent until the hand unfolds.
+  const byHand = useRef(false)
+  const followed = useRef(spec.focus)
+  const dock = useRef<HTMLElement>(null)
+  const column = useRef<HTMLDivElement>(null)
+  // The phase the panel is to open on, gone to once its column is there.
+  const onPhase = useRef<PhaseName | null>(null)
+  // Where the keyboard goes once the swap was asked, when it was in the Spec as it was asked.
+  const refocus = useRef<Refocus | null>(null)
+  const move = useTransition(swap.move)
+  const fade = useTransition(swap.fade)
+  const still = move === instant
+  // How far open the Spec is, from its small frame (0) to its panel (1).
+  const open = useMotionValue(startsFolded ? 0 : 1)
+  // How far in the Spec has arrived, from nothing (0) to its place in the row (1).
+  const present = useMotionValue(arrives ? 0 : 1)
+  const groups = phasesOf(spec)
+
+  function fold(next: boolean, hand: boolean, phase: PhaseName | null = null): void {
+    if (hand) byHand.current = next
+    if (isFolded.current === next) return
+    const inside = dock.current?.contains(document.activeElement) ?? false
+    refocus.current = hand && inside ? (next ? 'unfold' : (phase ?? 'fold')) : null
+    onPhase.current = next ? null : phase
+    isFolded.current = next
+    setFolded(next)
+    setMoving(true)
+    onFoldChange?.(next)
+  }
+
+  // The agent starting on something opens the panel on its phase — unless the hand folded it.
+  useEffect(() => {
+    const before = followed.current
+    followed.current = spec.focus
+    if (spec.focus === undefined || spec.focus === before) return
+    if (!isFolded.current || byHand.current) return
+    const phase = groups.find((group) => group.rows.some((row) => row.target === spec.focus))
+    fold(false, false, phase?.phase ?? null)
+  }, [spec.focus])
+
+  /**
+   * Writes how far open the Spec is onto its dock, which its slot's width and its panel's place
+   * are drawn from.
+   *
+   * Called on every frame the value moves rather than subscribed to it, as the shell does with the
+   * sidebar's width: a value that changes every frame cannot be a class, and a width assembled in
+   * a style attribute is a length living outside the theme.
+   */
+  function pose(share: number): void {
+    dock.current?.style.setProperty('--spec-open', String(share))
+  }
+
+  /** Writes how far in the Spec has arrived, which scales its whole slot and places its panel. */
+  function place(share: number): void {
+    dock.current?.style.setProperty('--spec-in', String(share))
+  }
+
+  // The first frame has no animation to report a share: the resting one is written before it.
+  useLayoutEffect(() => {
+    pose(open.get())
+    place(present.get())
+  }, [])
+
+  // Arriving, the Spec opens from nothing on the swap's spring; told to move less, it is there.
+  useLayoutEffect(() => {
+    if (present.get() === 1) return
+    if (still) {
+      present.jump(1)
+      place(1)
+      return
+    }
+    const travel = animate(present, 1, { ...move, onUpdate: place })
+    return () => travel.stop()
+  }, [])
+
+  // The swap. The panel moves on the swap's spring, from wherever it stands, pushing the chat on
+  // every frame; opening from the small frame, it waits a beat for the frame to start leaving.
+  // A swap turned round half-way waits for nothing: it is already under way. Told to move less,
+  // it lands at once.
+  useLayoutEffect(() => {
+    const target = folded ? 0 : 1
+    const from = open.get()
+    if (from === target) {
+      setMoving(false)
+      return
+    }
+    if (still) {
+      open.jump(target)
+      pose(target)
+      setMoving(false)
+      return
+    }
+    const late = !folded && from === 0 ? onTheBeat(move) : move
+    let live = true
+    const travel = animate(open, target, { ...late, onUpdate: pose })
+    void travel.then(() => {
+      if (live) setMoving(false)
+    })
+    return () => {
+      live = false
+      travel.stop()
+    }
+  }, [folded])
+
+  // Opened on a phase, the column is there at once on it: its content is arriving, and a scroll
+  // on top of the slide would be two journeys at once. Then the keyboard goes where the control it
+  // was on stands now: the fold, the heading of the phase it opened on, or back to the unfold.
+  // `preventScroll`, because the panel is sliding in a clip, and a focus that scrolled the clip to
+  // show itself would drag the panel along.
+  useEffect(() => {
+    const phase = onPhase.current
+    onPhase.current = null
+    if (!folded && phase !== null) goToPhase(column, phase, true)
+    const target = refocus.current
+    refocus.current = null
+    if (target === null) return
+    const selector =
+      target === 'unfold' || target === 'fold'
+        ? LANDINGS[target]
+        : `[data-phase="${target}"] [data-heading] button`
+    dock.current?.querySelector<HTMLElement>(selector)?.focus({ preventScroll: true })
+  }, [folded])
+
   // The build is offered on a Spec that is not being written, and never on an older revision of
   // one: only the current revision of a Spec is built, as only it can be reworked (D7-05, D8-12).
   // A launch already asked for stays where it stands once the Spec moves on: a build that started
@@ -136,63 +291,84 @@ export function SpecPanel({
       : markable
         ? { kind: 'ready', confirmed, refused: spec.readiness.refused, onMarkReady }
         : null
-  const groups = railOf(spec)
 
-  const rail = {
-    label: `Parts of ${spec.key}`,
-    groups,
-    current: shown,
-    following: spec.focus,
-    onSelect: (target: SpecTarget) => setPinned({ part: target }),
-    onSelectGroup: (phase: PhaseName) => setPinned({ group: phase }),
-  }
+  // The small frame leaves at once, and comes back a beat after the panel started leaving.
+  const frameMoves = folded ? onTheBeat(fade) : fade
+  const away = slide('stage').enter
 
   return (
     <>
-      <MissionPanel
-        label={`Spec ${spec.key}`}
-        noun="Spec"
-        defaultFolded={defaultFolded}
-        onFoldChange={onFoldChange}
-        arrives={arrives}
-        following={spec.focus}
-        // Unfolded by the agent, the stage shows the part it starts on, whatever was chosen.
-        onFollow={() => setPinned(null)}
-        head={(fold) => (
-          <>
-            <header className={HEAD}>
-              <SpecHead
-                specKey={spec.key}
-                title={spec.title}
-                type={spec.type}
-                status={spec.status}
-                revision={spec.revision}
-                revisions={spec.revisions}
-                superseded={spec.replacedBy !== undefined}
-                onPickRevision={onPickRevision}
-                onRework={() => setReworking(true)}
-                onFold={fold}
-              />
-              {spec.replacedBy !== undefined && (
-                // The one line under the head, and only for an older revision: which phase the
-                // agent is on is the rail's to say, and whether it is done the footer's (#150).
-                <p className={NOW}>An earlier version · read only</p>
-              )}
-            </header>
-            {reader !== undefined && (
-              <ReaderBar
-                writer={reader.writer}
-                takeOverRefused={reader.takeOverRefused}
-                onTakeOver={onTakeOver}
-              />
-            )}
-          </>
+      <section ref={dock} aria-label={`Spec ${spec.key}`} className={DOCK}>
+        <div aria-hidden="true" className="spec-slot shrink-0" />
+        {(!folded || moving) && (
+          <div className={CLIP}>
+            {/* Folding, the panel stays in its clip until it has left, out of reach of the
+                keyboard and of a screen reader the whole way. */}
+            <div
+              inert={folded}
+              aria-hidden={folded ? true : undefined}
+              data-spec-panel
+              className={PANEL}
+            >
+              <header className={HEAD}>
+                <SpecHead
+                  specKey={spec.key}
+                  title={spec.title}
+                  type={spec.type}
+                  status={spec.status}
+                  revision={spec.revision}
+                  revisions={spec.revisions}
+                  superseded={spec.replacedBy !== undefined}
+                  onPickRevision={onPickRevision}
+                  onRework={() => setReworking(true)}
+                  onFold={() => fold(true, true)}
+                />
+                {spec.replacedBy !== undefined && (
+                  // The one line under the head, and only for an older revision: where the phases
+                  // stand is their headings' to say, and whether it is done the footer's (#150).
+                  <p className={NOW}>An earlier version · read only</p>
+                )}
+              </header>
+              <div className={BODY}>
+                {reader !== undefined && (
+                  <ReaderBar
+                    writer={reader.writer}
+                    takeOverRefused={reader.takeOverRefused}
+                    onTakeOver={onTakeOver}
+                  />
+                )}
+                <SpecColumn
+                  spec={spec}
+                  groups={groups}
+                  column={column}
+                  still={still}
+                  {...handlers}
+                />
+              </div>
+              <SpecFoot content={foot} />
+            </div>
+          </div>
         )}
-        rail={<SpecRail {...rail} />}
-        stage={<SpecStage spec={spec} shown={shown} groups={groups} {...handlers} />}
-        band={<SpecRail {...rail} folded />}
-        foot={<SpecFoot content={foot} />}
-      />
+        {/* Drawn over the panel, so its leaving and its return are seen whole. */}
+        <motion.div
+          inert={!folded}
+          aria-hidden={folded ? undefined : true}
+          data-spec-frame
+          className={FRAME}
+          initial={false}
+          animate={folded ? { x: 0, ...CROSSFADE.to } : { x: away, ...CROSSFADE.from }}
+          transition={frameMoves}
+        >
+          <div className="pointer-events-auto">
+            <SpecFrame
+              specKey={spec.key}
+              groups={groups}
+              writing={spec.focus}
+              onUnfold={(phase) => fold(false, true, phase)}
+            />
+          </div>
+        </motion.div>
+      </section>
       <ReworkDialog
         open={reworking}
         onOpenChange={setReworking}
@@ -220,18 +396,18 @@ type FootContent =
     }
 
 /**
- * The footer of the panel (issues #135, #150): under the rail and the stage together, what the
- * Spec offers at its end — `Mark ready` on a draft, with what it was refused with beside it; once
- * ready, `Use an existing Workspace` and `Prepare and start the build`, then where the launch
- * stands.
+ * The footer of the panel (issues #135, #150): one across the panel, on the rim under the body,
+ * what the Spec offers at its end — `Mark ready` on a draft, with what it was refused with beside
+ * it; once ready, `Use an existing Workspace` and `Prepare and start the build`, then where the
+ * launch stands.
  *
  * What it holds arrives and leaves on the `expand` and `collapse` kinds: its height is what makes
- * room, so the rail and the stage above it give it room rather than being covered, and it fades as
- * it goes. Marked ready, `Mark ready` folds away as the build's actions unfold in its place; a
- * Rework takes the build's actions back and brings `Mark ready` back. A Spec opened in either
- * state finds its footer there. While a content leaves it is still in the page, and a button there
- * is a button a second press reaches: so the moment it starts leaving it is `inert` and hidden
- * from assistive technology.
+ * room, so the body above it gives it room rather than being covered, and it fades as it goes.
+ * Marked ready, `Mark ready` folds away as the build's actions unfold in its place; a Rework takes
+ * the build's actions back and brings `Mark ready` back. A Spec opened in either state finds its
+ * footer there. While a content leaves it is still in the page, and a button there is a button a
+ * second press reaches: so the moment it starts leaving it is `inert` and hidden from assistive
+ * technology.
  */
 function SpecFoot({ content }: { content: FootContent | null }): ReactNode {
   const transition = useTransition(morph)
@@ -291,98 +467,6 @@ function Leaving({
       data-foot={kind}
     >
       {children}
-    </div>
-  )
-}
-
-/** A section of the revision, or the empty one its name stands for while nothing is written. */
-function sectionOf(spec: SpecView, name: SectionName): SectionView {
-  return (
-    spec.sections.find((section) => section.name === name) ?? {
-      name,
-      body: '',
-      author: null,
-      mark: 'empty',
-    }
-  )
-}
-
-export interface SpecPartProps extends SpecPartHandlers {
-  spec: SpecView
-  target: SpecTarget
-}
-
-/** One part of the Spec, drawn by the part of its kind: a section, or one of the three lists. */
-export function SpecPart({ spec, target, onGoToQuestion }: SpecPartProps): ReactNode {
-  if (target === 'stories') {
-    return <StoriesPart stories={spec.stories} mark={spec.storiesMark} type={spec.type} />
-  }
-  if (target === 'tasks') return <TasksPart tasks={spec.tasks} mark={spec.tasksMark} />
-  if (target === 'questions') {
-    return (
-      <QuestionsPart
-        questions={spec.questions}
-        mark={spec.questionsMark}
-        onGoToQuestion={onGoToQuestion}
-      />
-    )
-  }
-  return <SectionPart section={sectionOf(spec, target)} />
-}
-
-export interface SpecStageProps extends SpecPartHandlers {
-  spec: SpecView
-  /** What is on the stage: one part, or every part of a phase. */
-  shown: StageChoice
-  /** The groups of the rail, which say which parts a phase has. */
-  groups: RailGroup[]
-}
-
-/** The parts a choice puts on the stage, in the order the rail lists them. */
-function partsOf(shown: StageChoice, groups: RailGroup[]): SpecTarget[] {
-  if ('part' in shown) return [shown.part]
-  return groups.find((group) => group.phase === shown.group)?.rows.map((row) => row.target) ?? []
-}
-
-/**
- * The stage: one part, or the parts of one phase one under the other, as they are — and a
- * cross-fade when what is on it changes (brief revisions 3 and 4).
- *
- * Nothing travels: the new content is drawn where the old one was and fades in on the `crossfade`
- * kind — short enough that walking the rail with the arrows never waits on it. The fade is a
- * filter, for the reason the foot of a message gives: the accessibility check measures a text's
- * contrast through an opacity and refuses what it reads mid-flight. New content starts at its top.
- */
-export function SpecStage({ spec, shown, groups, ...handlers }: SpecStageProps): ReactNode {
-  const transition = useTransition(crossfade)
-  const scroller = useRef<HTMLDivElement>(null)
-  const key = 'part' in shown ? `part-${shown.part}` : `group-${shown.group}`
-  useEffect(() => {
-    scroller.current?.scrollTo({ top: 0 })
-  }, [key])
-  return (
-    // The scroll of a long part, and so a stop of the keyboard: a region that scrolls and cannot
-    // be reached is a region the arrows cannot read.
-    <div
-      ref={scroller}
-      role="region"
-      aria-label={`Stage of ${spec.key}`}
-      tabIndex={0}
-      className={SCROLL}
-    >
-      <motion.div
-        key={key}
-        className={STAGE}
-        initial={CROSSFADE.from}
-        animate={CROSSFADE.to}
-        transition={transition}
-      >
-        {partsOf(shown, groups).map((target) => (
-          <div key={target} data-part={target}>
-            <SpecPart spec={spec} target={target} {...handlers} />
-          </div>
-        ))}
-      </motion.div>
     </div>
   )
 }

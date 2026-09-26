@@ -182,6 +182,8 @@ export interface Activity {
   state: ActivityState
   /** What is being run, when a tool call is: its title, as the agent wrote it. */
   detail?: string | undefined
+  /** What one of Hemera's own tools is doing, said whole: "Writing the Spec" (issue #170). */
+  doing?: string | undefined
   /** The thought arriving now, which is the last one of the turn that is running. */
   thought?: string | undefined
   /** How long the last turn took, from the user's message to its `turn` entry, once it is over. */
@@ -289,14 +291,11 @@ export function activityOf(
 
   const call = [...running].reverse().find((entry) => entry.kind === 'tool_call')
   if (call !== undefined && UNFINISHED.includes(call.state ?? '')) {
-    // One of Hemera's own tools is named the way the thread names it, never by the agent's word
-    // for it, `mcp__hemera__spec_write` (issue #159).
+    // One of Hemera's own tools says what it is doing in words of its own, never by the agent's
+    // word for it, `mcp__hemera__spec_write` (issue #159), nor as "Running Write Spec" (#170).
     const named = hemeraToolNamed(call.body)
-    return {
-      state: 'running',
-      detail: named === null ? call.body : TOOL_LABELS[named].label,
-      thought,
-    }
+    if (named !== null) return { state: 'running', doing: TOOL_LABELS[named].doing, thought }
+    return { state: 'running', detail: call.body, thought }
   }
 
   // A message has no state while it is being written — the engine writes the same entry again

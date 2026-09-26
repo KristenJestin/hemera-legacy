@@ -10,6 +10,7 @@ import type {
   SessionEntry,
   StopReason,
 } from '@hemera/ipc'
+import { TOOL_LABELS, hemeraToolNamed } from '@hemera/core'
 import type { ActivityState } from '@hemera/ui'
 
 import { effortStage, effortToLand, modelStage } from './agent-options.ts'
@@ -282,12 +283,19 @@ export function activityOf(
   const command = [...running].reverse().find((entry) => entry.kind === 'command_run')
   const run = command === undefined ? null : commandRunOf(command)
   if (run !== null && run.state === 'running' && run.type !== 'serve') {
-    return { state: 'running', detail: `Running ${run.name}`, thought }
+    return { state: 'running', detail: run.name, thought }
   }
 
   const call = [...running].reverse().find((entry) => entry.kind === 'tool_call')
   if (call !== undefined && UNFINISHED.includes(call.state ?? '')) {
-    return { state: 'running', detail: call.body, thought }
+    // One of Hemera's own tools is named the way the thread names it, never by the agent's word
+    // for it, `mcp__hemera__spec_write` (issue #159).
+    const named = hemeraToolNamed(call.body)
+    return {
+      state: 'running',
+      detail: named === null ? call.body : TOOL_LABELS[named].label,
+      thought,
+    }
   }
 
   // A message has no state while it is being written — the engine writes the same entry again

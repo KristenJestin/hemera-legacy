@@ -230,7 +230,6 @@ function goToQuestion(id: string): void {
 
 /** What the last act of a thread was refused with, when the engine refused it. */
 export interface SessionPageProps {
-  projectName: string
   session: Session
   /** The thread, oldest first, as the engine read it back. */
   entries: SessionEntry[]
@@ -307,7 +306,6 @@ export interface SessionPageProps {
 }
 
 export function SessionPage({
-  projectName,
   session,
   entries,
   loaded,
@@ -564,7 +562,7 @@ export function SessionPage({
         // group the reader unfolded is the same group when the next call arrives in it.
         id: `actions-${piece.items[0]?.id ?? ''}`,
         content: (
-          <ActionGroup count={piece.count} summary={piece.summary} status={piece.status}>
+          <ActionGroup count={piece.count} status={piece.status}>
             {piece.items.map((one) => (
               <Fragment key={one.id}>{one.content}</Fragment>
             ))}
@@ -720,7 +718,6 @@ export function SessionPage({
         <div className="mx-auto flex w-full max-w-3xl flex-col gap-4 px-6 pt-6 pb-4">
           <SessionHeader
             title={session.title}
-            projectName={projectName}
             onRename={onRename}
             editing={editing}
             onStartEditing={onStartEditing}

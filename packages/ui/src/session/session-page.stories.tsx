@@ -107,7 +107,7 @@ function Page({
         <div className="mx-auto flex w-full max-w-3xl flex-col gap-4 px-6 pt-6 pb-4">
           <SessionHeader
             title={name}
-            projectName="Atlas"
+
             onRename={setName}
             editing={editing}
             onStartEditing={fn()}

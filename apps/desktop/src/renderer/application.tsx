@@ -1260,7 +1260,6 @@ export function Application() {
           // Keyed on the Session: a draft of a title belongs to the Session it is about, and
           // carrying it to the next one would be renaming something nobody asked about.
           key={open.id}
-          projectName={active.name}
           session={open}
           entries={sessions.thread}
           // Read back or not: until the thread has come back, the page says nothing about it

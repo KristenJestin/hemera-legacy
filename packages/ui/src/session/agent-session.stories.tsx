@@ -387,7 +387,7 @@ function Page({
           <div className="mx-auto flex w-full max-w-3xl flex-col gap-4 px-6 pt-6 pb-4">
             <SessionHeader
               title={fresh ? 'Untitled' : 'CSV invoice export'}
-              projectName="Atlas"
+
               onRename={fn()}
               onStartEditing={fn()}
               onCancelEditing={fn()}

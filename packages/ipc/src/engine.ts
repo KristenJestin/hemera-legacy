@@ -793,6 +793,9 @@ export const ENGINE_REQUESTS = {
       projectId: z.string(),
       specId: z.string().nullable(),
       name: z.string(),
+      // The folder chosen in the dialog for this Workspace alone, or left out (or null) for the
+      // Project's own folder of Workspaces, which stays the default (#136).
+      root: z.string().nullable().optional(),
       repositories: z.array(worktreeSchema),
     }),
     response: workspaceSchema,

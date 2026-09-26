@@ -315,30 +315,41 @@ export async function pressIn(area: string, name: string): Promise<void> {
 }
 
 /**
- * Puts a part of a Spec on its panel's stage, the way a hand picks it in the rail: the stage
- * shows one part at a time, and a part that is not on it is not on the page at all.
+ * Waits for a part of a Spec to be in its panel's column: every part is laid there one after the
+ * other under the heading of its phase (issue #164), so there is nothing to pick for it to be read.
  */
 export async function showPart(key: string, part: string): Promise<void> {
-  await pressIn(`nav[aria-label="Parts of ${key}"]`, part)
+  await browser.waitUntil(
+    async () =>
+      await browser.execute(
+        (scope: string, name: string) =>
+          [...(document.querySelector(scope)?.querySelectorAll('[data-part] h3') ?? [])].some(
+            (heading) => (heading.textContent ?? '').startsWith(name),
+          ),
+        `[role="region"][aria-label="Contents of ${key}"]`,
+        part,
+      ),
+    { timeout: 5000, timeoutMsg: `the ${part} of ${key} is not in its column` },
+  )
 }
 
 /**
- * Unfolds the panel of a Spec from the band it opens folded to, the way a hand does: a Session
- * opens its panel folded, and what is read in it — the head, the stage, the reader bar — is drawn
- * only once it is open. A panel already open is left as it is.
+ * Unfolds the panel of a Spec from the small frame it opens folded to, the way a hand does: a
+ * Session opens its Spec folded, and what is read in it — the head, the column, the reader bar —
+ * is drawn only once it is open. A panel already open is left as it is.
  */
 export async function unfoldSpec(key: string): Promise<void> {
   await browser.execute((scope: string) => {
-    const band = document
+    const unfold = document
       .querySelector(scope)
       ?.querySelector('button[aria-label="Unfold the Spec"]')
-    if (band instanceof HTMLButtonElement) band.click()
+    if (unfold instanceof HTMLButtonElement) unfold.click()
   }, `section[aria-label="Spec ${key}"]`)
   await browser.waitUntil(
     async () =>
       await browser.execute(
         (scope: string) => document.querySelector(scope) !== null,
-        `[role="region"][aria-label="Stage of ${key}"]`,
+        `[role="region"][aria-label="Contents of ${key}"]`,
       ),
     { timeout: 5000, timeoutMsg: `the panel of ${key} never unfolded` },
   )

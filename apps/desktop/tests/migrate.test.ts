@@ -97,6 +97,13 @@ const QUEUED_MIGRATION = '20260926173604_queued_results'
  */
 const RUN_AT_OPEN_MIGRATION = '20260926185430_run_at_open'
 
+/**
+ * The migration that lets the Context view list Hemera's own words to the agent — a declined
+ * proposal and the New Spec request: the one a profile that ran the run at open's has never heard
+ * of.
+ */
+const CONTEXT_WORDS_MIGRATION = '20260926224349_context_notices'
+
 /** A folder carrying the shipped migrations up to one of them, as an older version did. */
 function shippedUpTo(last: string): string {
   const folder = join(workspace, `shipped-${last}`)
@@ -528,6 +535,7 @@ describe('A profile of lot 6 is migrated to lot 19 (specs)', () => {
       CHOICES_MIGRATION,
       QUEUED_MIGRATION,
       RUN_AT_OPEN_MIGRATION,
+      CONTEXT_WORDS_MIGRATION,
     ])
     expect(readdirSync(join(dataFolder, BACKUPS_FOLDER))).toEqual([`${SPECS_MIGRATION}.sqlite`])
 
@@ -901,6 +909,7 @@ describe('Un profil du lot 5 est migré vers le lot 6', () => {
       CHOICES_MIGRATION,
       QUEUED_MIGRATION,
       RUN_AT_OPEN_MIGRATION,
+      CONTEXT_WORDS_MIGRATION,
     ])
     expect(readdirSync(join(dataFolder, BACKUPS_FOLDER))).toEqual([`${TOOLS_MIGRATION}.sqlite`])
 
@@ -1044,6 +1053,7 @@ describe('A profile of lot 19 is migrated to lot 20', () => {
       CHOICES_MIGRATION,
       QUEUED_MIGRATION,
       RUN_AT_OPEN_MIGRATION,
+      CONTEXT_WORDS_MIGRATION,
     ])
     expect(readdirSync(join(dataFolder, BACKUPS_FOLDER))).toEqual([
       `${WORKSPACES_MIGRATION}.sqlite`,
@@ -1165,7 +1175,7 @@ describe('A profile of lot 19 is migrated to lot 20', () => {
       'profile.backed_up',
       'profile.migrated',
     ])
-    expect(JSON.parse(kept.events.at(-1)!.payload)).toEqual({ migration: RUN_AT_OPEN_MIGRATION })
+    expect(JSON.parse(kept.events.at(-1)!.payload)).toEqual({ migration: CONTEXT_WORDS_MIGRATION })
   })
 
   test('a command of a word of lot 18, or a step of an unknown state, is refused', async () => {
@@ -1366,7 +1376,12 @@ describe('A profile that ran the Workspaces gains the choices of its Sessions', 
     )
 
     const standing = await on(dataFolder, openProfile(dataFolder, SHIPPED, '0.4.0'))
-    expect(standing.behind).toEqual([CHOICES_MIGRATION, QUEUED_MIGRATION, RUN_AT_OPEN_MIGRATION])
+    expect(standing.behind).toEqual([
+      CHOICES_MIGRATION,
+      QUEUED_MIGRATION,
+      RUN_AT_OPEN_MIGRATION,
+      CONTEXT_WORDS_MIGRATION,
+    ])
     expect(readdirSync(join(dataFolder, BACKUPS_FOLDER))).toEqual([`${CHOICES_MIGRATION}.sqlite`])
 
     const kept = await on(
@@ -1414,7 +1429,11 @@ describe('A profile that ran the choices keeps a queued result across a quit', (
     )
 
     const standing = await on(dataFolder, openProfile(dataFolder, SHIPPED, '0.4.0'))
-    expect(standing.behind).toEqual([QUEUED_MIGRATION, RUN_AT_OPEN_MIGRATION])
+    expect(standing.behind).toEqual([
+      QUEUED_MIGRATION,
+      RUN_AT_OPEN_MIGRATION,
+      CONTEXT_WORDS_MIGRATION,
+    ])
     expect(readdirSync(join(dataFolder, BACKUPS_FOLDER))).toEqual([`${QUEUED_MIGRATION}.sqlite`])
 
     const read = await on(
@@ -1458,7 +1477,7 @@ describe('A profile that ran the queued results keeps its commands, none run at 
     )
 
     const standing = await on(dataFolder, openProfile(dataFolder, SHIPPED, '0.4.0'))
-    expect(standing.behind).toEqual([RUN_AT_OPEN_MIGRATION])
+    expect(standing.behind).toEqual([RUN_AT_OPEN_MIGRATION, CONTEXT_WORDS_MIGRATION])
     expect(readdirSync(join(dataFolder, BACKUPS_FOLDER))).toEqual([
       `${RUN_AT_OPEN_MIGRATION}.sqlite`,
     ])
@@ -1475,5 +1494,51 @@ describe('A profile that ran the queued results keeps its commands, none run at 
       }),
     )
     expect(kept).toEqual([{ name: 'up', line: 'docker compose up -d', run_at_open: 0 }])
+  })
+})
+
+describe('A profile that ran the commands at open keeps what its Sessions were provided', () => {
+  test('a delivery is kept whole, and a notice and a New Spec request can be recorded', async () => {
+    const dataFolder = join(workspace, 'from-run-at-open')
+    await on(dataFolder, openProfile(dataFolder, shippedUpTo(RUN_AT_OPEN_MIGRATION), '0.4.0'))
+    await on(
+      dataFolder,
+      Effect.gen(function* () {
+        const sql = yield* SqliteClient
+        const at = '2026-09-26T10:00:00.000Z'
+        yield* sql`INSERT INTO projects (id, name, tone, created_at, updated_at, version)
+          VALUES ('atlas', 'Atlas', 'primary', ${at}, ${at}, 1)`
+        yield* sql`INSERT INTO sessions (id, project_id, title, title_source, provider, native_session_id, native_state, cwd, created_at, last_written_at, version)
+          VALUES ('session-1', 'atlas', 'Shape the export', 'derived', 'claude', 'native-1', 'attached', '/work/atlas', ${at}, ${at}, 3)`
+        yield* sql`INSERT INTO context_deliveries (id, session_id, kind, path, fingerprint, delivered_at)
+          VALUES ('delivery-1', 'session-1', 'internal', '', 'f1', ${at})`
+      }),
+    )
+
+    const standing = await on(dataFolder, openProfile(dataFolder, SHIPPED, '0.4.0'))
+    expect(standing.behind).toEqual([CONTEXT_WORDS_MIGRATION])
+    expect(readdirSync(join(dataFolder, BACKUPS_FOLDER))).toEqual([
+      `${CONTEXT_WORDS_MIGRATION}.sqlite`,
+    ])
+
+    const kinds = await on(
+      dataFolder,
+      Effect.gen(function* () {
+        const sql = yield* SqliteClient
+        yield* sql`INSERT INTO context_deliveries (id, session_id, kind, path, fingerprint, delivered_at)
+          VALUES ('delivery-2', 'session-1', 'notice', '', 'f2', '2026-09-26T10:01:00.000Z')`
+        yield* sql`INSERT INTO context_deliveries (id, session_id, kind, path, fingerprint, delivered_at)
+          VALUES ('delivery-3', 'session-1', 'request', '', 'f3', '2026-09-26T10:02:00.000Z')`
+        return yield* sql<{
+          id: string
+          kind: string
+        }>`SELECT id, kind FROM context_deliveries ORDER BY id`
+      }),
+    )
+    expect(kinds).toEqual([
+      { id: 'delivery-1', kind: 'internal' },
+      { id: 'delivery-2', kind: 'notice' },
+      { id: 'delivery-3', kind: 'request' },
+    ])
   })
 })

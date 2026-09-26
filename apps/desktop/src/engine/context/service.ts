@@ -131,6 +131,15 @@ export interface ContextService {
     sessionId: string,
     handed: readonly QueuedResult[],
   ) => Effect.Effect<void, Refusal>
+  /**
+   * Records Hemera's own words as given, once the agent took them: a notice, or the New Spec
+   * request, each a row of its own for the Context view to list.
+   */
+  readonly handed: (
+    sessionId: string,
+    kind: 'notice' | 'request',
+    text: string,
+  ) => Effect.Effect<void, Refusal>
   /** Everything a Session was provided, oldest first. */
   readonly provided: (sessionId: string) => Effect.Effect<Delivery[], Refusal>
 }
@@ -250,6 +259,8 @@ export const contextLayer = Layer.effect(
         case 'answer':
         case 'edit':
         case 'internal':
+        case 'notice':
+        case 'request':
           return kind
         default:
           return 'instructions'
@@ -521,7 +532,11 @@ export const contextLayer = Layer.effect(
             case 'answer':
             case 'edit':
             case 'internal':
+            case 'notice':
               return 'delivery_prompt'
+            // It rides the first turn's prompt, in front of the user's message.
+            case 'request':
+              return 'embedded_resource'
           }
         }
         return rows.map((row): Delivery => ({
@@ -541,6 +556,8 @@ export const contextLayer = Layer.effect(
       queueInternal,
       queuedInternal,
       handedInternal,
+      handed: (sessionId, kind, text) =>
+        record(sessionId, kind, '', fingerprintOf(text)).pipe(Effect.asVoid),
       provided,
     }
   }),

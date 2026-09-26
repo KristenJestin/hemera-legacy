@@ -1,6 +1,6 @@
 import { Tabs as BaseTabs } from '@base-ui/react/tabs'
-import { LayoutGroup, motion } from 'motion/react'
-import { type FunctionComponent, type ReactNode, useId, useState } from 'react'
+import { cn } from 'cn'
+import { type FunctionComponent, type ReactNode, useState } from 'react'
 
 import { AlertDialog } from '../components/alert-dialog/alert-dialog.tsx'
 import { Badge } from '../components/badge/badge.tsx'
@@ -8,6 +8,7 @@ import { Button, IconButton } from '../components/button/button.tsx'
 import { Card, CardRow } from '../components/card/card.tsx'
 import type { PathEntry, PathListing } from '../components/suggest/path-input.tsx'
 import { Input } from '../components/field/field.tsx'
+import { OVER_MARK, SlidingMark } from '../components/sliding-mark/sliding-mark.tsx'
 import { Tooltip } from '../components/tooltip/tooltip.tsx'
 import { useAppForm } from '../form/app-form.ts'
 import { projectSettingsSchema } from '../form/schemas.ts'
@@ -24,7 +25,6 @@ import {
   IconVariable,
   IconX,
 } from '../icons.ts'
-import { arrival, useTransition } from '../motion.ts'
 import { CommandDialog, TypeMark } from './command-dialog.tsx'
 import type { CommandLine, ProjectSettingsDraft, RepositoryDraft, RepositoryLine } from './model.ts'
 import { slugOf } from './naming.ts'
@@ -79,15 +79,21 @@ const EMPTY_MARK = 'size-icon-sm shrink-0'
 
 const LAYOUT = 'flex items-start gap-8'
 
-const NAV = 'flex w-menu-side shrink-0 flex-col gap-1'
+/** The navigation, which the mark is placed against and whose layers stay inside it. */
+const NAV = 'relative isolate flex w-menu-side shrink-0 flex-col gap-1'
 
-/** One entry of the navigation and the room its mark travels through. */
-const NAV_SLOT = 'relative flex'
-
+/** The section chosen is drawn over the fill; the others are crossed by it. */
 const NAV_ITEM =
-  'relative flex h-control-md w-full items-center gap-2 rounded-md px-3 text-sm text-muted-foreground outline-none select-none focus-ring data-selected:text-foreground'
+  'relative flex h-control-md w-full items-center gap-2 rounded-md px-3 text-sm text-muted-foreground outline-none select-none focus-ring data-selected:z-1 data-selected:text-foreground'
 
-/** The one fill of the navigation, which travels to the section chosen. */
+/** What an entry says, drawn over the fill whichever entry the fill is crossing. */
+const NAV_CONTENT = 'flex items-center gap-2'
+
+/**
+ * The one fill of the navigation, which travels to the section chosen: the navigation's
+ * `SlidingMark` and no entry's (issue #127), so that it crosses the entries between two
+ * sections rather than going under them.
+ */
 const NAV_MARK = 'absolute inset-0 rounded-md bg-accent'
 
 const PANEL = 'flex min-w-0 flex-1 flex-col gap-4 outline-none'
@@ -207,8 +213,6 @@ export function ProjectSettings({
 }: ProjectSettingsProps): ReactNode {
   const [chosen, setChosen] = useState<ProjectSettingsSection>(defaultSection)
   const current = section ?? chosen
-  const transition = useTransition(arrival)
-  const group = useId()
   const [refusal, setRefusal] = useState<string | null>(null)
 
   const form = useAppForm({
@@ -375,23 +379,21 @@ export function ProjectSettings({
         className={LAYOUT}
       >
         <BaseTabs.List activateOnFocus aria-label="Project settings" className={NAV}>
-          <LayoutGroup id={group}>
-            {SECTIONS.map((one) => (
-              <span key={one.value} className={NAV_SLOT}>
-                {one.value === current && (
-                  <motion.span
-                    layoutId={`${group}-section`}
-                    className={NAV_MARK}
-                    transition={transition}
-                  />
-                )}
-                <BaseTabs.Tab value={one.value} className={NAV_ITEM}>
-                  <one.icon size="sm" aria-hidden="true" />
-                  {one.label}
-                </BaseTabs.Tab>
+          {SECTIONS.map((one) => (
+            <BaseTabs.Tab
+              key={one.value}
+              value={one.value}
+              data-mark={one.value}
+              className={NAV_ITEM}
+            >
+              <span className={cn(OVER_MARK, NAV_CONTENT)}>
+                <one.icon size="sm" aria-hidden="true" />
+                {one.label}
               </span>
-            ))}
-          </LayoutGroup>
+            </BaseTabs.Tab>
+          ))}
+          {/* Last, so that it is drawn after every entry it can cross. */}
+          <SlidingMark target={current} shape={NAV_MARK} />
         </BaseTabs.List>
         {SECTIONS.map((one) => (
           // Not a stop of the tab order of its own: the Tab key goes from the navigation to the

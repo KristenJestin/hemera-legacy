@@ -3,7 +3,9 @@ import { cn } from 'cn'
 import { useState } from 'react'
 import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
 
+import { expectNeverBuried, watchThereAndBack } from '../../.storybook/sliding-mark.ts'
 import { TooltipProvider } from '../components/tooltip/tooltip.tsx'
+import { SidebarMark } from '../shell/sidebar-mark.tsx'
 import {
   ArchivedSessions,
   SessionEmpty,
@@ -547,31 +549,40 @@ function Panel({
   active = 'csv',
   onRename,
   onArchive,
+  onChoose,
 }: {
   collapsed?: boolean
   active?: string
   onRename?: (id: string) => void
   onArchive?: (id: string) => void
+  /** Told which row was pressed, for a panel that moves its mark to it. */
+  onChoose?: (id: string) => void
 }) {
   return (
     <TooltipProvider>
       <div
         className={cn(
-          'flex flex-col gap-1 bg-sidebar p-2',
+          'relative isolate flex flex-col gap-1 bg-sidebar p-2',
           collapsed ? 'w-sidebar-rail' : 'w-sidebar',
         )}
       >
         {SESSIONS.map((session) => (
           <SidebarSessionEntry
             key={session.id}
+            id={session.id}
             title={session.title}
             active={session.id === active}
             collapsed={collapsed}
-            onSelect={SELECTED}
+            onSelect={() => {
+              SELECTED()
+              onChoose?.(session.id)
+            }}
             onRename={onRename === undefined ? undefined : () => onRename(session.id)}
             onArchive={onArchive === undefined ? undefined : () => onArchive(session.id)}
           />
         ))}
+        {/* The mark is the panel's, as in the sidebar: drawn once, after every row. */}
+        <SidebarMark target={active} />
       </div>
     </TooltipProvider>
   )
@@ -641,5 +652,33 @@ export const TheRowCommands: Story = {
     await userEvent.hover(row)
     await userEvent.click(canvas.getByRole('button', { name: 'Archive Full-text search' }))
     expect(ARCHIVED_A_SESSION).toHaveBeenCalledWith('search')
+  },
+}
+
+/** The panel holding which row is looked at, so that its mark has somewhere to go. */
+function Choosing() {
+  const [active, setActive] = useState('csv')
+  return <Panel active={active} onChoose={setActive} />
+}
+
+/**
+ * The panel's mark crossing its Sessions, down to the last and back up to the first: on every
+ * frame of the way it is drawn over the row it crosses and never under it (issue #127).
+ */
+export const MarkCrossing: Story = {
+  parameters: { layout: 'padded', controls: { disable: true } },
+  render: () => <Choosing />,
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const watched = await watchThereAndBack(
+      canvasElement,
+      () => userEvent.click(canvas.getByRole('button', { name: 'Migrate to Drizzle 1.0' })),
+      () => userEvent.click(canvas.getByRole('button', { name: 'CSV invoice export' })),
+    )
+    expect(canvas.getByRole('button', { name: 'CSV invoice export' })).toHaveAttribute(
+      'aria-current',
+      'true',
+    )
+    expectNeverBuried(watched)
   },
 }

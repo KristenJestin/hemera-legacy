@@ -1,14 +1,14 @@
 import { Radio } from '@base-ui/react/radio'
 import { RadioGroup } from '@base-ui/react/radio-group'
 import { cn } from 'cn'
-import { LayoutGroup, motion } from 'motion/react'
-import { type ReactNode, useId } from 'react'
+import type { ReactNode } from 'react'
 
 import { AgentsSection, type AgentsSectionProps } from './agents-section.tsx'
 import { Button } from '../components/button/button.tsx'
 import { Card } from '../components/card/card.tsx'
 import { Checkbox } from '../components/checkbox/checkbox.tsx'
 import { List, ListItem } from '../components/list/list.tsx'
+import { OVER_MARK, SlidingMark } from '../components/sliding-mark/sliding-mark.tsx'
 import {
   IconArchive,
   IconDeviceDesktop,
@@ -18,7 +18,6 @@ import {
   IconRestore,
   IconSun,
 } from '../icons.ts'
-import { arrival, useTransition } from '../motion.ts'
 import type { ThemeChoice } from '../window.ts'
 
 /**
@@ -31,21 +30,29 @@ import type { ThemeChoice } from '../window.ts'
  */
 const NOTE = 'text-sm text-muted-foreground'
 
-/** The three choices, drawn as one control: a segment, and one of them is always on. */
-const SEGMENT = 'inline-flex items-center gap-1 rounded-lg border border-border bg-muted p-1'
+/**
+ * The three choices, drawn as one control: a segment, and one of them is always on. The mark is
+ * placed against it and its layers stay inside it.
+ */
+const SEGMENT =
+  'relative isolate inline-flex items-center gap-1 rounded-lg border border-border bg-muted p-1'
 
 const CHOICE =
   'relative inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm text-muted-foreground'
 
-const CHOICE_ON = 'text-foreground'
+/** The choice that is on is drawn over the fill; the others are crossed by it. */
+const CHOICE_ON = 'z-1 text-foreground'
+
+/** What a choice says, drawn over the fill whichever choice the fill is crossing. */
+const CHOICE_CONTENT = 'inline-flex items-center gap-1.5'
 
 /**
  * The one fill of the segment, which slides from choice to choice.
  *
  * The same thing a tab strip does, and for the same reason: three fills that swap tell the eye
- * that something changed, one fill that travels tells it where it went. It is a sibling of the
- * control and never a child, or it would be measured inside two different boxes on the way
- * across and dip between them.
+ * that something changed, one fill that travels tells it where it went. It is the segment's
+ * `SlidingMark` and no choice's (issue #127): drawn after the three, it crosses the middle one
+ * on its way from one end to the other and never goes under it.
  */
 const CHOICE_MARK = 'absolute inset-0 rounded-md bg-card shadow-sm'
 
@@ -70,9 +77,6 @@ export interface AppearanceSectionProps {
 }
 
 export function AppearanceSection({ theme, onThemeChange }: AppearanceSectionProps): ReactNode {
-  const transition = useTransition(arrival)
-  // Scoped to this segment: two of them on a page are not one control with a mark between them.
-  const group = useId()
   return (
     <Card title="Appearance">
       <RadioGroup
@@ -85,30 +89,25 @@ export function AppearanceSection({ theme, onThemeChange }: AppearanceSectionPro
           onThemeChange(next as ThemeChoice)
         }}
       >
-        <LayoutGroup id={group}>
-          {THEMES.map((choice) => (
-            <span key={choice.value} className="relative flex">
-              {choice.value === theme && (
-                <motion.span
-                  layoutId={`${group}-theme`}
-                  className={CHOICE_MARK}
-                  transition={transition}
-                />
-              )}
-              <Radio.Root
-                value={choice.value}
-                // A real `<button>`, which is what the hand presses; told so, Base UI leaves out
-                // the attributes it would have had to add for something that only looks like one.
-                nativeButton
-                render={<button type="button" />}
-                className={cn(CHOICE, choice.value === theme && CHOICE_ON)}
-              >
-                {choice.icon}
-                {choice.label}
-              </Radio.Root>
+        {THEMES.map((choice) => (
+          <Radio.Root
+            key={choice.value}
+            value={choice.value}
+            data-mark={choice.value}
+            // A real `<button>`, which is what the hand presses; told so, Base UI leaves out the
+            // attributes it would have had to add for something that only looks like one.
+            nativeButton
+            render={<button type="button" />}
+            className={cn(CHOICE, choice.value === theme && CHOICE_ON)}
+          >
+            <span className={cn(OVER_MARK, CHOICE_CONTENT)}>
+              {choice.icon}
+              {choice.label}
             </span>
-          ))}
-        </LayoutGroup>
+          </Radio.Root>
+        ))}
+        {/* Last, so that it is drawn after every choice it can cross. */}
+        <SlidingMark target={theme} shape={CHOICE_MARK} />
       </RadioGroup>
       <p className={NOTE}>
         Followed by the frame, the window buttons and every native control, not only the page.

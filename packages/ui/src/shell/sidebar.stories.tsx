@@ -1,7 +1,8 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
-import { expect, fn, within } from 'storybook/test'
+import { expect, fn, userEvent, within } from 'storybook/test'
 import { useState } from 'react'
 
+import { expectNeverBuried, watchThereAndBack } from '../../.storybook/sliding-mark.ts'
 import { TooltipProvider } from '../components/tooltip/tooltip.tsx'
 import { JOURNAL_ENTRY, SIDEBAR_DEFAULT, type ShellSession } from './model.ts'
 import { Sidebar } from './sidebar.tsx'
@@ -46,7 +47,7 @@ function Harness({ collapsed = false, sessions = SESSIONS, settingsActive = fals
 }
 
 const meta = {
-  tags: ['autodocs'],
+  tags: ['autodocs', 'updated'],
   title: 'Shell/Sidebar',
   component: Harness,
   parameters: { layout: 'fullscreen' },
@@ -133,5 +134,29 @@ export const OnTheSettings: Story = {
 
     expect(marked).toHaveLength(1)
     expect(marked[0]).toHaveAccessibleName('Settings')
+  },
+}
+
+/**
+ * The panel's mark crossing it, down from the first Session to the Project settings and back up
+ * again: on every frame of the way it is drawn over the rows it crosses — the Sessions, the
+ * Journal — and never under one (issue #127). The way up is where a mark drawn inside its row
+ * went under the rows drawn after it.
+ */
+export const MarkCrossing: Story = {
+  parameters: { controls: { disable: true } },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const panel = canvas.getByRole('complementary', { name: /Sessions and places/ })
+    const watched = await watchThereAndBack(
+      panel,
+      () => userEvent.click(canvas.getByRole('button', { name: 'Project settings' })),
+      () => userEvent.click(canvas.getByRole('button', { name: 'CSV invoice export' })),
+    )
+    expect(canvas.getByRole('button', { name: 'CSV invoice export' })).toHaveAttribute(
+      'aria-current',
+      'true',
+    )
+    expectNeverBuried(watched)
   },
 }

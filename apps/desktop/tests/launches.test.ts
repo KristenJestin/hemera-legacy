@@ -15,10 +15,12 @@ import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
 import { fakeAgent } from '#engine/agents/fake.ts'
 import { NoNotices } from '#engine/agents/notices.ts'
 import { StderrSink } from '#engine/agents/supervisor.ts'
+import { domainEventsLayer } from '#engine/domain-events.ts'
 import { Projects } from '#engine/projects.ts'
 import { Sessions } from '#engine/sessions.ts'
+import { NoSpecNotices } from '#engine/specs/notices.ts'
 import { ReopenRefusedError } from '#engine/specs/revisions.ts'
-import { Specs } from '#engine/specs/specs.ts'
+import { Specs, specsLayer } from '#engine/specs/specs.ts'
 import { Database, type EngineDatabase, SqliteClient } from '#engine/storage/database.ts'
 import { Launches, StartDeadline, launchesLayer } from '#engine/workspaces/launches.ts'
 import { Preparation, recovered } from '#engine/workspaces/preparation.ts'
@@ -1072,6 +1074,77 @@ describe('A Rework cancels a launch that has not started', () => {
     ])
     // And the Workspace the build works in is still there.
     expect(seen.workspace.state).toBe('ready')
+  })
+
+  test('A Rework made while the engine stops cancels the launch at the next start', async () => {
+    opened = await openWindow(dataFolder, fakeAgent())
+    const left = await opened.running(
+      Effect.gen(function* () {
+        const { project, specId, session } = yield* atlas()
+        const sql = yield* SqliteClient
+        const workspace = yield* picked(project.id)
+        const [spec] = yield* sql<{ current_revision_id: string }>`
+          SELECT current_revision_id FROM specs WHERE id = ${specId}`
+        const revisionId = spec?.current_revision_id
+        if (revisionId === undefined) {
+          return yield* Effect.fail(new Error('the Spec has no current revision'))
+        }
+        // A launch still waiting on a Workspace that is ready: the next start would build it.
+        const at = '2026-09-25T08:00:00.000Z'
+        yield* sql`INSERT INTO build_launches
+          (id, spec_id, revision_id, workspace_id, state, created_at, updated_at)
+          VALUES (${LEFT_WAITING}, ${specId}, ${revisionId}, ${workspace.id}, 'waiting', ${at}, ${at})`
+        // The Rework is committed, and the engine stops before the launches hear of it: the Specs
+        // write it on events nobody follows (#113).
+        yield* Effect.gen(function* () {
+          yield* (yield* Specs).reopen({
+            specId,
+            expectedRevisionId: revisionId,
+            reason: 'Another shape.',
+            sessionId: session.id,
+          })
+        }).pipe(
+          Effect.provide(
+            Layer.fresh(specsLayer).pipe(
+              Layer.provide(Layer.mergeAll(Layer.fresh(domainEventsLayer), NoSpecNotices)),
+            ),
+          ),
+        )
+        return { revisionId, still: yield* launches }
+      }),
+    )
+    await opened.close()
+    opened = await openWindow(dataFolder, fakeAgent())
+    const seen = await opened.running(
+      Effect.gen(function* () {
+        const launched = yield* Launches
+        const sql = yield* SqliteClient
+        yield* recovered
+        // Recovered in the background (#132): the launch is read once it has moved on.
+        const launch = yield* until(launched.one(LEFT_WAITING), (one) => one.state !== 'waiting')
+        return {
+          builds: yield* builds,
+          launch,
+          lines: yield* sql<{ payload: string }>`
+            SELECT payload FROM domain_events WHERE type = 'launch.cancelled'`,
+        }
+      }),
+    )
+    // Left waiting by the engine that stopped, the launch is cancelled at the next start, saying
+    // what cancelled it, and its revision is never built.
+    expect(left.still).toEqual([{ state: 'waiting', session_id: null, detail: null }])
+    expect(seen.launch.state).toBe('cancelled')
+    expect(seen.launch.detail).toBe('reworked')
+    expect(seen.builds).toEqual([])
+    expect(seen.lines).toEqual([
+      {
+        payload: JSON.stringify({
+          specId: seen.launch.specId,
+          revisionId: left.revisionId,
+          reason: 'reworked',
+        }),
+      },
+    ])
   })
 })
 

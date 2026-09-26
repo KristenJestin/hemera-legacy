@@ -2,6 +2,7 @@ import type { Meta, StoryObj } from '@storybook/react-vite'
 import { useState } from 'react'
 import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
 
+import type { PathEntry, PathListing } from '../components/suggest/path-input.tsx'
 import {
   PreparationEditor,
   type PreparationEditorProps,
@@ -17,7 +18,8 @@ import {
  * a command of the catalogue — and runs `bun run lint`, a line the step carries on its own. The
  * story holds the recipe the way the application will — a move, a removal, an addition and an
  * edit change the list it hands back — so the order can be tried by hand, with the keyboard, in
- * both themes.
+ * both themes. What `main` holds under each base is a fixture tree, listed one folder at a time
+ * the way the engine's `paths.entries` answers (#104).
  */
 const REPOSITORIES = ['./sources/api', './sources/web']
 
@@ -74,6 +76,52 @@ const STEPS: RecipeStepLine[] = [
   },
 ]
 
+/** What `main` holds, by base (the Workspace root is '') and by folder under it. */
+const MAIN = new Map<string, Map<string, PathEntry[]>>([
+  [
+    '',
+    new Map([
+      [
+        '',
+        [
+          { name: 'sources', kind: 'folder' },
+          { name: 'CLAUDE.md', kind: 'file' },
+        ],
+      ],
+    ]),
+  ],
+  [
+    './sources/api',
+    new Map([
+      [
+        '',
+        [
+          { name: 'src', kind: 'folder' },
+          { name: 'tools', kind: 'folder' },
+          { name: '.env', kind: 'file' },
+          { name: '.env.example', kind: 'file' },
+          { name: 'package.json', kind: 'file' },
+        ],
+      ],
+      [
+        'src',
+        [
+          { name: 'config', kind: 'folder' },
+          { name: 'main.ts', kind: 'file' },
+        ],
+      ],
+    ]),
+  ],
+])
+
+/** One folder of `main` under a base, of the kinds asked for; nothing for a folder it lacks. */
+async function listing({ base, relative, kinds }: PathListing): Promise<readonly PathEntry[]> {
+  const entries = MAIN.get(base ?? '')?.get(relative) ?? []
+  return await Promise.resolve(entries.filter((entry) => kinds.includes(entry.kind)))
+}
+
+const listFolder = fn(listing)
+
 /** The Project's catalogue, which is what a `run` step may start. */
 const COMMANDS: RecipeCommand[] = [
   { id: 'install', name: 'install', type: 'configure' },
@@ -123,7 +171,7 @@ function Controlled({ steps, onAdd, onUpdate, onRemove, onMove, ...rest }: Prepa
 }
 
 const meta = {
-  tags: ['autodocs'],
+  tags: ['autodocs', 'updated'],
   title: 'Blocks/Workspace/PreparationEditor',
   component: PreparationEditor,
   render: (args) => <Controlled {...args} />,
@@ -136,6 +184,7 @@ const meta = {
     onUpdate: fn(async () => await Promise.resolve(null)),
     onRemove: fn(),
     onMove: fn(),
+    onList: listFolder,
   },
   argTypes: {
     steps: { control: 'object', description: 'The recipe, in the order it runs.' },
@@ -157,9 +206,10 @@ const meta = {
     },
     onRemove: { action: 'step removed', description: 'Takes a step out of the recipe.' },
     onMove: { action: 'step moved', description: 'Moves a step one place up or down.' },
-    onBrowse: {
-      action: 'folder picked',
-      description: "The system's picker, asked for a base; answers a path relative to it, or null.",
+    onList: {
+      action: 'folder listed',
+      description:
+        "Lists one folder of main under a step's base: what the path offers as it is typed.",
     },
     className: { control: false, description: 'Where the card sits; never how it looks.' },
   },
@@ -262,10 +312,11 @@ export const Adding: Story = {
     const dialog = within(shown)
     await expect(dialog.getByRole('heading', { name: 'Add step' })).toBeInTheDocument()
     await userEvent.type(dialog.getByRole('textbox', { name: 'Path' }), '../secrets.env')
-    await userEvent.click(dialog.getByRole('button', { name: 'Add' }))
+    // Refused as it is typed, with its reason: Add waits for a path under the base (#104).
     await waitFor(() => {
-      expect(dialog.getByText('A path is relative to its base.')).toHaveStyle({ opacity: '1' })
+      expect(dialog.getByText('That path climbs above its base.')).toHaveStyle({ opacity: '1' })
     })
+    await expect(dialog.getByRole('button', { name: 'Add' })).toBeDisabled()
     await expect(args.onAdd).not.toHaveBeenCalled()
 
     await choose(shown, 'Step kind', /^Run a command/)
@@ -352,7 +403,7 @@ async function aSourceMissingInMainIsRefused({ canvasElement, args }: StoryConte
   await waitFor(() => {
     expect(dialog.getByRole('alert')).toHaveTextContent(MISSING)
   })
-  await expect(within(document.body).getByRole('dialog')).toBeInTheDocument()
+  await expect(within(document.body).getByRole('dialog', { name: 'Add step' })).toBeInTheDocument()
   await expect(dialog.getByRole('textbox', { name: 'Path' })).toHaveValue('.env.local')
   await expect(canvas.queryByRole('list')).toBeNull()
   // The button comes back from its own quiet before the colours are judged.
@@ -406,9 +457,7 @@ export const Keyboard: Story = {
     await userEvent.tab()
     await expect(dialog.getByRole('textbox', { name: 'Path' })).toHaveFocus()
     await userEvent.keyboard('CLAUDE.md')
-    await userEvent.tab()
-    // The field's own picker sits between the box and the dialog's Add (recette 2).
-    await expect(dialog.getByRole('button', { name: 'Browse…' })).toHaveFocus()
+    // Tab leaves the path for the dialog's Add: no picker sits between them any more (#104).
     await userEvent.tab()
     await expect(dialog.getByRole('button', { name: 'Add' })).toHaveFocus()
     await userEvent.keyboard('{Enter}')
@@ -475,35 +524,84 @@ export const OwnLine: Story = {
 }
 
 /**
- * The picker of a copy's path (recette 2): what it answers is written relative to the base the
- * step works in, and a folder outside that base climbs out — the field refuses it with the reason
- * the schema the engine shares gives.
+ * A copy's path typed with suggestions (#104): the files and the folders of `main` under the
+ * step's base, one level at a time — `.env` offered as soon as `.e` is typed, `..` never — and a
+ * path that leaves the base refused with its reason. No picker is left beside the field.
  */
-export const PickedOutside: Story = {
-  args: {
-    steps: [],
-    // What the page's picker answers for a base: the `..` that would reach a folder beside it,
-    // because `folderUnderBase` writes what was picked relative to the base it was opened on.
-    onBrowse: fn(async () => await Promise.resolve('../web')),
-  },
-  play: async ({ canvasElement, args }) => {
-    args.onAdd.mockClear()
-    const canvas = within(canvasElement)
-    await userEvent.click(canvas.getByRole('button', { name: 'Add step' }))
-    const shown = await dialogShown()
-    const dialog = within(shown)
-    await choose(shown, 'Base', /^api$/)
-    const path = dialog.getByRole('textbox', { name: 'Path' })
+async function aPathIsOfferedUnderItsBase({ canvasElement, args }: StoryContext) {
+  args.onAdd.mockClear()
+  listFolder.mockClear()
+  const canvas = within(canvasElement)
+  await userEvent.click(canvas.getByRole('button', { name: 'Add step' }))
+  const shown = await dialogShown()
+  const dialog = within(shown)
+  await expect(dialog.queryByRole('button', { name: 'Browse…' })).toBeNull()
+  await choose(shown, 'Base', /^api$/)
+  const path = dialog.getByRole('textbox', { name: 'Path' })
 
-    // A folder beside the base is no path under it: the pick is refused with the reason the schema
-    // gives, and nothing of it is written in the field — a path is typed, or picked under its base.
-    await userEvent.click(dialog.getByRole('button', { name: 'Browse…' }))
-    await waitFor(() => {
-      expect(dialog.getByText('That path climbs out of the Workspace.')).toHaveStyle({
-        opacity: '1',
-      })
+  // The first level: files and folders of the base, asked of the base the step works from.
+  await userEvent.click(path)
+  const first = await waitFor(() => within(document.body).getByRole('listbox'))
+  await waitFor(() => {
+    expect(within(first).getByRole('option', { name: 'src/' })).toBeVisible()
+  })
+  await expect(within(first).getByRole('option', { name: 'package.json' })).toBeVisible()
+  await expect(within(first).queryByRole('option', { name: /\.\./ })).toBeNull()
+  await expect(listFolder).toHaveBeenCalledWith({
+    base: './sources/api',
+    relative: '',
+    kinds: ['folder', 'file'],
+  })
+
+  // `.e` is enough for `.env`, which Enter takes and the list closes on: a file ends the path.
+  await userEvent.type(path, '.e')
+  await waitFor(() => {
+    expect(within(document.body).getByRole('option', { name: '.env' })).toBeVisible()
+  })
+  await expect(within(document.body).getByRole('option', { name: '.env.example' })).toBeVisible()
+  await userEvent.keyboard('{Enter}')
+  await expect(path).toHaveValue('.env')
+  await waitFor(() => {
+    expect(within(document.body).queryByRole('listbox')).toBeNull()
+  })
+
+  // Above the base: nothing is offered, and the field says why.
+  await userEvent.clear(path)
+  await userEvent.type(path, '../')
+  await waitFor(() => {
+    expect(dialog.getByText('That path climbs above its base.')).toHaveStyle({ opacity: '1' })
+  })
+  await expect(within(document.body).queryByRole('option')).toBeNull()
+  await expect(dialog.getByRole('button', { name: 'Add' })).toBeDisabled()
+
+  // A folder is walked down: the list stays open on what it holds.
+  await userEvent.clear(path)
+  await userEvent.type(path, 'sr')
+  await waitFor(() => {
+    expect(within(document.body).getByRole('option', { name: 'src/' })).toBeVisible()
+  })
+  await userEvent.keyboard('{Enter}')
+  await waitFor(() => {
+    expect(within(document.body).getByRole('option', { name: 'src/main.ts' })).toBeVisible()
+  })
+  await userEvent.click(within(document.body).getByRole('option', { name: 'src/main.ts' }))
+  await expect(path).toHaveValue('src/main.ts')
+  await userEvent.click(dialog.getByRole('button', { name: 'Add' }))
+  await waitFor(() => {
+    expect(args.onAdd).toHaveBeenCalledWith({
+      kind: 'copy',
+      base: './sources/api',
+      path: 'src/main.ts',
+      commandId: null,
+      line: null,
+      lineWindows: null,
+      lineLinux: null,
     })
-    await expect(path).toHaveValue('')
-    await expect(args.onAdd).not.toHaveBeenCalled()
-  },
+  })
+  await dialogGone()
+}
+
+export const Suggestions: Story = {
+  args: { steps: [] },
+  play: aPathIsOfferedUnderItsBase,
 }

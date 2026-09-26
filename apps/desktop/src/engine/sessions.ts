@@ -994,8 +994,9 @@ export const sessionsLayer = Layer.effect(
                   type: 'session.choice_recorded',
                   entityKind: 'session',
                   entityId: id,
-                  source: 'ui',
-                  author: 'human',
+                  // What the agent stands on, whoever moved it, is recorded by the engine.
+                  source: 'system',
+                  author: 'hemera',
                   projectId: row.projectId,
                   sessionId: id,
                   payload: { optionId: choice.optionId, value: choice.value },

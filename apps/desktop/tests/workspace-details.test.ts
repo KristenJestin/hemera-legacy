@@ -371,6 +371,7 @@ describe('A dedicated Workspace from the settings is made from its plan', () => 
     expect(
       worktreesOf({
         name: 'login-form',
+        root: '/data/workspaces/atlas',
         repositories: [{ path: 'sources/api', base: 'a'.repeat(40), branch: 'kris/login' }],
       }),
     ).toEqual([{ relativePath: 'sources/api', base: 'a'.repeat(40), branch: 'kris/login' }])

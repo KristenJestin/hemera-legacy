@@ -86,7 +86,10 @@ async function theWorkspaceIsFixedOnceTheAgentHasStarted({ canvasElement, args }
   // "The Workspace is fixed once the agent has started"
   args.onWorkspaceChange.mockClear()
   const canvas = within(canvasElement)
-  const label = canvas.getByRole('img', { name: 'Workspace: login-form' })
+  // A screen reader hears the reason with the name, not only a pointer on its tooltip.
+  const label = canvas.getByRole('img', {
+    name: 'Workspace: login-form. The Workspace is fixed once the agent has started.',
+  })
   await expect(label).toHaveTextContent('login-form')
   // Not a choice any more, and not drawn as one.
   await expect(canvas.queryByRole('combobox')).toBeNull()

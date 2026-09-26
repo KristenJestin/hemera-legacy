@@ -823,6 +823,46 @@ export const BuildArrivesWhenReady: Story = {
 }
 
 /**
+ * A Rework while the build waits for its Workspace: the launch is taken back, and the draft it
+ * leaves has its footer — `Mark ready`, with the cancelled launch said beside it, not in its place.
+ */
+export const ReworkWhileTheLaunchWaits: Story = {
+  args: {
+    spec: READY,
+    build: { ...BUILD, launch: { state: 'waiting', step: 'pnpm install' } },
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await expect(canvas.getByText(/^Preparing the Workspace/)).toBeVisible()
+    await userEvent.click(canvas.getByRole('button', { name: 'Rework' }))
+    const dialog = await within(document.body).findByRole('dialog', { name: 'Rework ATL-7' })
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Rework' }))
+    await waitFor(() => expect(footOf(canvasElement, 'ready')).not.toBeNull())
+    await waitFor(() => expect(buildFootOf(canvasElement)).toBeNull())
+    const foot = within(footOf(canvasElement, 'ready')!)
+    await expect(foot.getByRole('button', { name: 'Mark ready' })).toBeVisible()
+    await expect(foot.getByRole('status')).toHaveTextContent('Cancelled by the Rework')
+  },
+}
+
+/**
+ * A draft with a failed launch still on it: `Mark ready` holds the footer, the failure is said
+ * beside it, and nothing offers to start the agent again on a Spec that is not ready.
+ */
+export const DraftWithAFailedLaunch: Story = {
+  args: {
+    build: { ...BUILD, launch: { state: 'failed', cause: 'the agent exited with code 1' } },
+  },
+  play: async ({ canvasElement }) => {
+    await expect(buildFootOf(canvasElement)).toBeNull()
+    const foot = within(footOf(canvasElement, 'ready')!)
+    await expect(foot.getByRole('button', { name: 'Mark ready' })).toBeVisible()
+    await expect(foot.getByText(/The agent did not start: the agent exited/)).toBeVisible()
+    await expect(foot.queryByRole('button', { name: 'Retry' })).toBeNull()
+  },
+}
+
+/**
  * The keyboard across the swap: the unfold, then the fold, then a glyph, each landing where the
  * control it was on now stands; the heading it lands on opens the menu of the phases, which gives
  * the keyboard back to it when it closes.

@@ -34,8 +34,8 @@ import { SpecQuestion } from './spec-question.tsx'
  * The chat is the thread and the composer of the Session page, as they are; what `define` adds
  * to it is the thin Hemera line that says what the agent was handed this turn, and the questions
  * of the Spec, asked there and answered there. The panel takes the side column's place — there
- * is no side column while it is there. It opens folded to a band of glyphs, so the chat has the
- * width (brief revision 4): a screen that shows the panel's state opens it unfolded, and a path
+ * is no side column while it is there. It opens folded to a small frame of its phases, so the chat
+ * has the width (issue #164): a screen that shows the panel's state opens it unfolded, and a path
  * unfolds it first, the way a hand does.
  * A `define` Session never exists without its Spec: it starts from a Spec, or from a `free`
  * Session whose agent proposes one. Every screen is the same Spec, `ATL-7`, taken through its
@@ -366,7 +366,7 @@ function Screens({
 }: {
   screen: ScreenName
   reworkOpen?: boolean
-  /** Whether the panel opens folded to its band, as a Session opens it. */
+  /** Whether the Spec opens folded to its small frame, as a Session opens it. */
   folded?: boolean
 }): ReactNode {
   return (
@@ -393,7 +393,10 @@ const meta = {
       description: 'Which screen of the brief.',
     },
     reworkOpen: { control: 'boolean', description: 'Whether the rework dialog starts open.' },
-    folded: { control: 'boolean', description: 'Whether the panel opens folded to its band.' },
+    folded: {
+      control: 'boolean',
+      description: 'Whether the Spec opens folded to its small frame.',
+    },
   },
 } satisfies Meta<typeof Screens>
 
@@ -410,17 +413,23 @@ type Story = StoryObj<typeof meta>
  * start from the folded panel a Session opens on: the hand unfolds it first.
  */
 
-/** The hand unfolding the panel from its band, and the panel once it is open. */
+/** The hand unfolding the Spec from its small frame, and the panel once it is open. */
 async function unfold(canvasElement: HTMLElement): Promise<void> {
   const canvas = within(canvasElement)
   await userEvent.click(canvas.getByRole('button', { name: 'Unfold the Spec' }))
-  await canvas.findByRole('region', { name: 'Stage of ATL-7' })
+  await canvas.findByRole('region', { name: 'Contents of ATL-7' })
+}
+
+/** The heading of a phase in the open panel's column, named with where the phase stands. */
+function phaseHeading(canvasElement: HTMLElement, name: RegExp): HTMLElement {
+  const column = within(canvasElement).getByRole('region', { name: 'Contents of ATL-7' })
+  return within(column).getByRole('button', { name })
 }
 
 /**
- * Screen 1 · a feature being planned, as the Session opens it: the chat has the width, the panel
- * a band beside it — the glyph of each phase, the Plan one tinted and breathing while the agent
- * writes the plan, and no readiness. The thread says what the agent was handed in one folded
+ * Screen 1 · a feature being planned, as the Session opens it: the chat has the width, the Spec
+ * a small frame at its edge — the glyph of each phase, tinted by how far along it is, the Plan one
+ * breathing while the agent writes the plan, and no readiness. The thread says what the agent was handed in one folded
  * Hemera line, and asks the blocking question as a block.
  */
 export const MidPlan: Story = {
@@ -429,27 +438,24 @@ export const MidPlan: Story = {
     await expect(
       canvas.getByRole('button', { name: /What the agent was told · Plan/ }),
     ).toBeVisible()
-    const band = canvas.getByRole('navigation', { name: 'Parts of ATL-7' })
-    await expect(within(band).queryByRole('img', { name: /^Readiness/ })).toBeNull()
-    await expect(
-      within(band).getByRole('button', { name: 'Plan phase, open, show all its parts' }),
-    ).toBeVisible()
-    // Folded, the phases alone (issue #159): the one the agent writes in breathes.
-    await expect(
-      within(band)
-        .getByRole('button', { name: 'Plan phase, open, show all its parts' })
-        .querySelector('[data-tint="writing"]'),
-    ).not.toBeNull()
-    await expect(within(band).queryByRole('button', { name: /^Tasks/ })).toBeNull()
+    const frame = canvas.getByRole('navigation', { name: 'Phases of ATL-7' })
+    await expect(within(frame).queryByRole('img', { name: /^Readiness/ })).toBeNull()
+    const plan = within(frame).getByRole('button', {
+      name: 'Plan phase, started, the agent is writing it, unfold the Spec on it',
+    })
+    await expect(plan).toBeVisible()
+    // Folded, the phases alone (issue #164): the one the agent writes in breathes.
+    await expect(plan.querySelector('[data-writing]')).not.toBeNull()
+    await expect(within(frame).queryByRole('button', { name: /^Tasks/ })).toBeNull()
     await expect(canvas.getByRole('button', { name: 'Unfold the Spec' })).toBeVisible()
-    await expect(canvas.queryByRole('region', { name: 'Stage of ATL-7' })).toBeNull()
+    await expect(canvas.queryByRole('region', { name: 'Contents of ATL-7' })).toBeNull()
     await expect(canvas.getByRole('group', { name: /^Question: Credit notes/ })).toBeVisible()
   },
 }
 
 /**
  * Unfolded, then `Mark ready` pressed too early: refused with what is left, said beside it;
- * the tasks, not written yet, put on the stage from the rail.
+ * the tasks, not written yet, in the column under Decompose.
  */
 export const MidPlanMarkReadyRefused: Story = {
   play: async ({ canvasElement }) => {
@@ -458,13 +464,8 @@ export const MidPlanMarkReadyRefused: Story = {
     await expect(canvas.queryByText(/^Plan ·/)).toBeNull()
     await userEvent.click(canvas.getByRole('button', { name: 'Mark ready' }))
     await expect(canvas.getByRole('alert')).toHaveTextContent(/Still to do: .*the tasks/)
-    await userEvent.click(canvas.getByRole('button', { name: /^Tasks/ }))
-    await expect(canvas.getByRole('button', { name: /^Tasks/ })).toHaveAttribute(
-      'aria-current',
-      'true',
-    )
-    const stage = canvas.getByRole('region', { name: 'Stage of ATL-7' })
-    await expect(within(stage).getByRole('heading', { name: /^Tasks · 0/ })).toBeVisible()
+    const column = canvas.getByRole('region', { name: 'Contents of ATL-7' })
+    await expect(within(column).getByRole('heading', { name: /^Tasks · 0/ })).toBeVisible()
     await expect(canvas.getByText(/Tasks are written in Decompose/)).toBeVisible()
   },
 }
@@ -474,7 +475,6 @@ export const MidPlanQuestionAnswered: Story = {
   play: async ({ canvasElement }) => {
     await unfold(canvasElement)
     const canvas = within(canvasElement)
-    await userEvent.click(canvas.getByRole('button', { name: /^Questions/ }))
     await userEvent.click(canvas.getByRole('button', { name: /^Answer in the chat: Credit/ }))
     const recommended = canvas.getByRole('button', { name: /recommended/ })
     await expect(recommended).toHaveFocus()
@@ -499,8 +499,8 @@ export const Bug: Story = {
 
 /**
  * Screen 3 · from a free Session: the agent proposes the Spec in the thread, `Create` makes the
- * Session `define`, and the panel arrives beside the thread, folded to its band, while the thread
- * stays.
+ * Session `define`, and the Spec arrives beside the thread, folded to its small frame, while the
+ * thread stays.
  */
 export const FromAFreeSession: Story = {
   args: { screen: 'fromFree' },
@@ -610,10 +610,8 @@ export const ReadyReworked: Story = {
     await waitFor(() => expect(says).toBeVisible())
     await userEvent.click(page.getByRole('button', { name: 'Rework' }))
     await waitFor(() => expect(canvas.getByRole('button', { name: 'Latest' })).toBeVisible())
-    // The rail says what is to review; no sentence under the head says it again (issue #150).
-    await expect(
-      canvas.getByRole('button', { name: 'Plan phase, to review, show all its parts' }),
-    ).toBeVisible()
+    // The phase's heading says what is to review; no sentence under the head says it again.
+    await expect(phaseHeading(canvasElement, /^Plan phase, to review,/)).toBeVisible()
     await expect(canvas.queryByText(/^Every phase to review/)).toBeNull()
   },
 }
@@ -628,10 +626,7 @@ export const Reader: Story = {
     const canvas = within(canvasElement)
     await expect(canvas.getByText('« Spec CSV »')).toBeVisible()
     await expect(canvas.getByRole('button', { name: 'Take over' })).toBeVisible()
-    await expect(canvas.getByRole('button', { name: 'Tasks, 3' })).toHaveAttribute(
-      'aria-current',
-      'true',
-    )
+    await expect(phaseHeading(canvasElement, /^Decompose phase/)).toBeVisible()
   },
 }
 
@@ -641,7 +636,6 @@ export const ReaderTakesOver: Story = {
   play: async ({ canvasElement }) => {
     await unfold(canvasElement)
     const canvas = within(canvasElement)
-    await userEvent.click(canvas.getByRole('button', { name: /^Stories/ }))
     await expect(canvas.getByRole('list', { name: 'Criteria of S2' })).toBeVisible()
     await expect(canvas.queryByRole('textbox', { name: /^Narrative/ })).toBeNull()
     await userEvent.click(canvas.getByRole('button', { name: 'Take over' }))
@@ -650,29 +644,16 @@ export const ReaderTakesOver: Story = {
 }
 
 /**
- * Screen 8 · after a rework: the Plan and Decompose groups of the rail in amber, their rows
- * stale, the plan copied from revision 2 on the stage, and the one sentence saying the agent
- * declares them again.
+ * Screen 8 · after a rework: the headings of Plan and Decompose say they are to review, their
+ * parts say so beside their titles, and the plan copied from revision 2 is in the column.
  */
 export const StaleAfterRework: Story = {
   args: { screen: 'stale', folded: false },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     await expect(canvas.queryByText(/^Every phase to review/)).toBeNull()
-    const rail = canvas.getByRole('navigation', { name: 'Parts of ATL-7' })
-    await expect(
-      within(rail).getByRole('button', {
-        name: 'Plan phase, to review, show all its parts',
-      }),
-    ).toBeVisible()
-    await expect(
-      within(rail).getByRole('button', {
-        name: 'Decompose phase, to review, show all its parts',
-      }),
-    ).toBeVisible()
-    await expect(canvas.getByRole('button', { name: 'Tasks, 4' })).toHaveAccessibleDescription(
-      'Started. To review',
-    )
+    await expect(phaseHeading(canvasElement, /^Plan phase, to review,/)).toBeVisible()
+    await expect(phaseHeading(canvasElement, /^Decompose phase, to review,/)).toBeVisible()
     await expect(canvas.getAllByText('to review')[0]).toBeVisible()
     await expect(canvas.queryByRole('button', { name: /things before ready/ })).toBeNull()
   },

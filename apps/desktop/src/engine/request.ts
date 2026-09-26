@@ -212,25 +212,39 @@ export function answer(
       }
     }
     if (decision.name === 'classifier.mode.write') {
-      return yield* (yield* ClassifierSettings).select(decision.argument.mode)
+      const settings = yield* ClassifierSettings
+      const previous = yield* settings.current
+      yield* settings.select(decision.argument.mode)
+      if (previous.mode !== decision.argument.mode) yield* (yield* AgentRuntime).classifierChanged
+      return
     }
     if (decision.name === 'classifier.consent.write') {
-      return yield* (yield* ClassifierSettings).setConsent(decision.argument.consent)
+      const settings = yield* ClassifierSettings
+      const previous = yield* settings.current
+      yield* settings.setConsent(decision.argument.consent)
+      if (previous.mode === 'hemera-auto' && previous.consent !== decision.argument.consent)
+        yield* (yield* AgentRuntime).classifierChanged
+      return
     }
     if (decision.name === 'classifier.ciphertext.read') {
       return yield* (yield* ClassifierSettings).ciphertext
     }
     if (decision.name === 'classifier.key.replace') {
-      return yield* (yield* ClassifierSettings).replaceKey(
-        decision.argument.ciphertext,
-        decision.argument.plaintext,
-      )
+      const settings = yield* ClassifierSettings
+      yield* settings.replaceKey(decision.argument.ciphertext, decision.argument.plaintext)
+      if ((yield* settings.current).mode === 'hemera-auto')
+        yield* (yield* AgentRuntime).classifierChanged
+      return
     }
     if (decision.name === 'classifier.key.restore') {
       return yield* (yield* ClassifierSettings).restoreKey(decision.argument.plaintext)
     }
     if (decision.name === 'classifier.key.remove') {
-      return yield* (yield* ClassifierSettings).removeKey
+      const settings = yield* ClassifierSettings
+      yield* settings.removeKey
+      if ((yield* settings.current).mode === 'hemera-auto')
+        yield* (yield* AgentRuntime).classifierChanged
+      return
     }
     if (decision.name === 'engine.status') return yield* (yield* EngineStatus).read
 

@@ -723,6 +723,18 @@ permission modes — and, beside them, what the turn used: the reading the agent
 window, with "not provided" for whatever it did not announce. Hemera divides by no window an agent
 never named.
 
+App Settings selects one permission classifier for the application: Agent default or Hemera
+Auto. Agent default retains each agent's available native permission behaviour and Hemera's
+existing guards. Hemera Auto replaces native permission selection in the composer and applies
+one policy to calls made through Hemera's tools, regardless of the Session's agent. It does not
+claim control over actions an agent performs outside those tools. Local rules settle only
+understood calls; Jev evaluates the remaining calls when the user has supplied a protected key
+and consented to sending a redacted action and relevant human context to TypeSafe AI. Missing
+or unusable evaluation asks the human for the exact call. A destructive local denial cannot be
+overridden by Jev or by that approval. A change of classifier or credential invalidates pending
+decisions and requires a running agent to leave its old native permission mode before a new
+prompt. The thread and Journal distinguish the classifier's decision from the tool's outcome.
+
 The effort scale marks the level the agent recommends for the current model, and nothing where it
 recommends none. While the user has chosen no effort in the Session, a model change puts the
 agent on the level the new model recommends, so the scale stands on its recommended mark instead

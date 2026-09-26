@@ -35,12 +35,13 @@ import {
   focusOf,
   renderSpecMarkdown,
 } from '@hemera/core'
-import { type SQL, and, desc, eq, inArray } from 'drizzle-orm'
+import { type SQL, and, desc, eq, inArray, ne } from 'drizzle-orm'
 import { Context, Data, Duration, Effect, Layer, Result } from 'effect'
 
 import { AgentNotices } from '../agents/notices.ts'
 import { AgentRuntime } from '../agents/runtime.ts'
 import { StderrSink } from '../agents/supervisor.ts'
+import { DomainEvents } from '../domain-events.ts'
 import { type InvalidCursorError, type NewEvent } from '../journal.ts'
 import { Preferences } from '../preferences.ts'
 import { Sessions, type UnknownSessionError, WorkspaceNotReadyError } from '../sessions.ts'
@@ -64,7 +65,6 @@ import {
 } from '../storage/schema.ts'
 import { type Mutation, type StaleVersionError, mutate } from '../transaction.ts'
 import { UnknownWorkspaceError } from './described.ts'
-import { launchEvent } from './launch-journal.ts'
 
 /** One launch as the interface reads it: the Spec, the revision, the Workspace, the build. */
 export interface LaunchView {
@@ -157,6 +157,85 @@ const NOT_PREPARED = 'The Workspace could not be prepared'
 /** What a launch waiting on a Workspace that was cleaned up is told (D8-13). */
 const REMOVED = 'The Workspace was removed'
 
+/** What a Rework says of the launches it cancels: the revision they waited for is gone (D8-13). */
+const REWORKED = 'reworked'
+
+/** What the Journal says of a launch: the entity is the launch itself (D8-16). */
+function launchEvent(
+  launch: { readonly id: string; readonly specId: string; readonly revisionId: string },
+  projectId: string,
+  type: string,
+  payload: Record<string, string | null>,
+  author: 'human' | 'hemera',
+): NewEvent {
+  return {
+    type,
+    entityKind: 'launch',
+    entityId: launch.id,
+    source: author === 'human' ? 'ui' : 'system',
+    author,
+    projectId,
+    payload: { specId: launch.specId, revisionId: launch.revisionId, ...payload },
+  }
+}
+
+/**
+ * The launches a Rework cancelled (D8-13, #113): every launch that has not started — the one still
+ * `waiting` for its environment, and the one whose agent failed — on a revision its Spec has left
+ * becomes `cancelled`, saying `reworked`. Only a Rework moves a Spec off a revision, so a launch
+ * there is one a Rework took the revision from.
+ *
+ * It reads the Spec's state rather than the Rework as it passed: the one Spec a Rework named, when
+ * the launches hear it, and every Spec at the engine's start, for a Rework the engine stopped
+ * before hearing. Nothing of the Workspace is touched: its worktrees and its steps are what they
+ * were, and the new revision has to reach `ready` and be launched by hand.
+ */
+function cancelReworked(
+  transaction: EngineTransaction,
+  specId: string | null,
+): Effect.Effect<readonly Reworked[], DatabaseError> {
+  return Effect.gen(function* () {
+    const left = yield* transaction
+      .select({ launch: buildLaunches, projectId: specs.projectId })
+      .from(buildLaunches)
+      .innerJoin(specs, eq(specs.id, buildLaunches.specId))
+      .where(
+        and(
+          specId === null ? undefined : eq(buildLaunches.specId, specId),
+          inArray(buildLaunches.state, ['waiting', 'failed']),
+          ne(buildLaunches.revisionId, specs.currentRevisionId),
+        ),
+      )
+      .pipe(Effect.mapError(failed('reading the launches a Rework cancels')))
+    if (left.length === 0) return []
+    const at = now()
+    yield* transaction
+      .update(buildLaunches)
+      .set({ state: 'cancelled', detail: REWORKED, updatedAt: at })
+      .where(
+        inArray(
+          buildLaunches.id,
+          left.map(({ launch }) => launch.id),
+        ),
+      )
+      .pipe(Effect.mapError(failed('cancelling the launches of the Spec')))
+    return left.map(({ launch, projectId }) => ({
+      id: launch.id,
+      specId: launch.specId,
+      projectId,
+      event: launchEvent(launch, projectId, 'launch.cancelled', { reason: REWORKED }, 'human'),
+    }))
+  })
+}
+
+/** A launch a Rework cancelled: which one, whose Spec, and its Journal line. */
+interface Reworked {
+  readonly id: string
+  readonly specId: string
+  readonly projectId: string
+  readonly event: NewEvent
+}
+
 /**
  * The launches still waiting on a Workspace that will never be ready: ended, saying why, in the
  * very transaction that says the Workspace failed or was cleaned up — a launch left `waiting` on a
@@ -239,6 +318,7 @@ export const launchesLayer = Layer.effect(
     const diagnostic = yield* StderrSink
     /** The engine's own scope: a start run in the background ends when the engine does (#132). */
     const scope = yield* Effect.scope
+    const domainEvents = yield* DomainEvents
 
     const withDatabase = <A, E>(effect: Effect.Effect<A, E, Database>): Effect.Effect<A, E> =>
       effect.pipe(Effect.provideService(Database, database))
@@ -475,6 +555,15 @@ export const launchesLayer = Layer.effect(
               if (row.state !== 'waiting') {
                 return { result: viewOf(row), events: [] } satisfies Mutation<LaunchView>
               }
+              // A Rework the launches have not heard yet took the revision this one waited on:
+              // it is cancelled here, never built on a revision the Spec has left (#113).
+              const reworked = yield* cancelReworked(transaction, row.specId)
+              if (reworked.some((each) => each.id === row.id)) {
+                return {
+                  result: { ...viewOf(row), state: 'cancelled' as const, detail: REWORKED },
+                  events: reworked.map((each) => each.event),
+                } satisfies Mutation<LaunchView>
+              }
               // The Workspace is read again here, in the very transaction that writes the
               // Session (D8-08): one cleaned up or failed since the launch was written gets no
               // build in a folder that is gone (D8-13).
@@ -683,6 +772,45 @@ export const launchesLayer = Layer.effect(
       })
 
     /**
+     * The launches a Rework cancelled — of one Spec, or of every one when `specId` is null —
+     * written with their Journal lines, and the window told of each Spec whose launch changed.
+     */
+    const cancelledByRework = (specId: string | null) =>
+      withDatabase(
+        mutate('cancelling the launches a Rework left', (transaction) =>
+          cancelReworked(transaction, specId).pipe(
+            Effect.map(
+              (reworked) =>
+                ({
+                  result: reworked,
+                  events: reworked.map((each) => each.event),
+                }) satisfies Mutation<readonly Reworked[]>,
+            ),
+          ),
+        ),
+      ).pipe(
+        Effect.tap((reworked) =>
+          Effect.sync(() => {
+            for (const each of reworked) notices.launched(each.specId, each.projectId)
+          }),
+        ),
+      )
+
+    // A Rework says that the Spec was reworked, and the launches follow it (D8-13, #113). A
+    // cancellation that cannot be written goes to the diagnostic: the Spec's state still says it,
+    // and the next start of the engine cancels it.
+    yield* domainEvents.follow('spec.reopened', (event) =>
+      event.specId === null || event.specId === undefined
+        ? Effect.void
+        : cancelledByRework(event.specId).pipe(
+            Effect.asVoid,
+            Effect.catch((failure) =>
+              diagnostic.write(`cancelling the launches a Rework left failed: ${failure.message}`),
+            ),
+          ),
+    )
+
+    /**
      * The launches an engine that stopped left behind (D8-05, D8-13): one it left `starting` is
      * started again on its Session — the agent of that Session, no new one, as the builds that
      * were running are resumed — and one it left `waiting` on a Workspace that is already ready
@@ -694,6 +822,9 @@ export const launchesLayer = Layer.effect(
      */
     const recovering = () =>
       Effect.gen(function* () {
+        // A Rework the engine stopped before the launches heard it: what waited on the revision
+        // it left is cancelled first, so nothing below starts a build of it (#113).
+        yield* cancelledByRework(null)
         const left = yield* withDatabase(
           reading('reading the launches a stopped engine left', (transaction) =>
             transaction
@@ -958,17 +1089,25 @@ export const launchesLayer = Layer.effect(
               Effect.gen(function* () {
                 // The launch is re-read in the very transaction that writes it (D8-13): a Rework
                 // may have cancelled it since it was read above, and writing `starting` over a
-                // cancelled launch starts a build nobody asked for.
+                // cancelled launch starts a build nobody asked for. One on a revision the Spec has
+                // left is a Rework the launches have not heard yet, and is refused the same (#113).
                 const held = yield* transaction
-                  .select({ state: buildLaunches.state, sessionId: buildLaunches.sessionId })
+                  .select({
+                    state: buildLaunches.state,
+                    sessionId: buildLaunches.sessionId,
+                    revisionId: buildLaunches.revisionId,
+                    current: specs.currentRevisionId,
+                  })
                   .from(buildLaunches)
+                  .innerJoin(specs, eq(specs.id, buildLaunches.specId))
                   .where(eq(buildLaunches.id, launch.id))
                   .pipe(Effect.mapError(failed('reading the launch')))
                 const claimed = held[0]
                 if (
                   claimed === undefined ||
                   claimed.state !== 'failed' ||
-                  claimed.sessionId === null
+                  claimed.sessionId === null ||
+                  claimed.revisionId !== claimed.current
                 ) {
                   return yield* Effect.fail(
                     new LaunchRefusedError({

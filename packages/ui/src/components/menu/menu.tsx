@@ -25,6 +25,15 @@ import { Kbd } from '../kbd/kbd.tsx'
 const POPUP =
   'min-w-48 rounded-lg border border-border bg-card p-1 text-sm text-card-foreground shadow-lg outline-none translate-y-0 popup-motion data-starting-style:-translate-y-2 data-starting-style:opacity-0 data-ending-style:-translate-y-2 data-ending-style:opacity-0'
 
+/**
+ * A trigger that is neither the label nor an icon: what it holds, on a bare surface that answers the
+ * pointer and the keyboard the way a ghost button does, and takes no size of its own.
+ */
+const BARE =
+  'flex min-w-0 items-center gap-2 rounded-md px-1 py-0.5 text-left text-sm outline-none focus-ring hover:bg-accent data-popup-open:bg-accent'
+
+const DETAIL = 'ml-auto pl-3 text-muted-foreground'
+
 const ITEM =
   'flex cursor-default items-center gap-2 rounded-md px-2 py-1.5 outline-none select-none data-highlighted:bg-accent data-disabled:opacity-50'
 
@@ -32,6 +41,8 @@ export interface MenuItem {
   label: string
   /** One icon of the catalogue, before the label. */
   icon?: ReactNode
+  /** A quiet word at the end of the line, which says something of the command: how far it is. */
+  detail?: string | undefined
   /** The keystroke that does the same thing, shown but not bound here. */
   shortcut?: string | undefined
   disabled?: boolean | undefined
@@ -51,6 +62,13 @@ export interface MenuProps {
    * while it is drawn as an ellipsis.
    */
   icon?: ReactNode | undefined
+  /**
+   * The trigger, when it is neither the label nor an icon: what it holds, drawn on a bare surface
+   * (issue #164). The heading of a phase of the Spec is one — its glyph, its name and how much of
+   * it is written — and pressed, it opens the menu of the phases. The label stays the control's
+   * name, so what the trigger holds is read by the eye and the label by a screen reader.
+   */
+  trigger?: ReactNode | undefined
   /** Groups of commands; a separator is drawn between two groups. */
   groups: MenuItem[][]
   disabled?: boolean | undefined
@@ -63,33 +81,47 @@ export interface MenuProps {
   className?: string | undefined
 }
 
-export function Menu({ label, icon, groups, disabled, size = 'md', className }: MenuProps) {
+export function Menu({
+  label,
+  icon,
+  trigger,
+  groups,
+  disabled,
+  size = 'md',
+  className,
+}: MenuProps) {
   const anchor = useRef<HTMLSpanElement>(null)
   const container = useOverlayContainer()
   return (
     <BaseMenu.Root>
       <span ref={anchor} className="inline-flex">
-        <BaseMenu.Trigger
-          disabled={disabled === true}
-          render={
-            icon === undefined ? (
-              // The label is the trigger's own words, and they are the control's name.
-              <Button variant="secondary" size={size} className={className} />
-            ) : (
-              // An icon trigger says nothing, so the label is carried as the accessible name
-              // instead: the button is drawn as an ellipsis and announced as what it opens.
-              <IconButton
-                variant="ghost"
-                size="sm"
-                icon={icon}
-                aria-label={label}
-                className={className}
-              />
-            )
-          }
-        >
-          {icon === undefined ? label : null}
-        </BaseMenu.Trigger>
+        {trigger !== undefined ? (
+          <BaseMenu.Trigger disabled={disabled === true} aria-label={label} className={BARE}>
+            {trigger}
+          </BaseMenu.Trigger>
+        ) : (
+          <BaseMenu.Trigger
+            disabled={disabled === true}
+            render={
+              icon === undefined ? (
+                // The label is the trigger's own words, and they are the control's name.
+                <Button variant="secondary" size={size} className={className} />
+              ) : (
+                // An icon trigger says nothing, so the label is carried as the accessible name
+                // instead: the button is drawn as an ellipsis and announced as what it opens.
+                <IconButton
+                  variant="ghost"
+                  size="sm"
+                  icon={icon}
+                  aria-label={label}
+                  className={className}
+                />
+              )
+            }
+          >
+            {icon === undefined ? label : null}
+          </BaseMenu.Trigger>
+        )}
       </span>
       <BaseMenu.Portal container={container}>
         <BaseMenu.Positioner anchor={anchor} side="bottom" align="start" sideOffset={4}>
@@ -108,6 +140,7 @@ export function Menu({ label, icon, groups, disabled, size = 'md', className }: 
                   >
                     {item.icon}
                     {item.label}
+                    {item.detail !== undefined && <span className={DETAIL}>{item.detail}</span>}
                     {item.shortcut !== undefined && (
                       <Kbd keys={item.shortcut} className="ml-auto" />
                     )}

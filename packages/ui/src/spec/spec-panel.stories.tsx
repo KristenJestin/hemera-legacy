@@ -3,8 +3,17 @@ import { MotionConfig } from 'motion/react'
 import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
 
 import { TooltipProvider } from '../components/tooltip/tooltip.tsx'
+import { swap } from '../motion.ts'
 import { LiveSpecPanel } from './spec-harness.tsx'
-import { BUG, GATE_FULL, MAINTENANCE, MID_PLAN, OLDER_REVISION, READY } from './spec-fixtures.ts'
+import {
+  BUG,
+  EMPTY,
+  GATE_FULL,
+  MAINTENANCE,
+  MID_PLAN,
+  OLDER_REVISION,
+  READY,
+} from './spec-fixtures.ts'
 import type { WorkspaceActionsProps } from './workspace-actions.tsx'
 
 /** The build of the Spec as the application hands it: nothing asked for yet, `main` to use. */
@@ -19,11 +28,24 @@ const BUILD: WorkspaceActionsProps = {
   onOpen: fn(),
 }
 
+/** The Spec in the row: its slot, the small frame and, while it is there, the panel. */
+function dockOf(canvasElement: HTMLElement): HTMLElement {
+  return within(canvasElement).getByRole('region', { name: 'Spec ATL-7' })
+}
+
+/** The open panel, or null once the Spec is folded and has landed. */
+function panelOf(canvasElement: HTMLElement): HTMLElement | null {
+  return dockOf(canvasElement).querySelector<HTMLElement>('[data-spec-panel]')
+}
+
+/** What the small frame is laid in, which slides and fades as a whole. */
+function frameOf(canvasElement: HTMLElement): HTMLElement {
+  return dockOf(canvasElement).querySelector<HTMLElement>('[data-spec-frame]')!
+}
+
 /** The panel's footer holding the build's actions, or `Mark ready`; null while it holds neither. */
 function footOf(canvasElement: HTMLElement, kind: 'build' | 'ready'): HTMLElement | null {
-  return within(canvasElement)
-    .getByRole('region', { name: 'Spec ATL-7' })
-    .querySelector<HTMLElement>(`[data-foot="${kind}"]`)
+  return dockOf(canvasElement).querySelector<HTMLElement>(`[data-foot="${kind}"]`)
 }
 
 /** The footer the build's actions stand in, or null while it has none. */
@@ -43,15 +65,44 @@ function isPrimary(button: HTMLElement): boolean {
   return button.classList.contains('bg-primary')
 }
 
+/** The column the Spec is read in, while the panel is open. */
+function columnOf(canvasElement: HTMLElement): HTMLElement {
+  return within(canvasElement).getByRole('region', { name: /^Contents of / })
+}
+
+/** The heading of a phase in the column, which is the trigger of the menu of the phases. */
+function headingOf(canvasElement: HTMLElement, phase: string): HTMLElement {
+  return within(columnOf(canvasElement)).getByRole('button', {
+    name: new RegExp(`^${phase} phase, .*go to another phase$`),
+  })
+}
+
 /**
- * The Spec panel alone, in a Session's row beside a stand-in for the chat. Folded by default to a
- * band — the rail's glyphs and their tints — and unfolded by the band, a glyph, or the agent
- * starting on a part, unless the hand folded it. Unfolded, a head that stays on top, the rail
- * beside a stage that shows one part, or every part of one phase, following the agent until a row
- * is chosen, and a footer under both (issue #150): `Mark ready` on a draft, quiet until the agent
- * confirmed the Spec complete and primary after, and the build's actions once the Spec is ready.
- * No readiness is drawn (issue #135). The screens of the brief are drawn in their
- * Session, under `Surfaces/Session/Define`; these are the panel's own states and paths.
+ * Whether a phase's heading stands at the top of the column, stuck there: the phase being read.
+ * Checked against the column's own top, to the pixel.
+ */
+function isStuck(canvasElement: HTMLElement, phase: string): boolean {
+  const column = columnOf(canvasElement).getBoundingClientRect()
+  const band = headingOf(canvasElement, phase).closest('[data-heading]')!.parentElement!
+  return Math.abs(band.getBoundingClientRect().top - column.top) < 1
+}
+
+/** Resolves on the next frame, once whatever was asked has been drawn. */
+function nextFrame(): Promise<void> {
+  return new Promise((resolve) => requestAnimationFrame(() => resolve()))
+}
+
+/**
+ * The Spec panel alone, in a Session's row beside a stand-in for the chat (issue #164). Folded by
+ * default to a small frame at the window's edge — the unfold chevron and the three phases' glyphs,
+ * each tinted by how far along it is — and opened by the chevron, a glyph, or the agent starting
+ * on a part, unless the hand folded it. The two trade places by a swap: the frame slides out by
+ * the edge and fades, and a beat later the panel slides in and pushes the chat; folding, the other
+ * way round. Open, one frame: the head on its rim, the Spec as one column under the sticky
+ * headings of its phases, and one footer across the panel (issue #150): `Mark ready` on a draft,
+ * quiet until the agent confirmed the Spec complete and primary after, and the build's actions
+ * once the Spec is ready. No readiness is drawn (issue #135). The screens of the brief are drawn
+ * in their Session, under `Surfaces/Session/Define`; these are the panel's own states and paths.
  */
 const meta = {
   title: 'Blocks/Spec/SpecPanel',
@@ -81,10 +132,13 @@ const meta = {
     spec: { control: 'object', description: 'The Spec as the panel draws it.' },
     reader: { control: 'object', description: 'Present when this Session reads the draft.' },
     defaultReworkOpen: { control: 'boolean', description: 'Whether Rework starts open.' },
-    defaultFolded: { control: 'boolean', description: 'Whether it starts folded to its band.' },
+    defaultFolded: {
+      control: 'boolean',
+      description: 'Whether it starts folded to its small frame.',
+    },
     arrives: {
       control: 'boolean',
-      description: 'Whether the Spec was just created here, and the panel arrives unfolding.',
+      description: 'Whether the Spec was just created here, and the panel arrives opening.',
     },
     agentWrites: {
       control: 'text',
@@ -102,84 +156,212 @@ export default meta
 
 type Story = StoryObj<typeof meta>
 
-/** The width the panel stands at now, in pixels. */
-function panelWidth(canvasElement: HTMLElement): number {
-  return within(canvasElement).getByRole('region', { name: 'Spec ATL-7' }).getBoundingClientRect()
-    .width
+/** The width the Spec takes in the row now, in pixels: its slot and its margin at the edge. */
+function dockWidth(canvasElement: HTMLElement): number {
+  return dockOf(canvasElement).getBoundingClientRect().width
 }
 
-/** The band's own width, read from the theme's rem: three of them. */
-const BAND = 48
+/** The small frame's width — the theme's three and a half rems — and its margin, in pixels. */
+const FOLDED = 56 + 12
 
 /**
- * Folded, as a Session opens it: a band beside the chat, the phases' glyphs in a column and no
- * part under them (issue #159), and nothing at their foot. No head and no stage: the chat has the
- * width.
+ * Folded, as a Session opens it: the small frame at the window's edge, centred on its height — the
+ * unfold chevron and the three phases' glyphs, each tinted by how far along it is and named with
+ * its phase and its state. No head and no column: the chat has the width.
  */
 export const Folded: Story = {
   args: { defaultFolded: true },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    await expect(panelWidth(canvasElement)).toBe(BAND)
-    const band = canvas.getByRole('navigation', { name: 'Parts of ATL-7' })
-    await expect(within(band).queryByRole('button', { name: 'Plan' })).toBeNull()
-    await expect(
-      within(band).getByRole('button', { name: 'Plan phase, open, show all its parts' }),
-    ).toBeVisible()
-    await expect(within(band).queryByRole('img', { name: /^Readiness/ })).toBeNull()
-    // The names leave the eye and stay the accessible name.
-    await expect(canvas.queryByText('Expected outcome')).toBeNull()
-    await expect(canvas.queryByRole('region', { name: 'Stage of ATL-7' })).toBeNull()
+    await expect(dockWidth(canvasElement)).toBe(FOLDED)
+    await expect(panelOf(canvasElement)).toBeNull()
+    const frame = canvas.getByRole('navigation', { name: 'Phases of ATL-7' })
+    const shape = within(frame).getByRole('button', {
+      name: 'Shape phase, done, unfold the Spec on it',
+    })
+    const plan = within(frame).getByRole('button', {
+      name: 'Plan phase, started, the agent is writing it, unfold the Spec on it',
+    })
+    const decompose = within(frame).getByRole('button', {
+      name: 'Decompose phase, started, unfold the Spec on it',
+    })
+    // The tints: done, started, and the phase the agent writes breathing.
+    await expect(shape.querySelector('[data-progress="done"]')).not.toBeNull()
+    await expect(plan.querySelector('[data-progress="started"][data-writing]')).not.toBeNull()
+    await expect(decompose.querySelector('[data-progress="started"]')).not.toBeNull()
+    await expect(canvas.getByRole('button', { name: 'Unfold the Spec' })).toBeVisible()
+    // Centred on the row's height.
+    const row = dockOf(canvasElement).getBoundingClientRect()
+    const box = frameOf(canvasElement).firstElementChild!.getBoundingClientRect()
+    await expect(box.top - row.top).toBeCloseTo(row.bottom - box.bottom, 0)
+    await expect(canvas.queryByRole('region', { name: 'Contents of ATL-7' })).toBeNull()
     await expect(canvas.queryByRole('heading', { name: 'CSV invoice export' })).toBeNull()
   },
 }
 
 /**
- * Unfolded: a feature being planned, the head with no sentence under it, the rail
- * beside one part, and the stage following the agent onto the plan it writes. No readiness bar.
+ * Open: a feature being planned, the head with no sentence under it and the fold at its end, the
+ * Spec as one column — no band of phases and no tabs — and `Mark ready` in the footer.
  */
-export const Unfolded: Story = {
+export const Open: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    await expect(panelWidth(canvasElement)).toBeGreaterThan(BAND)
+    await expect(dockWidth(canvasElement)).toBeGreaterThan(FOLDED)
     await expect(canvas.getByRole('heading', { name: 'CSV invoice export' })).toBeVisible()
-    await expect(canvas.queryByText(/^Plan ·/)).toBeNull()
-    const rail = canvas.getByRole('navigation', { name: 'Parts of ATL-7' })
-    await expect(
-      within(rail).getByRole('button', { name: 'Plan phase, open, show all its parts' }),
-    ).toBeVisible()
-    await expect(canvas.getByRole('button', { name: 'Plan' })).toHaveAttribute(
-      'aria-current',
-      'true',
+    await expect(canvas.getByRole('button', { name: 'Fold the Spec' })).toBeVisible()
+    await expect(canvas.queryByRole('navigation', { name: 'Phases of ATL-7' })).toBeNull()
+    await expect(canvas.queryByRole('tablist')).toBeNull()
+    // Every part, one phase after the other, under the three headings.
+    const titles = [...columnOf(canvasElement).querySelectorAll('[data-part] h3')].map(
+      (heading) => heading.textContent ?? '',
     )
-    const stage = canvas.getByRole('region', { name: 'Stage of ATL-7' })
-    await expect(within(stage).getByRole('heading', { name: /^Plan/ })).toBeVisible()
-    // One part at a time: nothing of the other parts is on the stage.
-    await expect(within(stage).queryByRole('heading', { name: /^Problem/ })).toBeNull()
-    await expect(canvas.queryByText('Prototype')).toBeNull()
+    const parts = [/^Problem/, /^Scope/, /^Plan/, /^Stories/, /^Tasks/, /^Questions/]
+    await expect(parts.filter((part) => !titles.some((title) => part.test(title)))).toEqual([])
+    await expect(titles.findIndex((title) => title.startsWith('Problem'))).toBeLessThan(
+      titles.findIndex((title) => title.startsWith('Plan')),
+    )
+    await expect(headingOf(canvasElement, 'Shape')).toHaveTextContent('5 of 5 written')
+    await expect(headingOf(canvasElement, 'Plan')).toHaveTextContent('1 of 1 written')
+    await expect(headingOf(canvasElement, 'Decompose')).toHaveTextContent('2 of 3 written')
+    await expect(isStuck(canvasElement, 'Shape')).toBe(true)
     await expect(markReadyOf(canvasElement)).toBeEnabled()
-    await expect(canvas.queryByRole('img', { name: /^Readiness/ })).toBeNull()
-    await expect(canvas.queryByRole('button', { name: /before ready/ })).toBeNull()
-    // A draft offers nothing to build.
     await expect(buildFootOf(canvasElement)).toBeNull()
-    await expect(canvas.queryByRole('button', { name: 'Prepare and start the build' })).toBeNull()
-    await expect(canvas.queryByRole('button', { name: 'Show all' })).toBeNull()
+    await expect(canvas.queryByText('Prototype')).toBeNull()
+  },
+}
+
+/** Opened on Shape from its glyph: the column stands on Shape, its heading at the top. */
+export const OpenOnShape: Story = {
+  args: { defaultFolded: true },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement)
+    await userEvent.click(canvas.getByRole('button', { name: /^Shape phase, done/ }))
+    await expect(args.onFoldChange).toHaveBeenCalledWith(false)
+    await waitFor(() => expect(isStuck(canvasElement, 'Shape')).toBe(true))
+    await expect(headingOf(canvasElement, 'Shape')).toHaveFocus()
+  },
+}
+
+/** Opened on Plan from its glyph: the column stands on Plan, Shape scrolled away above it. */
+export const OpenOnPlan: Story = {
+  args: { defaultFolded: true },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await userEvent.click(canvas.getByRole('button', { name: /^Plan phase, started/ }))
+    await waitFor(() => expect(isStuck(canvasElement, 'Plan')).toBe(true))
+    await expect(columnOf(canvasElement).scrollTop).toBeGreaterThan(0)
+    await expect(headingOf(canvasElement, 'Plan')).toHaveFocus()
+    await waitFor(() => expect(dockWidth(canvasElement)).toBeGreaterThan(FOLDED))
+  },
+}
+
+/**
+ * Opened on Decompose from its glyph: the last phase, which the column brings to the top whatever
+ * it holds, its heading stuck there as every other's is.
+ */
+export const OpenOnDecompose: Story = {
+  args: { defaultFolded: true },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await userEvent.click(canvas.getByRole('button', { name: /^Decompose phase, started/ }))
+    await waitFor(() => expect(isStuck(canvasElement, 'Decompose')).toBe(true))
+    await expect(headingOf(canvasElement, 'Decompose')).toHaveFocus()
+  },
+}
+
+/**
+ * The heading of the phase being read stays stuck at the top while its content scrolls under it,
+ * and the next phase's heading replaces it when it arrives: they never stack. Pressed, the stuck
+ * heading opens the menu of the three phases, each with how much of it is written; one chosen
+ * takes the column to it.
+ */
+export const StuckHeadingMenu: Story = {
+  play: async ({ canvasElement }) => {
+    const column = columnOf(canvasElement)
+    const shape = column.querySelector<HTMLElement>('[data-phase="shape"]')!
+    // Half-way down Shape: its heading is stuck, and it is the only one at the top.
+    column.scrollTo({ top: shape.offsetHeight / 2, behavior: 'instant' })
+    await nextFrame()
+    await expect(isStuck(canvasElement, 'Shape')).toBe(true)
+    await expect(isStuck(canvasElement, 'Plan')).toBe(false)
+    // Into Plan: Plan's heading has pushed Shape's away, and stands alone at the top.
+    column.scrollTo({ top: shape.offsetHeight + 4, behavior: 'instant' })
+    await nextFrame()
+    await expect(isStuck(canvasElement, 'Plan')).toBe(true)
+    const gone = headingOf(canvasElement, 'Shape').getBoundingClientRect()
+    await expect(gone.bottom).toBeLessThanOrEqual(column.getBoundingClientRect().top + 1)
+
+    await userEvent.click(headingOf(canvasElement, 'Plan'))
+    const menu = await waitFor(() => within(document.body).getByRole('menu'))
+    const items = within(menu).getAllByRole('menuitem')
+    await expect(items).toHaveLength(3)
+    await expect(items[0]).toHaveTextContent(/^Shape\s*5 of 5 written$/)
+    await expect(items[1]).toHaveTextContent(/^Plan\s*1 of 1 written$/)
+    await expect(items[2]).toHaveTextContent(/^Decompose\s*2 of 3 written$/)
+    await expect(items[0]!.querySelector('[data-progress="done"]')).not.toBeNull()
+    await userEvent.click(items[2]!)
+    await waitFor(() => expect(within(document.body).queryByRole('menu')).toBeNull())
+    await waitFor(() => expect(isStuck(canvasElement, 'Decompose')).toBe(true))
+  },
+}
+
+/**
+ * A phase being written: the agent writes the plan, so Plan's glyph breathes, its heading says so
+ * after how much is written, and both are named with it. Set to the tasks, it is Decompose's turn.
+ */
+export const PhaseBeingWritten: Story = {
+  args: { agentWrites: 'tasks' },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const plan = headingOf(canvasElement, 'Plan')
+    await expect(plan).toHaveAccessibleName(
+      'Plan phase, open, 1 of 1 written, the agent is writing it, go to another phase',
+    )
+    await expect(plan).toHaveTextContent('1 of 1 written · writing…')
+    await expect(plan.querySelector('[data-writing]')).not.toBeNull()
+    await expect(headingOf(canvasElement, 'Shape').querySelector('[data-writing]')).toBeNull()
+    await userEvent.click(canvas.getByRole('button', { name: 'Let the agent write the tasks' }))
+    await waitFor(() =>
+      expect(headingOf(canvasElement, 'Decompose').querySelector('[data-writing]')).not.toBeNull(),
+    )
+  },
+}
+
+/**
+ * A Spec with nothing written: every heading's glyph in the quiet tint, each phase "0 of n
+ * written", every part saying that nothing is written yet.
+ */
+export const Empty: Story = {
+  args: { spec: EMPTY },
+  play: async ({ canvasElement }) => {
+    const headings = ['Shape', 'Plan', 'Decompose'].map((phase) => headingOf(canvasElement, phase))
+    await expect(
+      headings.map((one) => one.querySelector('[data-progress]')?.getAttribute('data-progress')),
+    ).toEqual(['empty', 'empty', 'empty'])
+    await expect(headings.map((one) => /0 of \d written/.test(one.textContent ?? ''))).toEqual([
+      true,
+      true,
+      true,
+    ])
+    const column = within(columnOf(canvasElement))
+    await expect(column.getAllByText('Nothing written yet.').length).toBeGreaterThan(3)
   },
 }
 
 /**
  * Just created from the agent's proposal (issue #130): the panel arrives, opening from nothing to
- * its unfolded width on its own spring rather than standing there, and lands unfolded on the
- * part the agent is on.
+ * its open width on the swap's spring rather than standing there, and lands open. The small
+ * frame never shows.
  */
 export const Arrives: Story = {
   args: { arrives: true, defaultFolded: true },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    const { panel } = boxesOf(canvasElement)
-    const row = panel.parentElement!.getBoundingClientRect().width
-    await waitFor(() => expect(panel.getBoundingClientRect().width).toBeCloseTo(row * 0.45, 0))
+    const dock = dockOf(canvasElement)
+    const row = dock.parentElement!.getBoundingClientRect().width
+    await waitFor(() => expect(dock.getBoundingClientRect().width).toBeCloseTo(row * 0.45 + 12, 0))
     await expect(canvas.getByRole('heading', { name: 'CSV invoice export' })).toBeVisible()
+    await expect(frameOf(canvasElement)).toHaveAttribute('aria-hidden', 'true')
   },
 }
 
@@ -187,10 +369,10 @@ export const Arrives: Story = {
 export const Bug: Story = {
   args: { spec: BUG },
   play: async ({ canvasElement }) => {
-    const canvas = within(canvasElement)
-    await expect(canvas.getByRole('heading', { name: /^Reproduction/ })).toBeVisible()
-    await expect(canvas.queryByRole('button', { name: /^Behaviour/ })).toBeNull()
-    await expect(canvas.queryByRole('button', { name: /^Stories/ })).toBeNull()
+    const column = within(columnOf(canvasElement))
+    await expect(column.getByRole('heading', { name: /^Reproduction/ })).toBeVisible()
+    await expect(column.queryByRole('heading', { name: /^Behaviour/ })).toBeNull()
+    await expect(column.queryByRole('heading', { name: /^Stories/ })).toBeNull()
   },
 }
 
@@ -198,49 +380,31 @@ export const Bug: Story = {
 export const Maintenance: Story = {
   args: { spec: MAINTENANCE },
   play: async ({ canvasElement }) => {
-    const canvas = within(canvasElement)
-    await expect(canvas.getByRole('heading', { name: /^Invariants/ })).toBeVisible()
-    await expect(canvas.queryByRole('button', { name: /^Behaviour/ })).toBeNull()
-  },
-}
-
-/** A phase of the band pressed: the panel unfolds, and the stage shows every part of it. */
-export const GlyphChosen: Story = {
-  args: { defaultFolded: true },
-  play: async ({ canvasElement, args }) => {
-    const canvas = within(canvasElement)
-    await userEvent.click(canvas.getByRole('button', { name: /^Shape phase/ }))
-    await expect(args.onFoldChange).toHaveBeenCalledWith(false)
-    const stage = await canvas.findByRole('region', { name: 'Stage of ATL-7' })
-    await expect(within(stage).getByRole('heading', { name: /^Scope/ })).toBeVisible()
-    await waitFor(() => expect(panelWidth(canvasElement)).toBeGreaterThan(BAND))
+    const column = within(columnOf(canvasElement))
+    await expect(column.getByRole('heading', { name: /^Invariants/ })).toBeInTheDocument()
+    await expect(column.queryByRole('heading', { name: /^Behaviour/ })).toBeNull()
   },
 }
 
 /**
- * The agent starts on a part while the panel is folded: it unfolds on its own, and the part the
- * agent writes is on the stage.
+ * The agent starts on a part while the Spec is folded: it opens on its own, on the phase of the
+ * part the agent writes.
  */
-export const UnfoldsWhenTheAgentWrites: Story = {
+export const OpensWhenTheAgentWrites: Story = {
   args: { defaultFolded: true, agentWrites: 'tasks' },
   play: async ({ canvasElement, args }) => {
     const canvas = within(canvasElement)
-    await expect(canvas.queryByRole('region', { name: 'Stage of ATL-7' })).toBeNull()
+    await expect(panelOf(canvasElement)).toBeNull()
     await userEvent.click(canvas.getByRole('button', { name: 'Let the agent write the tasks' }))
     await expect(args.onFoldChange).toHaveBeenCalledWith(false)
-    const stage = await canvas.findByRole('region', { name: 'Stage of ATL-7' })
-    await expect(within(stage).getByRole('heading', { name: /^Tasks/ })).toBeVisible()
-    await expect(canvas.getByRole('button', { name: 'Tasks, 0' })).toHaveAttribute(
-      'aria-current',
-      'true',
-    )
-    await waitFor(() => expect(panelWidth(canvasElement)).toBeGreaterThan(BAND))
+    await waitFor(() => expect(isStuck(canvasElement, 'Decompose')).toBe(true))
+    await waitFor(() => expect(dockWidth(canvasElement)).toBeGreaterThan(FOLDED))
   },
 }
 
 /**
- * Folded by the hand, the panel stays folded when the agent starts on a part; unfolded by the
- * hand, it shows the part the agent writes.
+ * Folded by the hand, the Spec stays folded when the agent starts on a part — the phase's glyph
+ * breathes instead; unfolded by the hand, the keyboard is on the fold.
  */
 export const HandFoldWins: Story = {
   args: { agentWrites: 'tasks' },
@@ -248,45 +412,56 @@ export const HandFoldWins: Story = {
     const canvas = within(canvasElement)
     await userEvent.click(canvas.getByRole('button', { name: 'Fold the Spec' }))
     await expect(args.onFoldChange).toHaveBeenLastCalledWith(true)
-    await waitFor(() => expect(panelWidth(canvasElement)).toBe(BAND))
-    // The fold button is gone with the head: the keyboard is on the band's unfold button.
+    await waitFor(() => expect(dockWidth(canvasElement)).toBe(FOLDED))
+    // The fold is gone with the panel: the keyboard is on the small frame's unfold.
     await expect(canvas.getByRole('button', { name: 'Unfold the Spec' })).toHaveFocus()
-    await waitFor(() => expect(canvas.queryByRole('region', { name: 'Stage of ATL-7' })).toBeNull())
+    await waitFor(() => expect(panelOf(canvasElement)).toBeNull())
     await userEvent.click(canvas.getByRole('button', { name: 'Let the agent write the tasks' }))
-    // The agent is writing, and the band says so on the phase's square; the panel waits for the hand.
     await expect(
-      canvas
-        .getByRole('button', { name: /^Decompose phase/ })
-        .querySelector('[data-tint="writing"]'),
+      canvas.getByRole('button', { name: /^Decompose phase/ }).querySelector('[data-writing]'),
     ).not.toBeNull()
     await expect(args.onFoldChange).toHaveBeenCalledTimes(1)
-    await expect(canvas.queryByRole('region', { name: 'Stage of ATL-7' })).toBeNull()
+    await expect(panelOf(canvasElement)).toBeNull()
     await userEvent.click(canvas.getByRole('button', { name: 'Unfold the Spec' }))
     await expect(args.onFoldChange).toHaveBeenLastCalledWith(false)
-    const stage = await canvas.findByRole('region', { name: 'Stage of ATL-7' })
-    await expect(within(stage).getByRole('heading', { name: /^Tasks/ })).toBeVisible()
-    // And unfolded, on the row of what is on the stage.
-    await expect(canvas.getByRole('button', { name: 'Tasks, 0' })).toHaveFocus()
+    await waitFor(() => expect(canvas.getByRole('button', { name: 'Fold the Spec' })).toHaveFocus())
   },
 }
 
-/** Where the chat and the panel stand on one frame, in pixels. */
+/** Where the chat, the panel and the small frame stand on one frame. */
 interface Frame {
+  /** When the frame was read, on the page's clock. */
+  at: number
   chat: number
   chatRight: number
+  /** How much of the panel is inside its clip, in pixels. */
   panel: number
   panelLeft: number
+  /** How opaque the small frame is, from 0 to 1. */
+  frame: number
 }
 
-/** The two boxes of the Session's row: the chat stand-in, and the panel beside it. */
-interface Row {
-  chat: Element
-  panel: HTMLElement
+/** The opacity a filter draws an element at, 1 when it draws none. */
+function opacityOf(element: HTMLElement): number {
+  const found = /opacity\(([\d.]+)\)/.exec(getComputedStyle(element).filter)
+  return found === null ? 1 : Number(found[1])
 }
 
-function boxesOf(canvasElement: HTMLElement): Row {
-  const panel = within(canvasElement).getByRole('region', { name: 'Spec ATL-7' })
-  return { chat: panel.previousElementSibling!, panel }
+/** The Spec and the chat on the frame this is called on. */
+function measure(canvasElement: HTMLElement): Frame {
+  const dock = dockOf(canvasElement)
+  const chat = dock.previousElementSibling!.getBoundingClientRect()
+  const panel = panelOf(canvasElement)
+  const box = panel?.getBoundingClientRect()
+  const clip = panel?.parentElement?.getBoundingClientRect()
+  return {
+    at: performance.now(),
+    chat: chat.width,
+    chatRight: chat.right,
+    panel: box === undefined || clip === undefined ? 0 : Math.max(0, clip.right - box.left),
+    panelLeft: box?.left ?? Number.POSITIVE_INFINITY,
+    frame: opacityOf(frameOf(canvasElement)),
+  }
 }
 
 /**
@@ -294,19 +469,15 @@ function boxesOf(canvasElement: HTMLElement): Row {
  * and every frame after it until nothing has moved for twenty.
  */
 async function framesOf(canvasElement: HTMLElement, action: () => Promise<void>): Promise<Frame[]> {
-  const { chat, panel } = boxesOf(canvasElement)
-  const measure = (): Frame => {
-    const left = chat.getBoundingClientRect()
-    const right = panel.getBoundingClientRect()
-    return { chat: left.width, chatRight: left.right, panel: right.width, panelLeft: right.left }
-  }
-  const frames = [measure()]
+  const frames = [measure(canvasElement)]
   let acted = false
   const sampled = new Promise<Frame[]>((resolve) => {
     let still = 0
     const sample = (): void => {
-      const now = measure()
-      still = acted && frames.at(-1)!.chat === now.chat ? still + 1 : 0
+      const now = measure(canvasElement)
+      const last = frames.at(-1)!
+      const same = last.chat === now.chat && last.frame === now.frame && last.panel === now.panel
+      still = acted && same ? still + 1 : 0
       frames.push(now)
       if (still < 20) requestAnimationFrame(sample)
       else resolve(frames)
@@ -324,59 +495,102 @@ function moved(frames: Frame[]): number[] {
   return widths.slice(widths.findIndex((width) => width !== widths[0]) - 1)
 }
 
+/** Presses a button, and answers when the press landed, on the page's clock. */
+async function pressedAt(button: HTMLElement): Promise<number> {
+  let at = Number.NaN
+  button.addEventListener(
+    'click',
+    () => {
+      at = performance.now()
+    },
+    { once: true },
+  )
+  await userEvent.click(button)
+  return at
+}
+
+/** The swap's beat, in milliseconds: how long the panel waits for the frame to start leaving. */
+const BEAT = swap.beat * 1000
+
 /**
- * The panel pushes the chat as it opens (brief revision 4b): the slot's own width moves, and the
- * chat, which takes the rest of the row, narrows with it on every frame from the first one of the
- * unfold, and widens with it on every frame of the fold. It is never a jump — the first width the
- * chat moves to is one on the way — and the panel never stands over the chat: its left edge is
- * on or past the chat's right edge on every frame.
+ * The swap, both ways (issue #164). Opening, the small frame starts leaving first and the panel
+ * waits a beat for it, then comes in while the frame is still there; folding, the panel leaves and the
+ * frame is back while the panel is still going. On no frame is neither there. The chat is pushed
+ * on every frame, never a jump, down one way and up the other, and the panel never stands over it.
  */
-export const ChatPushedAsItOpens: Story = {
+export const SwapReplayed: Story = {
   args: { defaultFolded: true },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    const opening = await framesOf(canvasElement, () =>
-      userEvent.click(canvas.getByRole('button', { name: 'Unfold the Spec' })),
-    )
+    let pressed = Number.NaN
+    const opening = await framesOf(canvasElement, async () => {
+      pressed = await pressedAt(canvas.getByRole('button', { name: 'Unfold the Spec' }))
+    })
+    // Never neither: on every frame, some of the frame or some of the panel is there.
+    await expect(opening.filter((frame) => frame.frame === 0 && frame.panel === 0)).toEqual([])
+    // The frame goes first: the panel shows no sooner than a beat after the press. Measured on
+    // the clock rather than against the frame's fade, which the compositor may start a frame or
+    // two late on a busy machine.
+    const coming = opening.find((frame) => frame.panel > 0)!
+    await expect(coming.at - pressed).toBeGreaterThanOrEqual(BEAT)
+    // And the two overlap: the panel is coming in while the frame is still there.
+    await expect(opening.some((frame) => frame.frame > 0 && frame.panel > 0)).toBe(true)
     const narrowing = moved(opening)
     const [full, first] = narrowing
     const narrowest = narrowing.at(-1)!
     await expect(narrowest).toBeLessThan(full!)
-    // Down on every frame, and never back up.
+    // Down on every frame, never back up, and through widths in between.
     await expect(narrowing).toEqual(narrowing.toSorted((a, b) => b - a))
-    // Through the widths in between: the first move is a step, not the landing.
     await expect(first).toBeGreaterThan(narrowest)
-    // How many frames play this spring is the runner's frame rate, not the product's — a loaded
-    // Chromium gives two or three. A row of widths in between is the claim; their count is not.
-    await expect(
-      narrowing.filter((width) => width < full! && width > narrowest).length,
-    ).toBeGreaterThan(0)
-    await expect(opening.filter((frame) => frame.panelLeft < frame.chatRight)).toEqual([])
-    await expect(opening.at(-1)!.panel).toBeGreaterThan(BAND)
+    await expect(opening.filter((frame) => frame.panelLeft < frame.chatRight - 0.5)).toEqual([])
+    await expect(opening.at(-1)!.frame).toBe(0)
 
     const closing = await framesOf(canvasElement, () =>
       userEvent.click(canvas.getByRole('button', { name: 'Fold the Spec' })),
     )
+    await expect(closing.filter((frame) => frame.frame === 0 && frame.panel === 0)).toEqual([])
+    await expect(closing.some((frame) => frame.frame > 0 && frame.panel > 0)).toBe(true)
     const widening = moved(closing)
     const widest = widening.at(-1)!
     await expect(widest).toBeGreaterThan(widening[0]!)
-    // Up on every frame, and never back down.
     await expect(widening).toEqual(widening.toSorted((a, b) => a - b))
-    await expect(widening[1]).toBeLessThan(widest)
-    // How many frames play this spring is the runner's frame rate, not the product's — a loaded
-    // Chromium gives two or three. A row of widths in between is the claim; their count is not.
-    await expect(
-      widening.filter((width) => width > widening[0]! && width < widest).length,
-    ).toBeGreaterThan(0)
-    await expect(closing.filter((frame) => frame.panelLeft < frame.chatRight)).toEqual([])
-    await expect(closing.at(-1)!.panel).toBe(BAND)
+    await expect(closing.filter((frame) => frame.panelLeft < frame.chatRight - 0.5)).toEqual([])
+    await expect(closing.at(-1)!.frame).toBe(1)
     await expect(widest).toBe(full)
+    await waitFor(() => expect(panelOf(canvasElement)).toBeNull())
   },
 }
 
 /**
- * Told to move less, the width lands at once: on the frame after the hand unfolds it, the panel is
- * at its unfolded width — a share of the row — and the chat has the rest.
+ * A fold asked while the panel is still coming in turns it round from where it is: the chat is
+ * given its width back from the width it had reached, and is never pushed the rest of the way.
+ */
+export const TurnsRoundMidWay: Story = {
+  args: { defaultFolded: true },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const frames = await framesOf(canvasElement, async () => {
+      await userEvent.click(canvas.getByRole('button', { name: 'Unfold the Spec' }))
+      // Part of the way in, and no further.
+      await waitFor(() => expect(measure(canvasElement).panel).toBeGreaterThan(40), {
+        interval: 5,
+      })
+      await userEvent.click(canvas.getByRole('button', { name: 'Fold the Spec' }))
+    })
+    const widths = frames.map((frame) => frame.chat)
+    const row = dockOf(canvasElement).parentElement!.getBoundingClientRect().width
+    // The panel's whole width was never taken from the chat.
+    await expect(Math.min(...widths)).toBeGreaterThan(row * 0.55 - 12 + 1)
+    await expect(widths.at(-1)).toBe(widths[0])
+    await expect(frames.at(-1)!.frame).toBe(1)
+    await waitFor(() => expect(panelOf(canvasElement)).toBeNull())
+  },
+}
+
+/**
+ * Told to move less, the swap jumps: on the frame after the hand unfolds it, the panel is at its
+ * open width — a share of the row — the chat has the rest, and the small frame is gone. Folded
+ * again, the frame is back on the next frame.
  *
  * `MotionConfig` says the preference rather than the browser's media query, which motion reads
  * once when a component mounts: a story that emulated it afterwards would test a tree that never
@@ -394,52 +608,17 @@ export const ReducedMotion: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     await userEvent.click(canvas.getByRole('button', { name: 'Unfold the Spec' }))
-    await new Promise((resolve) => requestAnimationFrame(resolve))
-    const { chat, panel } = boxesOf(canvasElement)
-    const row = panel.parentElement!.getBoundingClientRect().width
-    await expect(panel.getBoundingClientRect().width).toBeCloseTo(row * 0.45, 0)
-    await expect(chat.getBoundingClientRect().width).toBeCloseTo(row * 0.55, 0)
-  },
-}
-
-/**
- * A row of the rail pins the stage: the chosen part stays on it, and the plan the agent writes
- * keeps breathing in the rail.
- */
-export const RowChosen: Story = {
-  play: async ({ canvasElement }) => {
-    const canvas = within(canvasElement)
-    await userEvent.click(canvas.getByRole('button', { name: /^Scope/ }))
-    const stage = canvas.getByRole('region', { name: 'Stage of ATL-7' })
-    await expect(within(stage).getByRole('heading', { name: /^Scope/ })).toBeVisible()
-    await expect(canvas.getByRole('button', { name: /^Scope/ })).toHaveAttribute(
-      'aria-current',
-      'true',
-    )
-    await expect(canvas.getByRole('button', { name: 'Plan' })).not.toHaveAttribute('aria-current')
-  },
-}
-
-/**
- * A group heading of the rail puts every part of its phase on the stage, one under the other,
- * as they are; a row then puts its part back alone.
- */
-export const GroupOnStage: Story = {
-  play: async ({ canvasElement }) => {
-    const canvas = within(canvasElement)
-    const shape = canvas.getByRole('button', { name: 'Shape phase, finished, show all its parts' })
-    await userEvent.click(shape)
-    await expect(shape).toHaveAttribute('aria-current', 'true')
-    const stage = canvas.getByRole('region', { name: 'Stage of ATL-7' })
-    const parts = [/^Problem/, /^Expected outcome/, /^Scope/, /^Verification/, /^Behaviour/]
-    await Promise.all(
-      parts.map((part) => expect(within(stage).getByRole('heading', { name: part })).toBeVisible()),
-    )
-    await expect(within(stage).queryByRole('heading', { name: /^Plan/ })).toBeNull()
-    await userEvent.click(canvas.getByRole('button', { name: /^Tasks/ }))
-    await expect(within(stage).getByRole('heading', { name: /^Tasks/ })).toBeVisible()
-    await expect(within(stage).queryByRole('heading', { name: /^Problem/ })).toBeNull()
-    await expect(shape).not.toHaveAttribute('aria-current')
+    await nextFrame()
+    const dock = dockOf(canvasElement)
+    const row = dock.parentElement!.getBoundingClientRect().width
+    await expect(dock.getBoundingClientRect().width).toBeCloseTo(row * 0.45 + 12, 0)
+    await expect(measure(canvasElement).frame).toBe(0)
+    await expect(canvas.getByRole('button', { name: 'Fold the Spec' })).toHaveFocus()
+    await userEvent.click(canvas.getByRole('button', { name: 'Fold the Spec' }))
+    await nextFrame()
+    await expect(dockWidth(canvasElement)).toBe(FOLDED)
+    await expect(measure(canvasElement).frame).toBe(1)
+    await expect(panelOf(canvasElement)).toBeNull()
   },
 }
 
@@ -465,7 +644,6 @@ export const MarkReadyRefused: Story = {
 export const QuestionLinked: Story = {
   play: async ({ canvasElement, args }) => {
     const canvas = within(canvasElement)
-    await userEvent.click(canvas.getByRole('button', { name: /^Questions/ }))
     await userEvent.click(canvas.getByRole('button', { name: /^Answer in the chat: Credit notes/ }))
     await expect(args.onGoToQuestion).toHaveBeenCalledWith('q-credit-notes')
   },
@@ -492,21 +670,18 @@ export const OlderRevision: Story = {
 /**
  * A draft half done (issue #150): shaped, the plan being written, nothing split into tasks. The
  * head says no sentence of the phase, and the footer offers `Mark ready` quietly — the agent has
- * not confirmed the Spec complete — across the panel's whole width.
+ * not confirmed the Spec complete — on the rim under the column, at the panel's end.
  */
 export const DraftHalfDone: Story = {
   play: async ({ canvasElement }) => {
-    const canvas = within(canvasElement)
     const header = canvasElement.querySelector('header')!
     await expect(within(header).queryByRole('button', { name: 'Mark ready' })).toBeNull()
     await expect(header.querySelectorAll('p')).toHaveLength(0)
     const mark = markReadyOf(canvasElement)
     await expect(isPrimary(mark)).toBe(false)
     const foot = footOf(canvasElement, 'ready')!.getBoundingClientRect()
-    const rail = canvas.getByRole('navigation', { name: 'Parts of ATL-7' }).getBoundingClientRect()
-    const stage = canvas.getByRole('region', { name: 'Stage of ATL-7' }).getBoundingClientRect()
-    await expect(foot.left).toBeCloseTo(rail.left, 0)
-    await expect(foot.right).toBeCloseTo(stage.right, 0)
+    const column = columnOf(canvasElement).getBoundingClientRect()
+    await expect(foot.top).toBeGreaterThanOrEqual(column.bottom)
     await expect(buildFootOf(canvasElement)).toBeNull()
   },
 }
@@ -529,9 +704,9 @@ export const DraftConfirmed: Story = {
 }
 
 /**
- * A ready Spec with its footer (issues #135, #150): the build's actions stand in a footer that runs
- * the panel's whole width, under the rail and the stage together, side by side at its end and
- * none of them cut — not in the head, which says the status and offers `Rework`.
+ * A ready Spec with its footer (issues #135, #150): the build's actions stand in the footer under
+ * the column, side by side at its end and none of them cut — not in the head, which says the
+ * status and offers `Rework`.
  */
 export const ReadyWithItsBuild: Story = {
   args: { spec: READY },
@@ -546,14 +721,8 @@ export const ReadyWithItsBuild: Story = {
       expect(button).toBeVisible()
       expect(button.scrollWidth).toBeLessThanOrEqual(button.clientWidth)
     }
-    // The panel's whole width: from the rail's left edge to the stage's right one, under both.
-    const box = foot!.getBoundingClientRect()
-    const rail = canvas.getByRole('navigation', { name: 'Parts of ATL-7' }).getBoundingClientRect()
-    const stage = canvas.getByRole('region', { name: 'Stage of ATL-7' }).getBoundingClientRect()
-    await expect(box.left).toBeCloseTo(rail.left, 0)
-    await expect(box.right).toBeCloseTo(stage.right, 0)
-    await expect(box.top).toBeGreaterThanOrEqual(rail.bottom - 1)
-    await expect(box.top).toBeGreaterThanOrEqual(stage.bottom - 1)
+    const column = columnOf(canvasElement).getBoundingClientRect()
+    await expect(foot!.getBoundingClientRect().top).toBeGreaterThanOrEqual(column.bottom)
     const header = canvasElement.querySelector('header')!
     await expect(within(header).queryByRole('button', { name: /build/ })).toBeNull()
     await expect(within(header).getByRole('button', { name: 'Rework' })).toBeVisible()
@@ -595,5 +764,34 @@ export const BuildArrivesWhenReady: Story = {
     await waitFor(() => expect(buildFootOf(canvasElement)).toBeNull())
     await expect(canvas.queryByRole('button', { name: 'Prepare and start the build' })).toBeNull()
     await expect(isPrimary(markReadyOf(canvasElement))).toBe(false)
+  },
+}
+
+/**
+ * The keyboard across the swap: the unfold, then the fold, then a glyph, each landing where the
+ * control it was on now stands; the heading it lands on opens the menu of the phases, which gives
+ * the keyboard back to it when it closes.
+ */
+export const Keyboard: Story = {
+  args: { defaultFolded: true },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    canvas.getByRole('button', { name: 'Unfold the Spec' }).focus()
+    await userEvent.keyboard('{Enter}')
+    await waitFor(() => expect(canvas.getByRole('button', { name: 'Fold the Spec' })).toHaveFocus())
+    await userEvent.keyboard('{Enter}')
+    await waitFor(() =>
+      expect(canvas.getByRole('button', { name: 'Unfold the Spec' })).toHaveFocus(),
+    )
+    await userEvent.tab()
+    await userEvent.tab()
+    await expect(canvas.getByRole('button', { name: /^Plan phase/ })).toHaveFocus()
+    await userEvent.keyboard('{Enter}')
+    await waitFor(() => expect(headingOf(canvasElement, 'Plan')).toHaveFocus())
+    await userEvent.keyboard('{Enter}')
+    const menu = await waitFor(() => within(document.body).getByRole('menu'))
+    await userEvent.keyboard('{Escape}')
+    await waitFor(() => expect(menu).not.toBeInTheDocument())
+    await expect(headingOf(canvasElement, 'Plan')).toHaveFocus()
   },
 }

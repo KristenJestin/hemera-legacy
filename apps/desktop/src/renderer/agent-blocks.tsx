@@ -4,6 +4,7 @@ import {
   AgentText,
   CommandProposal,
   CommandRun,
+  ClassifierDecision,
   CreateSpecProposal,
   DecisionSummary,
   DiffBlock,
@@ -167,6 +168,16 @@ const usageSchema = z.object({
 })
 
 const callPayloadSchema = z.object({ call: callSchema })
+
+const classifierDecisionSchema = z.object({
+  call: z.string(),
+  target: z.string(),
+  state: z.enum(['evaluating', 'allowed', 'ask', 'denied', 'unavailable', 'cancelled']),
+  reason: z.string(),
+  by: z.enum(['rules', 'judge', 'user']).optional(),
+  policyVersion: z.string().optional(),
+  model: z.string().optional(),
+})
 
 /** What the agent's own vocabulary is when it names something this window does not know. */
 const TOOL_KINDS: readonly ToolKind[] = [
@@ -366,6 +377,10 @@ export interface SpecContext {
  * as the call it belongs to rather than opening an empty box.
  */
 export function drawEntry(entry: SessionEntry, context: AgentContext): ReactNode | null {
+  if (entry.kind === 'classifier_decision') {
+    const decision = readPayload(classifierDecisionSchema, entry.payload)
+    return decision === null ? null : <ClassifierDecision {...decision} />
+  }
   if (entry.kind === 'message') {
     return entry.role === 'user' ? null : <AgentText text={entry.body} />
   }

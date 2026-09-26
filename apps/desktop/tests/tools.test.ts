@@ -325,7 +325,12 @@ describe('Hemera Auto classifies one admitted tool call before execution', () =>
           tool: 'fs_write',
           arguments: { path: 'written.md', content: 'written once', key: 'auto-write' },
         })
-        return { read, write, lines: yield* journalLines(session.projectId) }
+        return {
+          read,
+          write,
+          lines: yield* journalLines(session.projectId),
+          entries: yield* threadEntries(session.sessionId),
+        }
       }),
     )
     expect(result.read.state).toBe('completed')
@@ -333,6 +338,13 @@ describe('Hemera Auto classifies one admitted tool call before execution', () =>
     expect(human.asked).toHaveLength(1)
     expect(readFileSync(join(root, 'written.md'), 'utf8')).toBe('written once')
     expect(result.lines.filter((line) => line.type === 'classifier.decision')).toHaveLength(2)
+    const decisions = result.entries.filter((entry) => entry.kind === 'classifier_decision')
+    expect(decisions.map((entry) => entry.state)).toEqual(['allowed', 'unavailable'])
+    expect(JSON.parse(decisions[1]?.payload ?? '{}')).toMatchObject({
+      call: 'fs_write',
+      policyVersion: '1',
+      state: 'unavailable',
+    })
   })
 
   it('refuses a destructive one-off before asking or starting it', async () => {

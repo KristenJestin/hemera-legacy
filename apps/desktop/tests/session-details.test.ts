@@ -349,6 +349,79 @@ describe('The Context tab says how the instructions reached the agent', () => {
   })
 })
 
+/** Something a `define` Session handed its agent between two turns, named as the engine names it. */
+function aHanding(kind: Provided['kind'], path: string, deliveredAt: string): Provided {
+  return { kind, path, fingerprint: 'f'.repeat(64), deliveredAt, reached: 'delivery_prompt' }
+}
+
+describe('The Context tab lists what a define Session handed its agent', () => {
+  test('a phase change, an edit, an answer and a sub-agent result are four lines in plain words, each with its time', () => {
+    const view = aViewOf([
+      aSource('base', 'embedded_resource'),
+      aHanding('brief', 'plan · revision 1 · writer', '2026-09-23T13:40:00.000Z'),
+      aHanding('edit', 'scope,expected_outcome', '2026-09-23T14:02:00.000Z'),
+      aHanding('answer', 'Which format?', '2026-09-23T14:05:00.000Z'),
+      aHanding('internal', '', '2026-09-23T14:30:00.000Z'),
+    ])
+
+    const lists = contextListsOf(view, ROOT)
+    expect(lists.handed).toEqual([
+      {
+        label: 'The instructions for the Plan phase went to the agent',
+        at: atOf('2026-09-23T13:40:00.000Z'),
+      },
+      {
+        label: 'Your edits to Scope, Expected outcome went to the agent',
+        at: atOf('2026-09-23T14:02:00.000Z'),
+      },
+      {
+        label: 'Your answer to “Which format?” went to the agent',
+        at: atOf('2026-09-23T14:05:00.000Z'),
+      },
+      {
+        label: 'The result of a sub-agent went to the agent',
+        at: atOf('2026-09-23T14:30:00.000Z'),
+      },
+    ])
+    // They are not instructions: the instructions still read as the file and the base.
+    expect(lists.instructions.map((line) => line.label)).toEqual([
+      'This Workspace has no AGENTS.md',
+      'The base',
+    ])
+  })
+
+  test('a brief after a Rework names its revision, and one with no phase names the Spec', () => {
+    const view = aViewOf([
+      aHanding('brief', 'shape · revision 2 · reader', STARTED),
+      aHanding('brief', 'no phase · revision 1 · writer', STARTED),
+    ])
+
+    expect(contextListsOf(view, ROOT).handed.map((line) => line.label)).toEqual([
+      'The instructions for the Shape phase of revision 2 went to the agent',
+      'The instructions for the Spec went to the agent',
+    ])
+  })
+
+  test('an edit or an answer recorded before it was named is said without the name', () => {
+    const view = aViewOf([aHanding('edit', '', STARTED), aHanding('answer', '', STARTED)])
+
+    expect(contextListsOf(view, ROOT).handed.map((line) => line.label)).toEqual([
+      'Your edits to the Spec went to the agent',
+      'Your answers went to the agent',
+    ])
+  })
+
+  test('a Session that is not defining a Spec was handed nothing more', () => {
+    const view = aViewOf([
+      aSource('base', 'embedded_resource'),
+      aSource('provided', 'session_start'),
+      aSource('instructions', 'delivery_prompt'),
+    ])
+
+    expect(contextListsOf(view, ROOT).handed).toEqual([])
+  })
+})
+
 describe('A one-off command shows and is not promoted', () => {
   withQualifiedOpenCode()
 

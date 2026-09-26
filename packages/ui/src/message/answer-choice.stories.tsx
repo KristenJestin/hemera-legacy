@@ -143,6 +143,23 @@ export const LongQuestion: Story = {
   },
 }
 
+/**
+ * A question the agent wrote in Markdown: the `↳` line, the whole question under the hand and
+ * the accessible name read it as words, without its stars and backticks (issue #170).
+ */
+export const MarkdownQuestion: Story = {
+  args: { question: 'How should **the export** be split by `month` or _quarter_?' },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const plain = 'How should the export be split by month or quarter?'
+    await expect(
+      canvas.getByRole('group', { name: `You answered «${plain}»: B, One CSV per month` }),
+    ).toBeVisible()
+    const line = canvas.getByTitle(plain)
+    await expect(within(line).getByText(plain)).toBeVisible()
+  },
+}
+
 /** In a thread: the agent asked, the reader answered on their side, and it reads as a choice. */
 export const InTheThread: Story = {
   render: (args) => (

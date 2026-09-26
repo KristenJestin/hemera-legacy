@@ -85,6 +85,12 @@ const WORKSPACES_MIGRATION = '20260924223401_workspaces'
  */
 const CHOICES_MIGRATION = '20260926132904_session_choices'
 
+/**
+ * The migration that keeps a sub-agent's result queued for its Session's next safe point across
+ * a quit: the one a profile that ran the choices' has never heard of (issue #72).
+ */
+const QUEUED_MIGRATION = '20260926173604_queued_results'
+
 /** A folder carrying the shipped migrations up to one of them, as an older version did. */
 function shippedUpTo(last: string): string {
   const folder = join(workspace, `shipped-${last}`)
@@ -510,7 +516,12 @@ describe('A profile of lot 6 is migrated to lot 19 (specs)', () => {
     const standing = await on(dataFolder, openProfile(dataFolder, SHIPPED, '0.6.0'))
 
     // Behind by this migration and the Workspaces' after it, and the copy is named after the first.
-    expect(standing.behind).toEqual([SPECS_MIGRATION, WORKSPACES_MIGRATION, CHOICES_MIGRATION])
+    expect(standing.behind).toEqual([
+      SPECS_MIGRATION,
+      WORKSPACES_MIGRATION,
+      CHOICES_MIGRATION,
+      QUEUED_MIGRATION,
+    ])
     expect(readdirSync(join(dataFolder, BACKUPS_FOLDER))).toEqual([`${SPECS_MIGRATION}.sqlite`])
 
     // The Specs arrived, and the columns that tie a Project and a Session to them...
@@ -881,6 +892,7 @@ describe('Un profil du lot 5 est migré vers le lot 6', () => {
       SPECS_MIGRATION,
       WORKSPACES_MIGRATION,
       CHOICES_MIGRATION,
+      QUEUED_MIGRATION,
     ])
     expect(readdirSync(join(dataFolder, BACKUPS_FOLDER))).toEqual([`${TOOLS_MIGRATION}.sqlite`])
 
@@ -1019,7 +1031,7 @@ describe('A profile of lot 19 is migrated to lot 20', () => {
     )
 
     const standing = await on(dataFolder, openProfile(dataFolder, SHIPPED, '0.4.0'))
-    expect(standing.behind).toEqual([WORKSPACES_MIGRATION, CHOICES_MIGRATION])
+    expect(standing.behind).toEqual([WORKSPACES_MIGRATION, CHOICES_MIGRATION, QUEUED_MIGRATION])
     expect(readdirSync(join(dataFolder, BACKUPS_FOLDER))).toEqual([
       `${WORKSPACES_MIGRATION}.sqlite`,
     ])
@@ -1140,7 +1152,7 @@ describe('A profile of lot 19 is migrated to lot 20', () => {
       'profile.backed_up',
       'profile.migrated',
     ])
-    expect(JSON.parse(kept.events.at(-1)!.payload)).toEqual({ migration: CHOICES_MIGRATION })
+    expect(JSON.parse(kept.events.at(-1)!.payload)).toEqual({ migration: QUEUED_MIGRATION })
   })
 
   test('a command of a word of lot 18, or a step of an unknown state, is refused', async () => {
@@ -1341,7 +1353,7 @@ describe('A profile that ran the Workspaces gains the choices of its Sessions', 
     )
 
     const standing = await on(dataFolder, openProfile(dataFolder, SHIPPED, '0.4.0'))
-    expect(standing.behind).toEqual([CHOICES_MIGRATION])
+    expect(standing.behind).toEqual([CHOICES_MIGRATION, QUEUED_MIGRATION])
     expect(readdirSync(join(dataFolder, BACKUPS_FOLDER))).toEqual([`${CHOICES_MIGRATION}.sqlite`])
 
     const kept = await on(
@@ -1369,5 +1381,49 @@ describe('A profile that ran the Workspaces gains the choices of its Sessions', 
         choices: '{}',
       },
     ])
+  })
+})
+
+describe('A profile that ran the choices keeps a queued result across a quit', () => {
+  test('a Session is kept whole, and a result queued for it goes with it when it is deleted', async () => {
+    const dataFolder = join(workspace, 'from-choices')
+    await on(dataFolder, openProfile(dataFolder, shippedUpTo(CHOICES_MIGRATION), '0.4.0'))
+    await on(
+      dataFolder,
+      Effect.gen(function* () {
+        const sql = yield* SqliteClient
+        const at = '2026-09-26T10:00:00.000Z'
+        yield* sql`INSERT INTO projects (id, name, tone, created_at, updated_at, version)
+          VALUES ('atlas', 'Atlas', 'primary', ${at}, ${at}, 1)`
+        yield* sql`INSERT INTO sessions (id, project_id, title, title_source, provider, native_session_id, native_state, cwd, created_at, last_written_at, version)
+          VALUES ('session-1', 'atlas', 'Shape the export', 'derived', 'claude', 'native-1', 'attached', '/work/atlas', ${at}, ${at}, 3)`
+      }),
+    )
+
+    const standing = await on(dataFolder, openProfile(dataFolder, SHIPPED, '0.4.0'))
+    expect(standing.behind).toEqual([QUEUED_MIGRATION])
+    expect(readdirSync(join(dataFolder, BACKUPS_FOLDER))).toEqual([`${QUEUED_MIGRATION}.sqlite`])
+
+    const read = await on(
+      dataFolder,
+      Effect.gen(function* () {
+        const sql = yield* SqliteClient
+        yield* sql`PRAGMA foreign_keys = ON`
+        yield* sql`INSERT INTO queued_results (id, session_id, text, queued_at)
+          VALUES ('result-1', 'session-1', 'Two call sites.', '2026-09-26T10:01:00.000Z')`
+        const queued = yield* sql<{ text: string }>`SELECT text FROM queued_results`
+        const kept = yield* sql<{
+          title: string
+        }>`SELECT title FROM sessions WHERE id = 'session-1'`
+        yield* sql`DELETE FROM sessions WHERE id = 'session-1'`
+        const left = yield* sql<{ id: string }>`SELECT id FROM queued_results`
+        return { queued, kept, left }
+      }),
+    )
+    expect(read).toEqual({
+      queued: [{ text: 'Two call sites.' }],
+      kept: [{ title: 'Shape the export' }],
+      left: [],
+    })
   })
 })

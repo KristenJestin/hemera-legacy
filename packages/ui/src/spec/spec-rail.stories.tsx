@@ -11,13 +11,14 @@ import { type RailGroup, SpecRail, type StageChoice, railOf } from './spec-rail.
 /**
  * The rail of the Spec panel: the parts of the Spec grouped by the phase that writes them, one
  * row each, what is on the stage on a plain selected surface. Every row says its own state
- * without being opened — written plainly, empty quietly, being written or to review by a tint —
- * and says it in a sentence in its tooltip (issue #135). At its end, after its count, a mark says
- * how far along it is: a check when done, a half circle when started, nothing when empty (issue
- * #150). A group opens on a header in the small type of a label, which puts the
+ * without being opened — written plainly, not begun quietly, being written or to review by a tint
+ * — and says it in a sentence in its tooltip (issue #135). Its glyph says how far along it is, one
+ * family of circles in place of the part's own icon: dashed when nothing is written, half when
+ * started, checked when done (issues #150, #159); the headers keep their icons, and the word
+ * `empty` is said nowhere. A group opens on a header in the small type of a label, which puts the
  * whole phase on the stage; `Show all` shows under the hand and the keyboard. The arrows walk it
  * and Enter opens a row. No readiness at its foot (issue #135). Folded, it is the band the panel
- * folds to, each phase a block of glyphs.
+ * folds to: the phases' icons in a column, each saying quietly how far its phase is.
  */
 
 /** Every mark once, so the five of them are read side by side. */
@@ -142,7 +143,7 @@ function tintOf(row: HTMLElement): string {
   return tint === null ? 'none' : getComputedStyle(tint).backgroundColor
 }
 
-/** The mark at the end of a row: `done`, `started`, or `none` when it wears none. */
+/** How far along a row's glyph says it is: `done`, `started`, `empty`, or `none`. */
 function progressOf(row: HTMLElement): string {
   return row.querySelector('[data-progress]')?.getAttribute('data-progress') ?? 'none'
 }
@@ -162,8 +163,8 @@ async function tooltipSays(row: HTMLElement, said: string): Promise<void> {
 
 /**
  * One row per state, each said in the row without opening it, and no dot anywhere (issue #135): a
- * part written is plain, its name in the foreground; a part still empty is quiet, its name muted
- * and `empty` in its accessible name; the part being written and one to review are each tinted
+ * part written is plain, its name in the foreground; a part not begun is quiet, its name muted,
+ * and `Nothing written yet` its sentence — never the word `empty`; the part being written and one to review are each tinted
  * in their own colour; a part you edited wears nothing more than a written one. What is on the
  * stage wears a plain selected surface, and no rule. Each says its state in a sentence in its
  * tooltip.
@@ -176,7 +177,7 @@ export const States: Story = {
     await expect(dotsIn(rail)).toEqual([])
     const row = (name: string): HTMLElement => canvas.getByRole('button', { name })
     const written = row('Problem')
-    const empty = row('Expected outcome, empty')
+    const empty = row('Expected outcome')
     const edited = row('Scope')
     const review = row('Behaviour')
     const writing = row('Plan')
@@ -187,11 +188,13 @@ export const States: Story = {
     await expect(written).toHaveAccessibleDescription('Done')
     await expect(written).not.toHaveAttribute('aria-current')
     await expect(selected(written)).toBe(false)
-    // Empty: quiet, the name fainter than a written one's, nothing behind it, and said in its name.
+    // Not begun: quiet, the name fainter than a written one's, nothing behind it, and said in its
+    // sentence, never as `empty`.
     await expect(tintOf(empty)).toBe('none')
     await expect(getComputedStyle(empty).color).not.toBe(getComputedStyle(written).color)
     await expect(getComputedStyle(row('Questions, 1')).color).toBe(getComputedStyle(written).color)
-    await expect(empty).not.toHaveAttribute('aria-describedby')
+    await expect(empty).toHaveAccessibleDescription('Nothing written yet')
+    await expect(rail).not.toHaveTextContent(/empty/i)
     // The two tints, each its own.
     const tints = [tintOf(writing), tintOf(review)]
     await expect(tints).not.toContain('none')
@@ -209,24 +212,24 @@ export const States: Story = {
     await expect(edited).toHaveAccessibleDescription('Done. Edited by you')
     await expect(review).toHaveAccessibleDescription('Started. To review')
     await expect(writing).toHaveAccessibleDescription('The agent is writing this')
-    await tooltipSays(empty, 'Empty')
+    await tooltipSays(empty, 'Nothing written yet')
     await tooltipSays(edited, 'Done. Edited by you')
     await tooltipSays(review, 'Started. To review')
     await tooltipSays(writing, 'The agent is writing this')
     await tooltipSays(written, 'Done')
-    // How far along each is, at its end: done, started — to review or being written — or nothing.
+    // How far along each is, its glyph: done, started — to review or being written — or not begun.
     await expect(progressOf(written)).toBe('done')
     await expect(progressOf(edited)).toBe('done')
     await expect(progressOf(review)).toBe('started')
     await expect(progressOf(writing)).toBe('started')
-    await expect(progressOf(empty)).toBe('none')
+    await expect(progressOf(empty)).toBe('empty')
     // On the stage, the part you edited wears the selected surface, and no rule.
     await userEvent.click(edited)
     await expect(edited).toHaveAttribute('aria-current', 'true')
     await expect(selected(edited)).toBe(true)
     await expect(ruled(edited)).toBe(false)
     await expect(getComputedStyle(edited).borderLeftWidth).toBe('0px')
-    await expect(selected(row('Tasks, 0, empty'))).toBe(false)
+    await expect(selected(row('Tasks, 0'))).toBe(false)
   },
 }
 
@@ -273,11 +276,12 @@ export const PhaseToReview: Story = {
 }
 
 /**
- * Each part says how far along it is at a glance, at the end of its row and without a dot (issue
- * #150), read from what is written and the phase that writes it. A feature being planned: the
- * shaped sections are done, their phase finished; the plan, being written, is started; the
- * stories and the question, written while `decompose` has not finished, are started too; the
- * tasks, not written, wear nothing and their name is muted. The counts stay.
+ * Each part says how far along it is at a glance, by its glyph and without a dot (issues #150,
+ * #159), read from what is written and the phase that writes it. A feature being planned: the
+ * shaped sections are done, their phase finished, a circle with a check; the plan, being written,
+ * is started, a half circle; the stories and the question, written while `decompose` has not
+ * finished, are started too; the tasks, not written, a dashed circle and their name muted. The
+ * counts stay; the headers keep their own icons.
  */
 export const Progress: Story = {
   args: { groups: railOf(MID_PLAN), initial: 'plan', following: 'plan' },
@@ -294,16 +298,25 @@ export const Progress: Story = {
     await expect(progressOf(row('Stories, 2'))).toBe('started')
     await expect(row('Stories, 2')).toHaveAccessibleDescription('Started')
     await expect(progressOf(row('Questions, 1'))).toBe('started')
-    const tasks = row('Tasks, 0, empty')
-    await expect(progressOf(tasks)).toBe('none')
+    const tasks = row('Tasks, 0')
+    await expect(progressOf(tasks)).toBe('empty')
+    await expect(tasks.querySelector('.tabler-icon-circle-dashed')).not.toBeNull()
     await expect(getComputedStyle(tasks).color).not.toBe(getComputedStyle(row('Problem')).color)
-    // The mark stands at the end of the row, after the count, and is the glyph of the catalogue.
+    // The circle stands in place of the part's own glyph, before the name; the count at the end.
     const stories = row('Stories, 2')
-    const mark = stories.querySelector('[data-progress]')!
-    await expect(stories.lastElementChild).toBe(mark)
-    await expect(mark.querySelector('.tabler-icon-circle-half-2')).not.toBeNull()
-    await expect(row('Problem').querySelector('[data-progress] .tabler-icon-check')).not.toBeNull()
+    const mark = stories.querySelector('[data-progress]')
+    await expect(stories.querySelectorAll('[data-icon]')).toHaveLength(1)
+    await expect(mark?.querySelector('.tabler-icon-circle-half-2')).not.toBeNull()
+    await expect(
+      row('Problem').querySelector('[data-progress] .tabler-icon-circle-check'),
+    ).not.toBeNull()
     await expect(stories).toHaveTextContent('Stories2')
+    // The headers keep their own icons.
+    const shape = canvas.getByRole('button', { name: /^Shape phase/ })
+    await expect(shape.querySelector('[data-icon]')).not.toHaveAttribute(
+      'data-icon',
+      expect.stringMatching(/^IconCircle/),
+    )
   },
 }
 
@@ -318,7 +331,7 @@ export const Feature: Story = {
       }),
     ).toBeVisible()
     await expect(canvas.getByRole('button', { name: 'Behaviour' })).toBeVisible()
-    await expect(canvas.getByRole('button', { name: 'Tasks, 0, empty' })).toBeVisible()
+    await expect(canvas.getByRole('button', { name: 'Tasks, 0' })).toBeVisible()
   },
 }
 
@@ -502,10 +515,11 @@ export const Keyboard: Story = {
 }
 
 /**
- * Folded, the band keeps the hierarchy: each phase a block, its glyph in a tinted square, the
- * smaller glyphs of its parts right under it and set in, and a gap and a hairline before the next
- * phase. The tints of the rows fill the squares of the parts; the names leave the eye and stay the
- * accessible name and the tooltip, the state said beside the name. Nothing stands at its foot.
+ * Folded, the band keeps its look (issue #159): the phases' icons in a column, each in its square,
+ * and no part under them — a column of circles read as nothing. Each square says quietly how far
+ * its phase is: the muted tint when started, the breathing primary one while the agent writes one
+ * of its parts. The names leave the eye and stay the accessible name and the tooltip, with how far
+ * the phase is; the phase holding what is on the stage wears the rule. Nothing stands at its foot.
  */
 export const Folded: Story = {
   args: { groups: EVERY_MARK, initial: 'tasks', folded: true },
@@ -516,50 +530,81 @@ export const Folded: Story = {
     await expect(dotsIn(rail)).toEqual([])
     await expect(canvas.queryByRole('img', { name: /^Readiness/ })).toBeNull()
     await expect(canvas.queryByText(/^[0-9]+[/][0-9]+$/)).toBeNull()
-    const blocks = ['Shape', 'Plan', 'Decompose'].map((name) => canvas.getByRole('group', { name }))
-    for (const [index, block] of blocks.entries()) {
-      const [phase, ...parts] = within(block).getAllByRole('button')
-      if (phase === undefined) throw new Error('A phase of the band has no square.')
-      // The phase's glyph in a tinted square, a step larger than the glyphs of its parts.
-      expect(getComputedStyle(phase).backgroundColor).not.toBe('rgba(0, 0, 0, 0)')
-      const phaseBox = phase.getBoundingClientRect()
-      const phaseGlyph = glyphWidthOf(phase)
-      let above = phaseBox.bottom
-      for (const part of parts) {
-        const box = part.getBoundingClientRect()
-        // Right under the phase, tight, and set in.
-        expect(box.top - above).toBeLessThan(4)
-        expect(box.left).toBeGreaterThan(phaseBox.left)
-        expect(glyphWidthOf(part)).toBeLessThan(phaseGlyph)
-        above = box.bottom
-      }
-      // A clear gap and a hairline before the next phase.
-      const next = blocks[index + 1]
-      if (next !== undefined) {
-        expect(next.getBoundingClientRect().top - above).toBeGreaterThan(8)
-        expect(getComputedStyle(next).borderTopWidth).toBe('1px')
-      }
+    // The phases' squares alone, in a column: no part, and no circle.
+    const squares = within(rail).getAllByRole('button')
+    await expect(squares).toHaveLength(3)
+    await expect(rail.querySelector('[data-icon^="IconCircle"]')).toBeNull()
+    const [shape, plan, decompose] = squares
+    if (shape === undefined || plan === undefined || decompose === undefined) {
+      throw new Error('The band has fewer than three squares.')
     }
-    // The tints land on the squares of the parts, one colour per state.
-    const square = (name: string): HTMLElement => canvas.getByRole('button', { name })
-    const tints = [tintOf(square('Plan')), tintOf(square('Behaviour'))]
-    await expect(tints).not.toContain('none')
-    await expect(new Set(tints).size).toBe(2)
-    await expect(tintOf(square('Problem'))).toBe('none')
-    // Edited by you: no edge on its square either, the tooltip says it.
-    await expect(getComputedStyle(square('Scope')).borderLeftWidth).toBe('0px')
-    // The name and the state, in the tooltip.
-    await tooltipSays(square('Scope'), 'Scope · Done. Edited by you')
-    await tooltipSays(square('Behaviour'), 'Behaviour · Started. To review')
-    await tooltipSays(square('Problem'), 'Problem · Done')
-    // A phase's square says what it does.
-    await tooltipSays(canvas.getByRole('button', { name: /^Shape phase/ }), 'Shape · show all')
+    const boxes = squares.map((one) => one.getBoundingClientRect())
+    for (const [index, box] of boxes.entries()) {
+      const before = boxes[index - 1]
+      if (before === undefined) continue
+      expect(Math.abs(box.left - before.left)).toBeLessThan(1)
+      expect(box.top).toBeGreaterThan(before.bottom)
+    }
+    // How far each phase is, on its square.
+    await expect(shape).toHaveAttribute('data-progress', 'started')
+    await expect(getComputedStyle(shape).backgroundColor).not.toBe('rgba(0, 0, 0, 0)')
+    await expect(tintOf(plan)).not.toBe('none')
+    await expect(decompose).toHaveAttribute('data-progress', 'started')
+    // The phase holding what is on the stage wears the rule, and is the stop of the tab order.
+    await expect(ruled(decompose)).toBe(true)
+    await expect(ruled(shape)).toBe(false)
+    await expect(decompose).toHaveAttribute('tabindex', '0')
+    // The name and how far it is, in the tooltip.
+    await tooltipSays(shape, 'Shape · Started')
+    await tooltipSays(decompose, 'Decompose · Started')
   },
 }
 
-/** How wide the glyph of a row is drawn. */
-function glyphWidthOf(row: HTMLElement): number {
-  return row.querySelector('[data-icon]')?.getBoundingClientRect().width ?? 0
+/** A phase done, one started and one not begun, as the folded band tells them apart. */
+const DONE_STARTED_EMPTY: RailGroup[] = [
+  {
+    phase: 'shape',
+    state: 'finished',
+    rows: [
+      { target: 'problem', label: 'Problem', mark: 'agent' },
+      { target: 'scope', label: 'Scope', mark: 'human' },
+    ],
+  },
+  { phase: 'plan', state: 'open', rows: [{ target: 'plan', label: 'Plan', mark: 'agent' }] },
+  {
+    phase: 'decompose',
+    state: 'pending',
+    rows: [
+      { target: 'tasks', label: 'Tasks', mark: 'empty', count: 0 },
+      { target: 'questions', label: 'Questions', mark: 'empty', count: 0 },
+    ],
+  },
+]
+
+/**
+ * Folded, the three steps of a phase side by side: done on the success tint, started on the muted
+ * one, not begun a dashed outline and no fill.
+ */
+export const FoldedProgress: Story = {
+  args: { groups: DONE_STARTED_EMPTY, initial: 'plan', folded: true },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const rail = canvas.getByRole('navigation', { name: 'Parts of ATL-7' })
+    const [shape, plan, decompose] = within(rail).getAllByRole('button')
+    if (shape === undefined || plan === undefined || decompose === undefined) {
+      throw new Error('The band has fewer than three squares.')
+    }
+    await expect(shape).toHaveAttribute('data-progress', 'done')
+    await expect(plan).toHaveAttribute('data-progress', 'started')
+    await expect(decompose).toHaveAttribute('data-progress', 'empty')
+    const fills = [shape, plan].map((one) => getComputedStyle(one).backgroundColor)
+    await expect(fills).not.toContain('rgba(0, 0, 0, 0)')
+    await expect(new Set(fills).size).toBe(2)
+    await expect(getComputedStyle(decompose).backgroundColor).toBe('rgba(0, 0, 0, 0)')
+    await expect(getComputedStyle(decompose).borderTopStyle).toBe('dashed')
+    await tooltipSays(shape, 'Shape · Done')
+    await tooltipSays(decompose, 'Decompose · Not started')
+  },
 }
 
 /** The `data-icon` of each row of a rail, the group headings among them, in order. */
@@ -570,9 +615,8 @@ function iconsOf(rail: HTMLElement): string[] {
 }
 
 /**
- * Every phase and every part wears a glyph of its own (brief revision 4b): the three phase
- * headings and the eleven parts a Spec of any type can have are fourteen different glyphs, the
- * same ones folded as unfolded, where the glyph stands before the name.
+ * The phases keep a glyph of their own (brief revision 4b), unfolded and folded alike; the parts
+ * wear the circle of how far along they are instead of theirs (issue #159), before the name.
  */
 export const EveryIcon: Story = {
   args: { groups: EVERY_PART, initial: 'plan' },
@@ -588,11 +632,13 @@ export const EveryIcon: Story = {
     const folded = iconsOf(canvas.getByRole('navigation', { name: 'Parts of ATL-7, folded' }))
     await expect(unfolded).toHaveLength(14)
     await expect(unfolded).not.toContain('')
-    await expect(new Set(unfolded).size).toBe(14)
-    await expect(folded).toEqual(unfolded)
-    // The glyph stands before the name.
+    const phases = unfolded.filter((one) => !one.startsWith('IconCircle'))
+    await expect(phases).toHaveLength(3)
+    await expect(new Set(phases).size).toBe(3)
+    await expect(folded).toEqual(phases)
+    // The circle stands before the name.
     const scope = canvas.getAllByRole('button', { name: 'Scope' })[0]!
-    await expect(scope.firstElementChild).toHaveAttribute('data-icon', 'IconBorderOuter')
+    await expect(scope.firstElementChild).toHaveAttribute('data-icon', 'IconCircleCheck')
     await expect(scope).toHaveTextContent('Scope')
   },
 }

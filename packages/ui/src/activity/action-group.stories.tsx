@@ -11,8 +11,8 @@ import { ToolCallCard } from './tool-call-card.tsx'
  * The tool calls of a turn between two things the agent said, folded into one row (recette of 26
  * September 2026, issue #149).
  *
- * The line says how many actions and what kinds — `read 3 files, ran 2 commands` — and a dot for
- * where the run stands; it unfolds to the rows it holds, each the row it always was. What is
+ * The line says how many actions — `5 actions`, no more (issue #159) — and a dot for where the
+ * run stands; it unfolds to the rows it holds, each the row it always was. What is
  * judged here is the thread with and without it: the agent's answer, not the plumbing before it,
  * is what the eye lands on.
  */
@@ -65,13 +65,11 @@ const meta = {
   parameters: { layout: 'padded' },
   args: {
     count: 5,
-    summary: 'read 3 files, ran 1 command, 1 Hemera call',
     status: 'completed',
     children: rows(),
   },
   argTypes: {
     count: { control: 'number', description: 'How many calls the run holds.' },
-    summary: { control: 'text', description: 'What kinds they were, already written.' },
     status: {
       control: 'inline-radio',
       options: ['in_progress', 'failed', 'completed'],
@@ -86,13 +84,13 @@ export default meta
 
 type Story = StoryObj<typeof meta>
 
-/** Folded, which is how a run of calls arrives in the thread: one line, and what it holds said. */
+/** Folded, which is how a run of calls arrives in the thread: one line, the count and no more. */
 export const Folded: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     const row = canvas.getByRole('button', { name: /5 actions/ })
     await expect(row).toHaveAttribute('aria-expanded', 'false')
-    await expect(row).toHaveTextContent('read 3 files, ran 1 command, 1 Hemera call')
+    await expect(row, 'the line says more than the count').not.toHaveTextContent(/Hemera|read/)
     await expect(canvas.queryByText('src/billing/export.ts')).toBeNull()
   },
 }

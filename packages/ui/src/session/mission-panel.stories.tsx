@@ -185,16 +185,19 @@ function specFree(canvasElement: HTMLElement): boolean {
   return !/\bSpec\b/.test(canvasElement.textContent ?? '')
 }
 
-/** Folded, as a Session opens it: the band, its unfold button and the rail's glyphs. */
+/**
+ * Folded, as a Session opens it: the band, its unfold button and the groups' glyphs in a column,
+ * no item under them (issue #159).
+ */
 export const Folded: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     await expect(panelOf(canvasElement).getBoundingClientRect().width).toBe(BAND)
     await expect(canvas.getByRole('button', { name: 'Unfold the build' })).toBeVisible()
     await expect(canvas.queryByRole('region', { name: 'Stage of B-3' })).toBeNull()
-    await expect(
-      canvas.getByRole('button', { name: 'Check the import' }),
-    ).toHaveAccessibleDescription('To review')
+    await expect(canvas.getByRole('button', { name: 'Tasks' })).toBeVisible()
+    await expect(canvas.getByRole('button', { name: 'Workers' })).toBeVisible()
+    await expect(canvas.queryByRole('button', { name: 'Check the import' })).toBeNull()
     await expect(specFree(canvasElement)).toBe(true)
   },
 }
@@ -281,9 +284,10 @@ export const HandFoldWins: Story = {
     // The fold button is gone with the head: the keyboard is on the band's unfold button.
     await expect(canvas.getByRole('button', { name: 'Unfold the build' })).toHaveFocus()
     await userEvent.click(canvas.getByRole('button', { name: 'Let the agent start the ledger' }))
+    // Folded, the group of what the agent works on says so on its square.
     await expect(
-      canvas.getByRole('button', { name: 'Write the ledger' }),
-    ).toHaveAccessibleDescription('The agent is working on this')
+      canvas.getByRole('button', { name: 'Tasks' }).querySelector('[data-tint="writing"]'),
+    ).not.toBeNull()
     await expect(args.onFoldChange).toHaveBeenCalledTimes(1)
     await expect(canvas.queryByRole('region', { name: 'Stage of B-3' })).toBeNull()
     await userEvent.click(canvas.getByRole('button', { name: 'Unfold the build' }))

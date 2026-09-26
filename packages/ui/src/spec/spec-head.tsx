@@ -1,11 +1,19 @@
-import type { ReactNode } from 'react'
+import { cn } from 'cn'
+import type { FunctionComponent, ReactNode } from 'react'
 
 import { Badge } from '../components/badge/badge.tsx'
 import { Button, IconButton } from '../components/button/button.tsx'
 import { Menu } from '../components/menu/menu.tsx'
-import { StatusDot, type StatusTone } from '../components/status-dot/status-dot.tsx'
 import { Tooltip } from '../components/tooltip/tooltip.tsx'
-import { IconChevronRight, IconRefresh } from '../icons.ts'
+import {
+  type IconProps,
+  IconChevronRight,
+  IconCircleCheck,
+  IconCircleX,
+  IconHammer,
+  IconPencil,
+  IconRefresh,
+} from '../icons.ts'
 import type { RevisionView, SpecStatus, SpecType } from './model.ts'
 import { SPEC_TYPE_ICONS } from './spec-icons.ts'
 
@@ -14,8 +22,8 @@ import { SPEC_TYPE_ICONS } from './spec-icons.ts'
  * "Head").
  *
  * The key in mono, because it is what a person types to find it again; the title; the type as
- * a quiet chip; the status as a dot and a word — a draft is a plain dot, `ready` the success
- * one. A revision is only named once there is more than one, and then as the picker of the
+ * a quiet chip; the status as an icon in its colour between the key and the title, and no word
+ * (issue #159): the word is its tooltip and its accessible name. A revision is only named once there is more than one, and then as the picker of the
  * revisions, the older ones read only. `Rework` stands at the end of the line of a `ready` Spec
  * and nowhere else: it is the one way back to a draft (core.md, "Spec and revisions"). `Mark
  * ready` is not here: it stands in the panel's footer, where the build's actions take its place
@@ -29,19 +37,24 @@ const KEY = 'shrink-0 font-mono text-xs text-muted-foreground'
 
 const TITLE = 'min-w-0 truncate text-base font-semibold'
 
-const STATUS = 'flex shrink-0 items-center gap-1.5 text-xs'
+/** The status's icon, which the keyboard reaches for its tooltip as the pointer does. */
+const STATUS = 'focus-ring flex shrink-0 rounded-sm not-italic'
 
 const END = 'ml-auto flex shrink-0 items-center gap-1.5'
 
 /**
- * The dot of each status (D8-13): a draft is nothing yet, a frozen Spec is the success one, a
- * Spec a build has taken on is running, and one taken back is the quiet one.
+ * The icon of each status (D8-13, issue #159): a draft is being written, a frozen Spec is the
+ * success one, a Spec a build has taken on is being built in the running colour, and one taken
+ * back is the quiet one. The word is what the tooltip and the accessible name say.
  */
-const DOT: Record<SpecStatus, StatusTone> = {
-  draft: 'pending',
-  ready: 'success',
-  in_progress: 'running',
-  cancelled: 'cancelled',
+const STATUS_ICON: Record<
+  SpecStatus,
+  { Icon: FunctionComponent<IconProps>; word: string; tone: string }
+> = {
+  draft: { Icon: IconPencil, word: 'Draft', tone: 'text-muted-foreground' },
+  ready: { Icon: IconCircleCheck, word: 'Ready', tone: 'text-success' },
+  in_progress: { Icon: IconHammer, word: 'Building', tone: 'text-warning' },
+  cancelled: { Icon: IconCircleX, word: 'Cancelled', tone: 'text-muted-foreground' },
 }
 
 export interface SpecHeadProps {
@@ -77,18 +90,24 @@ export function SpecHead({
 }: SpecHeadProps): ReactNode {
   const ready = status === 'ready'
   const TypeIcon = SPEC_TYPE_ICONS[type]
+  const { Icon: StatusIcon, word, tone } = STATUS_ICON[status]
   const reworkable = ready && !superseded
   return (
     <div className={HEAD}>
       <span className={KEY}>{specKey}</span>
+      <Tooltip label={word}>
+        <i
+          role="img"
+          // Focusable so the keyboard reaches its tooltip as the pointer does.
+          tabIndex={0}
+          aria-label={word}
+          className={cn(STATUS, tone)}
+        >
+          <StatusIcon size="sm" aria-hidden="true" />
+        </i>
+      </Tooltip>
       <h2 className={TITLE}>{title}</h2>
       <Badge icon={<TypeIcon size="sm" aria-hidden="true" />}>{type}</Badge>
-      <span className={STATUS}>
-        <StatusDot status={DOT[status]} />
-        <span className={ready ? 'text-success-muted-foreground' : 'text-muted-foreground'}>
-          {status}
-        </span>
-      </span>
       {(revisions.length > 1 || reworkable || onFold !== undefined) && (
         <span className={END}>
           {revisions.length > 1 && (

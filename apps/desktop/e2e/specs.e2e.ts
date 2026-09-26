@@ -190,7 +190,14 @@ describe('A free Session’s agent proposes a Spec, and Create makes the Session
     const panel = await region(PANEL)
     expect(panel).toContain(KEY)
     expect(panel).toContain(PROPOSAL.title)
-    expect(panel).toContain('draft')
+    // The status is an icon named by its word, not a word on the line (issue #159).
+    expect(
+      await browser.execute(
+        (scope: string) =>
+          document.querySelector(`${scope} [role="img"][aria-label="Draft"]`) !== null,
+        PANEL,
+      ),
+    ).toBe(true)
     // No sentence of the phase under the head: the rail says where each part stands (#150).
     expect(panel).not.toContain('Shape ·')
     // The head names the Project alone (issue #149): the mission is the panel beside the chat,

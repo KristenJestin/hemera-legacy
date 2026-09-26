@@ -41,7 +41,7 @@ import { ADAPTERS } from '../agents/discovery.ts'
 import { Git } from '../git.ts'
 import { Sessions, UnknownSessionError } from '../sessions.ts'
 import { Database, DatabaseError } from '../storage/database.ts'
-import { type ContextDeliveryKind, contextDeliveries } from '../storage/schema.ts'
+import { type ContextDeliveryKind, contextDeliveries, queuedResults } from '../storage/schema.ts'
 
 /** How a source of the provided context is named, in the table and under the same name in a view. */
 export type DeliveryKind = ContextDeliveryKind
@@ -94,6 +94,12 @@ export interface Pending {
   readonly content: string
 }
 
+/** A sub-agent's result waiting for the next safe point, as its row holds it (issue #72). */
+export interface QueuedResult {
+  readonly id: string
+  readonly text: string
+}
+
 /** What this service provides a Session, and what it can be refused with. */
 export interface ContextService {
   /**
@@ -110,8 +116,21 @@ export interface ContextService {
    * and the file reading as it is no longer a change.
    */
   readonly delivered: (sessionId: string, given: Pending) => Effect.Effect<Delivery, Refusal>
-  /** Records a sub-agent's result as given, once the agent took it (D7-14). */
-  readonly handedInternal: (sessionId: string, text: string) => Effect.Effect<void, Refusal>
+  /**
+   * Queues a sub-agent's result for the next safe point (D7-14), written down so that a quit
+   * before that point does not lose it (issue #72).
+   */
+  readonly queueInternal: (sessionId: string, text: string) => Effect.Effect<void, Refusal>
+  /** The sub-agent's results waiting for the next safe point, oldest first. */
+  readonly queuedInternal: (sessionId: string) => Effect.Effect<QueuedResult[], Refusal>
+  /**
+   * Records sub-agent's results as given, once the agent took them (D7-14): each leaves the queue
+   * and gets its `internal` row in one transaction, so it is handed over once.
+   */
+  readonly handedInternal: (
+    sessionId: string,
+    handed: readonly QueuedResult[],
+  ) => Effect.Effect<void, Refusal>
   /** Everything a Session was provided, oldest first. */
   readonly provided: (sessionId: string) => Effect.Effect<Delivery[], Refusal>
 }
@@ -410,8 +429,61 @@ export const contextLayer = Layer.effect(
         return { ...row, reached: 'delivery_prompt' as const }
       })
 
-    const handedInternal = (sessionId: string, text: string): Effect.Effect<void, Refusal> =>
-      record(sessionId, 'internal', '', fingerprintOf(text)).pipe(Effect.asVoid)
+    const queueInternal = (sessionId: string, text: string): Effect.Effect<void, Refusal> =>
+      withDatabase(
+        database
+          .insert(queuedResults)
+          .values({ id: crypto.randomUUID(), sessionId, text, queuedAt: new Date().toISOString() })
+          .pipe(Effect.mapError(failed('queuing the result of a sub-agent'))),
+      ).pipe(Effect.asVoid)
+
+    const queuedInternal = (sessionId: string): Effect.Effect<QueuedResult[], Refusal> =>
+      withDatabase(
+        database
+          .select({ id: queuedResults.id, text: queuedResults.text })
+          .from(queuedResults)
+          .where(eq(queuedResults.sessionId, sessionId))
+          .orderBy(queuedResults.queuedAt, sql`rowid`)
+          .pipe(Effect.mapError(failed('reading the queued results of sub-agents'))),
+      )
+
+    const handedInternal = (
+      sessionId: string,
+      handed: readonly QueuedResult[],
+    ): Effect.Effect<void, Refusal> =>
+      withDatabase(
+        database
+          .transaction((transaction) =>
+            Effect.gen(function* () {
+              // Only what was taken off the queue is recorded: a result a second safe point
+              // already handed over is not recorded twice.
+              const taken = yield* transaction
+                .delete(queuedResults)
+                .where(
+                  and(
+                    eq(queuedResults.sessionId, sessionId),
+                    inArray(
+                      queuedResults.id,
+                      handed.map((one) => one.id),
+                    ),
+                  ),
+                )
+                .returning({ text: queuedResults.text })
+              const deliveredAt = new Date().toISOString()
+              for (const one of taken) {
+                yield* transaction.insert(contextDeliveries).values({
+                  id: crypto.randomUUID(),
+                  sessionId,
+                  kind: 'internal',
+                  path: '',
+                  fingerprint: fingerprintOf(one.text),
+                  deliveredAt,
+                })
+              }
+            }),
+          )
+          .pipe(Effect.mapError(failed('recording the results of sub-agents as given'))),
+      )
 
     /**
      * How the base reaches the agent of this Session: by the means its adapter declares, on the
@@ -461,6 +533,15 @@ export const contextLayer = Layer.effect(
         }))
       })
 
-    return { base: composedBase, start, pending, delivered, handedInternal, provided }
+    return {
+      base: composedBase,
+      start,
+      pending,
+      delivered,
+      queueInternal,
+      queuedInternal,
+      handedInternal,
+      provided,
+    }
   }),
 )

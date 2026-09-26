@@ -29,6 +29,7 @@ import {
   type WorkspaceStep,
   branchNameFor,
   defaultBranchPrefix,
+  specWorkspaceName,
   stepsFor,
   workspaceName,
 } from '@hemera/core'
@@ -697,7 +698,7 @@ export const workspacesLayer = Layer.effect(
 
       one: viewOf,
 
-      plan: (projectId, _key, slug) =>
+      plan: (projectId, key, slug) =>
         Effect.gen(function* () {
           const project = yield* projectRow(projectId)
           const main = yield* mainPathOf(projectId)
@@ -710,10 +711,13 @@ export const workspacesLayer = Layer.effect(
             Effect.catchTag('GitUnavailableError', () => Effect.succeed(false)),
           )
           const root = rootOf(project)
+          // A Spec's Workspace is proposed its key and a few words of its title (#136); one made
+          // from the settings has no Spec, and is proposed what it was asked.
+          const name = key === null ? slug : specWorkspaceName(key, slug)
           return {
-            name: slug,
+            name,
             root,
-            path: join(root, slug),
+            path: join(root, name),
             branchPrefix,
             // The locations themselves, in the Project's order: what the dialog opens with, and it
             // asks for each of them as it shows its row (#110).

@@ -360,8 +360,10 @@ export const pinging: Transition = {
  * - `move` is what the panel slides on, and what the chat beside it is pushed on: `lead`, the
  *   quickest spring of the preset that still reads as a slide, started from rest so that a swap
  *   turned round half-way leaves from where it is rather than carrying on for a frame.
- * - `fade` is what the small frame slides and fades on: `crossfade`, short, a tween, since it
- *   only has to get out of the way and to come back.
+ * - `fade` is what the small frame slides and fades on: the same spring as the panel. A shorter
+ *   fade would be all but gone by the time the beat is over and the panel shows, which reads as
+ *   a moment with nothing at the edge; on one spring the frame is still leaving as the panel
+ *   comes in, and still arriving as it goes.
  * - `beat` is how long the second move waits for the first, the beat a folding panel's labels
  *   already wait for its width.
  *
@@ -370,7 +372,7 @@ export const pinging: Transition = {
  */
 export const swap = {
   move: { ...lead, velocity: 0 },
-  fade: crossfade,
+  fade: { ...lead, velocity: 0 },
   beat: LABEL_DELAY,
 } as const
 

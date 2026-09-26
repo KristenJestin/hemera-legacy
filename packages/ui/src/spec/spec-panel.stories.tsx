@@ -33,9 +33,24 @@ function dockOf(canvasElement: HTMLElement): HTMLElement {
   return within(canvasElement).getByRole('region', { name: 'Spec ATL-7' })
 }
 
-/** The open panel, or null once the Spec is folded and has landed. */
-function panelOf(canvasElement: HTMLElement): HTMLElement | null {
-  return dockOf(canvasElement).querySelector<HTMLElement>('[data-spec-panel]')
+/** The panel, which stays mounted folded as well as open. */
+function panelOf(canvasElement: HTMLElement): HTMLElement {
+  return dockOf(canvasElement).querySelector<HTMLElement>('[data-spec-panel]')!
+}
+
+/**
+ * Whether the panel is stowed: the Spec folded and at rest, the panel still laid out so that an
+ * unfold starts at once, but not drawn, out of the keyboard's reach and out of the accessibility
+ * tree.
+ */
+function isStowed(canvasElement: HTMLElement): boolean {
+  const panel = panelOf(canvasElement)
+  return (
+    panel.hasAttribute('data-stowed') &&
+    panel.inert &&
+    panel.getAttribute('aria-hidden') === 'true' &&
+    getComputedStyle(panel).visibility === 'hidden'
+  )
 }
 
 /** What the small frame is laid in, which slides and fades as a whole. */
@@ -174,7 +189,7 @@ export const Folded: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     await expect(dockWidth(canvasElement)).toBe(FOLDED)
-    await expect(panelOf(canvasElement)).toBeNull()
+    await expect(isStowed(canvasElement)).toBe(true)
     const frame = canvas.getByRole('navigation', { name: 'Phases of ATL-7' })
     const shape = within(frame).getByRole('button', {
       name: 'Shape phase, done, unfold the Spec on it',
@@ -196,6 +211,25 @@ export const Folded: Story = {
     await expect(box.top - row.top).toBeCloseTo(row.bottom - box.bottom, 0)
     await expect(canvas.queryByRole('region', { name: 'Contents of ATL-7' })).toBeNull()
     await expect(canvas.queryByRole('heading', { name: 'CSV invoice export' })).toBeNull()
+    // The column is there, laid out for the swap, and nothing of it takes the keyboard: neither
+    // asked directly, nor walked to from the small frame.
+    const panel = panelOf(canvasElement)
+    const reachable = [
+      ...panel.querySelectorAll<HTMLElement>('button, [tabindex], a[href], input, textarea'),
+    ]
+    await expect(reachable.length).toBeGreaterThan(0)
+    for (const one of reachable) one.focus()
+    await expect(panel.contains(document.activeElement)).toBe(false)
+    canvas.getByRole('button', { name: 'Unfold the Spec' }).focus()
+    const walked: boolean[] = []
+    for (const _ of [1, 2, 3, 4, 5]) {
+      // oxlint-disable-next-line no-await-in-loop -- the tab stops are walked one after the other
+      await userEvent.tab()
+      walked.push(panel.contains(document.activeElement))
+    }
+    await expect(walked).toEqual([false, false, false, false, false])
+    // Left as it opened: the walk leaves no focus, and so no tooltip, behind it.
+    if (document.activeElement instanceof HTMLElement) document.activeElement.blur()
   },
 }
 
@@ -394,7 +428,7 @@ export const OpensWhenTheAgentWrites: Story = {
   args: { defaultFolded: true, agentWrites: 'tasks' },
   play: async ({ canvasElement, args }) => {
     const canvas = within(canvasElement)
-    await expect(panelOf(canvasElement)).toBeNull()
+    await expect(isStowed(canvasElement)).toBe(true)
     await userEvent.click(canvas.getByRole('button', { name: 'Let the agent write the tasks' }))
     await expect(args.onFoldChange).toHaveBeenCalledWith(false)
     await waitFor(() => expect(isStuck(canvasElement, 'Decompose')).toBe(true))
@@ -415,13 +449,13 @@ export const HandFoldWins: Story = {
     await waitFor(() => expect(dockWidth(canvasElement)).toBe(FOLDED))
     // The fold is gone with the panel: the keyboard is on the small frame's unfold.
     await expect(canvas.getByRole('button', { name: 'Unfold the Spec' })).toHaveFocus()
-    await waitFor(() => expect(panelOf(canvasElement)).toBeNull())
+    await waitFor(() => expect(isStowed(canvasElement)).toBe(true))
     await userEvent.click(canvas.getByRole('button', { name: 'Let the agent write the tasks' }))
     await expect(
       canvas.getByRole('button', { name: /^Decompose phase/ }).querySelector('[data-writing]'),
     ).not.toBeNull()
     await expect(args.onFoldChange).toHaveBeenCalledTimes(1)
-    await expect(panelOf(canvasElement)).toBeNull()
+    await expect(isStowed(canvasElement)).toBe(true)
     await userEvent.click(canvas.getByRole('button', { name: 'Unfold the Spec' }))
     await expect(args.onFoldChange).toHaveBeenLastCalledWith(false)
     await waitFor(() => expect(canvas.getByRole('button', { name: 'Fold the Spec' })).toHaveFocus())
@@ -452,14 +486,14 @@ function measure(canvasElement: HTMLElement): Frame {
   const dock = dockOf(canvasElement)
   const chat = dock.previousElementSibling!.getBoundingClientRect()
   const panel = panelOf(canvasElement)
-  const box = panel?.getBoundingClientRect()
-  const clip = panel?.parentElement?.getBoundingClientRect()
+  const box = panel.getBoundingClientRect()
+  const clip = panel.parentElement!.getBoundingClientRect()
   return {
     at: performance.now(),
     chat: chat.width,
     chatRight: chat.right,
-    panel: box === undefined || clip === undefined ? 0 : Math.max(0, clip.right - box.left),
-    panelLeft: box?.left ?? Number.POSITIVE_INFINITY,
+    panel: isStowed(canvasElement) ? 0 : Math.max(0, clip.right - box.left),
+    panelLeft: box.left,
     frame: opacityOf(frameOf(canvasElement)),
   }
 }
@@ -557,7 +591,7 @@ export const SwapReplayed: Story = {
     await expect(closing.filter((frame) => frame.panelLeft < frame.chatRight - 0.5)).toEqual([])
     await expect(closing.at(-1)!.frame).toBe(1)
     await expect(widest).toBe(full)
-    await waitFor(() => expect(panelOf(canvasElement)).toBeNull())
+    await waitFor(() => expect(isStowed(canvasElement)).toBe(true))
   },
 }
 
@@ -583,7 +617,7 @@ export const TurnsRoundMidWay: Story = {
     await expect(Math.min(...widths)).toBeGreaterThan(row * 0.55 - 12 + 1)
     await expect(widths.at(-1)).toBe(widths[0])
     await expect(frames.at(-1)!.frame).toBe(1)
-    await waitFor(() => expect(panelOf(canvasElement)).toBeNull())
+    await waitFor(() => expect(isStowed(canvasElement)).toBe(true))
   },
 }
 
@@ -618,7 +652,7 @@ export const ReducedMotion: Story = {
     await nextFrame()
     await expect(dockWidth(canvasElement)).toBe(FOLDED)
     await expect(measure(canvasElement).frame).toBe(1)
-    await expect(panelOf(canvasElement)).toBeNull()
+    await expect(isStowed(canvasElement)).toBe(true)
   },
 }
 

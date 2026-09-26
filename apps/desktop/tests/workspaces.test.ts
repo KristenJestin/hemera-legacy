@@ -156,7 +156,9 @@ describe('A dedicated Workspace assembles one worktree per repository', () => {
     // The plan names its locations and reads none of them: the dialog opens on the folder and on
     // the rows, and each row is read on its own afterwards (#110).
     expect(seen.plan.repositories).toEqual([API, FRONT])
-    expect(seen.plan.path).toBe(join(seen.plan.root, 'login-form'))
+    // Named after the Spec's key and the words of its title (#136).
+    expect(seen.plan.name).toBe('hem-7-login-form')
+    expect(seen.plan.path).toBe(join(seen.plan.root, 'hem-7-login-form'))
     // One location read on its own: the branch it is checked out on, out of the branches it has
     // here — a branch name as the base, and never the sha it points at (D8-04) — and the branch
     // it would be given under the prefix set since.
@@ -199,13 +201,37 @@ describe('A dedicated Workspace assembles one worktree per repository', () => {
         git(join(main, 'sources', repository), 'rev-parse', 'HEAD'),
       )
     }
-    expect(workspace.path.endsWith(join('workspaces', workspace.projectId, 'login-form'))).toBe(
-      true,
-    )
+    expect(
+      workspace.path.endsWith(join('workspaces', workspace.projectId, 'hem-7-login-form')),
+    ).toBe(true)
     expect(workspace.state).toBe('ready')
     expect(workspace.specId).toBe('HEM-7')
     expect(workspace.repositories.map((one) => one.relativePath)).toEqual([API, FRONT])
     expect(git(join(main, 'sources', 'api'), 'remote')).toBe('')
+  })
+})
+
+// Scenario "A Spec's Workspace is proposed a readable name" (#136).
+describe("A Spec's Workspace is proposed its key and at most four words of its title", () => {
+  it('names the plan after the key and the meaningful words, and one from the settings as asked', async () => {
+    const seen = await workspaceEngine(folder)(
+      Effect.gen(function* () {
+        const workspaces = yield* Workspaces
+        const project = yield* atlas(main, [API, FRONT])
+        return {
+          spec: yield* workspaces.plan(
+            project.id,
+            'AAA-1',
+            'progress-bar-des-atomes-restent-allumes-au-debut',
+          ),
+          settings: yield* workspaces.plan(project.id, null, 'spike'),
+        }
+      }),
+    )
+
+    expect(seen.spec.name).toBe('aaa-1-progress-bar-atomes-restent')
+    expect(seen.spec.path).toBe(join(seen.spec.root, 'aaa-1-progress-bar-atomes-restent'))
+    expect(seen.settings.name).toBe('spike')
   })
 })
 
@@ -466,7 +492,7 @@ describe('A failed check refuses the whole creation', () => {
         const refused = yield* Effect.flip(
           workspaces.create(project.id, {
             specId: 'HEM-7',
-            name: 'login-form',
+            name: plan.name,
             repositories: edit(
               reads
                 .filter((one) => one.included)
@@ -705,7 +731,7 @@ describe('Cleanup removes the worktrees and keeps the branches', () => {
         // The old branches stay, so the new Workspace is made on branches of its own.
         const again = yield* workspaces.create(project.id, {
           specId: 'HEM-7',
-          name: 'login-form',
+          name: 'hem-7-login-form',
           repositories: first.repositories.map((one) => ({
             relativePath: one.relativePath,
             base: one.base,
@@ -716,13 +742,13 @@ describe('Cleanup removes the worktrees and keeps the branches', () => {
       }),
     )
 
-    expect(seen.again.name).toBe('login-form')
+    expect(seen.again.name).toBe('hem-7-login-form')
     expect(seen.again.specId).toBe('HEM-7')
     expect(seen.again.id).not.toBe(seen.first.id)
     expect(seen.listed.map((one) => [one.name, one.state])).toEqual([
       ['main', 'ready'],
-      ['login-form', 'cleaned'],
-      ['login-form', 'preparing'],
+      ['hem-7-login-form', 'cleaned'],
+      ['hem-7-login-form', 'preparing'],
     ])
   })
 })
@@ -788,7 +814,7 @@ describe('Cleanup is refused while a service runs or Git refuses', () => {
     )
 
     expect(seen.whileRunning).toBeInstanceOf(CleanupRefusedError)
-    expect(seen.whileRunning.message).toBe('the service dev of login-form is running')
+    expect(seen.whileRunning.message).toBe('the service dev of hem-7-login-form is running')
     expect(seen.whileChanged).toBeInstanceOf(CleanupRefusedError)
     expect(seen.whileChanged.message).toMatch(
       /^fatal: .*sources[\\/]front.* contains modified or untracked files/,
@@ -836,10 +862,10 @@ describe('A Workspace with a running build Session is not cleaned up', () => {
     )
 
     expect(seen.running).toBeInstanceOf(CleanupRefusedError)
-    expect(seen.running.message).toBe('the build of login-form is still open')
+    expect(seen.running.message).toBe('the build of hem-7-login-form is still open')
     expect(seen.kept).toEqual({ api: true, folder: true, front: true, state: 'ready' })
     expect(seen.events).toEqual([
-      { payload: JSON.stringify({ reason: 'the build of login-form is still open' }) },
+      { payload: JSON.stringify({ reason: 'the build of hem-7-login-form is still open' }) },
     ])
     expect(seen.cleaned.state).toBe('cleaned')
     expect(existsSync(seen.workspace.path)).toBe(false)

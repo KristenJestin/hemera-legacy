@@ -128,6 +128,7 @@ export {
   nextPending,
   resumedSteps,
   slugify,
+  specWorkspaceName,
   stepsFor,
   variableKey,
   workspaceName,

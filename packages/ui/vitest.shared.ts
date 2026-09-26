@@ -19,6 +19,14 @@ export function catalogue(theme: 'light' | 'dark') {
         configDir: join(import.meta.dirname, '.storybook'),
         initialGlobals: { theme },
       }),
+      // The Storybook plugin names the optimizer's cache after the Storybook folder, which both
+      // themes share: run side by side, each server wiped and renamed the other's bundles under
+      // its open page, and on Windows a story file then waited forever for a module. Each theme
+      // gets a folder of its own, set after the plugin so its choice does not win.
+      {
+        name: 'hemera:cache-per-theme',
+        config: () => ({ cacheDir: join(import.meta.dirname, 'node_modules/.vite', theme) }),
+      },
     ],
     // Declared rather than discovered: a dependency the optimizer meets for the first time
     // mid-run makes it reload the page under the tests, and a run that reloads is a run that
@@ -36,11 +44,14 @@ export function catalogue(theme: 'light' | 'dark') {
         '@base-ui/react/tabs',
         '@base-ui/react/tooltip',
         '@tabler/icons-react',
+        '@tanstack/markdown/extensions/streaming',
+        '@tanstack/markdown/react',
         '@tanstack/react-form',
-        '@tanstack/react-hotkeys',
         'class-variance-authority',
         'cn',
         'motion/react',
+        'shiki/core',
+        'shiki/engine/javascript',
         'zod',
       ],
     },

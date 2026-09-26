@@ -335,6 +335,23 @@ export interface AgentRuntimeService {
 export { AgentNotices, NoNotices } from './notices.ts'
 export type { AgentNoticesService, Notice } from './notices.ts'
 
+/**
+ * Where an option is put back when an agent starts again: the model, then the effort it
+ * publishes, then the mode, then whatever else the agent offers.
+ */
+function rankOf(category: string | null): number {
+  switch (category) {
+    case 'model':
+      return 0
+    case 'thought_level':
+      return 1
+    case 'mode':
+      return 2
+    default:
+      return 3
+  }
+}
+
 /** One running agent, as the runtime keeps it. */
 interface Live {
   readonly connection: AgentConnection
@@ -1828,7 +1845,17 @@ export const runtimeLayer = Layer.effect(
               ([optionId, value]) => ({ optionId, value }),
             )
           : choices
-        for (const choice of put) {
+        // The model first, then the effort, then the mode, whatever order they were chosen in: an
+        // effort is the model's own, and one put back before its model lands on the wrong one.
+        const categories = new Map(
+          connection.options().map((option) => [option.id, option.category] as const),
+        )
+        const ranked = put.toSorted(
+          (one, other) =>
+            rankOf(categories.get(one.optionId) ?? null) -
+            rankOf(categories.get(other.optionId) ?? null),
+        )
+        for (const choice of ranked) {
           // A choice the agent will not take is not a Session that cannot start: it opens on
           // what the agent is on, and the composer shows what that is.
           yield* attempt(
@@ -2696,12 +2723,10 @@ export const runtimeLayer = Layer.effect(
       Effect.gen(function* () {
         const held = yield* opened(sessionId)
         yield* attempt('choosing an option', held.connection.setOption(optionId, value))
-        // Written down once the agent took it: the next start of this Session's agent is put back
-        // on it, which no agent does by itself (issue #133).
-        yield* attempt(
-          'recording a choice',
-          sessions.recordChoices(sessionId, [{ optionId, value }]),
-        ).pipe(Effect.ignore)
+        // Written down once the agent took it, with every other option as it answered them: a
+        // model chosen may have moved the effort. The next start of this Session's agent is put
+        // back on them, which no agent does by itself (issue #133).
+        yield* recordStanding(sessionId)
       })
 
     const prompt = (sessionId: string, text: string, intent?: PromptIntent) =>

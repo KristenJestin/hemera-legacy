@@ -269,7 +269,7 @@ export interface SessionsService {
   ) => Effect.Effect<void, Refusal>
   /**
    * One Session, what the agent handed back about it (design D5-06), and what its agent was put
-   * on, in the order it was first chosen.
+   * on. The order is not the one they are put back in: the runtime puts the model back first.
    *
    * The engine reads a Session by its identifier where the window reads a Project's list: a turn
    * names the Session it belongs to, and the handle the agent gave is the engine's own — the
@@ -977,8 +977,6 @@ export const sessionsLayer = Layer.effect(
                 .pipe(Effect.mapError(failed('reading the Session')))
               const row = rows[0]
               if (row === undefined) return yield* Effect.fail(new UnknownSessionError(id))
-              // A value chosen again keeps its place: a model is put back before the effort it
-              // publishes, whichever of the two was changed last.
               const held = new Map(
                 choicesOf(row.choices).map((one) => [one.optionId, one.value] as const),
               )

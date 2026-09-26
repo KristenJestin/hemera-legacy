@@ -224,6 +224,40 @@ describe('An obsolete request is refused', () => {
     expect(specSnapshot().refusal).toBe(null)
   })
 
+  test('a refusal is forgotten once the Spec it refused changes', async () => {
+    reads(4)
+    await openSpec('spec-7')
+    answers.set('specs.markReady', new Error('ATL-7 does not pass its gate: phases.'))
+    await markReady('writer')
+    expect(specSnapshot().readyRefused).toBe('ATL-7 does not pass its gate: phases.')
+
+    // Read again on the same content, it stands.
+    push({ event: 'turn', sessionId: 'writer', entry: null })
+    await settled()
+    expect(specSnapshot().readyRefused).toBe('ATL-7 does not pass its gate: phases.')
+
+    // The agent writes on: the content version moves on, and the refusal is gone.
+    reads(5)
+    push({ event: 'spec.changed', specId: 'spec-7', projectId: 'atlas' })
+    await settled()
+    expect(specSnapshot().readyRefused).toBe(null)
+  })
+
+  test('a refusal is forgotten once the Spec is on another revision', async () => {
+    reads(4)
+    await openSpec('spec-7')
+    answers.set('specs.markReady', new Error('ATL-7 does not pass its gate: phases.'))
+    await markReady('writer')
+    const reworked = snapshot(4)
+    reworked.spec.currentRevisionId = 'rev-2'
+    answers.set('specs.read', reworked)
+
+    push({ event: 'spec.changed', specId: 'spec-7', projectId: 'atlas' })
+    await settled()
+
+    expect(specSnapshot().readyRefused).toBe(null)
+  })
+
   test('the next act that goes through forgets the refused click', async () => {
     reads(4)
     await openSpec('spec-7')

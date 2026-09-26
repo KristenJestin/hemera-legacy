@@ -114,9 +114,9 @@ export interface SpecPanelProps extends SpecPartHandlers {
   onTakeOver: () => void
   /**
    * Where the build stands, and what it is launched in (D8-12, D8-13), which the application
-   * composes. Drawn in the panel's footer on a Spec that is not being written, and on a launch
-   * already asked for whatever the Spec is doing: a draft offers nothing to build, and an older
-   * revision of a ready one is read as it was (D7-05).
+   * composes. Drawn in the panel's footer on a Spec that is not being written: a draft offers
+   * nothing to build, and says a launch already asked for beside `Mark ready`; an older revision
+   * of a ready one is read as it was (D7-05).
    */
   build?: WorkspaceActionsProps | undefined
 }
@@ -279,22 +279,29 @@ export function SpecPanel({
   // one: only the current revision of a Spec is built, as only it can be reworked (D7-05, D8-12).
   // A launch already asked for stays where it stands once the Spec moves on: a build that started
   // takes its Spec on (`in_progress`), and a Rework takes a waiting launch back — either way the
-  // panel is where the Session it opened, or what became of it, is said (D8-13).
-  const launched = build !== undefined && build.launch !== null
-  const buildable = spec.replacedBy === undefined && (spec.status !== 'draft' || launched)
+  // panel is where the Session it opened, or what became of it, is said (D8-13). On a draft, what
+  // became of it is said beside `Mark ready`, never in its place, and offers nothing to start.
+  const buildable = spec.replacedBy === undefined && spec.status !== 'draft'
+  const launch = build?.launch ?? null
   // `Mark ready` is offered on the current revision of a draft, whatever it holds: never disabled,
   // what the Spec still lacks is what the engine refuses it with (issue #135). It turns primary
-  // once the agent's `ready` proposal was accepted — its attestation stands on the content the
-  // Spec is at now (D7-10) — and stays quiet before (issue #150).
+  // once the whole gate passes — the agent's attestation on the content the Spec is at now among
+  // it (D7-10) — and stays quiet before (issue #150): an attestation given with a phase open or a
+  // blocking question raised is a press the engine refuses.
   const markable = spec.status === 'draft' && spec.replacedBy === undefined
-  const confirmed = spec.readiness.checks.some(
-    (check) => check.check === 'attestation' && check.passed,
-  )
+  const confirmed = spec.readiness.checks.every((check) => check.passed)
   const foot: FootContent | null =
     buildable && build !== undefined
       ? { kind: 'build', build }
       : markable
-        ? { kind: 'ready', confirmed, refused: spec.readiness.refused, onMarkReady }
+        ? {
+            kind: 'ready',
+            confirmed,
+            refused: spec.readiness.refused,
+            onMarkReady,
+            launch:
+              build === undefined || launch === null ? null : { ...build, onRetry: undefined },
+          }
         : null
 
   // The small frame leaves at once, and comes back a beat after the panel started leaving.
@@ -394,11 +401,13 @@ type FootContent =
   | { kind: 'build'; build: WorkspaceActionsProps }
   | {
       kind: 'ready'
-      /** Whether the agent confirmed the Spec complete, which makes `Mark ready` the primary. */
+      /** Whether the whole gate passes, the agent's attestation among it: `Mark ready` primary. */
       confirmed: boolean
       /** What the last `Mark ready` was refused with. */
       refused: string | undefined
       onMarkReady: () => void
+      /** A launch asked for on the revision a Rework left, said beside `Mark ready`: no Retry. */
+      launch: WorkspaceActionsProps | null
     }
 
 /**
@@ -433,6 +442,7 @@ function SpecFoot({ content }: { content: FootContent | null }): ReactNode {
               <WorkspaceActions {...content.build} />
             ) : (
               <>
+                {content.launch !== null && <WorkspaceActions {...content.launch} />}
                 {content.refused !== undefined && (
                   // What the draft still lacks, or that it changed as it was pressed (D7-10).
                   <p role="alert" className={REFUSED}>

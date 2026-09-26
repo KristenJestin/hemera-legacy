@@ -240,6 +240,9 @@ function todoOf(snapshot: SpecSnapshot, failures: readonly GateFailure[]): Readi
       add({ label: 'the task links', target: 'tasks' })
     } else if (check === 'coverage' && target === 'tasks') {
       add({ label: 'the tasks', target: 'tasks' })
+    } else if (check === 'coverage' && target === 'stories') {
+      // A feature with no story at all: the target names the list, not a story (#143).
+      add({ label: 'a user story', target: 'stories' })
     } else if (check === 'coverage') {
       const key = keys.get(target) ?? target
       if (!snapshot.criteria.some((criterion) => criterion.storyId === target)) {

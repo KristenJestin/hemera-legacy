@@ -521,6 +521,38 @@ describe('Portless is looked for once per engine', () => {
   })
 })
 
+describe('A Portless command is classified as the wrapper actually launched', () => {
+  it('previews the wrapper and refuses a changed invocation without spawning it', async () => {
+    const bin = join(scratch.folder, 'bin')
+    standIn(bin)
+    const marker = join(scratch.root, 'should-not-start')
+    const seen = await engine(onlyIn(bin))(
+      Effect.gen(function* () {
+        const session = yield* opened
+        const commands = yield* Commands
+        const asked = request(session, {
+          name: 'dev',
+          type: 'script',
+          portless: true,
+          line: `"${process.execPath}" -e "require('fs').writeFileSync('should-not-start','')"`,
+        })
+        const preview = yield* commands.preview(asked)
+        const run = yield* commands.run({
+          ...asked,
+          expectedInvocation: { command: 'a-different-program', args: [], verbatim: false },
+        })
+        return { preview, run }
+      }),
+    )
+    expect(seen.preview.missingPortless).toBe(false)
+    expect(seen.preview.line).toContain('portless atlas')
+    expect(JSON.stringify(seen.preview.invocation)).toContain('portless')
+    expect(seen.run.state).toBe('failed')
+    expect(seen.run.output).toContain('changed after classification')
+    expect(existsSync(marker)).toBe(false)
+  })
+})
+
 describe('Portless is refused when it is not installed', () => {
   it('refuses the launch naming portless, and starts nothing', async () => {
     const empty = join(scratch.folder, 'bin')

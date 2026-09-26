@@ -222,6 +222,7 @@ export function application(
       | AgentContext
     > = runtimeLayer.pipe(
       Layer.provideMerge(toolAccessLayer),
+      Layer.provide(classifierSettingsLayer),
       Layer.provideMerge(contextLayer),
       // No build runs here: a Session that is none passes through the builds untouched.
       Layer.provide(idleBuilds),

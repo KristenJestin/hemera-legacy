@@ -161,6 +161,7 @@ function running<A, E>(
   })
   const lent = tools.pipe(Layer.provide(rows), Layer.provide(agents), Layer.provide(heldWordsLayer))
   const runtime = runtimeLayer.pipe(
+    Layer.provideMerge(classifierSettingsLayer),
     Layer.provideMerge(discoveryLayer),
     Layer.provide(rows),
     Layer.provide(preferencesLayer),
@@ -993,5 +994,44 @@ describe('Hemera Auto owns native permission selection across existing Sessions'
     )
     expect(outcome).toBe(true)
     expect(agent.answers.choices).toEqual([])
+  })
+
+  test('a native permission remembered in Agent default is not replayed after switching to Hemera Auto', async () => {
+    const mode = {
+      id: 'session-mode',
+      type: 'select' as const,
+      name: 'Mode',
+      category: 'mode' as const,
+      currentValue: 'default',
+      options: [
+        { value: 'default', name: 'Default' },
+        { value: 'acceptEdits', name: 'Accept edits' },
+      ],
+    }
+    const first = fakeAgent({ configOptions: [mode] })
+    const projectId = await running(
+      Effect.gen(function* () {
+        const project = yield* (yield* Projects).create({
+          name: 'Atlas',
+          tone: 'primary',
+          mainPath: dataFolder,
+        })
+        const runtime = yield* AgentRuntime
+        yield* runtime.offer(project.id, 'claude')
+        yield* runtime.offerSet(project.id, 'claude', 'session-mode', 'acceptEdits')
+        yield* (yield* ClassifierSettings).select('hemera-auto')
+        return project.id
+      }),
+      first,
+    )
+    expect(first.answers.choices).toContain('session-mode=acceptEdits')
+    const second = fakeAgent({ configOptions: [mode] })
+    await running(
+      Effect.gen(function* () {
+        yield* (yield* AgentRuntime).offer(projectId, 'claude')
+      }),
+      second,
+    )
+    expect(second.answers.choices).toEqual([])
   })
 })

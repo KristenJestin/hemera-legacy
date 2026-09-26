@@ -254,14 +254,19 @@ export interface SessionsService {
    */
   readonly recordNative: (id: string, native: NativeRecord) => Effect.Effect<Session, Refusal>
   /**
-   * Records one option the user put the Session's agent on, beside the ones chosen before.
+   * Records the values the Session's agent stands on, beside the ones recorded before: what the
+   * user put it on, and what the agent moved by itself since.
    *
    * An agent keeps its model, its effort and its mode for as long as its process lives, and no
    * longer: what is recorded here is what the next start of the agent is put back on, whatever
    * ended the last one (issue #133). No version is taken, for the reason `recordNative` takes
-   * none: the choice is made while the agent works and the user may be renaming the Session.
+   * none: the agent moves while it works and the user may be renaming the Session. A value that
+   * reads as it was recorded is not written again, and has no Journal line.
    */
-  readonly recordChoice: (id: string, choice: OptionChoice) => Effect.Effect<void, Refusal>
+  readonly recordChoices: (
+    id: string,
+    choices: readonly OptionChoice[],
+  ) => Effect.Effect<void, Refusal>
   /**
    * One Session, what the agent handed back about it (design D5-06), and what its agent was put
    * on, in the order it was first chosen.
@@ -960,9 +965,9 @@ export const sessionsLayer = Layer.effect(
           ),
         ),
 
-      recordChoice: (id, choice) =>
+      recordChoices: (id, choices) =>
         withDatabase(
-          mutate('recording a choice of a Session', (transaction) =>
+          mutate('recording the choices of a Session', (transaction) =>
             Effect.gen(function* () {
               const rows = yield* transaction
                 .select({ choices: sessions.choices, projectId: sessions.projectId })
@@ -977,7 +982,9 @@ export const sessionsLayer = Layer.effect(
               const held = new Map(
                 choicesOf(row.choices).map((one) => [one.optionId, one.value] as const),
               )
-              held.set(choice.optionId, choice.value)
+              const changed = choices.filter((choice) => held.get(choice.optionId) !== choice.value)
+              if (changed.length === 0) return { result: undefined, events: [] }
+              for (const choice of changed) held.set(choice.optionId, choice.value)
               yield* transaction
                 .update(sessions)
                 .set({ choices: JSON.stringify(Object.fromEntries(held)) })
@@ -985,18 +992,16 @@ export const sessionsLayer = Layer.effect(
                 .pipe(Effect.mapError(failed('writing the Session')))
               return {
                 result: undefined,
-                events: [
-                  {
-                    type: 'session.choice_recorded',
-                    entityKind: 'session',
-                    entityId: id,
-                    source: 'ui',
-                    author: 'human',
-                    projectId: row.projectId,
-                    sessionId: id,
-                    payload: { optionId: choice.optionId, value: choice.value },
-                  },
-                ],
+                events: changed.map((choice): NewEvent => ({
+                  type: 'session.choice_recorded',
+                  entityKind: 'session',
+                  entityId: id,
+                  source: 'ui',
+                  author: 'human',
+                  projectId: row.projectId,
+                  sessionId: id,
+                  payload: { optionId: choice.optionId, value: choice.value },
+                })),
               } satisfies Mutation<void>
             }),
           ),

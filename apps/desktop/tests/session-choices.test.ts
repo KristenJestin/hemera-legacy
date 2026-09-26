@@ -239,3 +239,63 @@ describe("A Session's model and effort survive a restart of its agent", () => {
     )
   })
 })
+
+/** An agent with modes, as Claude Code has: it opens on `default`, and moves when told. */
+const withModes = (script: Partial<FakeScript> = {}): FakeAgent => {
+  let mode = 'default'
+  const now = () => [
+    {
+      id: 'mode',
+      type: 'select' as const,
+      name: 'Mode',
+      category: 'mode' as const,
+      currentValue: mode,
+      options: [
+        { value: 'default', name: 'Default' },
+        { value: 'plan', name: 'Plan' },
+      ],
+    },
+  ]
+  return fakeAgent({
+    continues: true,
+    ...script,
+    configOptions: now(),
+    onChoice: (choice) => {
+      if (choice.id === 'mode') mode = choice.value
+      return now()
+    },
+  })
+}
+
+describe('A mode the agent left is not put back by a restart', () => {
+  for (const as of ['mode', 'config'] as const) {
+    test(`an agent that left plan mode by itself (${as} update) starts again out of it`, async () => {
+      const first = withModes({
+        steps: [
+          { does: 'switches', option: 'mode', value: 'default', as },
+          { does: 'says', text: 'The plan is approved.' },
+        ],
+      })
+      const second = withModes()
+
+      await twoStarts(
+        first,
+        second,
+      )(
+        Effect.gen(function* () {
+          const runtime = yield* AgentRuntime
+          const session = yield* aSession(workingDirectory)
+          yield* runtime.setOption(session.id, 'mode', 'plan')
+          yield* runtime.prompt(session.id, 'approve the plan')
+          expect(yield* standing(session.id)).toEqual({ mode: 'default' })
+          yield* endedBy(first, true)
+
+          yield* runtime.prompt(session.id, 'carry on')
+
+          expect(second.answers.choices).not.toContain('mode=plan')
+          expect(yield* standing(session.id)).toEqual({ mode: 'default' })
+        }),
+      )
+    })
+  }
+})

@@ -175,6 +175,17 @@ export type FakeStep =
       readonly does: 'requests'
       readonly method: string
     }
+  | {
+      /**
+       * One of its options moved by the agent itself, as Claude Code leaves plan mode once the
+       * plan is approved: said as `current_mode_update` when `as` is `mode`, and as the whole set
+       * in a `config_option_update` otherwise.
+       */
+      readonly does: 'switches'
+      readonly option: string
+      readonly value: string
+      readonly as?: 'mode' | 'config'
+    }
 
 /**
  * What the agent is scripted to be: what it announces, and what it does when it is asked.
@@ -484,6 +495,7 @@ function updateOf(step: FakeStep): SessionUpdate | null {
     case 'usesTogether':
     case 'complains':
     case 'requests':
+    case 'switches':
       return null
     default:
       return null
@@ -969,6 +981,20 @@ export function fakeAgent(script: Partial<FakeScript> = {}): FakeAgent {
         if (step.does === 'requests') {
           // oxlint-disable-next-line no-await-in-loop -- a request is answered before the agent goes on, as it would wait on it
           await connection?.extMethod(step.method, {}).catch(() => undefined)
+          continue
+        }
+        if (step.does === 'switches') {
+          announced = announced.map((option) =>
+            option.id === step.option && option.type !== 'boolean'
+              ? { ...option, currentValue: step.value }
+              : option,
+          )
+          const update: SessionUpdate =
+            step.as === 'mode'
+              ? { sessionUpdate: 'current_mode_update', currentModeId: step.value }
+              : { sessionUpdate: 'config_option_update', configOptions: [...announced] }
+          // oxlint-disable-next-line no-await-in-loop -- what it says is sent before what it says next
+          if (!dead) await connection?.sessionUpdate({ sessionId, update })
           continue
         }
         if (step.does === 'usesTogether') {

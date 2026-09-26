@@ -32,6 +32,11 @@ const meta = {
       control: 'text',
       description: 'What it is doing it to: the title of the tool call. Only `running` has one.',
     },
+    doing: {
+      control: 'text',
+      description:
+        'What is being done, as a whole phrase, read in place of `Running` and its detail.',
+    },
     thought: { control: 'text', description: 'The thought arriving now, which the chevron opens.' },
     elapsedMs: {
       control: 'number',
@@ -65,6 +70,20 @@ export const Running: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     await expect(canvas.getByText('Running cat recap.md')).toBeVisible()
+  },
+}
+
+/**
+ * One of Hemera's own tools running says what it is doing in a phrase of its own, "Writing the
+ * Spec", rather than "Running Write Spec" (issue #170).
+ */
+export const RunningHemeraTool: Story = {
+  args: { state: 'running', doing: 'Writing the Spec' },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await expect(canvas.getByText('Writing the Spec')).toBeVisible()
+    await expect(canvas.getByRole('status', { name: 'Writing the Spec' })).toBeInTheDocument()
+    await expect(canvas.queryByText(/Running/)).toBeNull()
   },
 }
 

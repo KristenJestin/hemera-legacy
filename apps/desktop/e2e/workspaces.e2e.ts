@@ -486,7 +486,11 @@ describe('Two Workspaces run the same command as two instances', () => {
     await startSession('login-form', 'Serve the app in login-form.')
     // The agent started in login-form: its Workspace is fixed now (D8-08), a plain label whose
     // tooltip says why (issue #128).
-    expect(await $('[aria-label="Workspace: login-form"]').waitForExist()).toBe(true)
+    expect(
+      await $(
+        '[aria-label="Workspace: login-form. The Workspace is fixed once the agent has started."]',
+      ).waitForExist(),
+    ).toBe(true)
     await openCommands()
     await runLine('dev')
     await awaitsIn('[role="dialog"]', 'Running')

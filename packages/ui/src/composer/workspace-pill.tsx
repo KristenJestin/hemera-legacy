@@ -15,7 +15,8 @@ import { IconGitBranch } from '../icons.ts'
  * The choice is made before the first message and fixed once the agent has started, because the
  * agent's own session was opened in that folder (D8-08). Fixed, it is no longer a choice, so it
  * is no longer drawn as one: a plain label with the Workspace's name, and the reason is its
- * tooltip rather than a sentence that stayed on screen for the whole Session (issue #128).
+ * tooltip rather than a sentence that stayed on screen for the whole Session (issue #128), and
+ * part of its accessible name, which is what a screen reader says of it.
  */
 
 /** A Workspace on offer: the name it is chosen by, and where it is on disk. */
@@ -53,7 +54,8 @@ export function WorkspacePill({
           role="img"
           // Focusable so the keyboard reaches its tooltip as the pointer does.
           tabIndex={0}
-          aria-label={`Workspace: ${workspace}`}
+          // The reason is part of the name: a screen reader does not reach a tooltip.
+          aria-label={`Workspace: ${workspace}. ${FIXED_REASON}`}
           className={LABEL}
         >
           <IconGitBranch size="sm" aria-hidden="true" />

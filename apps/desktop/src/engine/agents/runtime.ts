@@ -405,6 +405,23 @@ export interface AgentRuntimeService {
 export { AgentNotices, NoNotices } from './notices.ts'
 export type { AgentNoticesService, Notice } from './notices.ts'
 
+/**
+ * Where an option is put back when an agent starts again: the model, then the effort it
+ * publishes, then the mode, then whatever else the agent offers.
+ */
+function rankOf(category: string | null): number {
+  switch (category) {
+    case 'model':
+      return 0
+    case 'thought_level':
+      return 1
+    case 'mode':
+      return 2
+    default:
+      return 3
+  }
+}
+
 /** One running agent, as the runtime keeps it. */
 interface Live {
   readonly connection: AgentConnection
@@ -454,6 +471,11 @@ interface Live {
    * session opened afresh or rebuilt from the thread, which leaves the brief out (D7-09).
    */
   unbriefed: boolean
+  /**
+   * Whether the agent was put back on what the Session chose. Until it is, what it stands on is
+   * its defaults, and an option it reports moving is not recorded over the Session's choices.
+   */
+  restored: boolean
   /** Why that context had to be rebuilt, in the agent's own terms; null when it did not. */
   why: string | null
   /**
@@ -1094,6 +1116,13 @@ export const runtimeLayer = Layer.effect(
           // history, and an older reading written over a newer one is a meter that goes backwards.
           const running = live.get(sessionId)
           if (!event.replay && running !== undefined) running.window = event.window
+          return
+        }
+
+        if (event.type === 'options') {
+          // The agent moved an option by itself: the next start is put back where it moved to,
+          // not where the user last put it. A replay is the past, not where the agent stands.
+          if (!event.replay) yield* recordStanding(sessionId)
           return
         }
 
@@ -1823,6 +1852,7 @@ export const runtimeLayer = Layer.effect(
           context: null,
           provisions: [],
           unbriefed: false,
+          restored: false,
           why: null,
           window: null,
           pending: 0,
@@ -1875,18 +1905,35 @@ export const runtimeLayer = Layer.effect(
               ([optionId, value]) => ({ optionId, value }),
             )
           : choices
-        for (const choice of put) {
-          const set = yield* Effect.result(
-            attempt('choosing an option', connection.setOption(choice.optionId, choice.value)),
-          )
+        // The model first, then the effort, then the mode, whatever order they were chosen in: an
+        // effort is the model's own, and one put back before its model lands on the wrong one.
+        const categories = new Map(
+          connection.options().map((option) => [option.id, option.category] as const),
+        )
+        const ranked = put.toSorted(
+          (one, other) =>
+            rankOf(categories.get(one.optionId) ?? null) -
+            rankOf(categories.get(other.optionId) ?? null),
+        )
+        for (const choice of ranked) {
           // A choice the agent will not take is not a Session that cannot start: it opens on
           // what the agent is on, and the composer shows what that is.
-          if (Result.isSuccess(set) && inherited) {
-            yield* attempt('recording a choice', sessions.recordChoice(sessionId, choice)).pipe(
-              Effect.ignore,
-            )
-          }
+          yield* attempt(
+            'choosing an option',
+            connection.setOption(choice.optionId, choice.value),
+          ).pipe(Effect.ignore)
         }
+        // What it stands on now is what the Session is recorded on, inherited choices included.
+        started.restored = true
+        yield* recordStanding(sessionId)
+        // A sub-agent's result a quit caught before its safe point does not wait for the user to
+        // type: the agent is back, and idle unless a prompt is starting it, which hands it over
+        // itself (issue #72).
+        const queued = yield* attempt(
+          'reading the results of sub-agents',
+          context.queuedInternal(sessionId),
+        ).pipe(Effect.orElseSucceed(() => []))
+        if (queued.length > 0) deliverSoon(sessionId, false)
         return started
       })
 
@@ -2399,9 +2446,12 @@ export const runtimeLayer = Layer.effect(
           mimeType: 'text/markdown',
         })),
         announce: (turnId) => lines(turnId, true),
-        taken: Effect.sync(() => {
+        taken: Effect.gen(function* () {
           // Said meanwhile, a later word stays for the next safe point.
           words.set(sessionId, (words.get(sessionId) ?? []).slice(waiting.length))
+          for (const one of waiting) {
+            yield* attempt('recording the delivery', context.handed(sessionId, 'notice', one.text))
+          }
         }),
         missed: (turnId) => lines(turnId, false),
       }
@@ -2722,16 +2772,32 @@ export const runtimeLayer = Layer.effect(
         return held.connection.options()
       })
 
+    /**
+     * Records every option the Session's agent stands on now, as the agent last reported them:
+     * after it was put back on the Session's choices, and whenever it moves one by itself. The
+     * next start of its agent is put back there (issue #133).
+     */
+    const recordStanding = (sessionId: string) =>
+      Effect.gen(function* () {
+        const held = live.get(sessionId)
+        if (held === undefined || !held.restored) return
+        const standing = held.connection
+          .options()
+          .map((option) => ({ optionId: option.id, value: option.value }))
+        if (standing.length === 0) return
+        yield* attempt('recording the choices', sessions.recordChoices(sessionId, standing)).pipe(
+          Effect.ignore,
+        )
+      })
+
     const setOption = (sessionId: string, optionId: string, value: string) =>
       Effect.gen(function* () {
         const held = yield* opened(sessionId)
         yield* attempt('choosing an option', held.connection.setOption(optionId, value))
-        // Written down once the agent took it: the next start of this Session's agent is put back
-        // on it, which no agent does by itself (issue #133).
-        yield* attempt(
-          'recording a choice',
-          sessions.recordChoice(sessionId, { optionId, value }),
-        ).pipe(Effect.ignore)
+        // Written down once the agent took it, with every other option as it answered them: a
+        // model chosen may have moved the effort. The next start of this Session's agent is put
+        // back on them, which no agent does by itself (issue #133).
+        yield* recordStanding(sessionId)
       })
 
     const prompt = (sessionId: string, text: string, intent?: PromptIntent) =>
@@ -2865,6 +2931,13 @@ export const runtimeLayer = Layer.effect(
         const outcome = yield* Effect.result(held.connection.prompt(sent, provisions))
         if (Result.isSuccess(outcome)) {
           const answered = outcome.success
+          // The New Spec request the agent took with this turn is listed in the Context view.
+          for (const request of provisionsOf(intent)) {
+            yield* attempt(
+              'recording the delivery',
+              context.handed(sessionId, 'request', request.text),
+            ).pipe(Effect.ignore)
+          }
           // What is in the thread is read before the window is: the announcement travels as a
           // notification of its own, and the entry is written from it once everything the agent
           // said is held rather than racing it.

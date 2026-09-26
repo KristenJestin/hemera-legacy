@@ -192,8 +192,8 @@ export function LiveSpecPanel({
       <div className="flex min-w-0 flex-1 flex-col items-start gap-3 p-6 text-sm text-muted-foreground">
         <p>
           The chat of the Session stands here, and takes whatever width the Spec panel leaves it:
-          all of it but the band while the panel is folded, and what is left beside the panel once
-          it is unfolded.
+          all of it but the small frame while the Spec is folded, and what is left beside the panel
+          once it is open.
         </p>
         {agentWrites !== undefined && (
           <Button

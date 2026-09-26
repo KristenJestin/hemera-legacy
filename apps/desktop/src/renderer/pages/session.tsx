@@ -671,7 +671,8 @@ export function SessionPage({
    * The panel beside the chat, chosen by the Session's mission here and nowhere else. A `define`
    * Session has its Spec. A `free` Session has no panel and nothing that offers one: a Spec begins
    * with the agent's proposal in the thread (D7-07). `build` plugs in here, with the panel of its
-   * tasks, workers and evidence standing in the same `MissionPanel` the Spec stands in.
+   * tasks, workers and evidence. The Spec panel is its own slot of the row: folded to a small frame
+   * at the window's edge, and swapped for the open panel, which pushes the chat (issue #164).
    */
   function missionPanel(): ReactNode {
     if (session.mission !== 'define' || spec === null || defined === null) return null
@@ -689,7 +690,7 @@ export function SessionPage({
         }}
         onTakeOver={() => void takeOver(session.id)}
         // Where the build of this ready Spec stands, and what is to be pressed next (D8-12,
-        // D8-13): the footer of the panel's rail holds it (issue #135), and the whole journey it
+        // D8-13): the panel's footer holds it (issue #135), and the whole journey it
         // opens — the plan, the Workspace, the launch — belongs here.
         build={{
           launch: launchOf(stored.launches),
@@ -911,8 +912,8 @@ export function SessionPage({
       {/*
         The panel of the Session's mission, beside the chat: the working surface the thread gave
         up width for, where the side column stood before the Session details took its plan and its
-        files into a dialog. It opens folded to a band beside the chat, and unfolds pushing it
-        aside when the hand or the agent asks (brief revisions 4, 4b).
+        files into a dialog. It opens folded to a small frame at the window's edge, and is swapped
+        for its panel, which pushes the chat aside, when the hand or the agent asks (issue #164).
       */}
       {missionPanel()}
       {workspacePlan !== null && (

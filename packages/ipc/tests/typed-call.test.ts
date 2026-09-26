@@ -208,6 +208,7 @@ describe('Cas d’usage nommés du process dédié', () => {
       'preferences.read',
       'preferences.write',
       'engine.status',
+      'engine.atOpen',
       'projects.list',
       'projects.create',
       'projects.update',

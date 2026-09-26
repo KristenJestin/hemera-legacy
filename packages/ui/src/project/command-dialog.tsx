@@ -43,6 +43,8 @@ import { repositoryNamesOf, slugOf } from './naming.ts'
  * Portless is offered on a server alone, and only where it can run (D8-10): not installed, the
  * option is not drawn at all; a line that already calls `portless` runs as it is written, and
  * the option is not drawn either.
+ *
+ * Under the lines, any command may be run each time Hemera opens, in the Project's `main` (#114).
  */
 const FORM = 'flex flex-col gap-4'
 
@@ -170,6 +172,7 @@ export function CommandDialog({
   const [folder, setFolder] = useState('')
   const [portless, setPortless] = useState(false)
   const [portlessName, setPortlessName] = useState('')
+  const [runAtOpen, setRunAtOpen] = useState(false)
   const [refusal, setRefusal] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
 
@@ -191,6 +194,7 @@ export function CommandDialog({
     setFolder(command?.folder ?? '')
     setPortless(command?.portless ?? false)
     setPortlessName(command?.portlessName ?? slugOf(projectName))
+    setRunAtOpen(command?.runAtOpen ?? false)
     setRefusal(null)
   }, [open])
 
@@ -265,6 +269,7 @@ export function CommandDialog({
       ...portlessOf(),
       folderBase: base === ROOT ? null : base,
       folder: typedFolder === '.' ? '' : typedFolder,
+      runAtOpen,
     })
     setSaving(false)
     setRefusal(said)
@@ -358,6 +363,12 @@ export function CommandDialog({
             />
           )}
         </div>
+        <Checkbox
+          label="Run when Hemera opens"
+          description="Hemera runs it each time it opens, in main."
+          checked={runAtOpen}
+          onCheckedChange={setRunAtOpen}
+        />
         {serve && (
           <Labelled label="Scope">
             <Select label="Scope" value={scope} onValueChange={setScope} items={SCOPE_ITEMS} />

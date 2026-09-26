@@ -2,6 +2,7 @@ import type { Meta, StoryObj } from '@storybook/react-vite'
 import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
 import { useState } from 'react'
 
+import { expectNeverBuried, watchThereAndBack } from '../../.storybook/sliding-mark.ts'
 import type { WorkspaceRow } from '../workspace/model.ts'
 import type { VariableLine } from '../workspace/services-model.ts'
 import { PreparationSteps } from '../workspace/preparation-steps.tsx'
@@ -433,7 +434,7 @@ function Controlled({
 }
 
 const meta = {
-  tags: ['autodocs'],
+  tags: ['autodocs', 'updated'],
   title: 'Surfaces/Project/Settings',
   component: ProjectSettings,
   render: (args) => <Controlled {...args} />,
@@ -955,5 +956,24 @@ export const Keyboard: Story = {
       'aria-selected',
       'true',
     )
+  },
+}
+
+/**
+ * The fill of the navigation crossing it, down to the last section and back up to the first: on
+ * every frame of the way it is drawn over the sections it crosses and never under one (issue
+ * #127) — the way up included, which is where a mark drawn inside its entry was lost.
+ */
+export const MarkCrossing: Story = {
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const navigation = canvas.getByRole('tablist', { name: 'Project settings' })
+    const watched = await watchThereAndBack(
+      navigation,
+      () => userEvent.click(canvas.getByRole('tab', { name: 'Variables' })),
+      () => userEvent.click(canvas.getByRole('tab', { name: 'General' })),
+    )
+    expect(canvas.getByRole('tab', { name: 'General' })).toHaveAttribute('aria-selected', 'true')
+    expectNeverBuried(watched)
   },
 }

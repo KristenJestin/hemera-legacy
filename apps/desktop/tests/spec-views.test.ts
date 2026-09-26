@@ -242,6 +242,16 @@ describe('The readiness bar says what is left', () => {
     ])
   })
 
+  test('a feature without a story is asked for a user story', () => {
+    const readiness = readinessOf(snapshot(), [failure('coverage', 'stories')])
+    expect(readiness.todo).toEqual([{ label: 'a user story', target: 'stories' }])
+    // The same, read from the gate of `@hemera/core` rather than handed in.
+    expect(readinessOf(snapshot()).todo).toContainEqual({
+      label: 'a user story',
+      target: 'stories',
+    })
+  })
+
   test('the readiness is the ready gate of the very snapshot on screen', () => {
     // Shaping has just begun: sections of the contract empty, no task, `shape` open, nothing
     // attested — and no question, no link, no cycle to fail, which is nothing met either.

@@ -14,6 +14,7 @@ import { useAppForm } from '../form/app-form.ts'
 import { projectSettingsSchema } from '../form/schemas.ts'
 import {
   IconArchive,
+  IconBolt,
   IconChecklist,
   IconFolders,
   IconGitFork,
@@ -76,6 +77,9 @@ const ADDRESS = 'shrink-0 font-mono text-xs text-foreground'
 const INCLUDED = 'flex shrink-0 rounded-sm text-muted-foreground focus-ring'
 
 const EMPTY_MARK = 'size-icon-sm shrink-0'
+
+/** The quiet mark of a command Hemera runs each time it opens (#114). */
+const AT_OPEN = 'flex shrink-0 rounded-sm text-muted-foreground focus-ring'
 
 const LAYOUT = 'flex items-start gap-8'
 
@@ -598,7 +602,8 @@ export function RepositoryList({
  * this list holds and nothing else.
  *
  * A row says the type of a command with its fixed icon, its name, its line and, for a Portless
- * server, the address it answers at. The scope, where it runs from and the line of each system
+ * server, the address it answers at; a command Hemera runs each time it opens wears one quiet
+ * mark with a tooltip (#114). The scope, where it runs from and the line of each system
  * are in the dialog its pencil opens: a badge saying `Workspace root` told the reader where a
  * command ran and never what it ran, and four badges on every row said the same thing four times
  * (recette 2).
@@ -676,6 +681,19 @@ export function CommandList({
                   <span className={ADDRESS}>
                     https://{one.portlessName ?? slugOf(projectName)}.localhost
                   </span>
+                )}
+                {one.runAtOpen && (
+                  <Tooltip label="Runs when Hemera opens">
+                    <i
+                      role="img"
+                      // Focusable so the keyboard reaches its tooltip as the pointer does.
+                      tabIndex={0}
+                      aria-label={`${one.name} runs when Hemera opens`}
+                      className={AT_OPEN}
+                    >
+                      <IconBolt size="sm" aria-hidden="true" />
+                    </i>
+                  </Tooltip>
                 )}
                 {onUpdate === undefined ? null : (
                   <IconButton

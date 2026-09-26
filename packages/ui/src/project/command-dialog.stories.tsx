@@ -33,6 +33,7 @@ const DEV: CommandLine = {
   portlessName: null,
   folderBase: './sources/front',
   folder: '',
+  runAtOpen: false,
 }
 
 const TAKEN = 'a command named "check" is already declared'
@@ -179,6 +180,7 @@ export const Add: Story = {
         portlessName: null,
         folderBase: './sources/api',
         folder: 'packages/core',
+        runAtOpen: false,
       })
     })
   },
@@ -422,6 +424,26 @@ export const PortlessInLine: Story = {
   },
 }
 
+/**
+ * Run when Hemera opens (#114): the box under the lines, off by default, says where it runs, and
+ * ticking it is what is written.
+ */
+export const RunAtOpen: Story = {
+  play: async ({ args }) => {
+    args.onSubmit.mockClear()
+    const inside = dialog()
+    const atOpen = inside.getByRole('checkbox', { name: /^Run when Hemera opens/ })
+    await expect(atOpen).not.toBeChecked()
+    await expect(inside.getByText('Hemera runs it each time it opens, in main.')).toBeVisible()
+    await userEvent.click(atOpen)
+    await expect(atOpen).toBeChecked()
+    await userEvent.click(inside.getByRole('button', { name: 'Save' }))
+    await waitFor(() => {
+      expect(args.onSubmit).toHaveBeenCalledWith({ ...DEV, runAtOpen: true })
+    })
+  },
+}
+
 /** The engine refused: the dialog stays open on what was typed, and says why. */
 export const Refused: Story = {
   args: { command: null, refusal: TAKEN },
@@ -460,6 +482,8 @@ export const Keyboard: Story = {
     await userEvent.tab()
     await expect(inside.getByRole('textbox', { name: 'Line' })).toHaveFocus()
     await userEvent.keyboard('pnpm dev')
+    await userEvent.tab()
+    await expect(inside.getByRole('checkbox', { name: /^Run when Hemera opens/ })).toHaveFocus()
     await userEvent.tab()
     await expect(inside.getByLabelText('Runs from')).toHaveFocus()
     await userEvent.tab()

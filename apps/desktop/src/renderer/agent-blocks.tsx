@@ -3,6 +3,7 @@ import type { CommandRun as Run, SessionEntry, SpecType } from '@hemera/ipc'
 import {
   AgentReport,
   AgentText,
+  AnswerChoice,
   CommandProposal,
   CommandRun,
   CreateSpecProposal,
@@ -11,7 +12,6 @@ import {
   HemeraToolCall,
   type HemeraToolStatus,
   MessageGroup,
-  MessageText,
   MissionBrief,
   PermissionRequest,
   SpecQuestion,
@@ -560,16 +560,19 @@ export function drawEntry(entry: SessionEntry, context: AgentContext): ReactNode
     )
   }
 
-  // The answer is the reader's: drawn as their own message where they gave it, the option they
-  // chose or the words they typed (issue #149), and the question above folds to itself.
+  // The answer is the reader's, on their side where they gave it (issue #149), and drawn as the
+  // choice they made rather than as words they typed; only what they typed under `Other` is a
+  // message (issue #165). The question above folds to itself.
   if (entry.kind === 'spec_answer') {
-    const said = answerOf(entry, context.spec.thread)
-    if (said === null) return null
+    const view = answerOf(entry, context.spec.thread)
+    if (view === null) return null
     return (
-      <MessageGroup
-        author="user"
-        name="You"
-        lines={[{ id: entry.id, body: <MessageText body={said} /> }]}
+      <AnswerChoice
+        {...view}
+        at={new Date(entry.createdAt).toLocaleTimeString('en-GB', {
+          hour: '2-digit',
+          minute: '2-digit',
+        })}
       />
     )
   }

@@ -364,6 +364,8 @@ export interface CommandEdit {
   readonly portless: boolean
   /** The name Portless serves it under, null for the Project's name as a slug (D8-10). */
   readonly portlessName: string | null
+  /** Whether Hemera runs it in the Project's `main` each time it opens (#114). */
+  readonly runAtOpen: boolean
 }
 
 export interface CommandsService {
@@ -1062,6 +1064,7 @@ export const commandsLayer = Layer.effect(
                     scope: commandScope(row.scope),
                     portless: row.portless === 1,
                     portlessName: row.portlessName,
+                    runAtOpen: row.runAtOpen === 1,
                     createdAt: Date.parse(row.createdAt),
                   })),
                 catch: (cause) => new DatabaseError({ doing: 'reading the commands', cause }),
@@ -1080,6 +1083,7 @@ export const commandsLayer = Layer.effect(
               const lines = { lineWindows: edit.lineWindows, lineLinux: edit.lineLinux }
               const portless = edit.portless ? 1 : 0
               const portlessName = edit.portlessName
+              const runAtOpen = edit.runAtOpen ? 1 : 0
               const at = new Date().toISOString()
               const existing = yield* transaction
                 .select()
@@ -1111,6 +1115,7 @@ export const commandsLayer = Layer.effect(
                     scope: runsIn,
                     portless,
                     portlessName,
+                    runAtOpen,
                     createdAt,
                     updatedAt: at,
                   })
@@ -1126,6 +1131,7 @@ export const commandsLayer = Layer.effect(
                     scope: runsIn,
                     portless,
                     portlessName,
+                    runAtOpen,
                     updatedAt: at,
                   })
                   .where(eq(projectCommands.id, id))
@@ -1143,6 +1149,7 @@ export const commandsLayer = Layer.effect(
                   scope: runsIn,
                   portless: edit.portless,
                   portlessName,
+                  runAtOpen: edit.runAtOpen,
                   createdAt: Date.parse(createdAt),
                 } satisfies Command,
                 events: [

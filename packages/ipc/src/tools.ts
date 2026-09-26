@@ -49,6 +49,8 @@ export const commandSchema = z.object({
   portless: z.boolean(),
   /** The name Portless serves it under, null for the Project's name as a slug (D8-10). */
   portlessName: z.string().nullable(),
+  /** Whether Hemera runs it in the Project's `main` each time it opens (#114). */
+  runAtOpen: z.boolean(),
   createdAt: z.number(),
 })
 

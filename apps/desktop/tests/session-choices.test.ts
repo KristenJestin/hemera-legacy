@@ -23,6 +23,7 @@ import {
 } from '#engine/agents/fake.ts'
 import { IDLE_AFTER_MS } from '#engine/agents/pool.ts'
 import { AgentRuntime } from '#engine/agents/runtime.ts'
+import { Journal, journalLayer } from '#engine/journal.ts'
 import { Specs } from '#engine/specs/specs.ts'
 import { application, aSession, machine, pause } from './application.ts'
 
@@ -396,6 +397,33 @@ describe('A start puts the model back before the effort', () => {
 
         expect(second.answers.choices).toEqual(['model=sonnet', 'effort=high'])
         expect(yield* standing(session.id)).toEqual({ model: 'sonnet', effort: 'high' })
+      }),
+    )
+  })
+})
+
+describe("The Journal keeps what the agent stands on as the engine's", () => {
+  test('a mode the agent moved to is a line of Hemera’s, not the user’s', async () => {
+    const agent = withModes({
+      steps: [{ does: 'switches', option: 'mode', value: 'default', as: 'mode' }],
+    })
+
+    await application(dataFolder)(agent)(
+      Effect.gen(function* () {
+        const runtime = yield* AgentRuntime
+        const session = yield* aSession(workingDirectory)
+        yield* runtime.setOption(session.id, 'mode', 'plan')
+        yield* runtime.prompt(session.id, 'approve the plan')
+
+        const page = yield* Effect.gen(function* () {
+          return yield* (yield* Journal).read({ projectId: session.projectId })
+        }).pipe(Effect.provide(journalLayer))
+        const recorded = page.entries.filter((entry) => entry.type === 'session.choice_recorded')
+        expect(recorded.map((entry) => [entry.payload.value, entry.author])).toEqual([
+          ['default', 'hemera'],
+          ['plan', 'hemera'],
+          ['default', 'hemera'],
+        ])
       }),
     )
   })

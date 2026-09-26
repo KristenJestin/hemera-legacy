@@ -10,17 +10,27 @@ import {
   slide,
   useTransition,
 } from '../../motion.ts'
-import type { PhaseName } from '../../spec/model.ts'
+import { PHASE_TITLES, type PhaseName } from '../../spec/model.ts'
+import { OVER_MARK, SlidingMark } from '../../components/sliding-mark/sliding-mark.tsx'
+import { Tooltip } from '../../components/tooltip/tooltip.tsx'
 import { ANCHORED, FoldedPhases, RimLayer } from './column-variants.tsx'
 import {
+  BODY_FIT,
   Probe,
   RIM,
+  type ScrollSpy,
   type Size,
   type SpecSession,
   useScrollSpy,
   useSize,
 } from './frames-fixtures.tsx'
-import type { VariantProps } from './variants.tsx'
+import {
+  FoldToggle,
+  PROGRESS_WORDS,
+  PhaseGlyph,
+  type VariantProps,
+  phaseProgress,
+} from './variants.tsx'
 
 /**
  * Three ways between V4b's two states (issue #159, second verdict of 26 September: V4b kept, its
@@ -34,7 +44,8 @@ import type { VariantProps } from './variants.tsx'
  * - C · Reveal · the panel, laid at its size, is uncovered from the folded frame's rectangle to
  *   its whole, the glyphs travelling to their segments while it is.
  * - Drawer 1 · Swap and Drawer 2 · Carried · two takes on B (third verdict: B leaned to, not there
- *   yet): the folded frame trading places with the panel, or carried in on the panel's edge.
+ *   yet): the folded frame trading places with the panel, one after the other; or the folded
+ *   frame kept as it is and docked as the panel's navigation, the panel sliding in beside it.
  *
  * Every one pushes the chat on the same spring as its own movement, and every one answers a
  * reader asking for less movement by landing at once.
@@ -316,15 +327,22 @@ export function TransitionMorph({
 // ---------------------------------------------------------------------------------------------
 // B · Drawer and C · Reveal: the panel laid at its size
 
-/** Where B and C are: folded, on the way in, open, on the way out. */
-type PanelStage = 'folded' | 'opening' | 'open' | 'closing'
+/**
+ * Where B and C are: folded, on the way in, open, on the way out — and, for Drawer 1, the folded
+ * frame retreating before the panel comes in.
+ */
+type PanelStage = 'folded' | 'retreating' | 'opening' | 'open' | 'closing'
 
 /**
  * What B and C share: the stage, the probes, and the room the panel takes in the row — an empty
  * box whose width goes from the folded frame's to the panel's on `morph`, so that the chat is
  * pushed on the same spring the panel moves on and never covered.
  */
-function usePanel({ session, defaultFolded, signal, onSettle }: TransitionProps) {
+function usePanel(
+  { session, defaultFolded, signal, onSettle }: TransitionProps,
+  /** Whether the folded frame leaves first, the panel coming in only once it has. */
+  retreat = false,
+) {
   const [stage, setStage] = useState<PanelStage>(defaultFolded ? 'folded' : 'open')
   const [foldedProbe, folded] = useSize()
   const [openProbe, opened] = useSize()
@@ -348,7 +366,7 @@ function usePanel({ session, defaultFolded, signal, onSettle }: TransitionProps)
     if (stage !== 'folded') return
     byHand.current = true
     setPressed(phase)
-    setStage(still ? 'open' : 'opening')
+    setStage(still ? 'open' : retreat ? 'retreating' : 'opening')
   }
 
   function fold(): void {
@@ -549,16 +567,17 @@ export function TransitionReveal(props: TransitionProps): ReactNode {
 
 /**
  * Drawer 1 · Swap. B's drawer, the folded frame no longer fading in place over it: the two trade
- * places as one gesture. Unfolding, the folded frame leaves by the window's edge, sliding out and
- * fading on the `crossfade` beat, while the panel slides in from that edge on `morph` above it —
- * the frame is gone before the panel's edge reaches where it stood. Folding, the panel slides out
- * the same way, and once it has gone the folded frame comes back in from the edge on `arrival`,
- * something putting itself in place. They are never both in sight at the same spot.
+ * places one after the other, each way the mirror of the other. Unfolding, the folded frame first
+ * retreats by the window's edge — sliding out and fading on the `crossfade` beat — and only once
+ * it has gone does the panel slide in from that edge on `morph`, the chat pushed on the same
+ * spring. Folding, the panel slides out the same way, and once it has gone the folded frame comes
+ * back in from the edge on `arrival`, something putting itself in place. They are never in sight
+ * together.
  */
 export function DrawerSwap(props: TransitionProps): ReactNode {
   const { session } = props
   const family = 'v4b-swap'
-  const panel = usePanel(props)
+  const panel = usePanel(props, true)
   const leave = useTransition(crossfade)
   const come = useTransition(arrival)
   const away = slide('stage').enter
@@ -567,7 +586,6 @@ export function DrawerSwap(props: TransitionProps): ReactNode {
     <div ref={panel.dock} className="relative flex h-full shrink-0 items-center py-3 pr-3">
       {panel.probes}
       {panel.spacer}
-      {/* Drawn first: the panel slides in over the place it is leaving. */}
       <motion.div
         inert={!present}
         aria-hidden={present ? undefined : 'true'}
@@ -575,6 +593,9 @@ export function DrawerSwap(props: TransitionProps): ReactNode {
         initial={false}
         animate={present ? { x: 0, ...CROSSFADE.to } : { x: away, ...CROSSFADE.from }}
         transition={present ? come : leave}
+        onAnimationComplete={() => {
+          if (panel.stage === 'retreating') panel.setStage('opening')
+        }}
       >
         <div className={`${RIM} pointer-events-auto`}>
           <FoldedPhases session={session} family={family} travels={false} onOpen={panel.unfold} />
@@ -608,24 +629,91 @@ export function DrawerSwap(props: TransitionProps): ReactNode {
 // ---------------------------------------------------------------------------------------------
 // Drawer 2 · Carried
 
-/**
- * Where Drawer 2 is, in order both ways: folded; the panel riding in with the folded frame on its
- * left edge; the folded frame handing its glyphs to the segments; open. And back: the glyphs
- * leaving the segments for the frame on the panel's edge; the panel riding out with it.
- */
-type CarriedStage = 'folded' | 'riding-in' | 'merging' | 'open' | 'detaching' | 'riding-out'
+/** The mark of the phase being read, behind its glyph in the docked frame. */
+const DOCK_MARK = 'absolute -inset-1 rounded-lg bg-accent ring-1 ring-border'
 
 /**
- * Drawer 2 · Carried. The folded frame is fixed to the panel's left edge, outside it, and stands
- * where it does because the panel is out of the window: the two are one piece sliding on `morph`.
+ * The folded frame, which is also the open panel's navigation: the same frame in both states,
+ * never remounted, so that nothing about it changes but what its controls say. Folded, its
+ * chevron unfolds and a glyph unfolds onto its phase; open, its chevron folds, a mark sits behind
+ * the glyph of the phase being read, and a glyph scrolls the column to its phase.
+ */
+function DockedPhases({
+  session,
+  open,
+  spy,
+  onUnfold,
+  onFold,
+}: {
+  session: SpecSession
+  open: boolean
+  spy: ScrollSpy<PhaseName>
+  onUnfold: (phase: PhaseName | null) => void
+  onFold: () => void
+}): ReactNode {
+  const fade = useTransition(crossfade)
+  return (
+    <div className={RIM}>
+      <FoldToggle folded={!open} onToggle={() => (open ? onFold() : onUnfold(null))} />
+      <div className={BODY_FIT}>
+        <nav
+          aria-label={`Phases of ${session.spec.key}`}
+          className="relative isolate flex flex-col gap-1 p-1"
+        >
+          {session.groups.map((group) => {
+            const progress = phaseProgress(group, session.spec.focus)
+            const title = PHASE_TITLES[group.phase]
+            const reading = open && spy.active === group.phase
+            return (
+              <Tooltip
+                key={group.phase}
+                label={`${title} · ${PROGRESS_WORDS[progress]}`}
+                side="left"
+              >
+                <button
+                  type="button"
+                  data-mark={group.phase}
+                  aria-current={reading ? 'location' : undefined}
+                  aria-label={
+                    open
+                      ? `Go to the ${title} phase, ${PROGRESS_WORDS[progress]}`
+                      : `${title} phase, ${PROGRESS_WORDS[progress]}, open it`
+                  }
+                  className="relative flex rounded-md outline-none focus-ring"
+                  onClick={() =>
+                    open ? spy.goTo(group.phase, fade === instant) : onUnfold(group.phase)
+                  }
+                >
+                  <span className={`flex ${OVER_MARK}`}>
+                    <PhaseGlyph phase={group.phase} progress={progress} travels={false} />
+                  </span>
+                </button>
+              </Tooltip>
+            )
+          })}
+          <motion.div initial={false} animate={{ opacity: open ? 1 : 0 }} transition={fade}>
+            <SlidingMark target={open ? spy.active : null} shape={DOCK_MARK} />
+          </motion.div>
+        </nav>
+      </div>
+    </div>
+  )
+}
+
+/** Where Drawer 2 is: folded, the panel sliding in, open, the panel sliding out. */
+type DockStage = 'folded' | 'opening' | 'open' | 'closing'
+
+/**
+ * Drawer 2 · Carried. The folded frame stays what it is and becomes the panel's navigation: open,
+ * it stands docked against the panel's left side, the three phases tinted by progress, the phase
+ * being read marked, a phase pressed scrolling the column to it — so the panel drops the phases
+ * of its rim and is V4b's head, column and `Mark ready` alone.
  *
- * Unfolding, the piece slides in from the edge — the panel entering, the folded frame riding on
- * its left side — and the chat is pushed by exactly the frame's left edge, so nothing covers it.
- * Once the panel has landed, the frame hands over: its glyphs travel into their segments, its
- * unfold and body fade away, and the room it took beside the panel closes (`morph`, the push's
- * spring). Folding, the reverse: the room opens again beside the panel, the glyphs leave the
- * segments for the frame, which comes back around them on the panel's edge, and the piece slides
- * out until the panel has gone — leaving the frame where the folded state stands.
+ * Unfolding, only the panel moves: it slides in from the window's edge on the frame's right, on
+ * `morph`, and the room it takes in the row opens on the same spring, so the frame — the panel's
+ * left neighbour — is carried along the row with it, never covered and never redrawn; the chat
+ * is pushed the same. Folding, the panel slides back out by the edge and the room closes behind
+ * it, leaving the frame as it was.
  */
 export function DrawerCarried({
   session,
@@ -634,48 +722,39 @@ export function DrawerCarried({
   onSettle,
 }: TransitionProps): ReactNode {
   const family = 'v4b-carried'
-  const [stage, setStage] = useState<CarriedStage>(defaultFolded ? 'folded' : 'open')
-  const [foldedProbe, folded] = useSize()
-  const [openProbe, opened] = useSize()
+  const [stage, setStage] = useState<DockStage>(defaultFolded ? 'folded' : 'open')
+  const [roomProbe, roomSize] = useSize()
   const answered = useTransition(morph)
   const still = answered === instant
   const dock = useRef<HTMLDivElement>(null)
   const byHand = useRef(false)
   const [pressed, setPressed] = useState<PhaseName | null>(null)
   const spy = useScrollSpy(session.groups.map((group) => group.phase))
-  const away = slide('stage').enter
-  const inside = stage !== 'folded' && stage !== 'riding-out'
-  // The room in the row: the frame alone, the panel with the frame beside it, the panel alone.
-  const beside = stage === 'riding-in' || stage === 'detaching'
-  const lone = stage === 'folded' || stage === 'riding-out'
-  const room =
-    opened === null || folded === null
-      ? null
-      : lone
-        ? folded.width
-        : beside
-          ? opened.width + folded.width
-          : opened.width
-  const roomTransition = usePlaced(room === null ? null : { width: room, height: 0 }, answered)
+  const shown = stage === 'opening' || stage === 'open'
+  const mounted = stage !== 'folded'
+  const room = roomSize === null ? null : { width: shown ? roomSize.width : 0 }
+  const placedAt = room === null ? null : { width: room.width, height: 0 }
+  const roomTransition = usePlaced(placedAt, answered)
   useLanding(stage === 'folded' || stage === 'open' ? stage : null, byHand, dock, onSettle)
-  const shown = stage !== 'folded'
   useEffect(() => {
-    if (!shown || pressed === null) return
+    if (!mounted || pressed === null) return
     spy.goTo(pressed, true)
     setPressed(null)
-  }, [shown, pressed])
+  }, [mounted, pressed])
 
+  // The same control unfolds and folds, and only the room moves: either can be asked for on
+  // the way, and the room turns round from where it is.
   function unfold(phase: PhaseName | null): void {
-    if (stage !== 'folded') return
+    if (stage !== 'folded' && stage !== 'closing') return
     byHand.current = true
     setPressed(phase)
-    setStage(still ? 'open' : 'riding-in')
+    setStage(still ? 'open' : 'opening')
   }
 
   function fold(): void {
-    if (stage !== 'open') return
+    if (stage !== 'open' && stage !== 'opening') return
     byHand.current = true
-    setStage(still ? 'folded' : 'detaching')
+    setStage(still ? 'folded' : 'closing')
   }
 
   useSignal(signal, () => {
@@ -683,56 +762,29 @@ export function DrawerCarried({
     else fold()
   })
 
-  // The frame as it is carried, against the panel's left edge: whole while it rides, fading away
-  // as it hands its glyphs over, coming back around them as it takes them again.
-  let carried: ReactNode = null
-  if (stage === 'merging') {
-    carried = <Dress session={session} family={family} on={false} rim />
-  } else if (stage === 'detaching') {
-    carried = (
-      <>
-        <Dress session={session} family={family} on rim />
-        <div className={`${ANCHORED} relative z-1`}>
-          <FoldedPhases session={session} family={family} travels chrome={false} onOpen={NOTHING} />
-        </div>
-      </>
-    )
-  } else if (stage !== 'open') {
-    carried = (
-      <div className={`${RIM} pointer-events-auto relative z-1`}>
-        <FoldedPhases session={session} family={family} travels onOpen={unfold} />
-      </div>
-    )
-  }
-
   return (
     <div ref={dock} className="relative flex h-full shrink-0 items-center py-3 pr-3">
-      <Probes session={session} family={family} open={openProbe} folded={foldedProbe} />
+      {/* The room the panel takes beside the frame: its width and the gap before it. */}
+      <Probe measure={roomProbe} className="invisible absolute box-content w-mission-panel pl-2" />
+      <div className="shrink-0">
+        <DockedPhases session={session} open={shown} spy={spy} onUnfold={unfold} onFold={fold} />
+      </div>
+      {/* The panel is held on the room's left edge, so it slides in as the room opens, the
+          window's edge cutting it; the frame on the room's left is carried the same. */}
       <motion.div
-        aria-hidden="true"
-        className="shrink-0"
+        className="relative shrink-0 self-stretch overflow-hidden"
         initial={false}
-        animate={room === null ? {} : { width: room }}
+        animate={room ?? {}}
         transition={roomTransition}
         onAnimationComplete={() => {
-          if (stage === 'merging') setStage('open')
-          if (stage === 'detaching') setStage('riding-out')
-        }}
-      />
-      <motion.div
-        className="pointer-events-none absolute inset-y-3 right-3 w-mission-panel"
-        initial={false}
-        animate={{ x: inside ? 0 : away }}
-        transition={answered}
-        onAnimationComplete={() => {
-          if (stage === 'riding-in') setStage('merging')
-          if (stage === 'riding-out') setStage('folded')
+          if (stage === 'opening') setStage('open')
+          if (stage === 'closing') setStage('folded')
         }}
       >
-        {shown && (
+        {mounted && (
           <section
             aria-label={`Spec ${session.spec.key}`}
-            className="pointer-events-auto relative flex size-full flex-col rounded-xl bg-surface-rim"
+            className="absolute inset-y-0 left-2 flex w-mission-panel flex-col rounded-xl bg-surface-rim"
           >
             <div className="flex size-full flex-col border border-transparent p-1.5">
               <RimLayer
@@ -743,21 +795,11 @@ export function DrawerCarried({
                 still={still}
                 fold={fold}
                 shown
-                glyphsAway={stage === 'riding-in' || stage === 'riding-out'}
+                segments={false}
               />
             </div>
             <RimLine />
           </section>
-        )}
-        {carried !== null && (
-          // Only the folded state's own frame is reached: on its way, it is being carried.
-          <div
-            inert={stage !== 'folded'}
-            aria-hidden={stage === 'folded' ? undefined : 'true'}
-            className="pointer-events-none absolute inset-y-0 right-full flex items-center"
-          >
-            {carried}
-          </div>
         )}
       </motion.div>
     </div>

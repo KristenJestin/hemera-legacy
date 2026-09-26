@@ -40,7 +40,8 @@ import { V1Grow, V2Beside, V3Cards } from './variants.tsx'
  *   of 26 September: V4b chosen, its fold refused): the folded frame morphing into the rim, the
  *   panel sliding in as a drawer, the panel uncovered by a clip. Each with a replay.
  * - V4b · Drawer 1 · Swap and Drawer 2 · Carried · two takes on the drawer (third verdict: B
- *   leaned to): the folded frame trading places with the panel, or riding in on its left edge.
+ *   leaned to): the folded frame and the panel trading places one after the other, or the
+ *   folded frame docked as the panel's navigation while the panel slides in beside it.
  *
  * Every chevron folds and unfolds, as many times as wanted; the `reducedMotion` control shows
  * the same thing with the journey taken out.

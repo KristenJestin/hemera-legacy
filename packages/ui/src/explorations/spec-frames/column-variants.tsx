@@ -490,6 +490,7 @@ export function RimLayer({
   shown,
   onHidden,
   glyphsAway = false,
+  segments = true,
 }: OpenLayer & {
   /**
    * Whether what is not a glyph is there, for a transition that fills the frame once it landed
@@ -500,80 +501,87 @@ export function RimLayer({
   onHidden?: (() => void) | undefined
   /** Whether the glyphs are elsewhere — carried outside the frame — their room kept empty. */
   glyphsAway?: boolean | undefined
+  /**
+   * Whether the phases stand on the rim. Without them, the phases and the fold are a frame of
+   * their own docked beside this one, and the head folds nothing.
+   */
+  segments?: boolean | undefined
 }): ReactNode {
   const fade = useTransition(crossfade)
   return (
     <>
       <Piece shown={shown} from="side" className={HEAD_BAND}>
-        <Head session={session} onFold={fold} />
+        <Head session={session} onFold={segments ? fold : undefined} />
       </Piece>
-      <nav
-        aria-label={`Phases of ${session.spec.key}`}
-        className="relative isolate z-1 grid shrink-0 grid-cols-3 gap-1 pb-1.5"
-      >
-        {session.groups.map((group) => {
-          const progress = phaseProgress(group, session.spec.focus)
-          const title = PHASE_TITLES[group.phase]
-          const reading = spy.active === group.phase
-          return (
-            <button
-              key={group.phase}
-              type="button"
-              data-mark={group.phase}
-              aria-current={reading ? 'location' : undefined}
-              aria-label={`Go to the ${title} phase, ${PROGRESS_WORDS[progress]}`}
-              className="relative flex min-w-0 flex-col gap-1.5 rounded-lg p-1.5 text-left outline-none focus-ring"
-              onClick={() => spy.goTo(group.phase, still)}
-            >
-              <span className={cn('flex min-w-0 items-center gap-2', OVER_MARK)}>
-                <span className={glyphsAway ? 'invisible flex' : 'flex'}>
-                  <PhaseGlyph
-                    phase={group.phase}
-                    progress={progress}
-                    travels={!glyphsAway}
-                    family={family}
-                  />
-                </span>
-                <Piece shown={shown} from="side" order={1} className="flex min-w-0 flex-col">
-                  <span
-                    className={cn(
-                      'truncate text-sm font-medium',
-                      reading ? 'text-foreground' : 'text-muted-foreground',
-                    )}
-                  >
-                    {title}
-                  </span>
-                  <span className="truncate text-xs text-muted-foreground">
-                    {writtenOf(group)} of {group.rows.length} written
-                  </span>
-                </Piece>
-              </span>
-              <Piece
-                shown={shown}
-                stays
-                className={cn('block h-0.5 overflow-hidden rounded-full bg-border', OVER_MARK)}
+      {segments && (
+        <nav
+          aria-label={`Phases of ${session.spec.key}`}
+          className="relative isolate z-1 grid shrink-0 grid-cols-3 gap-1 pb-1.5"
+        >
+          {session.groups.map((group) => {
+            const progress = phaseProgress(group, session.spec.focus)
+            const title = PHASE_TITLES[group.phase]
+            const reading = spy.active === group.phase
+            return (
+              <button
+                key={group.phase}
+                type="button"
+                data-mark={group.phase}
+                aria-current={reading ? 'location' : undefined}
+                aria-label={`Go to the ${title} phase, ${PROGRESS_WORDS[progress]}`}
+                className="relative flex min-w-0 flex-col gap-1.5 rounded-lg p-1.5 text-left outline-none focus-ring"
+                onClick={() => spy.goTo(group.phase, still)}
               >
-                {/* Where the reader is, followed as they scroll: set, never travelled. */}
-                <motion.span
-                  className="block h-full origin-left rounded-full bg-muted-foreground"
-                  initial={false}
-                  animate={{ scaleX: spy.read[group.phase] }}
-                  transition={instant}
-                />
-              </Piece>
-            </button>
-          )
-        })}
-        {shown === undefined ? (
-          <SlidingMark target={settled ? spy.active : null} shape={RIM_MARK} />
-        ) : (
-          // Faded as a whole with what it marks. An opacity and not a filter: a filter would hold
-          // the mark's box, which is placed against the list.
-          <motion.div initial={false} animate={{ opacity: shown ? 1 : 0 }} transition={fade}>
+                <span className={cn('flex min-w-0 items-center gap-2', OVER_MARK)}>
+                  <span className={glyphsAway ? 'invisible flex' : 'flex'}>
+                    <PhaseGlyph
+                      phase={group.phase}
+                      progress={progress}
+                      travels={!glyphsAway}
+                      family={family}
+                    />
+                  </span>
+                  <Piece shown={shown} from="side" order={1} className="flex min-w-0 flex-col">
+                    <span
+                      className={cn(
+                        'truncate text-sm font-medium',
+                        reading ? 'text-foreground' : 'text-muted-foreground',
+                      )}
+                    >
+                      {title}
+                    </span>
+                    <span className="truncate text-xs text-muted-foreground">
+                      {writtenOf(group)} of {group.rows.length} written
+                    </span>
+                  </Piece>
+                </span>
+                <Piece
+                  shown={shown}
+                  stays
+                  className={cn('block h-0.5 overflow-hidden rounded-full bg-border', OVER_MARK)}
+                >
+                  {/* Where the reader is, followed as they scroll: set, never travelled. */}
+                  <motion.span
+                    className="block h-full origin-left rounded-full bg-muted-foreground"
+                    initial={false}
+                    animate={{ scaleX: spy.read[group.phase] }}
+                    transition={instant}
+                  />
+                </Piece>
+              </button>
+            )
+          })}
+          {shown === undefined ? (
             <SlidingMark target={settled ? spy.active : null} shape={RIM_MARK} />
-          </motion.div>
-        )}
-      </nav>
+          ) : (
+            // Faded as a whole with what it marks. An opacity and not a filter: a filter would hold
+            // the mark's box, which is placed against the list.
+            <motion.div initial={false} animate={{ opacity: shown ? 1 : 0 }} transition={fade}>
+              <SlidingMark target={settled ? spy.active : null} shape={RIM_MARK} />
+            </motion.div>
+          )}
+        </nav>
+      )}
       {shown === undefined ? (
         <div className={BODY_COLUMN}>
           <SpecColumn session={session} spy={spy} first={2} />

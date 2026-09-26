@@ -24,6 +24,7 @@ export function commandLineOf(command: Command): CommandLine {
     scope: command.scope,
     portless: command.portless,
     portlessName: command.portlessName,
+    runAtOpen: command.runAtOpen,
     folderBase: command.folderBase,
     folder: command.folder?.replace(/^\.\//, '') ?? '',
   }
@@ -42,6 +43,7 @@ export type CommandWrite = Pick<
   | 'scope'
   | 'portless'
   | 'portlessName'
+  | 'runAtOpen'
 >
 
 /** A row as the engine writes it: the base itself is no folder at all, and is null. */
@@ -57,6 +59,7 @@ export function commandWriteOf(line: CommandLine): CommandWrite {
     scope: line.scope,
     portless: line.portless,
     portlessName: line.portlessName,
+    runAtOpen: line.runAtOpen,
   }
 }
 

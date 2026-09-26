@@ -81,6 +81,8 @@ export interface Command {
    * (recette 2), so one name reads the same run everywhere.
    */
   readonly portlessName: string | null
+  /** Whether Hemera runs it in the Project's `main` each time it opens (#114). */
+  readonly runAtOpen: boolean
   readonly createdAt: number
 }
 

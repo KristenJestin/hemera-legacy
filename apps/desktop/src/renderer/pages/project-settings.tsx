@@ -33,7 +33,6 @@ import {
   commandLineOf,
   commandWriteOf,
   folderBasePath,
-  folderUnderBase,
 } from '../project-lines.ts'
 import {
   branchOfName,
@@ -336,7 +335,8 @@ export function ProjectSettingsPage({
   onBrowse: (start?: string) => Promise<string | null>
   /**
    * The entries of one folder under an absolute base, of the kinds asked for: what a command's
-   * Folder offers as it is typed, from where it runs and never above it (#109).
+   * Folder offers as it is typed, from where it runs and never above it (#109), and what a
+   * preparation step's path offers from its base in `main` (#104).
    */
   onListEntries: (
     base: string,
@@ -412,17 +412,6 @@ export function ProjectSettingsPage({
    */
   workspacesRefusal: string | null
 }): ReactNode {
-  /**
-   * The picker of the system, opened where a step works and answered from there (recette 2): what
-   * comes back is a path relative to that base — the folder a command runs in, the file or the
-   * folder a copy takes, the folder a step's own line runs in — and a folder outside that base
-   * climbs out, which the field refuses.
-   */
-  const browseUnderBase = async (base: string | null): Promise<string | null> => {
-    const chosen = await onBrowse(folderBasePath(project.mainPath, base))
-    return chosen === null ? null : folderUnderBase(project.mainPath, base, chosen)
-  }
-
   return (
     // Wide enough for the navigation beside a section (recette 1).
     <div className="mx-auto w-full max-w-5xl px-6 py-10">
@@ -469,7 +458,9 @@ export function ProjectSettingsPage({
             steps={recipeLinesOf(recipe)}
             repositories={repositories.map((one) => one.path)}
             commands={recipeCommandsOf(commands)}
-            onBrowse={browseUnderBase}
+            onList={async ({ base, relative, kinds }) =>
+              await onListEntries(folderBasePath(project.mainPath, base), relative, kinds)
+            }
             onAdd={async (step) => await onAddRecipeStep(recipeAddOf(step))}
             onUpdate={async (id, step) => await onUpdateRecipeStep(id, recipeAddOf(step))}
             onRemove={onRemoveRecipeStep}

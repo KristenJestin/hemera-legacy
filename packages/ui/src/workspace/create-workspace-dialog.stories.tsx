@@ -164,6 +164,7 @@ const meta = {
   args: {
     open: true,
     root: '/home/someone/.local/share/hemera/workspaces/atlas',
+    temporary: false,
     onBrowse: fn(async () => await Promise.resolve('/home/someone/trees')),
     defaultName: 'login-form',
     repositories: [API, FRONT],
@@ -175,6 +176,10 @@ const meta = {
   argTypes: {
     open: { control: 'boolean', description: 'Whether the dialog is on screen.' },
     root: { control: 'text', description: 'Where the dedicated Workspaces of the Project live.' },
+    temporary: {
+      control: 'boolean',
+      description: 'Whether that folder is under the system’s temporary directory.',
+    },
     onBrowse: { control: false, description: 'Asks the system for a folder.' },
     defaultName: {
       control: 'text',
@@ -630,4 +635,27 @@ async function theFolderIsChosenForThisWorkspaceAlone({ args }: Context) {
 /** The folder changed for this Workspace, picked with Browse then typed. */
 export const FolderChosen: Story = {
   play: theFolderIsChosenForThisWorkspaceAlone,
+}
+
+// Scenario "A default folder under the temporary directory is said so" (#136).
+async function aTemporaryDefaultFolderIsSaidSo() {
+  const dialog = within(document.body).getByRole('dialog')
+  const inside = within(dialog)
+  await expect(
+    inside.getByText(/This folder is temporary: it may be cleared on restart/),
+  ).toBeVisible()
+  // Another folder chosen is the user's own choice: the notice is about the default alone.
+  const folder = inside.getByRole('textbox', { name: 'Workspaces folder' })
+  await userEvent.clear(folder)
+  await userEvent.type(folder, '/srv/trees')
+  await expect(inside.queryByText(/This folder is temporary/)).toBeNull()
+  await userEvent.clear(folder)
+  await userEvent.type(folder, '/tmp/hemera-trial/workspaces/atlas')
+  await expect(inside.getByText(/This folder is temporary/)).toBeVisible()
+}
+
+/** The Project's folder of Workspaces is under the system's temporary directory. */
+export const TemporaryFolder: Story = {
+  args: { root: '/tmp/hemera-trial/workspaces/atlas', temporary: true },
+  play: aTemporaryDefaultFolderIsSaidSo,
 }

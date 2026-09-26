@@ -89,7 +89,6 @@ const meta = {
   parameters: { layout: 'padded' },
   args: {
     title: 'CSV invoice export',
-    projectName: 'Atlas',
     editing: false,
     archiveDisabled: false,
     onRename: fn(),
@@ -99,7 +98,6 @@ const meta = {
   },
   argTypes: {
     title: { control: 'text', description: 'What the Session is called.' },
-    projectName: { control: 'text', description: 'The Project it belongs to.' },
     editing: { control: 'boolean', description: 'Whether the title is being typed right now.' },
     archiveDisabled: {
       control: 'boolean',
@@ -122,18 +120,17 @@ type Story = StoryObj<typeof meta>
 /**
  * A Session with a name, a Project, and the menu that holds what can be done to it.
  *
- * The head is one line (review of #40, defect 4): the title, the Project it lives in, and the
- * `…` at the end of the same line. The Project's name and nothing after it (issue #149): the
- * mission shows in the panel beside the thread, and the agent in the composer. The title is itself the control that opens the field, because
+ * The head is one line (review of #40, defect 4): the title and the `…` at the end of the same
+ * line. Not even the Project's name (issue #159): the tab above says it, and the mission shows in
+ * the panel beside the thread. The title is itself the control that opens the field, because
  * the hand that wants the name changed is already on the words.
  */
 export const Named: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     expect(canvas.getByRole('heading', { level: 1 })).toHaveTextContent('CSV invoice export')
-    // The Project's name alone: no date, no count, no mission, no agent after it.
-    expect(canvas.getByText('Atlas', { selector: 'p' })).toBeInTheDocument()
-    expect(canvas.queryByText(/Atlas ·/)).toBeNull()
+    // Nothing beside the title: the Project is the tab's to say.
+    expect(canvas.queryByText('Atlas')).toBeNull()
     expect(canvas.getByRole('button', { name: 'CSV invoice export' })).toBeInTheDocument()
     expect(canvas.getByRole('button', { name: 'Commands for CSV invoice export' })).toBeEnabled()
     // Nothing is being typed, so there is no field: the title is a heading until it is not.
@@ -152,10 +149,10 @@ export const ReadAndTyped: Story = {
   parameters: { layout: 'padded', controls: { disable: true } },
   render: () => (
     <div className="flex w-full flex-col gap-8">
-      <Harness title="CSV invoice export" projectName="Atlas" onRename={fn()} onArchive={fn()} />
+      <Harness title="CSV invoice export" onRename={fn()} onArchive={fn()} />
       <Harness
         title="CSV invoice export"
-        projectName="Atlas"
+
         editing
         onRename={fn()}
         onArchive={fn()}
@@ -204,7 +201,7 @@ export const NewNamedAndArchived: Story = {
       <div className="flex flex-col gap-6">
         <Harness
           title="Untitled"
-          projectName="Atlas"
+
           editing
           archiveDisabled
           onRename={fn()}
@@ -212,7 +209,7 @@ export const NewNamedAndArchived: Story = {
         />
         <SessionEmpty />
       </div>
-      <Harness title="CSV invoice export" projectName="Atlas" onRename={fn()} onArchive={fn()} />
+      <Harness title="CSV invoice export" onRename={fn()} onArchive={fn()} />
       <ArchivedSessions sessions={ARCHIVED_SESSIONS} onRestore={RESTORED} />
     </div>
   ),

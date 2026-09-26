@@ -9,7 +9,7 @@ import {
 } from 'react'
 
 import { Tooltip } from '../components/tooltip/tooltip.tsx'
-import { IconCheck, IconCircleHalf2, type IconProps } from '../icons.ts'
+import { IconCircleCheck, IconCircleDashed, IconCircleHalf2, type IconProps } from '../icons.ts'
 
 /**
  * The rail of a mission panel: what the mission is made of, one quiet row each, grouped under
@@ -20,15 +20,16 @@ import { IconCheck, IconCircleHalf2, type IconProps } from '../icons.ts'
  * a count, and the one thing that needs attention about it, if anything does; and it draws them
  * the way the maintainer decided for the Spec (lot 19, the rail's states; issue #135): every row
  * says its own state, in the row, without being opened. A written one is plain, its name in the
- * foreground text; an empty one is quiet, its name muted and `empty` in its accessible name. The
- * one the agent is working on is tinted in the primary, the tint breathing; one to review is
+ * foreground text; an empty one is quiet, its name muted. The one the agent is working on is tinted in the primary, the tint breathing; one to review is
  * tinted in the warning colour. One edited by the reader wears nothing more: the part itself says
- * who wrote it. Each says its state in a sentence in its tooltip, and to a screen reader: an
- * empty one in its name, the others as its accessible description.
+ * who wrote it. Each says its state in a sentence in its tooltip, and to a screen reader as its
+ * accessible description.
  *
- * How far along a row is shows at its end, after its count, without a dot (issue #150): a check
- * when it is done, a circle half hatched when it is started, and nothing when it is empty — its
- * muted name says that. The mark is the glyph's only; its words are the row's sentence.
+ * How far along a row is, when its caller says it, is the row's glyph (issues #150, #159): one
+ * family of circles in place of the item's own icon — a dashed circle when nothing is written, a
+ * half circle when it is started, a circle with a check when it is done. The headers keep their
+ * own icons. The mark is the glyph's only; its words are the row's sentence, and the word `empty`
+ * is said nowhere.
  *
  * What is on the stage says so with a plain selected surface, and nothing else. A group opens on
  * its header, which reads as the header of a section and not as one more row: its name in the
@@ -40,11 +41,13 @@ import { IconCheck, IconCircleHalf2, type IconProps } from '../icons.ts'
  *
  * One stop of the tab order, and the arrows walk it: up and down, Home and End, Enter opens.
  *
- * Folded, the rail is the band the panel folds to beside the chat, and it keeps the hierarchy:
- * each group a block, its glyph in a tinted square, the smaller glyphs of its items right under
- * it and set in, and a gap and a hairline before the next group. The tints of the rows land on
- * the squares of the items; the names leave the eye and stay the accessible name and the
- * tooltip, beside the state; what is on the stage wears a thin rule left of its square.
+ * Folded, the rail is the band the panel folds to beside the chat: the groups' icons in a column,
+ * each in its square, and no item under them (issue #159: a column of circles read as nothing).
+ * How far each group is shows on its square, quietly: a dashed outline when none of its items is
+ * begun, the muted tint when it is started, the success tint when every item is done; the warning
+ * tint when it is to review, and the breathing primary one while the agent writes one of its
+ * items. The names leave the eye and stay the accessible name and the tooltip, beside how far the
+ * group is; what is on the stage wears a thin rule left of its square.
  */
 
 /** What needs attention about an item, which the row says with a tint, a fainter name or a sentence. */
@@ -104,7 +107,7 @@ const TINTS: Partial<Record<RailAttention, string>> = {
   review: 'bg-warning/15',
 }
 
-/** The name of an empty item: quiet, the muted text, where a written one is the foreground. */
+/** The name of an item not begun: quiet, the muted text, where a written one is the foreground. */
 const EMPTY = 'text-muted-foreground'
 
 /** The name of a written item, whatever else it says: plain. */
@@ -146,23 +149,15 @@ const ROWS = 'flex flex-col pl-3'
 
 const LIST_FOLDED = 'flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto px-1 py-2'
 
-/** A group folded: a block, a hairline and a gap above it but the first. */
-const GROUP_FOLDED =
-  'flex flex-col items-start gap-0.5 border-t border-border pt-3 first:border-t-0 first:pt-0'
-
-/** The items of a group folded: stacked tight, and set in under the group's square. */
-const ROWS_FOLDED = 'flex flex-col gap-0.5 pl-2'
+/** A group folded: its square alone, in the column of the band. */
+const GROUP_FOLDED = 'flex flex-col items-center'
 
 /**
  * A row: its glyph and its words, and no surface but the tint of what needs attention and, on
- * the stage, the selected one. Folded, the glyph stands alone in a small square, which is what
- * the tint fills.
+ * the stage, the selected one.
  */
 const ROW =
   'relative isolate flex h-control-sm w-full items-center gap-2 rounded-sm px-2 text-left text-sm outline-none focus-ring hover:text-foreground'
-
-const ROW_FOLDED =
-  'relative isolate flex size-6 items-center justify-center rounded-md outline-none focus-ring hover:text-foreground'
 
 /**
  * A group's header: its glyph and name in the small type of a label — smaller, heavier, a little
@@ -171,13 +166,36 @@ const ROW_FOLDED =
 const HEADING =
   'group/head relative isolate flex h-6 w-full items-center gap-1.5 rounded-sm px-2 text-left text-xs font-medium tracking-wide whitespace-nowrap text-muted-foreground outline-none focus-ring'
 
-/** A group folded: its glyph in a tinted square, a step larger than the glyphs of its items. */
+/** A group folded: its glyph in a square, which says how far the group is. */
 const HEADING_FOLDED =
-  'relative isolate flex size-control-sm items-center justify-center rounded-md bg-muted-foreground/15 text-muted-foreground outline-none focus-ring hover:text-foreground'
-
-/** The same square when the group is to review: the warning tint instead. */
-const HEADING_FOLDED_REVIEW =
   'relative isolate flex size-control-sm items-center justify-center rounded-md text-muted-foreground outline-none focus-ring hover:text-foreground'
+
+/**
+ * How far a group is, on its folded square: a dashed outline when nothing is begun, the muted
+ * tint when started, the success tint when done. A group to review, or one of whose items the
+ * agent is writing, wears that tint instead.
+ */
+const GROUP_PROGRESS: Record<RailProgress, string> = {
+  empty: 'border border-dashed border-border',
+  started: 'bg-muted-foreground/15',
+  done: 'bg-success/15 text-success-muted-foreground',
+}
+
+/** How far a group is, said in the words of its folded tooltip. */
+const GROUP_PROGRESS_WORDS: Record<RailProgress, string> = {
+  empty: 'Not started',
+  started: 'Started',
+  done: 'Done',
+}
+
+/** How far a group is: done when every item is, not started when none is begun, started else. */
+function groupProgressOf(items: readonly MissionRailItem[]): RailProgress | undefined {
+  const known = items.flatMap((item) => (item.progress === undefined ? [] : [item.progress]))
+  if (known.length === 0) return undefined
+  if (known.every((one) => one === 'done')) return 'done'
+  if (known.every((one) => one === 'empty')) return 'empty'
+  return 'started'
+}
 
 /** What is on the stage, unfolded: a plain selected surface, a row or a group's header. */
 const SELECTED = 'bg-accent'
@@ -203,28 +221,27 @@ const LABEL = 'min-w-0 flex-1 truncate'
 
 const COUNT = 'text-xs text-muted-foreground tabular-nums'
 
-/** The mark at a row's end: a check in the success tone for done, the muted half for started. */
-const DONE = 'flex shrink-0 text-success-muted-foreground'
+/** The circle of each step of how far along an item is, and its colour. */
+const PROGRESS_GLYPHS: Record<RailProgress, { icon: RailIcon; tone: string }> = {
+  empty: { icon: IconCircleDashed, tone: 'text-muted-foreground' },
+  started: { icon: IconCircleHalf2, tone: 'text-muted-foreground' },
+  done: { icon: IconCircleCheck, tone: 'text-success-muted-foreground' },
+}
 
-const STARTED = 'flex shrink-0 text-muted-foreground'
-
-/** The mark of how far along a row is, at its end; an empty row wears none. */
-function ProgressMark({ progress }: { progress: RailProgress | undefined }): ReactNode {
-  if (progress === 'done') {
-    return (
-      <span aria-hidden="true" data-progress="done" className={DONE}>
-        <IconCheck size="sm" />
-      </span>
-    )
-  }
-  if (progress === 'started') {
-    return (
-      <span aria-hidden="true" data-progress="started" className={STARTED}>
-        <IconCircleHalf2 size="sm" />
-      </span>
-    )
-  }
-  return null
+/** An item's glyph: the circle of how far along it is, or its own icon when that is not said. */
+function ItemGlyph({ item }: { item: MissionRailItem }): ReactNode {
+  if (item.progress === undefined) return <Glyph icon={item.icon} />
+  const { icon: Icon, tone } = PROGRESS_GLYPHS[item.progress]
+  return (
+    <span
+      aria-hidden="true"
+      data-icon={Icon.displayName}
+      data-progress={item.progress}
+      className={cn('flex shrink-0', tone)}
+    >
+      <Icon size="sm" />
+    </span>
+  )
 }
 
 export interface MissionRailProps {
@@ -287,6 +304,18 @@ export function MissionRail({
           const whole = 'group' in current && current.group === group.id
           const review = group.attention === 'review'
           const headingSaid = `${said}-group-${group.id}`
+          // Folded, the group stands for its items: it says how far they are, whether the agent
+          // is writing one of them, and wears the rule when one of them is on the stage.
+          const progress = groupProgressOf(group.items)
+          const writing = group.items.some((item) => item.attention === 'writing')
+          const holds = group.items.some((item) => 'item' in current && current.item === item.id)
+          const foldedTip = [
+            group.label,
+            review ? group.description : undefined,
+            progress === undefined ? undefined : GROUP_PROGRESS_WORDS[progress],
+          ]
+            .filter((one) => one !== undefined)
+            .join(' · ')
           return (
             <div
               key={group.id}
@@ -294,25 +323,33 @@ export function MissionRail({
               aria-label={group.label}
               className={folded ? GROUP_FOLDED : GROUP}
             >
-              <Tooltip label={group.tooltip ?? group.label} side={side}>
+              <Tooltip label={folded ? foldedTip : (group.tooltip ?? group.label)} side={side}>
                 <button
                   type="button"
                   data-row
                   data-heading
                   // One stop of the tab order: what is on the stage. The arrows do the rest.
-                  tabIndex={whole ? 0 : -1}
+                  tabIndex={whole || (folded && holds) ? 0 : -1}
                   aria-current={whole ? 'true' : undefined}
                   aria-label={group.name ?? group.label}
                   aria-describedby={group.description === undefined ? undefined : headingSaid}
+                  data-progress={folded ? progress : undefined}
                   className={cn(
-                    folded ? (review ? HEADING_FOLDED_REVIEW : HEADING_FOLDED) : HEADING,
-                    whole && (folded ? RULE_FOLDED : HEADING_SELECTED),
+                    folded ? HEADING_FOLDED : HEADING,
+                    folded &&
+                      !review &&
+                      !writing &&
+                      progress !== undefined &&
+                      GROUP_PROGRESS[progress],
+                    whole && !folded && HEADING_SELECTED,
+                    folded && (whole || holds) && RULE_FOLDED,
                   )}
                   onClick={() => onSelectGroup(group.id)}
                   onPointerEnter={() => setPointed(group.id)}
                   onPointerLeave={() => setPointed(null)}
                 >
                   {review && <Tint attention="review" folded={folded} />}
+                  {folded && writing && !review && <Tint attention="writing" folded />}
                   <Glyph icon={group.icon} size={folded ? 'md' : 'sm'} />
                   {!folded && (
                     <>
@@ -333,63 +370,48 @@ export function MissionRail({
                   {group.description}
                 </span>
               )}
-              <ul className={folded ? ROWS_FOLDED : ROWS}>
-                {group.items.map((item) => {
-                  const on = 'item' in current && current.item === item.id
-                  const rowSaid = `${said}-item-${item.id}`
-                  const empty = item.attention === 'empty'
-                  const counted =
-                    item.count === undefined ? item.label : `${item.label}, ${item.count}`
-                  // An empty item says so in its name, which is what a screen reader reads first;
-                  // its sentence would only say it twice.
-                  const name = empty ? `${counted}, empty` : counted
-                  const described = item.description !== undefined && !empty
-                  const tip =
-                    item.description === undefined
-                      ? item.label
-                      : folded
-                        ? `${item.label} · ${item.description}`
-                        : item.description
-                  return (
-                    <li key={item.id} className="flex">
-                      <Tooltip label={tip} side={side}>
-                        <button
-                          type="button"
-                          data-row
-                          data-attention={item.attention}
-                          tabIndex={on ? 0 : -1}
-                          aria-current={on ? 'true' : undefined}
-                          aria-label={name}
-                          aria-describedby={described ? rowSaid : undefined}
-                          className={cn(
-                            folded ? ROW_FOLDED : ROW,
-                            empty ? EMPTY : WRITTEN,
-                            on && (folded ? RULE_FOLDED : SELECTED),
-                          )}
-                          onClick={() => onSelect(item.id)}
-                        >
-                          <Tint attention={item.attention} folded={folded} />
-                          <Glyph icon={item.icon} />
-                          {!folded && (
-                            <>
-                              <span className={LABEL}>{item.label}</span>
-                              {item.count !== undefined && (
-                                <span className={COUNT}>{item.count}</span>
-                              )}
-                              <ProgressMark progress={item.progress} />
-                            </>
-                          )}
-                        </button>
-                      </Tooltip>
-                      {described && (
-                        <span id={rowSaid} hidden>
-                          {item.description}
-                        </span>
-                      )}
-                    </li>
-                  )
-                })}
-              </ul>
+              {!folded && (
+                <ul className={ROWS}>
+                  {group.items.map((item) => {
+                    const on = 'item' in current && current.item === item.id
+                    const rowSaid = `${said}-item-${item.id}`
+                    const empty = item.attention === 'empty'
+                    const name =
+                      item.count === undefined ? item.label : `${item.label}, ${item.count}`
+                    const described = item.description !== undefined
+                    const tip = item.description ?? item.label
+                    return (
+                      <li key={item.id} className="flex">
+                        <Tooltip label={tip} side={side}>
+                          <button
+                            type="button"
+                            data-row
+                            data-attention={item.attention}
+                            tabIndex={on ? 0 : -1}
+                            aria-current={on ? 'true' : undefined}
+                            aria-label={name}
+                            aria-describedby={described ? rowSaid : undefined}
+                            className={cn(ROW, empty ? EMPTY : WRITTEN, on && SELECTED)}
+                            onClick={() => onSelect(item.id)}
+                          >
+                            <Tint attention={item.attention} folded={false} />
+                            <ItemGlyph item={item} />
+                            <span className={LABEL}>{item.label}</span>
+                            {item.count !== undefined && (
+                              <span className={COUNT}>{item.count}</span>
+                            )}
+                          </button>
+                        </Tooltip>
+                        {described && (
+                          <span id={rowSaid} hidden>
+                            {item.description}
+                          </span>
+                        )}
+                      </li>
+                    )
+                  })}
+                </ul>
+              )}
             </div>
           )
         })}

@@ -112,8 +112,9 @@ function panelWidth(canvasElement: HTMLElement): number {
 const BAND = 48
 
 /**
- * Folded, as a Session opens it: a band of glyphs beside the chat, each phase a block over the
- * glyphs of its parts, and nothing at their foot. No head and no stage: the chat has the width.
+ * Folded, as a Session opens it: a band beside the chat, the phases' glyphs in a column and no
+ * part under them (issue #159), and nothing at their foot. No head and no stage: the chat has the
+ * width.
  */
 export const Folded: Story = {
   args: { defaultFolded: true },
@@ -121,7 +122,7 @@ export const Folded: Story = {
     const canvas = within(canvasElement)
     await expect(panelWidth(canvasElement)).toBe(BAND)
     const band = canvas.getByRole('navigation', { name: 'Parts of ATL-7' })
-    await expect(within(band).getByRole('button', { name: 'Plan' })).toBeVisible()
+    await expect(within(band).queryByRole('button', { name: 'Plan' })).toBeNull()
     await expect(
       within(band).getByRole('button', { name: 'Plan phase, open, show all its parts' }),
     ).toBeVisible()
@@ -203,12 +204,12 @@ export const Maintenance: Story = {
   },
 }
 
-/** A glyph of the band pressed: the panel unfolds, and the stage shows that part. */
+/** A phase of the band pressed: the panel unfolds, and the stage shows every part of it. */
 export const GlyphChosen: Story = {
   args: { defaultFolded: true },
   play: async ({ canvasElement, args }) => {
     const canvas = within(canvasElement)
-    await userEvent.click(canvas.getByRole('button', { name: /^Scope/ }))
+    await userEvent.click(canvas.getByRole('button', { name: /^Shape phase/ }))
     await expect(args.onFoldChange).toHaveBeenCalledWith(false)
     const stage = await canvas.findByRole('region', { name: 'Stage of ATL-7' })
     await expect(within(stage).getByRole('heading', { name: /^Scope/ })).toBeVisible()
@@ -252,10 +253,12 @@ export const HandFoldWins: Story = {
     await expect(canvas.getByRole('button', { name: 'Unfold the Spec' })).toHaveFocus()
     await waitFor(() => expect(canvas.queryByRole('region', { name: 'Stage of ATL-7' })).toBeNull())
     await userEvent.click(canvas.getByRole('button', { name: 'Let the agent write the tasks' }))
-    // The agent is writing, and the band says so; the panel waits for the hand.
-    await expect(canvas.getByRole('button', { name: 'Tasks, 0' })).toHaveAccessibleDescription(
-      'The agent is writing this',
-    )
+    // The agent is writing, and the band says so on the phase's square; the panel waits for the hand.
+    await expect(
+      canvas
+        .getByRole('button', { name: /^Decompose phase/ })
+        .querySelector('[data-tint="writing"]'),
+    ).not.toBeNull()
     await expect(args.onFoldChange).toHaveBeenCalledTimes(1)
     await expect(canvas.queryByRole('region', { name: 'Stage of ATL-7' })).toBeNull()
     await userEvent.click(canvas.getByRole('button', { name: 'Unfold the Spec' }))
@@ -453,7 +456,7 @@ export const MarkReadyRefused: Story = {
     await expect(foot.getByRole('alert')).toHaveTextContent(
       /^ATL-7 is not ready yet. Still to do: .*the credit-note question/,
     )
-    await expect(canvas.getByText('draft')).toBeVisible()
+    await expect(canvas.getByRole('img', { name: 'Draft' })).toBeVisible()
     await expect(markReadyOf(canvasElement)).toBeVisible()
   },
 }
@@ -519,7 +522,9 @@ export const DraftConfirmed: Story = {
     await expect(isPrimary(mark)).toBe(true)
     await userEvent.click(mark)
     await expect(args.onMarkReady).toHaveBeenCalledTimes(1)
-    await waitFor(() => expect(within(canvasElement).getByText('ready')).toBeVisible())
+    await waitFor(() =>
+      expect(within(canvasElement).getByRole('img', { name: 'Ready' })).toBeVisible(),
+    )
   },
 }
 

@@ -222,13 +222,7 @@ function Chat({ title, thread }: { title: string; thread: ScrollerEntry[] }): Re
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col">
       <div className="flex w-full flex-col px-6 pt-6 pb-4">
-        <SessionHeader
-          title={title}
-          projectName="Atlas"
-          onRename={fn()}
-          onStartEditing={fn()}
-          onArchive={fn()}
-        />
+        <SessionHeader title={title} onRename={fn()} onStartEditing={fn()} onArchive={fn()} />
       </div>
       <MessageScroller className="flex-1" label="The thread of this Session" entries={thread} />
       <div className="flex w-full flex-col px-6 pb-4">

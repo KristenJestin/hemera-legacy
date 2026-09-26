@@ -6,7 +6,8 @@ import { Card, CardRow } from '../components/card/card.tsx'
 import { Dialog } from '../components/dialog/dialog.tsx'
 import { Input } from '../components/field/field.tsx'
 import { Select } from '../components/select/select.tsx'
-import { relativePathSchema } from '../form/schemas.ts'
+import { type PathEntry, PathInput, type PathListing } from '../components/suggest/path-input.tsx'
+import { stepPathSchema, underBaseSchema } from '../form/schemas.ts'
 import {
   IconArrowDown,
   IconArrowUp,
@@ -33,9 +34,11 @@ import {
  *
  * A copy or a link works from a base — the Workspace root, or one of the Project's repositories,
  * named by the last segment of its path — and a path relative to that base. Two repositories are
- * two steps: a step works in one place. A path that is absolute or climbs out of its base is
- * refused here, before anybody is asked; whether the source exists in `main` is the engine's to
- * check, and its answer is shown in the dialog, which stays open on what was typed.
+ * two steps: a step works in one place. The path is typed, and offered one level at a time as it
+ * is typed — files and folders — from the step's base in `main` and never above it (#104): `..` is
+ * not offered, and a path that is absolute or climbs out of its base is refused with its reason,
+ * before anybody is asked. Whether the source exists in `main` is the engine's to check, and its
+ * answer is shown in the dialog, which stays open on what was typed.
  *
  * The list is only a list: a step is added and edited in the same dialog, opened empty by
  * **Add step** and filled by a row's pencil.
@@ -99,11 +102,11 @@ export interface PreparationEditorProps {
   /** Moves a step one place up or down the recipe. */
   onMove: (id: string, direction: 'up' | 'down') => void
   /**
-   * The system's picker, asked for a base and answered with a path relative to it, or null when
-   * nothing was picked. A copy's and a link's path is picked among what `main` holds under its
-   * base, and a step's own line picks the folder it runs in (recette 2).
+   * Lists one folder of `main` under a step's base — null for the Workspace root — which is what a
+   * copy's and a link's Path offers as it is typed, and what a step's own line offers for the
+   * folder it runs in (#104). Typed without suggestions without it.
    */
-  onBrowse?: ((base: string | null) => Promise<string | null>) | undefined
+  onList?: ((listing: PathListing) => Promise<readonly PathEntry[]>) | undefined
   /** Where the card sits; never how it looks. */
   className?: string | undefined
 }
@@ -159,8 +162,13 @@ const LINE_MODE_ITEMS: { value: 'same' | 'system'; label: string }[] = [
   { value: 'system', label: 'A line per system' },
 ]
 
-/** The one thing said about a path that is not relative, whatever is wrong with it. */
-const NOT_RELATIVE = 'A path is relative to its base.'
+/** A copy or a link takes a file or a folder; a step's own line runs in a folder. */
+const FILES_AND_FOLDERS = ['folder', 'file'] as const
+
+const FOLDERS = ['folder'] as const
+
+/** No listing handed over: the field is typed without suggestions. */
+const NOTHING_LISTED = async (): Promise<readonly PathEntry[]> => await Promise.resolve([])
 
 /** The last segment of a path, which is the name a repository goes by. */
 function lastSegmentOf(path: string): string {
@@ -271,13 +279,12 @@ export function PreparationEditor({
   onUpdate,
   onRemove,
   onMove,
-  onBrowse,
+  onList = NOTHING_LISTED,
   className,
 }: PreparationEditorProps): ReactNode {
   /** What the dialog holds; kept while it closes, so it does not empty on its way out. */
   const [editing, setEditing] = useState<Editing>(EMPTY)
   const [open, setOpen] = useState(false)
-  const [pathError, setPathError] = useState<string | undefined>(undefined)
   const [refusal, setRefusal] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
 
@@ -286,20 +293,30 @@ export function PreparationEditor({
   /** A run of a line of its own, which the Project's catalogue never holds (recette 2). */
   const own = running && editing.commandId === OWN
   const carried = editing.linesPerSystem ? editing.lineLinux : editing.line
-  const ready = running
-    ? editing.commandId !== undefined && (!own || carried.trim() !== '')
-    : editing.path.trim() !== ''
+  /**
+   * Why the path typed is refused, said while it is typed (#104): a copy's or a link's path is
+   * under its base, and so is the folder a step's own line runs in, which may be left empty. A run
+   * of a command has no path at all.
+   */
+  const pathRead = (running ? underBaseSchema : stepPathSchema).safeParse(editing.path)
+  const pathError =
+    (running && !own) || editing.path.trim() === '' || pathRead.success
+      ? undefined
+      : (pathRead.error.issues[0]?.message ?? 'That path cannot be used.')
+  const ready =
+    pathError === undefined &&
+    (running
+      ? editing.commandId !== undefined && (!own || carried.trim() !== '')
+      : editing.path.trim() !== '')
 
   const show = (next: Editing) => {
     setEditing(next)
-    setPathError(undefined)
     setRefusal(null)
     setOpen(true)
   }
 
   const change = (next: Partial<Editing>) => {
     setEditing({ ...editing, ...next })
-    setPathError(undefined)
     setRefusal(null)
   }
 
@@ -316,31 +333,6 @@ export function PreparationEditor({
       line: !perSystem && editing.line.trim() === '' ? editing.lineLinux : editing.line,
     })
   }
-
-  /**
-   * The system's picker, asked for the base the step works in and answered with a path relative to
-   * it. What it answers outside that base climbs out, which is a path no step may take: the field
-   * refuses it there and then, in the words of the schema the engine shares (recette 2).
-   */
-  const browse = (base: string) => {
-    if (onBrowse === undefined) return
-    void onBrowse(base === ROOT ? null : base).then((chosen) => {
-      if (chosen === null) return
-      const read = relativePathSchema.safeParse(chosen)
-      if (!read.success) {
-        setPathError(read.error.issues[0]?.message ?? NOT_RELATIVE)
-        return
-      }
-      change({ path: chosen })
-    })
-  }
-
-  const browseButton =
-    onBrowse === undefined ? undefined : (
-      <Button variant="ghost" size="sm" onClick={() => browse(editing.base)}>
-        Browse…
-      </Button>
-    )
 
   const save = async () => {
     let step: RecipeStepDraft
@@ -366,12 +358,6 @@ export function PreparationEditor({
             lineLinux: null,
           }
     } else {
-      // Refused here, before anybody is asked: a path that is absolute or climbs out of its
-      // base is not a place a Workspace has (D8-05).
-      if (!relativePathSchema.safeParse(editing.path).success) {
-        setPathError(NOT_RELATIVE)
-        return
-      }
       step = {
         kind: editing.kind,
         base: editing.base === ROOT ? null : editing.base,
@@ -547,14 +533,16 @@ export function PreparationEditor({
                         })),
                       ]}
                     />
-                    <Input
+                    <PathInput
                       label="Folder"
                       className={PATH_FIELD}
                       placeholder="./tools"
                       value={editing.path}
                       error={pathError}
                       onValueChange={(path) => change({ path })}
-                      action={browseButton}
+                      base={editing.base === ROOT ? null : editing.base}
+                      kinds={FOLDERS}
+                      onList={onList}
                     />
                   </div>
                 </>
@@ -571,14 +559,16 @@ export function PreparationEditor({
                   ...repositories.map((path) => ({ value: path, label: names.get(path) ?? path })),
                 ]}
               />
-              <Input
+              <PathInput
                 label="Path"
                 className={PATH_FIELD}
                 placeholder=".env"
                 value={editing.path}
                 error={pathError}
                 onValueChange={(path) => change({ path })}
-                action={browseButton}
+                base={editing.base === ROOT ? null : editing.base}
+                kinds={FILES_AND_FOLDERS}
+                onList={onList}
               />
             </div>
           )}

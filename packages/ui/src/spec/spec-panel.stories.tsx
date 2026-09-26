@@ -13,6 +13,8 @@ import {
   MID_PLAN,
   OLDER_REVISION,
   READY,
+  gate,
+  phases,
 } from './spec-fixtures.ts'
 import type { WorkspaceActionsProps } from './workspace-actions.tsx'
 
@@ -734,6 +736,25 @@ export const DraftConfirmed: Story = {
     await waitFor(() =>
       expect(within(canvasElement).getByRole('img', { name: 'Ready' })).toBeVisible(),
     )
+  },
+}
+
+/**
+ * A draft the agent attested while a phase is still open: the attestation alone does not make
+ * `Mark ready` the primary action, since the press would be refused on the rest of the gate.
+ */
+export const AttestedWithAPhaseOpen: Story = {
+  args: {
+    spec: {
+      ...GATE_FULL,
+      phases: phases('finished', 'finished', 'open'),
+      readiness: gate({ phases: 'phases · the decompose phase is open, not finished' }, [
+        { label: 'decompose', target: 'tasks' },
+      ]),
+    },
+  },
+  play: async ({ canvasElement }) => {
+    await expect(isPrimary(markReadyOf(canvasElement))).toBe(false)
   },
 }
 

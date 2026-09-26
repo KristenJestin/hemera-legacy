@@ -384,6 +384,11 @@ interface Live {
    * session opened afresh or rebuilt from the thread, which leaves the brief out (D7-09).
    */
   unbriefed: boolean
+  /**
+   * Whether the agent was put back on what the Session chose. Until it is, what it stands on is
+   * its defaults, and an option it reports moving is not recorded over the Session's choices.
+   */
+  restored: boolean
   /** Why that context had to be rebuilt, in the agent's own terms; null when it did not. */
   why: string | null
   /**
@@ -1034,6 +1039,13 @@ export const runtimeLayer = Layer.effect(
           // history, and an older reading written over a newer one is a meter that goes backwards.
           const running = live.get(sessionId)
           if (!event.replay && running !== undefined) running.window = event.window
+          return
+        }
+
+        if (event.type === 'options') {
+          // The agent moved an option by itself: the next start is put back where it moved to,
+          // not where the user last put it. A replay is the past, not where the agent stands.
+          if (!event.replay) yield* recordStanding(sessionId)
           return
         }
 
@@ -1763,6 +1775,7 @@ export const runtimeLayer = Layer.effect(
           context: null,
           provisions: [],
           unbriefed: false,
+          restored: false,
           why: null,
           window: null,
           pending: 0,
@@ -1816,17 +1829,16 @@ export const runtimeLayer = Layer.effect(
             )
           : choices
         for (const choice of put) {
-          const set = yield* Effect.result(
-            attempt('choosing an option', connection.setOption(choice.optionId, choice.value)),
-          )
           // A choice the agent will not take is not a Session that cannot start: it opens on
           // what the agent is on, and the composer shows what that is.
-          if (Result.isSuccess(set) && inherited) {
-            yield* attempt('recording a choice', sessions.recordChoice(sessionId, choice)).pipe(
-              Effect.ignore,
-            )
-          }
+          yield* attempt(
+            'choosing an option',
+            connection.setOption(choice.optionId, choice.value),
+          ).pipe(Effect.ignore)
         }
+        // What it stands on now is what the Session is recorded on, inherited choices included.
+        started.restored = true
+        yield* recordStanding(sessionId)
         return started
       })
 
@@ -2662,6 +2674,24 @@ export const runtimeLayer = Layer.effect(
         return held.connection.options()
       })
 
+    /**
+     * Records every option the Session's agent stands on now, as the agent last reported them:
+     * after it was put back on the Session's choices, and whenever it moves one by itself. The
+     * next start of its agent is put back there (issue #133).
+     */
+    const recordStanding = (sessionId: string) =>
+      Effect.gen(function* () {
+        const held = live.get(sessionId)
+        if (held === undefined || !held.restored) return
+        const standing = held.connection
+          .options()
+          .map((option) => ({ optionId: option.id, value: option.value }))
+        if (standing.length === 0) return
+        yield* attempt('recording the choices', sessions.recordChoices(sessionId, standing)).pipe(
+          Effect.ignore,
+        )
+      })
+
     const setOption = (sessionId: string, optionId: string, value: string) =>
       Effect.gen(function* () {
         const held = yield* opened(sessionId)
@@ -2670,7 +2700,7 @@ export const runtimeLayer = Layer.effect(
         // on it, which no agent does by itself (issue #133).
         yield* attempt(
           'recording a choice',
-          sessions.recordChoice(sessionId, { optionId, value }),
+          sessions.recordChoices(sessionId, [{ optionId, value }]),
         ).pipe(Effect.ignore)
       })
 

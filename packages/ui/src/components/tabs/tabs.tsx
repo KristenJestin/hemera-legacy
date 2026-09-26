@@ -21,7 +21,7 @@ const LIST = 'relative isolate flex items-center gap-1 border-b border-border'
 
 /** The selected tab is drawn over the mark; the others are crossed by it. */
 const TAB =
-  'relative inline-flex h-control-md items-center gap-1.5 rounded-t-md px-3 text-sm font-medium text-muted-foreground outline-none select-none focus-ring data-selected:z-1 data-selected:text-foreground'
+  'relative inline-flex h-control-md items-center gap-1.5 rounded-t-md px-3 text-sm font-medium text-muted-foreground outline-none select-none focus-ring data-active:z-1 data-active:text-foreground'
 
 /** What a tab says, drawn over the mark whichever tab the mark is crossing. */
 const CONTENT = 'inline-flex items-center gap-1.5'

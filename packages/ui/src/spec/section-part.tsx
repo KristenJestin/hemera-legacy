@@ -42,7 +42,7 @@ export function SectionPart({ section }: SectionPartProps): ReactNode {
  */
 function factsOf(section: SectionView): ReactNode[] {
   const yours: ReactNode[] = section.author === 'human' ? ['you'] : []
-  if (section.author === null) return section.mark === 'writing' ? ['writing…'] : ['empty']
+  if (section.author === null) return section.mark === 'writing' ? ['writing…'] : []
   if (section.copiedFrom !== undefined) {
     return [
       ...yours,

@@ -109,7 +109,7 @@ export function railOf(spec: SpecView): RailGroup[] {
  * written and current says nothing: there is nothing to do about it.
  */
 export const STATE_SENTENCES: Record<Mark, string | undefined> = {
-  empty: 'Empty',
+  empty: 'Nothing written yet',
   agent: undefined,
   human: 'Edited by you',
   stale: 'To review',

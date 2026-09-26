@@ -2386,9 +2386,12 @@ export const runtimeLayer = Layer.effect(
           mimeType: 'text/markdown',
         })),
         announce: (turnId) => lines(turnId, true),
-        taken: Effect.sync(() => {
+        taken: Effect.gen(function* () {
           // Said meanwhile, a later word stays for the next safe point.
           words.set(sessionId, (words.get(sessionId) ?? []).slice(waiting.length))
+          for (const one of waiting) {
+            yield* attempt('recording the delivery', context.handed(sessionId, 'notice', one.text))
+          }
         }),
         missed: (turnId) => lines(turnId, false),
       }
@@ -2868,6 +2871,13 @@ export const runtimeLayer = Layer.effect(
         const outcome = yield* Effect.result(held.connection.prompt(sent, provisions))
         if (Result.isSuccess(outcome)) {
           const answered = outcome.success
+          // The New Spec request the agent took with this turn is listed in the Context view.
+          for (const request of provisionsOf(intent)) {
+            yield* attempt(
+              'recording the delivery',
+              context.handed(sessionId, 'request', request.text),
+            ).pipe(Effect.ignore)
+          }
           // What is in the thread is read before the window is: the announcement travels as a
           // notification of its own, and the entry is written from it once everything the agent
           // said is held rather than racing it.

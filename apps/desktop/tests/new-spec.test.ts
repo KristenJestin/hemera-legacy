@@ -68,6 +68,11 @@ describe('A Session started with New Spec asks its agent for a Spec proposal', (
       { type: 'text', text: 'Export the invoices with HT and TTC' },
     ])
     expect(SPEC_REQUEST).toContain('`spec_propose`, kind `spec`')
+    // And the Context tab lists it, as something Hemera handed the agent on that turn.
+    const context = await opened.bridge.invoke('context.read', { sessionId: made?.id ?? '' })
+    expect(context.provided.filter((one) => one.kind === 'request')).toEqual([
+      expect.objectContaining({ path: '', reached: 'embedded_resource' }),
+    ])
 
     // The next message is a message like any other.
     expect(await say(made?.id ?? '', 'The HT first')).toBeNull()

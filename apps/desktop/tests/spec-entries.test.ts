@@ -13,6 +13,7 @@ import { describe, expect, test } from 'vite-plus/test'
 import type { SessionEntry } from '@hemera/ipc'
 import {
   answerOf,
+  answerWords,
   briefOf,
   proposalIdOf,
   proposalOf,
@@ -119,32 +120,67 @@ describe('A question is asked and answered in the chat', () => {
   })
 })
 
-describe('An answer reads as the user’s own message', () => {
-  test('an option chosen is said in the words the question offered it', () => {
+describe('A picked answer reads as a human choice, not as a typed message', () => {
+  test('an option chosen is the choice, lettered as the card lettered it, under its question', () => {
     const answer = entry(
       'spec_answer',
       JSON.stringify({ questionId: 'q-date', optionId: 'payment' }),
       'answer',
     )
-    expect(answerOf(answer, [QUESTION, answer])).toBe('The payment date')
+    expect(answerOf(answer, [QUESTION, answer])).toEqual({
+      question: 'Which date decides the month?',
+      choices: [{ letter: 'B', label: 'The payment date', recommended: undefined }],
+    })
   })
 
-  test('the words typed are said as they were typed', () => {
+  test('the recommended choice keeps its mark', () => {
+    const answer = entry(
+      'spec_answer',
+      JSON.stringify({ questionId: 'q-date', optionId: 'issue' }),
+      'answer',
+    )
+    expect(answerOf(answer, [QUESTION, answer])?.choices).toEqual([
+      { letter: 'A', label: 'The issue date', recommended: true },
+    ])
+  })
+
+  test('words typed are the Other choice, the card’s last letter, with the words as typed', () => {
     const own = entry(
       'spec_answer',
       JSON.stringify({ questionId: 'q-date', text: 'The delivery date' }),
       'own',
     )
-    expect(answerOf(own, [QUESTION, own])).toBe('The delivery date')
+    const view = answerOf(own, [QUESTION, own])
+    expect(view).toEqual({
+      question: 'Which date decides the month?',
+      choices: [{ letter: 'C', label: 'Other' }],
+      text: 'The delivery date',
+    })
+    expect(answerWords(view!)).toBe('The delivery date')
   })
 
-  test('an option the question does not hold, or an entry that does not parse, says nothing', () => {
+  test('the rail marks a choice by its label', () => {
+    const answer = entry(
+      'spec_answer',
+      JSON.stringify({ questionId: 'q-date', optionId: 'payment' }),
+      'answer',
+    )
+    expect(answerWords(answerOf(answer, [QUESTION, answer])!)).toBe('The payment date')
+  })
+
+  test('an option the question does not hold, an unknown question or an unread entry: nothing', () => {
     const unknown = entry(
       'spec_answer',
       JSON.stringify({ questionId: 'q-date', optionId: 'refund' }),
       'unknown',
     )
+    const elsewhere = entry(
+      'spec_answer',
+      JSON.stringify({ questionId: 'q-gone', text: 'Anything' }),
+      'elsewhere',
+    )
     expect(answerOf(unknown, [QUESTION, unknown])).toBe(null)
+    expect(answerOf(elsewhere, [QUESTION, elsewhere])).toBe(null)
     expect(answerOf(entry('spec_answer', '{'), [QUESTION])).toBe(null)
   })
 })

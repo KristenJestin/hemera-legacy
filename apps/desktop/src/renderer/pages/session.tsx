@@ -909,6 +909,7 @@ export function SessionPage({
             }
           }}
           root={workspacePlan.root}
+          temporary={workspacePlan.temporary}
           onBrowse={pickWorkspacesFolder}
           defaultName={workspacePlan.name}
           repositories={planLinesOf(workspacePlan, workspaceReads)}

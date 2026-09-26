@@ -18,7 +18,7 @@ import {
   writeFileSync,
 } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, parse } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vite-plus/test'
 import { Effect, Result } from 'effect'
 
@@ -34,6 +34,7 @@ import {
   CleanupRefusedError,
   CreationRefusedError,
   Workspaces,
+  isTemporary,
 } from '#engine/workspaces/workspaces.ts'
 
 import { git } from './repositories.ts'
@@ -298,6 +299,38 @@ describe('The folder of a Workspace can be chosen at its creation', () => {
     expect(seen.made.failure.message).toBe(
       `the folder ${join(main, 'trees')} is inside main (${main})`,
     )
+  })
+})
+
+// Scenario "A default folder under the temporary directory is said so" (#136).
+describe('A folder of Workspaces under the temporary directory is said to be temporary', () => {
+  it('says so of the default folder of a data folder in the temporary directory, and not of another', async () => {
+    // Out of the temporary directory, at the root of its drive; never made, only named.
+    const kept = join(parse(folder).root, 'hemera-workspaces-kept')
+    const seen = await workspaceEngine(folder)(
+      Effect.gen(function* () {
+        const projects = yield* Projects
+        const workspaces = yield* Workspaces
+        const project = yield* atlas(main, [API, FRONT])
+        const before = yield* workspaces.plan(project.id, 'HEM-7', 'login-form')
+        yield* projects.setWorkspacesRoot(project.id, project.version, kept)
+        const after = yield* workspaces.plan(project.id, 'HEM-7', 'login-form')
+        return { before, after }
+      }),
+    )
+
+    // The suite's data folder is a temporary one, like a trial run's `--data-dir` in %TEMP%.
+    expect(seen.before.temporary).toBe(true)
+    expect(seen.after.root).toBe(kept)
+    expect(seen.after.temporary).toBe(false)
+  })
+
+  it('compares a folder with the temporary directory, itself included', () => {
+    const temporary = join(parse(folder).root, 'scratch')
+    expect(isTemporary(join(temporary, 'hemera', 'workspaces'), temporary)).toBe(true)
+    expect(isTemporary(temporary, temporary)).toBe(true)
+    expect(isTemporary(join(parse(folder).root, 'scratch-kept'), temporary)).toBe(false)
+    expect(isTemporary(join(parse(folder).root, 'data'), temporary)).toBe(false)
   })
 })
 

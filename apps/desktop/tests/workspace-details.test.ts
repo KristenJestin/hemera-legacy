@@ -286,6 +286,7 @@ describe('A dedicated Workspace from the settings is made from its plan', () => 
   const plan: WorkspacePlan = {
     name: '',
     root: '/data/workspaces/atlas',
+    temporary: false,
     path: '/data/workspaces/atlas',
     branchPrefix: 'atlas',
     repositories: ['sources/api', 'docs'],

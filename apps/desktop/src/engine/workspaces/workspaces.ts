@@ -17,6 +17,7 @@
 
 import { existsSync, realpathSync, statSync } from 'node:fs'
 import { rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
 import { basename, isAbsolute, join, relative, sep } from 'node:path'
 
 import {
@@ -216,6 +217,11 @@ function readLocation(
 export interface WorkspacePlan {
   readonly name: string
   readonly root: string
+  /**
+   * Whether that folder is under the system's temporary directory, which may be emptied on a
+   * restart (#136): the dialog says so, and the user chooses another there or in the settings.
+   */
+  readonly temporary: boolean
   readonly path: string
   readonly branchPrefix: string
   /**
@@ -367,6 +373,16 @@ function resolved(path: string): string {
   } catch {
     return path
   }
+}
+
+/**
+ * Whether a folder is under the system's temporary directory (#136), which may be emptied on a
+ * restart: compared as written and as resolved, since either may be the short form of the other.
+ */
+export function isTemporary(folder: string, temporaryDirectory: string = tmpdir()): boolean {
+  return (
+    isWithin(folder, temporaryDirectory) || isWithin(resolved(folder), resolved(temporaryDirectory))
+  )
 }
 
 export const workspacesLayer = Layer.effect(
@@ -756,6 +772,7 @@ export const workspacesLayer = Layer.effect(
           return {
             name,
             root,
+            temporary: isTemporary(root),
             path: join(root, name),
             branchPrefix,
             // The locations themselves, in the Project's order: what the dialog opens with, and it

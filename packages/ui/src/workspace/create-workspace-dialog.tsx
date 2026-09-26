@@ -32,12 +32,13 @@ import type { PlanRepositoryLine, PlanRepositoryRead, WorkspaceDraft } from './m
  *
  * The folder the Workspace is made under is the Project's folder of Workspaces, and it can be
  * changed here for this Workspace alone, typed or picked with Browse: the Project's setting stays
- * the default (#136).
+ * the default (#136). A default folder under the system's temporary directory is said to be one,
+ * since a restart may empty it.
  *
  * Opened from a Spec, the name is the Spec's key and a few words of its title (#136), and the
- * branches are the Spec's. Opened from the
- * settings, there is no Spec: the name may start empty, and each branch follows the name as it is
- * typed (`branchOf`) until the user writes that branch by hand.
+ * branches are the Spec's. Opened from the settings, there is no Spec: the name may start empty,
+ * and each branch follows the name as it is typed (`branchOf`) until the user writes that branch
+ * by hand.
  */
 const FORM = 'flex flex-col gap-4'
 
@@ -46,6 +47,9 @@ const NOTE = 'text-sm text-muted-foreground'
 const FOLDER = 'min-w-0 font-mono text-sm break-all text-foreground'
 
 const REFUSAL = 'text-sm text-destructive-muted-foreground'
+
+/** What is said of a folder a restart may empty (#136): a warning, not a refusal. */
+const TEMPORARY = 'text-sm text-warning-muted-foreground'
 
 const ROWS = 'flex flex-col gap-2'
 
@@ -211,6 +215,8 @@ export interface CreateWorkspaceDialogProps {
    * change for this Workspace alone (#136).
    */
   root: string
+  /** Whether `root` is under the system's temporary directory, which a restart may empty (#136). */
+  temporary?: boolean | undefined
   /** Asks the system for a folder, from the one given, and answers null when it was dismissed. */
   onBrowse?: ((start: string) => Promise<string | null>) | undefined
   /** The name proposed: the Spec's key and a few words of its title, or empty with no Spec. */
@@ -233,6 +239,7 @@ export function CreateWorkspaceDialog({
   open,
   onOpenChange,
   root,
+  temporary = false,
   onBrowse,
   defaultName,
   repositories,
@@ -384,6 +391,13 @@ export function CreateWorkspaceDialog({
             )
           }
         />
+        {/* Said of the default only: a folder the user chose here is one they chose knowingly. */}
+        {temporary && folder.trim() === root && (
+          <p className={TEMPORARY}>
+            This folder is temporary: it may be cleared on restart. Choose another here, or set the
+            Workspaces folder in the Project settings.
+          </p>
+        )}
         {/* The folder is the Workspace's own, so it is shown once the name makes one: before
             that the line reads as the Project's folder, which is Hemera's own id for it. */}
         {name.trim() !== '' && folder.trim() !== '' && (

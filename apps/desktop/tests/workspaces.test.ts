@@ -20,7 +20,7 @@ import {
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vite-plus/test'
-import { Effect } from 'effect'
+import { Effect, Result } from 'effect'
 
 import { InvalidRepositoryPathError } from '@hemera/core'
 import { Commands } from '#engine/commands/service.ts'
@@ -232,6 +232,72 @@ describe("A Spec's Workspace is proposed its key and at most four words of its t
     expect(seen.spec.name).toBe('aaa-1-progress-bar-atomes-restent')
     expect(seen.spec.path).toBe(join(seen.spec.root, 'aaa-1-progress-bar-atomes-restent'))
     expect(seen.settings.name).toBe('spike')
+  })
+})
+
+// Scenario "The folder of a Workspace is chosen in its dialog, the Project's stays the default".
+describe('The folder of a Workspace can be chosen at its creation', () => {
+  /** The plan for `HEM-7`, created under `root` as the dialog hands it over. */
+  const createdUnder = (root: string | null) =>
+    workspaceEngine(folder)(
+      Effect.gen(function* () {
+        const workspaces = yield* Workspaces
+        const project = yield* atlas(main, [API, FRONT])
+        const plan = yield* workspaces.plan(project.id, 'HEM-7', 'login-form')
+        const reads = yield* readPlan(project.id, 'HEM-7', 'login-form', plan.repositories)
+        const made = yield* Effect.result(
+          workspaces.create(project.id, {
+            specId: 'HEM-7',
+            name: plan.name,
+            root,
+            repositories: reads
+              .filter((one) => one.included)
+              .map((one) => ({
+                relativePath: one.relativePath,
+                base: one.base ?? '',
+                branch: one.branch,
+              })),
+          }),
+        )
+        // The Project's own folder is what the next plan proposes again: the choice was this
+        // Workspace's alone.
+        const after = yield* workspaces.plan(project.id, 'HEM-7', 'login-form')
+        return { plan, made, after }
+      }),
+    )
+
+  it('makes the Workspace under the folder chosen, and leaves the Project its own', async () => {
+    const chosen = join(folder, 'elsewhere')
+    const seen = await createdUnder(chosen)
+
+    if (!Result.isSuccess(seen.made)) throw seen.made.failure
+    expect(seen.made.success.path).toBe(join(chosen, 'hem-7-login-form'))
+    expect(seen.after.root).toBe(seen.plan.root)
+  })
+
+  it('makes it under the Project’s folder when none is chosen', async () => {
+    const seen = await createdUnder(null)
+
+    if (!Result.isSuccess(seen.made)) throw seen.made.failure
+    expect(seen.made.success.path).toBe(seen.plan.path)
+  })
+
+  it('refuses a folder that is not absolute', async () => {
+    const seen = await createdUnder('workspaces')
+
+    if (!Result.isFailure(seen.made)) throw new Error('a relative folder was taken')
+    expect(seen.made.failure).toMatchObject({ check: 'folder' })
+    expect(seen.made.failure.message).toBe('the folder workspaces is not an absolute path')
+  })
+
+  it('refuses a folder inside main', async () => {
+    const seen = await createdUnder(join(main, 'trees'))
+
+    if (!Result.isFailure(seen.made)) throw new Error('a folder inside main was taken')
+    expect(seen.made.failure).toMatchObject({ check: 'folder' })
+    expect(seen.made.failure.message).toBe(
+      `the folder ${join(main, 'trees')} is inside main (${main})`,
+    )
   })
 })
 

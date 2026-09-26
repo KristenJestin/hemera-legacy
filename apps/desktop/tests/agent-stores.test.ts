@@ -884,6 +884,43 @@ describe('A running turn that hears nothing says so (#131)', () => {
   })
 })
 
+describe('Silence does not count while Hemera works for the turn (#170)', () => {
+  /** A run of a command Hemera runs for the turn, as the thread holds its entry. */
+  function aCheck(state: string, type: 'serve' | 'test' = 'test'): SessionEntry {
+    return {
+      ...reported('e3', 'command_run', 'test', state, null),
+      role: 'hemera',
+      createdAt: 2_000,
+      payload: JSON.stringify({ runId: 'run-e3', name: 'test', line: 'pnpm test', type, state }),
+    }
+  }
+
+  const said: SessionEntry = { ...entry('e1', 'user', 'Run the tests'), createdAt: 1_000 }
+  const aCall = (state: string, body = 'mcp__hemera__commands_run'): SessionEntry => ({
+    ...reported('e2', 'tool_call', body, state),
+    createdAt: 1_500,
+  })
+
+  test('a command Hemera is running for the turn is no silence of the agent', () => {
+    const quiet = agentOf('session-never-heard')
+    expect(heardSince(quiet, [said, aCall('in_progress'), aCheck('running')])).toBeNull()
+    // Once it has ended, the silence counts again, from what was written last.
+    expect(heardSince(quiet, [said, aCall('completed'), aCheck('exited')])).toBe(2_000)
+  })
+
+  test("one of Hemera's tools that has not answered is no silence of the agent", () => {
+    const quiet = agentOf('session-never-heard')
+    expect(heardSince(quiet, [said, aCall('in_progress', 'mcp__hemera__spec_write')])).toBeNull()
+    // The agent's own tool is the agent's, and its silence is counted.
+    expect(heardSince(quiet, [said, aCall('in_progress', 'Bash')])).toBe(1_500)
+  })
+
+  test('an app left running is not what the turn waits on', () => {
+    const quiet = agentOf('session-never-heard')
+    expect(heardSince(quiet, [said, aCall('completed'), aCheck('running', 'serve')])).toBe(2_000)
+  })
+})
+
 describe('The trace of a Session is asked about by the Session, never by a path (#131)', () => {
   test('the trace is asked about and opened by its Session, never by a path', async () => {
     answers.set('trace.exists', true)

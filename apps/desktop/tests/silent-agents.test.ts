@@ -17,7 +17,7 @@ import type { AnyMessage } from '@agentclientprotocol/sdk'
 import type { SessionEntry } from '@hemera/core'
 
 import { fakeAgent } from '#engine/agents/fake.ts'
-import { AgentRuntime, REPORT_GAP, UNANSWERED_AFTER } from '#engine/agents/runtime.ts'
+import { AgentRuntime, REPORT_GAP, UNANSWERED_AFTER, requestNotes } from '#engine/agents/runtime.ts'
 import {
   AcpTraces,
   TRACE_LIMIT,
@@ -26,6 +26,7 @@ import {
   requestBook,
 } from '#engine/agents/trace.ts'
 import { Preferences } from '#engine/preferences.ts'
+import type { ThreadWrite } from '#engine/sessions.ts'
 import { traceFileOf } from '#main/diagnostic.ts'
 import {
   ASKED,
@@ -323,6 +324,87 @@ describe('A request Hemera must answer is never left silent', () => {
         expect(rows[0]?.body).toBe('The agent asked for something Hemera cannot answer')
         expect(payloadOf(rows[0]).method).toBe('_fake/unknown')
       }),
+    )
+  })
+
+  test('a request nobody can see is said, and the note closes once it is answered (#170)', async () => {
+    // No request Hemera receives today stays open without a block to draw it — a permission is
+    // drawn, and the SDK refuses the rest at once — so the wire is played here as it would cross
+    // a connection whose answer is late, through the very notes the runtime keeps.
+    const written: ThreadWrite[] = []
+    const notes = requestNotes({
+      drawn: () => false,
+      turnId: () => 'turn-1',
+      write: (entry) => Effect.sync(() => void written.push(entry)),
+    })
+    const book = requestBook()
+
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const asked = book.heard('in', {
+          jsonrpc: '2.0',
+          id: 9,
+          method: 'elicitation/create',
+          params: {},
+        })
+        const waiting = yield* Effect.forkChild(notes.asked(book, asked))
+        yield* TestClock.adjust(UNANSWERED_AFTER)
+        yield* Fiber.join(waiting)
+        expect(written).toEqual([
+          {
+            role: 'hemera',
+            kind: 'note',
+            body: 'The agent is waiting for an answer Hemera cannot show',
+            payload: JSON.stringify({ reason: 'unanswered_request', method: 'elicitation/create' }),
+            correlationId: 'request:9',
+            turnId: 'turn-1',
+          },
+        ])
+
+        // The answer goes out: the same note, by its correlation, now says it was answered.
+        yield* notes.answered(book.heard('out', { jsonrpc: '2.0', id: 9, result: {} }))
+        expect(written[1]).toEqual({
+          role: 'hemera',
+          kind: 'note',
+          body: 'Hemera answered what the agent was waiting for',
+          payload: JSON.stringify({ reason: 'answered_request', method: 'elicitation/create' }),
+          correlationId: 'request:9',
+          turnId: 'turn-1',
+        })
+      }).pipe(Effect.provide(TestClock.layer())),
+    )
+  })
+
+  test('a request answered in time, or drawn in the thread, is never said', async () => {
+    const written: ThreadWrite[] = []
+    const drawn = (heard: { method: string }) => heard.method === 'session/request_permission'
+    const notes = requestNotes({
+      drawn,
+      turnId: () => null,
+      write: (entry) => Effect.sync(() => void written.push(entry)),
+    })
+    const book = requestBook()
+
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const quick = book.heard('in', { jsonrpc: '2.0', id: 1, method: '_x/y', params: {} })
+        const permission = book.heard('in', {
+          jsonrpc: '2.0',
+          id: 2,
+          method: 'session/request_permission',
+          params: {},
+        })
+        const both = yield* Effect.forkChild(
+          Effect.all([notes.asked(book, quick), notes.asked(book, permission)], {
+            concurrency: 'unbounded',
+          }),
+        )
+        const answer = book.heard('out', { jsonrpc: '2.0', id: 1, result: {} })
+        yield* notes.answered(answer)
+        yield* TestClock.adjust(UNANSWERED_AFTER)
+        yield* Fiber.join(both)
+        expect(written).toEqual([])
+      }).pipe(Effect.provide(TestClock.layer())),
     )
   })
 

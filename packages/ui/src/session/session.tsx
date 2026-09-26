@@ -37,10 +37,13 @@ import { LABEL_DELAY, LABEL_TRAVEL, instant, morph, useTransition } from '../mot
 /** What the head of a Session says, and what it offers to do with it. */
 const HEAD = 'flex items-center gap-3'
 
-/** The title and where the Session lives, on one line, taking the room the menu leaves. */
+/**
+ * The title, taking the room the menu leaves. The Project it lives in is not said beside it: the
+ * tab above already says it (issue #159).
+ */
 const COLUMN = 'flex min-w-0 flex-1 items-baseline gap-3'
 
-/** The title, which truncates rather than pushing the directory and the menu out of the line. */
+/** The title, which truncates rather than pushing the menu out of the line. */
 const TITLE = 'min-w-0 truncate text-2xl font-medium'
 
 /**
@@ -51,13 +54,6 @@ const TITLE = 'min-w-0 truncate text-2xl font-medium'
  * same thing for whoever reads the menu before touching anything.
  */
 const TITLE_ACTION = 'focus-ring -mx-1 min-w-0 truncate rounded-md px-1 text-left hover:bg-accent'
-
-/**
- * Where the Session lives: the Project it belongs to, and nothing else (issue #149). Its date,
- * its count, its mission and its agent made a line to read on the way to the thread: the mission
- * shows in the panel beside it and the agent in the composer, and the rest is not worth the line.
- */
-const SUB = 'min-w-0 truncate text-sm text-muted-foreground'
 
 /** The commands of the head, at the end of the line rather than under it. */
 const ACTIONS = 'ml-auto flex shrink-0 items-center gap-2'
@@ -89,8 +85,6 @@ export interface SessionHeaderProps {
    * design system decides on.
    */
   title: string
-  /** The Project it belongs to, which is where it will be found again, and all the line says. */
-  projectName: string
   /**
    * What the title becomes, once it is saved.
    *
@@ -132,8 +126,7 @@ export interface SessionHeaderProps {
 /**
  * The head of a Session: what it is called, where it lives, and what can be done to it.
  *
- * One line (review of #40, defect 4): the title, the Project it lives in, and the commands at
- * the end of the same line. The title is the page's first line and the only editable one, so it
+ * One line (review of #40, defect 4): the title and the commands at the end of the same line. The title is the page's first line and the only editable one, so it
  * is edited where it stands — a dialog over the page to change a line of it would hide the thread
  * being named — and the title is itself the control that opens the field, because that is where
  * the hand already is.
@@ -148,7 +141,6 @@ export interface SessionHeaderProps {
  */
 export function SessionHeader({
   title,
-  projectName,
   onRename,
   editing = false,
   onStartEditing,
@@ -203,7 +195,6 @@ export function SessionHeader({
             )}
           </h1>
         )}
-        <p className={SUB}>{projectName}</p>
       </div>
       <div className={ACTIONS}>
         {onOpenDetails !== undefined && (

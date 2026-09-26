@@ -56,22 +56,38 @@ import {
 /** Where the frame is: folded, growing into the panel, or open. */
 type Growth = 'folded' | 'opening' | 'open'
 
+/** The body of the folded frame with nothing of it drawn: the glyphs alone, where they stand. */
+// Nothing clipped: a glyph travelling into it is drawn the whole of its way, not only once it
+// is inside the body.
+const BODY_BARE = 'flex flex-col rounded-lg border border-transparent'
+
 /** The frame folded: V3's rail, the unfold on the rim and the phases' glyphs in the body. */
-function FoldedPhases({
+export function FoldedPhases({
   session,
   family,
   travels,
   onOpen,
+  chrome = true,
+  glyphs = true,
 }: {
   session: SpecSession
   family: string
   travels: boolean
   onOpen: (phase: PhaseName | null) => void
+  /**
+   * Whether the unfold and the body are drawn. A transition lays the glyphs alone on top, and
+   * fades the frame they stand in on a copy underneath.
+   */
+  chrome?: boolean | undefined
+  /** Whether the glyphs are drawn: that copy keeps their room and shows none of them. */
+  glyphs?: boolean | undefined
 }): ReactNode {
   return (
     <>
-      <FoldToggle folded onToggle={() => onOpen(null)} />
-      <div className={BODY_FIT}>
+      <div className={chrome ? 'flex flex-col' : 'invisible flex flex-col'}>
+        <FoldToggle folded onToggle={() => onOpen(null)} />
+      </div>
+      <div className={chrome ? BODY_FIT : BODY_BARE}>
         <nav aria-label={`Phases of ${session.spec.key}`} className="flex flex-col gap-1 p-1">
           {session.groups.map((group) => {
             const progress = phaseProgress(group, session.spec.focus)
@@ -85,7 +101,7 @@ function FoldedPhases({
                 <button
                   type="button"
                   aria-label={`${title} phase, ${PROGRESS_WORDS[progress]}, open it`}
-                  className="flex rounded-md outline-none focus-ring"
+                  className={cn('flex rounded-md outline-none focus-ring', !glyphs && 'invisible')}
                   onClick={() => onOpen(group.phase)}
                 >
                   <PhaseGlyph
@@ -105,7 +121,7 @@ function FoldedPhases({
 }
 
 /** How many of a phase's parts hold something, as the rail counts them. */
-function writtenOf(group: RailGroup): number {
+export function writtenOf(group: RailGroup): number {
   return group.rows.filter((row) => row.mark !== 'empty').length
 }
 
@@ -122,9 +138,11 @@ function SpecColumn({
 }: {
   session: SpecSession
   spy: ScrollSpy<PhaseName>
-  first: number
+  /** The beat the first phase arrives on; null when the column is uncovered, never arriving. */
+  first: number | null
 }): ReactNode {
   const { spec } = session
+  const Rise = first === null ? Still : Arriving
   return (
     <div
       ref={spy.scroller}
@@ -144,19 +162,19 @@ function SpecColumn({
             aria-label={`${title} phase`}
             className="flex flex-col gap-6 border-b border-border px-6 pt-5 pb-8 last:border-b-0"
           >
-            <Arriving order={first + index}>
+            <Rise order={(first ?? 0) + index}>
               <h3 className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
                 <Icon size="sm" aria-hidden="true" />
                 <span className="text-foreground">{title}</span>
                 <span>· {STATE_WORDS[group.state]}</span>
               </h3>
-            </Arriving>
+            </Rise>
             {group.rows.map((row) => (
-              <Arriving key={row.target} order={first + index}>
+              <Rise key={row.target} order={(first ?? 0) + index}>
                 <div data-part={row.target}>
                   <SpecPart spec={spec} target={row.target} onGoToQuestion={() => undefined} />
                 </div>
-              </Arriving>
+              </Rise>
             ))}
           </section>
         )
@@ -165,8 +183,68 @@ function SpecColumn({
   )
 }
 
+/** What stands in place of `Arriving` where nothing arrives. */
+function Still({
+  className,
+  children,
+}: {
+  order?: number
+  from?: 'below' | 'side'
+  className?: string | undefined
+  children: ReactNode
+}): ReactNode {
+  return <div className={className}>{children}</div>
+}
+
+/**
+ * A piece of the open frame that is not a glyph: it arrives on its beat as V4b has it, or, handed
+ * `shown`, it is there or not and fades between the two on `crossfade` — for a transition that
+ * lands the frame first and fills it after, and empties it before it folds.
+ */
+function Piece({
+  shown,
+  order = 0,
+  from = 'below',
+  className,
+  onHidden,
+  stays = false,
+  children,
+}: {
+  shown: boolean | undefined
+  order?: number
+  from?: 'below' | 'side'
+  className?: string | undefined
+  onHidden?: (() => void) | undefined
+  /** Whether, handed no `shown`, it stands where it is rather than arriving. */
+  stays?: boolean | undefined
+  children: ReactNode
+}): ReactNode {
+  const fade = useTransition(crossfade)
+  if (shown === undefined && stays) return <div className={className}>{children}</div>
+  if (shown === undefined) {
+    return (
+      <Arriving order={order} from={from} className={className}>
+        {children}
+      </Arriving>
+    )
+  }
+  return (
+    <motion.div
+      className={className}
+      initial={false}
+      animate={shown ? CROSSFADE.to : CROSSFADE.from}
+      transition={fade}
+      onAnimationComplete={() => {
+        if (!shown) onHidden?.()
+      }}
+    >
+      {children}
+    </motion.div>
+  )
+}
+
 /** What the open frame of a variant is handed to lay itself out. */
-interface OpenLayer {
+export interface OpenLayer {
   session: SpecSession
   spy: ScrollSpy<PhaseName>
   family: string
@@ -178,14 +256,14 @@ interface OpenLayer {
 }
 
 /** The body of the frame taking the rest of its height, its strip over its column. */
-const BODY_COLUMN =
+export const BODY_COLUMN =
   'flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border border-border bg-surface-body shadow-sm'
 
 /**
  * A laid-out layer of the frame, held on its right edge and its vertical centre by the frame, which
  * lets it overflow to the left and equally up and down while it is smaller than it.
  */
-const ANCHORED = 'flex shrink-0 flex-col border border-transparent p-1.5'
+export const ANCHORED = 'flex shrink-0 flex-col border border-transparent p-1.5'
 
 /**
  * The frame both variants share: folded to V3's glyphs, grown into the panel on `morph`, and what
@@ -402,15 +480,36 @@ const RIM_MARK = 'absolute inset-0 rounded-lg border border-border bg-surface-bo
  * V4b's segments: on the rim, under the head, one per phase, each its glyph, its name, how much of
  * it is written, and a hairline of how much of it the reader has scrolled past.
  */
-function RimLayer({ session, spy, family, settled, still, fold }: OpenLayer): ReactNode {
+export function RimLayer({
+  session,
+  spy,
+  family,
+  settled,
+  still,
+  fold,
+  shown,
+  onHidden,
+  glyphsAway = false,
+}: OpenLayer & {
+  /**
+   * Whether what is not a glyph is there, for a transition that fills the frame once it landed
+   * and empties it before folding; left out, it arrives as V4b has it.
+   */
+  shown?: boolean | undefined
+  /** Called once it is all gone, `shown` turned false. */
+  onHidden?: (() => void) | undefined
+  /** Whether the glyphs are elsewhere — carried outside the frame — their room kept empty. */
+  glyphsAway?: boolean | undefined
+}): ReactNode {
+  const fade = useTransition(crossfade)
   return (
     <>
-      <Arriving from="side" className={HEAD_BAND}>
+      <Piece shown={shown} from="side" className={HEAD_BAND}>
         <Head session={session} onFold={fold} />
-      </Arriving>
+      </Piece>
       <nav
         aria-label={`Phases of ${session.spec.key}`}
-        className="relative isolate grid shrink-0 grid-cols-3 gap-1 pb-1.5"
+        className="relative isolate z-1 grid shrink-0 grid-cols-3 gap-1 pb-1.5"
       >
         {session.groups.map((group) => {
           const progress = phaseProgress(group, session.spec.focus)
@@ -427,8 +526,15 @@ function RimLayer({ session, spy, family, settled, still, fold }: OpenLayer): Re
               onClick={() => spy.goTo(group.phase, still)}
             >
               <span className={cn('flex min-w-0 items-center gap-2', OVER_MARK)}>
-                <PhaseGlyph phase={group.phase} progress={progress} travels family={family} />
-                <Arriving from="side" order={1} className="flex min-w-0 flex-col">
+                <span className={glyphsAway ? 'invisible flex' : 'flex'}>
+                  <PhaseGlyph
+                    phase={group.phase}
+                    progress={progress}
+                    travels={!glyphsAway}
+                    family={family}
+                  />
+                </span>
+                <Piece shown={shown} from="side" order={1} className="flex min-w-0 flex-col">
                   <span
                     className={cn(
                       'truncate text-sm font-medium',
@@ -440,10 +546,11 @@ function RimLayer({ session, spy, family, settled, still, fold }: OpenLayer): Re
                   <span className="truncate text-xs text-muted-foreground">
                     {writtenOf(group)} of {group.rows.length} written
                   </span>
-                </Arriving>
+                </Piece>
               </span>
-              <span
-                aria-hidden="true"
+              <Piece
+                shown={shown}
+                stays
                 className={cn('block h-0.5 overflow-hidden rounded-full bg-border', OVER_MARK)}
               >
                 {/* Where the reader is, followed as they scroll: set, never travelled. */}
@@ -453,18 +560,32 @@ function RimLayer({ session, spy, family, settled, still, fold }: OpenLayer): Re
                   animate={{ scaleX: spy.read[group.phase] }}
                   transition={instant}
                 />
-              </span>
+              </Piece>
             </button>
           )
         })}
-        <SlidingMark target={settled ? spy.active : null} shape={RIM_MARK} />
+        {shown === undefined ? (
+          <SlidingMark target={settled ? spy.active : null} shape={RIM_MARK} />
+        ) : (
+          // Faded as a whole with what it marks. An opacity and not a filter: a filter would hold
+          // the mark's box, which is placed against the list.
+          <motion.div initial={false} animate={{ opacity: shown ? 1 : 0 }} transition={fade}>
+            <SlidingMark target={settled ? spy.active : null} shape={RIM_MARK} />
+          </motion.div>
+        )}
       </nav>
-      <div className={BODY_COLUMN}>
-        <SpecColumn session={session} spy={spy} first={2} />
-      </div>
-      <Arriving order={4} className={FOOT_BAND}>
+      {shown === undefined ? (
+        <div className={BODY_COLUMN}>
+          <SpecColumn session={session} spy={spy} first={2} />
+        </div>
+      ) : (
+        <Piece shown={shown} className={BODY_COLUMN} onHidden={onHidden}>
+          <SpecColumn session={session} spy={spy} first={null} />
+        </Piece>
+      )}
+      <Piece shown={shown} order={4} className={FOOT_BAND}>
         <MarkReady session={session} />
-      </Arriving>
+      </Piece>
     </>
   )
 }

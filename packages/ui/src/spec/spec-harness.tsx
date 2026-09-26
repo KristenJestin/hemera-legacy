@@ -187,6 +187,14 @@ export function LiveSpecPanel({
   ...on
 }: LiveSpecPanelProps): ReactNode {
   const { spec, reader, actions, write } = useLiveSpec(initial, initialReader, on)
+  // A Rework takes a launch that has not started back, as the engine does (D8-13, #113).
+  const [launch, setLaunch] = useState(build?.launch ?? null)
+  function onRework(reason: string): void {
+    actions.onRework(reason)
+    if (launch?.state === 'waiting' || launch?.state === 'failed') {
+      setLaunch({ state: 'cancelled' })
+    }
+  }
   return (
     <div className="@container flex h-screen min-h-0 bg-background text-foreground">
       <div className="flex min-w-0 flex-1 flex-col items-start gap-3 p-6 text-sm text-muted-foreground">
@@ -210,10 +218,10 @@ export function LiveSpecPanel({
         arrives={arrives}
         onGoToQuestion={actions.onGoToQuestion}
         onMarkReady={actions.onMarkReady}
-        onRework={actions.onRework}
+        onRework={onRework}
         onPickRevision={actions.onPickRevision}
         onTakeOver={actions.onTakeOver}
-        build={build}
+        build={build === undefined ? undefined : { ...build, launch }}
       />
     </div>
   )

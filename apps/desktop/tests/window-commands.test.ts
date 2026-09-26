@@ -76,6 +76,7 @@ describe('The agent starts the app and the user opens it', () => {
       scope: 'workspace',
       portless: false,
       portlessName: null,
+      runAtOpen: false,
       folderBase: null,
       folder: null,
     })

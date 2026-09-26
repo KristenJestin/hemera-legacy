@@ -426,6 +426,14 @@ export const ENGINE_REQUESTS = {
     arguments: nothingSchema,
     response: engineStatusSchema,
   },
+  // What the main process asks once the window is shown (#114): every command marked to run when
+  // Hemera opens is run in its Project's `main`, a service still running stopped and started
+  // again. Answers what could not be started, each said, for the diagnostic log; a run that
+  // started and failed is the Project's to read, as any other.
+  'engine.atOpen': {
+    arguments: nothingSchema,
+    response: z.array(z.string()),
+  },
 
   'projects.list': {
     arguments: z.object({ includeArchived: z.boolean().optional() }),
@@ -680,6 +688,7 @@ export const ENGINE_REQUESTS = {
       scope: commandScopeSchema,
       portless: z.boolean(),
       portlessName: z.string().nullable(),
+      runAtOpen: z.boolean(),
     }),
     response: commandSchema,
   },
@@ -696,6 +705,7 @@ export const ENGINE_REQUESTS = {
       scope: commandScopeSchema,
       portless: z.boolean(),
       portlessName: z.string().nullable(),
+      runAtOpen: z.boolean(),
     }),
     response: commandSchema,
   },

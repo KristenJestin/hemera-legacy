@@ -178,6 +178,7 @@ const classifierDecisionSchema = z.object({
   by: z.enum(['rules', 'judge', 'user']).optional(),
   policyVersion: z.string().optional(),
   model: z.string().optional(),
+  scores: z.string().optional(),
 })
 
 /** What the agent's own vocabulary is when it names something this window does not know. */

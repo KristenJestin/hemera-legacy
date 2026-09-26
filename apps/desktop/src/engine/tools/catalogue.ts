@@ -45,7 +45,7 @@ import { HeldWords } from '../agents/held.ts'
 import { AgentNotices } from '../agents/notices.ts'
 import { Builds } from '../build/build.ts'
 import { ClassifierSettings } from '../classifier/settings.ts'
-import { evaluateJev, JevTransportPort } from '../classifier/jev.ts'
+import { evaluateJev, JEV_MODEL, JevTransportPort } from '../classifier/jev.ts'
 import type { Invocation } from '../commands/line.ts'
 import { Commands, Platform, type RunRequest } from '../commands/service.ts'
 import { Projects } from '../projects.ts'
@@ -692,12 +692,32 @@ export const toolCatalogueLayer: Layer.Layer<
         let verdict: Classified['verdict'] = 'ask'
         let source = 'unavailable'
         let model = ''
+        let scores:
+          | { readonly risk: number; readonly approval: number; readonly userRequested: number }
+          | undefined
+        const correlationId = `classifier:${crypto.randomUUID()}`
+        const target = detail.resolvedTarget ?? detail.cwd ?? action.target
         const local = localClassifierVerdict(action)
         if (local !== 'defer') {
           verdict = local
           source = 'local'
         } else if (snapshot.key !== null && snapshot.consent) {
           const key = snapshot.key
+          yield* inThread(asked.sessionId, {
+            role: 'hemera',
+            kind: 'classifier_decision',
+            body: `Hemera Auto evaluating ${action.tool}`,
+            payload: JSON.stringify({
+              call: action.tool,
+              target,
+              state: 'evaluating',
+              reason: 'Jev is evaluating this call.',
+              policyVersion: CLASSIFIER_POLICY_VERSION,
+              model: JEV_MODEL,
+            }),
+            correlationId,
+            state: 'evaluating',
+          }).pipe(Effect.catch(() => Effect.void))
           const evaluated = yield* Effect.tryPromise({
             try: (signal) =>
               evaluateJev(
@@ -711,27 +731,69 @@ export const toolCatalogueLayer: Layer.Layer<
                 knownSecrets,
               ),
             catch: () => 'unavailable',
-          }).pipe(Effect.catch(() => Effect.succeed({ kind: 'unavailable' as const })))
+          }).pipe(
+            Effect.catch(() => Effect.succeed({ kind: 'unavailable' as const })),
+            Effect.onInterrupt(() =>
+              inThread(asked.sessionId, {
+                role: 'hemera',
+                kind: 'classifier_decision',
+                body: `Hemera Auto cancelled ${action.tool}`,
+                payload: JSON.stringify({
+                  call: action.tool,
+                  target,
+                  state: 'cancelled',
+                  reason: 'The call stopped before evaluation finished.',
+                  policyVersion: CLASSIFIER_POLICY_VERSION,
+                }),
+                correlationId,
+                state: 'cancelled',
+              }).pipe(Effect.catch(() => Effect.void)),
+            ),
+          )
           if (evaluated.kind === 'evaluated') {
             verdict = evaluated.verdict
             source = 'jev'
             model = evaluated.model
+            scores = evaluated.scores
           }
         }
-        yield* journalled(asked, made, 'classifier.decision', {
+        const [currentSettings, currentMessages] = yield* Effect.all([
+          answered(classifier.current),
+          answered(sessions.humanMessages(asked.sessionId)),
+        ])
+        const stale =
+          currentSettings?.mode !== 'hemera-auto' ||
+          currentSettings.generation !== snapshot.generation ||
+          currentMessages === undefined ||
+          classifierHumanContext(mission, currentMessages).latestHumanSeq !==
+            context.latestHumanSeq ||
+          !(yield* access.live(asked.sessionId))
+        if (stale) {
+          verdict = 'deny'
+          source = 'cancelled'
+          scores = undefined
+        }
+        const decisionPayload = {
           verdict,
           source,
           model,
           policy: CLASSIFIER_POLICY_VERSION,
           generation: snapshot.generation,
-        })
+        }
+        if (scores !== undefined) {
+          Object.assign(decisionPayload, scores)
+        }
+        yield* journalled(asked, made, 'classifier.decision', decisionPayload)
         let state = 'ask'
-        if (source === 'unavailable') state = 'unavailable'
+        if (source === 'cancelled') state = 'cancelled'
+        else if (source === 'unavailable') state = 'unavailable'
         else if (verdict === 'deny') state = 'denied'
         else if (verdict === 'allow') state = 'allowed'
         let reason = 'No usable evaluator result; your confirmation is required.'
         if (source === 'local') reason = 'Local policy'
         else if (source === 'jev') reason = 'Jev evaluation'
+        else if (source === 'cancelled')
+          reason = 'The call or its context changed before execution.'
         let by: 'rules' | 'judge' | undefined
         if (source === 'local') by = 'rules'
         else if (source === 'jev') by = 'judge'
@@ -741,14 +803,18 @@ export const toolCatalogueLayer: Layer.Layer<
           body: `Hemera Auto ${state} ${action.tool}`,
           payload: JSON.stringify({
             call: action.tool,
-            target: detail.resolvedTarget ?? detail.cwd ?? action.target,
+            target,
             state,
             reason,
             by,
             policyVersion: CLASSIFIER_POLICY_VERSION,
             model: model || undefined,
+            scores:
+              scores === undefined
+                ? undefined
+                : `risk ${scores.risk} · approval ${scores.approval} · user requested ${scores.userRequested}`,
           }),
-          correlationId: `classifier:${crypto.randomUUID()}`,
+          correlationId,
           state,
         }).pipe(Effect.catch(() => Effect.void))
         return { verdict, generation: snapshot.generation, latestHumanSeq: context.latestHumanSeq }

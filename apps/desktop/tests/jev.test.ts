@@ -41,6 +41,7 @@ describe('Every invalid or unavailable evaluation asks', () => {
       kind: 'evaluated',
       verdict: 'allow',
       model: JEV_MODEL,
+      scores: { risk: 1, approval: 0.2, userRequested: 0.9 },
     })
     expect(
       await evaluateJev(state, 'test-key', new AbortController().signal, transport(answer(2.5))),

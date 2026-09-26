@@ -73,7 +73,7 @@ import { provisionsOf } from './spec-request.ts'
 import { ProcessSupervisor, StderrSink, type SupervisedProcess } from './supervisor.ts'
 import { AcpTraces, type Heard, type RequestBook, requestBook, traceLine } from './trace.ts'
 import { Commands } from '../commands/service.ts'
-import { Context as AgentContext, fingerprintOf } from '../context/service.ts'
+import { Context as AgentContext, type QueuedResult, fingerprintOf } from '../context/service.ts'
 import { Preferences } from '../preferences.ts'
 import { Projects } from '../projects.ts'
 import { Sessions, type NativeRecord, type OptionChoice, type ThreadWrite } from '../sessions.ts'
@@ -2301,14 +2301,6 @@ export const runtimeLayer = Layer.effect(
       }
     }
 
-    /**
-     * The results of sub-agents waiting for a Session's next safe point, oldest first (D7-14).
-     *
-     * Held in memory, as the sub-agent that produced one is: a result the quit catches before its
-     * safe point goes with it.
-     */
-    const results = new Map<string, readonly string[]>()
-
     /** Hemera's words waiting for a Session's next safe point, oldest first (issue #130). */
     const words = new Map<string, readonly { readonly text: string; readonly said: string }[]>()
 
@@ -2358,13 +2350,16 @@ export const runtimeLayer = Layer.effect(
     /**
      * A sub-agent's results (D7-14): each a resource said to be internal and a line of Hemera's,
      * never a message of the user's. Taken off the queue only once the agent took them.
+     *
+     * The queue is the database's, not this process's (issue #72): a result the quit catches
+     * before its safe point is handed over at the first one after the agent starts again.
      */
-    const internalParcel = (sessionId: string, waiting: readonly string[]): Parcel => {
+    const internalParcel = (sessionId: string, waiting: readonly QueuedResult[]): Parcel => {
       const correlation = crypto.randomUUID()
       const lines = (turnId: string | null, handed: boolean) =>
         Effect.forEach(
           waiting,
-          (text, index) =>
+          ({ text }, index) =>
             deliveryLine(
               sessionId,
               `delivery:${correlation}:${index}`,
@@ -2383,19 +2378,14 @@ export const runtimeLayer = Layer.effect(
           { discard: true },
         )
       return {
-        provisions: waiting.map((text) => ({
+        provisions: waiting.map(({ text }) => ({
           uri: contextUri('internal'),
           text: internalText(text),
           mimeType: 'text/markdown',
         })),
         announce: (turnId) => lines(turnId, true),
-        taken: Effect.gen(function* () {
-          // Queued meanwhile, a later result stays for the next safe point.
-          results.set(sessionId, (results.get(sessionId) ?? []).slice(waiting.length))
-          for (const text of waiting) {
-            yield* attempt('recording the delivery', context.handedInternal(sessionId, text))
-          }
-        }),
+        // Queued meanwhile, a later result stays for the next safe point.
+        taken: attempt('recording the delivery', context.handedInternal(sessionId, waiting)),
         missed: (turnId) => lines(turnId, false),
       }
     }
@@ -2421,7 +2411,10 @@ export const runtimeLayer = Layer.effect(
         const said = words.get(sessionId) ?? []
         if (said.length > 0) parcels.push(wordsParcel(sessionId, said))
         if (spec !== null) parcels.push(specParcel(sessionId, held, spec))
-        const queued = results.get(sessionId) ?? []
+        const queued = yield* attempt(
+          'reading the results of sub-agents',
+          context.queuedInternal(sessionId),
+        )
         if (queued.length > 0) parcels.push(internalParcel(sessionId, queued))
         return parcels
       })
@@ -3111,11 +3104,19 @@ export const runtimeLayer = Layer.effect(
       running: (sessionId) => turns.has(sessionId) || starting.has(sessionId),
       specChanged,
       deliverInternal: (sessionId, text) =>
-        Effect.sync(() => {
-          results.set(sessionId, [...(results.get(sessionId) ?? []), text])
-          // An agent that is not running is handed it when its next prompt starts one.
-          if (live.has(sessionId)) deliverSoon(sessionId, false)
-        }),
+        context.queueInternal(sessionId, text).pipe(
+          Effect.tap(() =>
+            Effect.sync(() => {
+              // An agent that is not running is handed it when its next prompt starts one.
+              if (live.has(sessionId)) deliverSoon(sessionId, false)
+            }),
+          ),
+          Effect.catch((refusal) =>
+            diagnostic.write(
+              `agents: the result of a sub-agent for Session ${sessionId} could not be queued: ${describe(refusal)}`,
+            ),
+          ),
+        ),
     }
     return service
   }),

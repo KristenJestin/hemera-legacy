@@ -139,7 +139,8 @@ function unheard(quietMs: number): string {
 }
 
 /** The line the row reads, from its state and whatever the caller gave it to name. */
-function sayOf(state: ActivityState, detail?: string, elapsedMs?: number): string {
+function sayOf(state: ActivityState, detail?: string, elapsedMs?: number, doing?: string): string {
+  if (state === 'running' && doing !== undefined) return doing
   if (state === 'running' && detail !== undefined) return `${SAID[state]} ${detail}`
   if (state === 'done' && elapsedMs !== undefined) return `${SAID[state]} in ${lasted(elapsedMs)}`
   return SAID[state]
@@ -161,6 +162,11 @@ export interface ActivityRowProps {
    * without saying which, and the reader watching a turn is watching for exactly that.
    */
   detail?: string | undefined
+  /**
+   * What is being done, as a whole phrase: "Writing the Spec" (issue #170). Read in place of
+   * "Running" and its detail, for a step whose own words say it better than a title would.
+   */
+  doing?: string | undefined
   /** The thought arriving now, which is what the chevron opens. */
   thought?: string | undefined
   /**
@@ -189,6 +195,7 @@ export interface ActivityRowProps {
 export function ActivityRow({
   state,
   detail,
+  doing,
   thought,
   elapsedMs,
   quietMs,
@@ -198,8 +205,8 @@ export function ActivityRow({
 }: ActivityRowProps): ReactNode {
   const [open, setOpen] = useState(false)
   const quiet = quietOf(state, quietMs)
-  const doing = sayOf(state, detail, elapsedMs)
-  const said = quiet === null ? doing : `${doing} · ${unheard(quiet)}, no answer yet`
+  const saying = sayOf(state, detail, elapsedMs, doing)
+  const said = quiet === null ? saying : `${saying} · ${unheard(quiet)}, no answer yet`
   const stuck = quiet !== null && quiet >= STUCK_AFTER_MS
   const ended = ENDED[state]
   const line = (

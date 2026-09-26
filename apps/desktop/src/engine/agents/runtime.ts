@@ -122,6 +122,76 @@ export const INSTRUCTIONS_SETTLE = Duration.millis(300)
  */
 export const UNANSWERED_AFTER = Duration.seconds(5)
 
+/** What the notes of one connection's requests are told by the runtime that keeps them. */
+export interface RequestNoteOptions {
+  /** Whether a block of the thread already draws this request: a permission being asked. */
+  readonly drawn: (heard: Heard) => boolean
+  /** The turn a note written now belongs to, or null outside a turn. */
+  readonly turnId: () => string | null
+  /** Writes a note into the Session's thread, over the one that carries its correlation. */
+  readonly write: (entry: ThreadWrite) => Effect.Effect<void>
+}
+
+/** The note a request of the agent's is said with, waiting or answered. */
+function requestNote(heard: Heard, answered: boolean, turnId: string | null): ThreadWrite {
+  return {
+    role: 'hemera',
+    kind: 'note',
+    body: answered
+      ? 'Hemera answered what the agent was waiting for'
+      : 'The agent is waiting for an answer Hemera cannot show',
+    payload: JSON.stringify({
+      reason: answered ? 'answered_request' : 'unanswered_request',
+      method: heard.method,
+    }),
+    correlationId: `request:${heard.id ?? ''}`,
+    turnId,
+  }
+}
+
+/**
+ * The agent's requests on one connection, said in the thread while Hemera leaves them waiting
+ * (#131), and said answered once Hemera's answer goes out (#170): a note that went on saying the
+ * agent waits after it was answered would be a thread lying about a turn that has moved on.
+ *
+ * The two writes take turns, so an answer that goes out while the note is being written closes
+ * it after it, never before.
+ */
+export function requestNotes(options: RequestNoteOptions) {
+  /** The requests a note was written for, with the turn that note belongs to. */
+  const noted = new Map<string, string | null>()
+  const writing = Semaphore.makeUnsafe(1)
+  return {
+    /**
+     * A request of the agent's: said after `UNANSWERED_AFTER` when Hemera has not answered it and
+     * no block of the thread draws it.
+     */
+    asked: (book: RequestBook, heard: Heard): Effect.Effect<void> =>
+      Effect.sleep(UNANSWERED_AFTER).pipe(
+        Effect.andThen(
+          writing.withPermits(1)(
+            Effect.gen(function* () {
+              if (heard.id === null || !book.waiting(heard.id) || options.drawn(heard)) return
+              const turnId = options.turnId()
+              noted.set(heard.id, turnId)
+              yield* options.write(requestNote(heard, false, turnId))
+            }),
+          ),
+        ),
+      ),
+    /** Hemera's answer to one of the agent's requests went out: its note, if any, says so. */
+    answered: (heard: Heard): Effect.Effect<void> =>
+      writing.withPermits(1)(
+        Effect.gen(function* () {
+          if (heard.id === null || !noted.has(heard.id)) return
+          const turnId = noted.get(heard.id) ?? null
+          noted.delete(heard.id)
+          yield* options.write(requestNote(heard, true, turnId))
+        }),
+      ),
+  }
+}
+
 /**
  * What the agent writes on its standard error while a turn runs, as the thread says it (#131).
  *
@@ -814,26 +884,16 @@ export const runtimeLayer = Layer.effect(
       })
 
     /**
-     * A request of the agent's that Hemera has not answered after `UNANSWERED_AFTER`, said in the
-     * thread with its method (#131). A permission the thread is drawing is not one: its block is
-     * already what says the agent is waiting.
+     * The notes of one Session's requests (#131, #170). A permission the thread is drawing is not
+     * one: its block is already what says the agent is waiting.
      */
-    const watchedRequest = (sessionId: string, book: RequestBook, heard: Heard) =>
-      Effect.gen(function* () {
-        yield* Effect.sleep(UNANSWERED_AFTER)
-        if (heard.id === null || !book.waiting(heard.id)) return
-        const turn = turns.get(sessionId)
-        if (heard.method === 'session/request_permission' && (turn?.permission ?? null) !== null) {
-          return
-        }
-        yield* write(sessionId, {
-          role: 'hemera',
-          kind: 'note',
-          body: 'The agent is waiting for an answer Hemera cannot show',
-          payload: JSON.stringify({ reason: 'unanswered_request', method: heard.method }),
-          correlationId: `request:${heard.id}`,
-          turnId: turn?.id ?? null,
-        })
+    const notesOf = (sessionId: string) =>
+      requestNotes({
+        drawn: (heard) =>
+          heard.method === 'session/request_permission' &&
+          (turns.get(sessionId)?.permission ?? null) !== null,
+        turnId: () => turns.get(sessionId)?.id ?? null,
+        write: (entry) => write(sessionId, entry).pipe(Effect.asVoid, Effect.ignore),
       })
 
     /**
@@ -860,17 +920,17 @@ export const runtimeLayer = Layer.effect(
      */
     const listening = (sessionId: string) => {
       const book = requestBook()
+      const notes = notesOf(sessionId)
       const refused = new Set<string>()
       return (direction: 'in' | 'out', message: Parameters<RequestBook['heard']>[1]) => {
         const heard = book.heard(direction, message)
         if (traces.on()) traces.write(sessionId, traceLine(direction, heard, message, new Date()))
         if (heard.askedBy !== 'agent') return
         if (heard.kind === 'request') {
-          runOwned(watchedRequest(sessionId, book, heard).pipe(Effect.ignore)).catch(
-            () => undefined,
-          )
+          runOwned(notes.asked(book, heard)).catch(() => undefined)
           return
         }
+        runOwned(notes.answered(heard)).catch(() => undefined)
         if (heard.error === null || refused.has(heard.method)) return
         refused.add(heard.method)
         runOwned(refusedRequest(sessionId, heard).pipe(Effect.ignore)).catch(() => undefined)

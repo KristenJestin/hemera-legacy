@@ -28,14 +28,14 @@ import {
   SessionDetails,
   SessionHeader,
   SpecPanel,
-  ActivityRow,
+  TurnLine,
   STUCK_AFTER_MS,
-  UsageMeter,
   type MessageLine,
   type MessageState,
   type OfferedAgent,
   type PermissionOption,
   type ScrollerEntry,
+  type UsageMeterProps,
 } from '@hemera/ui'
 
 import {
@@ -170,36 +170,43 @@ function useTrace(sessionId: string, asking: boolean): boolean {
 }
 
 /**
- * The row of a running turn, told how long it has heard nothing (issue #131): past half a minute
- * its line says so, and past two it offers Stop and, when the settings had it written, the trace
- * of what the agent and Hemera said. Its own component, so the clock it ticks on redraws the row
- * and not the thread.
+ * The row above the box (`TurnLine`): what the turn is doing and what the Session has spent. The
+ * running turn is told how long it has heard nothing (issue #131): past half a minute its line
+ * says so, and past two it offers Stop and, when the settings had it written, the trace of what
+ * the agent and Hemera said. Its own component, so the clock it ticks on redraws the row and not
+ * the thread.
  */
-function ListeningRow({
+function TurnRow({
   activity,
+  usage,
   since,
   sessionId,
   onStop,
 }: {
-  activity: Activity
+  activity: Activity | null
+  usage: UsageMeterProps | null
   since: number | null
   sessionId: string
   onStop: () => void
 }): ReactNode {
-  const listening = since !== null && !hasEnded(activity)
+  const listening = activity !== null && since !== null && !hasEnded(activity)
   const now = useTicking(listening)
   const quietMs = listening ? Math.max(0, now - since) : undefined
   const stuck = quietMs !== undefined && quietMs >= STUCK_AFTER_MS
   const traced = useTrace(sessionId, stuck)
   return (
-    <ActivityRow
-      state={activity.state}
-      detail={activity.detail}
-      thought={activity.thought}
-      elapsedMs={activity.elapsedMs}
-      quietMs={quietMs}
-      onStop={onStop}
-      onOpenTrace={traced ? () => void openTrace(sessionId) : undefined}
+    <TurnLine
+      activity={
+        activity === null
+          ? null
+          : {
+              ...activity,
+              quietMs,
+              onStop,
+              onOpenTrace: traced ? () => void openTrace(sessionId) : undefined,
+            }
+      }
+      usage={usage}
     />
   )
 }
@@ -768,25 +775,13 @@ export function SessionPage({
           something to say, and the meter keeps its end of it whether or not a turn is running.
         */}
         <div className="mx-auto flex w-full max-w-3xl flex-col gap-2 px-6 pb-4">
-          {(activity !== null || usage !== null) && (
-            <div className="flex items-end justify-between gap-3">
-              {activity !== null ? (
-                <ListeningRow
-                  activity={activity}
-                  since={agent.running ? heardSince(agent, thread) : null}
-                  sessionId={session.id}
-                  onStop={onStop}
-                />
-              ) : (
-                <span />
-              )}
-              {usage !== null && (
-                <span className="flex h-6 shrink-0 items-center">
-                  <UsageMeter used={usage.used} size={usage.size} cost={usage.cost} />
-                </span>
-              )}
-            </div>
-          )}
+          <TurnRow
+            activity={activity}
+            usage={usage}
+            since={agent.running ? heardSince(agent, thread) : null}
+            sessionId={session.id}
+            onStop={onStop}
+          />
           {/*
             What the page's last act was refused with — a rename, an archive, a thread that could
             not be read, a Workspace changed once the agent had started (D8-08) — said here and

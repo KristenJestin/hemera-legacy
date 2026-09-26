@@ -65,10 +65,16 @@ export type ToolMark =
   | 'write-spec'
   | 'propose-spec'
 
-/** What a reader calls a tool, and the mark it wears. */
+/** What a reader calls a tool, the mark it wears, and what the turn is doing while it runs. */
 export interface ToolLabel {
   readonly label: string
   readonly mark: ToolMark
+  /**
+   * What the turn is doing while the tool runs, as a phrase of its own: "Writing the Spec". The
+   * row above the box reads it whole, where "Running" and the label read "Running Write Spec"
+   * (issue #170).
+   */
+  readonly doing: string
 }
 
 /**
@@ -78,21 +84,29 @@ export interface ToolLabel {
  * reader's, and it is what the line is read by.
  */
 export const TOOL_LABELS: Readonly<Record<ToolName, ToolLabel>> = {
-  fs_read: { label: 'Read file', mark: 'read-file' },
-  fs_list: { label: 'List folder', mark: 'list-folder' },
-  search: { label: 'Search', mark: 'search' },
-  fs_write: { label: 'Write file', mark: 'write-file' },
-  fs_edit: { label: 'Edit file', mark: 'edit-file' },
-  commands_run: { label: 'Run command', mark: 'run-command' },
-  commands_stop: { label: 'Stop command', mark: 'stop-command' },
-  commands_list: { label: 'List commands', mark: 'list-commands' },
-  commands_output: { label: 'Command output', mark: 'command-output' },
-  commands_propose: { label: 'Propose command', mark: 'propose-command' },
-  project_get: { label: 'Project', mark: 'project' },
-  session_get: { label: 'Session', mark: 'session' },
-  spec_read: { label: 'Read Spec', mark: 'read-spec' },
-  spec_write: { label: 'Write Spec', mark: 'write-spec' },
-  spec_propose: { label: 'Propose', mark: 'propose-spec' },
+  fs_read: { label: 'Read file', mark: 'read-file', doing: 'Reading a file' },
+  fs_list: { label: 'List folder', mark: 'list-folder', doing: 'Listing a folder' },
+  search: { label: 'Search', mark: 'search', doing: 'Searching the code' },
+  fs_write: { label: 'Write file', mark: 'write-file', doing: 'Writing a file' },
+  fs_edit: { label: 'Edit file', mark: 'edit-file', doing: 'Editing a file' },
+  commands_run: { label: 'Run command', mark: 'run-command', doing: 'Running a command' },
+  commands_stop: { label: 'Stop command', mark: 'stop-command', doing: 'Stopping a command' },
+  commands_list: { label: 'List commands', mark: 'list-commands', doing: 'Listing the commands' },
+  commands_output: {
+    label: 'Command output',
+    mark: 'command-output',
+    doing: 'Reading the output of a command',
+  },
+  commands_propose: {
+    label: 'Propose command',
+    mark: 'propose-command',
+    doing: 'Proposing a command',
+  },
+  project_get: { label: 'Project', mark: 'project', doing: 'Reading the Project' },
+  session_get: { label: 'Session', mark: 'session', doing: 'Reading the Session' },
+  spec_read: { label: 'Read Spec', mark: 'read-spec', doing: 'Reading the Spec' },
+  spec_write: { label: 'Write Spec', mark: 'write-spec', doing: 'Writing the Spec' },
+  spec_propose: { label: 'Propose', mark: 'propose-spec', doing: 'Proposing a Spec' },
 }
 
 /** The most `fs_read` hands back in one call, and the page a long file is read in. */

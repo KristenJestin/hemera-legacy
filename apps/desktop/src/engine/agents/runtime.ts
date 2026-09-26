@@ -1866,6 +1866,14 @@ export const runtimeLayer = Layer.effect(
         // What it stands on now is what the Session is recorded on, inherited choices included.
         started.restored = true
         yield* recordStanding(sessionId)
+        // A sub-agent's result a quit caught before its safe point does not wait for the user to
+        // type: the agent is back, and idle unless a prompt is starting it, which hands it over
+        // itself (issue #72).
+        const queued = yield* attempt(
+          'reading the results of sub-agents',
+          context.queuedInternal(sessionId),
+        ).pipe(Effect.orElseSucceed(() => []))
+        if (queued.length > 0) deliverSoon(sessionId, false)
         return started
       })
 

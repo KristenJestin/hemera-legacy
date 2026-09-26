@@ -458,7 +458,8 @@ export type ContextDeliveryKind = (typeof CONTEXT_DELIVERY_KINDS)[number]
  * `line_windows` and `line_linux` are the machine's own line, null when it runs the default one;
  * `scope` says whether a `serve` runs once per Workspace or once for the Project; `portless`
  * whether its line runs through Portless (D8-10), and `portless_name` the name it runs under,
- * null for the Project's name as a slug (D8-10 as amended by recette 1).
+ * null for the Project's name as a slug (D8-10 as amended by recette 1). `run_at_open` says
+ * whether Hemera runs it in the Project's `main` each time it opens (#114).
  */
 export const projectCommands = sqliteTable(
   'project_commands',
@@ -479,6 +480,7 @@ export const projectCommands = sqliteTable(
     portless: integer('portless').notNull().default(0),
     folderBase: text('folder_base'),
     portlessName: text('portless_name'),
+    runAtOpen: integer('run_at_open').notNull().default(0),
   },
   (table) => [
     check('command_type_is_known', sql`${table.type} IN (${sql.raw(oneOf(COMMAND_TYPES))})`),

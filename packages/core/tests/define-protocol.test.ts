@@ -117,4 +117,12 @@ describe('The phase briefs', () => {
   test('shape asks each question through the question tool', () => {
     expect(PHASE_BRIEFS.shape).toContain('Each question is a call to `spec_write` with `question`')
   })
+
+  test('the user reads the Spec and answers through the question card, and edits nothing', () => {
+    expect(DEFINE_MISSION_BRIEF).toContain(
+      'The user reads the Spec beside the chat and edits none of it',
+    )
+    expect(DEFINE_MISSION_BRIEF).toContain('answers your questions through the question card')
+    expect(DEFINE_MISSION_BRIEF).not.toContain('reads and edits the Spec')
+  })
 })

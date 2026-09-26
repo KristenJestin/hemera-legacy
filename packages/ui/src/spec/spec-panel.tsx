@@ -1,5 +1,5 @@
 import { AnimatePresence, animate, motion, useIsPresent, useMotionValue } from 'motion/react'
-import { type ReactNode, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { type ReactNode, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 
 import { Button } from '../components/button/button.tsx'
 import { IconCheck } from '../icons.ts'
@@ -70,6 +70,10 @@ const CLIP =
 /** The open panel: a frame the whole height of the row, its rim around the head, body and foot. */
 const PANEL =
   'spec-panel-in pointer-events-auto flex size-full flex-col rounded-xl border border-border bg-surface-rim p-1.5'
+
+/** The panel folded and at rest: still laid out, so an unfold starts at once, and not drawn. */
+const STOWED =
+  'spec-panel-in pointer-events-auto invisible flex size-full flex-col rounded-xl border border-border bg-surface-rim p-1.5'
 
 /** The small frame's place: on the window's edge, centred on its height, over the panel. */
 const FRAME = 'pointer-events-none absolute inset-y-3 right-3 z-1 flex items-center'
@@ -142,7 +146,7 @@ export function SpecPanel({
 }: SpecPanelProps): ReactNode {
   const startsFolded = arrives ? false : defaultFolded
   const [folded, setFolded] = useState(startsFolded)
-  // Whether the swap is on its way. Folding, the panel stays in the slot until it has left.
+  // Whether the swap is on its way. Folded and at rest, the panel is stowed: laid out, hidden.
   const [moving, setMoving] = useState(false)
   const [reworking, setReworking] = useState(defaultReworkOpen)
   // The fold as it is now, read by the several hands one click may bubble through.
@@ -163,7 +167,8 @@ export function SpecPanel({
   const open = useMotionValue(startsFolded ? 0 : 1)
   // How far in the Spec has arrived, from nothing (0) to its place in the row (1).
   const present = useMotionValue(arrives ? 0 : 1)
-  const groups = phasesOf(spec)
+  // Read once per Spec, so the column is handed the same phases across a fold and is not drawn again.
+  const groups = useMemo(() => phasesOf(spec), [spec])
 
   function fold(next: boolean, hand: boolean, phase: PhaseName | null = null): void {
     if (hand) byHand.current = next
@@ -300,55 +305,56 @@ export function SpecPanel({
     <>
       <section ref={dock} aria-label={`Spec ${spec.key}`} className={DOCK}>
         <div aria-hidden="true" className="spec-slot shrink-0" />
-        {(!folded || moving) && (
-          <div className={CLIP}>
-            {/* Folding, the panel stays in its clip until it has left, out of reach of the
-                keyboard and of a screen reader the whole way. */}
-            <div
-              inert={folded}
-              aria-hidden={folded ? true : undefined}
-              data-spec-panel
-              className={PANEL}
-            >
-              <header className={HEAD}>
-                <SpecHead
-                  specKey={spec.key}
-                  title={spec.title}
-                  type={spec.type}
-                  status={spec.status}
-                  revision={spec.revision}
-                  revisions={spec.revisions}
-                  superseded={spec.replacedBy !== undefined}
-                  onPickRevision={onPickRevision}
-                  onRework={() => setReworking(true)}
-                  onFold={() => fold(true, true)}
+        <div className={CLIP}>
+          {/* Mounted whether the Spec is folded or not, so that an unfold starts moving on the
+              frame it is asked on rather than after the whole column has been laid out. Folded,
+              it is out of reach of the keyboard and of a screen reader, and once it has left,
+              not drawn at all. */}
+          <div
+            inert={folded}
+            aria-hidden={folded ? true : undefined}
+            data-spec-panel
+            data-stowed={folded && !moving ? '' : undefined}
+            className={folded && !moving ? STOWED : PANEL}
+          >
+            <header className={HEAD}>
+              <SpecHead
+                specKey={spec.key}
+                title={spec.title}
+                type={spec.type}
+                status={spec.status}
+                revision={spec.revision}
+                revisions={spec.revisions}
+                superseded={spec.replacedBy !== undefined}
+                onPickRevision={onPickRevision}
+                onRework={() => setReworking(true)}
+                onFold={() => fold(true, true)}
+              />
+              {spec.replacedBy !== undefined && (
+                // The one line under the head, and only for an older revision: where the phases
+                // stand is their headings' to say, and whether it is done the footer's (#150).
+                <p className={NOW}>An earlier version · read only</p>
+              )}
+            </header>
+            <div className={BODY}>
+              {reader !== undefined && (
+                <ReaderBar
+                  writer={reader.writer}
+                  takeOverRefused={reader.takeOverRefused}
+                  onTakeOver={onTakeOver}
                 />
-                {spec.replacedBy !== undefined && (
-                  // The one line under the head, and only for an older revision: where the phases
-                  // stand is their headings' to say, and whether it is done the footer's (#150).
-                  <p className={NOW}>An earlier version · read only</p>
-                )}
-              </header>
-              <div className={BODY}>
-                {reader !== undefined && (
-                  <ReaderBar
-                    writer={reader.writer}
-                    takeOverRefused={reader.takeOverRefused}
-                    onTakeOver={onTakeOver}
-                  />
-                )}
-                <SpecColumn
-                  spec={spec}
-                  groups={groups}
-                  column={column}
-                  still={still}
-                  {...handlers}
-                />
-              </div>
-              <SpecFoot content={foot} />
+              )}
+              <SpecColumn
+                spec={spec}
+                groups={groups}
+                column={column}
+                still={still}
+                onGoToQuestion={handlers.onGoToQuestion}
+              />
             </div>
+            <SpecFoot content={foot} />
           </div>
-        )}
+        </div>
         {/* Drawn over the panel, so its leaving and its return are seen whole. */}
         <motion.div
           inert={!folded}

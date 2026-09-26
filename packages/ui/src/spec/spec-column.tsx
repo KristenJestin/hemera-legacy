@@ -1,4 +1,4 @@
-import type { ReactNode, RefObject } from 'react'
+import { type ReactNode, type RefObject, memo } from 'react'
 
 import { Menu } from '../components/menu/menu.tsx'
 import { IconChevronDown } from '../icons.ts'
@@ -68,7 +68,12 @@ export interface SpecColumnProps extends SpecPartHandlers {
   still: boolean
 }
 
-export function SpecColumn({
+/**
+ * Memoised: the column is the heavy part of the panel — every part of the Spec, its Markdown
+ * rendered — and nothing about it changes when the Spec folds or unfolds. Drawn again on that
+ * press, it would hold the swap's first frame back.
+ */
+export const SpecColumn = memo(function SpecColumn({
   spec,
   groups,
   column,
@@ -109,7 +114,7 @@ export function SpecColumn({
       ))}
     </div>
   )
-}
+})
 
 /**
  * A phase's heading, which is also the way to the others: pressed, the menu of the three phases.

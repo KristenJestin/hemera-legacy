@@ -11,8 +11,8 @@ import { hemeraToolCallOf } from './agent-tool-payloads.ts'
  *
  * A turn reads twelve files, lists five folders and runs two commands before it answers, and each
  * of those was a row of the thread: the answer was found at the end of a column of plumbing. So
- * every run of calls between two pieces of the agent's text is one row, folded — `12 actions`, and
- * what kinds they were — which unfolds to the rows it holds, as they were. Whatever the tools are:
+ * every run of calls between two pieces of the agent's text is one row, folded — `12 actions`, no
+ * more (issue #159) — which unfolds to the rows it holds, as they were. Whatever the tools are:
  * the agent's own and Hemera's alike.
  *
  * A thought or a diff inside such a run goes into the group with the calls around it: they are
@@ -94,31 +94,6 @@ export function groupingOf(entry: SessionEntry): Grouping {
   return { kind: KINDS.find((one) => one === kind) ?? 'other', status: statusOf(status) }
 }
 
-/** How many of one kind a group holds, in the words its line says them in. */
-const SAID: Record<ActionKind, (count: number) => string> = {
-  read: (count) => `read ${plural(count, 'file')}`,
-  edit: (count) => `edited ${plural(count, 'file')}`,
-  delete: (count) => `deleted ${plural(count, 'file')}`,
-  move: (count) => `moved ${plural(count, 'file')}`,
-  search: (count) => `searched ${count === 1 ? 'once' : `${String(count)} times`}`,
-  execute: (count) => `ran ${plural(count, 'command')}`,
-  think: (count) => `thought ${count === 1 ? 'once' : `${String(count)} times`}`,
-  fetch: (count) => `fetched ${plural(count, 'page')}`,
-  hemera: (count) => `${plural(count, 'Hemera call')}`,
-  other: (count) => `${plural(count, 'other call')}`,
-}
-
-function plural(count: number, noun: string): string {
-  return `${String(count)} ${noun}${count === 1 ? '' : 's'}`
-}
-
-/** What a group's line says it holds: `read 3 files, ran 2 commands`, kinds as they first came. */
-export function summaryOf(actions: readonly Action[]): string {
-  const counted = new Map<ActionKind, number>()
-  for (const action of actions) counted.set(action.kind, (counted.get(action.kind) ?? 0) + 1)
-  return [...counted].map(([kind, count]) => SAID[kind](count)).join(', ')
-}
-
 /** Where a group stands: running while one of its calls runs, failed if one failed, else done. */
 export function groupStatusOf(actions: readonly Action[]): ActionStatus {
   if (actions.some((one) => one.status === 'in_progress')) return 'in_progress'
@@ -129,7 +104,7 @@ export function groupStatusOf(actions: readonly Action[]): ActionStatus {
 /** A piece of the thread once the runs are folded: a block as it was, or a group of them. */
 export type Piece<T> =
   | { kind: 'one'; item: T }
-  | { kind: 'group'; items: T[]; count: number; summary: string; status: ActionStatus }
+  | { kind: 'group'; items: T[]; count: number; status: ActionStatus }
 
 /**
  * The blocks of a thread with every run of two calls or more folded into one group.
@@ -156,7 +131,6 @@ export function groupActions<T>(blocks: readonly { item: T; grouping: Grouping }
         kind: 'group',
         items: run.slice(first, last + 1).map((one) => one.item),
         count: actions.length,
-        summary: summaryOf(actions),
         status: groupStatusOf(actions),
       })
       for (const one of run.slice(last + 1)) pieces.push({ kind: 'one', item: one.item })

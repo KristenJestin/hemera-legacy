@@ -10,7 +10,7 @@
 import { describe, expect, test } from 'vite-plus/test'
 
 import type { SessionEntry } from '@hemera/ipc'
-import { type Grouping, groupActions, groupingOf, summaryOf } from '#renderer/action-groups.ts'
+import { type Grouping, groupActions, groupingOf } from '#renderer/action-groups.ts'
 
 function entryOf(kind: SessionEntry['kind'], payload: string, id: string = kind): SessionEntry {
   return {
@@ -53,7 +53,6 @@ describe('Tool calls between two agent texts are one folded group', () => {
         kind: 'group',
         items: ['read-1', 'read-2', 'hemera', 'run'],
         count: 4,
-        summary: 'read 2 files, 1 Hemera call, ran 1 command',
         status: 'completed',
       },
       { kind: 'one', item: 'text-2' },
@@ -71,7 +70,6 @@ describe('Tool calls between two agent texts are one folded group', () => {
         kind: 'group',
         items: ['read-1', 'thought', 'read-2'],
         count: 2,
-        summary: 'read 2 files',
         status: 'completed',
       },
     ])
@@ -114,17 +112,12 @@ describe('Tool calls between two agent texts are one folded group', () => {
     expect(failed[0]).toMatchObject({ kind: 'group', status: 'failed' })
   })
 
-  test('the line counts the kinds as they first came, in words', () => {
-    expect(
-      summaryOf([
-        { kind: 'read', status: 'completed' },
-        { kind: 'search', status: 'completed' },
-        { kind: 'read', status: 'completed' },
-        { kind: 'search', status: 'completed' },
-        { kind: 'edit', status: 'completed' },
-        { kind: 'other', status: 'completed' },
-      ]),
-    ).toBe('read 2 files, searched 2 times, edited 1 file, 1 other call')
+  test('a group says only its count, never the kinds it holds (issue #159)', () => {
+    const [group] = groupActions([
+      { item: 'a', grouping: { kind: 'hemera', status: 'completed' } },
+      { item: 'b', grouping: READ },
+    ])
+    expect(Object.keys(group ?? {}).sort()).toEqual(['count', 'items', 'kind', 'status'])
   })
 })
 

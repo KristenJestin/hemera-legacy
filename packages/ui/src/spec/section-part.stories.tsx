@@ -83,7 +83,7 @@ export const NotWritten: Story = {
   args: { section: sectionOf(BUG.sections, 'scope') },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    await expect(canvas.getByText('empty')).toBeVisible()
+    await expect(canvas.queryByText('empty')).toBeNull()
     await expect(canvas.getByText('Nothing written yet.')).toBeVisible()
     await expect(canvas.queryByRole('textbox')).toBeNull()
   },

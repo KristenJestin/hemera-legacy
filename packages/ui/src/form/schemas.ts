@@ -66,6 +66,18 @@ export const underBaseSchema = z
   )
   .refine((path) => !climbsOut(path.trim()), 'That path climbs above where it runs from.')
 
+/**
+ * The file or the folder a preparation step copies or links, under the step's base (#104): the
+ * same refusals as a command's folder, said about the base the step works from.
+ */
+export const stepPathSchema = z
+  .string()
+  .refine(
+    (path) => !/^([\\/]|[a-zA-Z]:)/.test(path.trim()),
+    'That path is absolute: write it from its base.',
+  )
+  .refine((path) => !climbsOut(path.trim()), 'That path climbs above its base.')
+
 function climbsOut(candidate: string): boolean {
   let depth = 0
   for (const segment of candidate.replaceAll('\\', '/').split('/')) {

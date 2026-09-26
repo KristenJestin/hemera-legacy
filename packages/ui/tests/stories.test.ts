@@ -223,7 +223,7 @@ const NAMED_STATES = new Map([
       'Editing',
       'SourceMissing',
       'OwnLine',
-      'PickedOutside',
+      'Suggestions',
       'Keyboard',
     ],
   ],

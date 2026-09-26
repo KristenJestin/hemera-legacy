@@ -184,7 +184,7 @@ function titled(name: string): string {
 /**
  * What a `define` Session handed its agent besides its instructions (#74), one line each, oldest
  * first, in the reader's words and never the engine's: the instructions of each phase, the human's
- * edits and answers, and the results of sub-agents. The engine names what each was — the key a
+ * edits and answers, the results of sub-agents, and what Hemera said to it of its own. The engine names what each was — the key a
  * brief was composed for, the sections an edit touched, the question an answer answered — and a
  * row written before it did is said without it.
  */
@@ -218,6 +218,11 @@ function handedOf(provided: ContextView['provided']): ContextEntry[] {
         ]
       case 'internal':
         return [{ label: 'The result of a sub-agent went to the agent', at }]
+      // Hemera's own words: the only notice it sends is that the user declined a proposal.
+      case 'notice':
+        return [{ label: 'Hemera told the agent you declined its proposal', at }]
+      case 'request':
+        return [{ label: 'The New Spec request went to the agent', at }]
       default:
         return []
     }

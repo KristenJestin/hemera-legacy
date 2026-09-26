@@ -574,7 +574,7 @@ export const Ready: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     const panel = canvas.getByRole('region', { name: 'Spec ATL-7' })
-    await expect(within(panel).getByText('ready')).toBeVisible()
+    await expect(within(panel).getByRole('img', { name: 'Ready' })).toBeVisible()
     await expect(within(panel).queryByText(/frozen/i)).toBeNull()
     await expect(canvas.queryByRole('textbox', { name: 'Expected outcome' })).toBeNull()
     await expect(canvas.getByRole('button', { name: 'Latest' })).toBeVisible()

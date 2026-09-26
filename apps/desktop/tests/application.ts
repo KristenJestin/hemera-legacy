@@ -46,6 +46,7 @@ import { preferencesLayer } from '#engine/preferences.ts'
 import type { Preferences } from '#engine/preferences.ts'
 import { Projects, projectsLayer } from '#engine/projects.ts'
 import { Sessions, sessionsLayer, type ThreadWrite } from '#engine/sessions.ts'
+import { domainEventsLayer } from '#engine/domain-events.ts'
 import { NoSpecNotices, type SpecNotices } from '#engine/specs/notices.ts'
 import { type Specs, specsLayer } from '#engine/specs/specs.ts'
 import { DatabaseError, databaseLayer } from '#engine/storage/database.ts'
@@ -230,7 +231,11 @@ export function application(
           storage.sessions,
           preferencesLayer,
           specsLayer.pipe(Layer.provide(NoSpecNotices)),
-        ).pipe(Layer.provideMerge(databaseLayer(join(dataFolder, 'hemera.sqlite')))),
+        ).pipe(
+          Layer.provideMerge(
+            Layer.mergeAll(databaseLayer(join(dataFolder, 'hemera.sqlite')), domainEventsLayer),
+          ),
+        ),
       ),
       Layer.provide(discoveryLayer.pipe(Layer.provide(environment))),
       Layer.provide(supervisor ?? fakeSupervisor(agent)),
@@ -490,7 +495,11 @@ export function toolApplication(
           storage.sessions,
           preferencesLayer,
           specsLayer.pipe(Layer.provide(specNotices)),
-        ).pipe(Layer.provideMerge(databaseLayer(join(dataFolder, 'hemera.sqlite')))),
+        ).pipe(
+          Layer.provideMerge(
+            Layer.mergeAll(databaseLayer(join(dataFolder, 'hemera.sqlite')), domainEventsLayer),
+          ),
+        ),
       ),
       Layer.provide(discoveryLayer.pipe(Layer.provide(environment))),
       Layer.provide(

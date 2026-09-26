@@ -37,6 +37,7 @@ import { toolCatalogueLayer } from './tools/catalogue.ts'
 import { toolPermissionsLayer } from './tools/permissions.ts'
 import { toolServerLayer } from './tools/server.ts'
 import { openProfile } from './migrate.ts'
+import { type DomainEvents, domainEventsLayer } from './domain-events.ts'
 import { journalLayer } from './journal.ts'
 import type { Journal } from './journal.ts'
 import { preferencesLayer } from './preferences.ts'
@@ -194,6 +195,7 @@ export type EngineServices =
   | Variables
   | Preparation
   | Launches
+  | DomainEvents
   | Database
   | SqliteClient
 
@@ -321,7 +323,12 @@ function servicesOf(
     proposalsLayer.pipe(Layer.provide(tools), Layer.provide(rows), Layer.provide(agents)),
     workspaces,
     runtime,
-  ).pipe(Layer.provideMerge(databaseLayer(join(start.directory, DATABASE_FILE))))
+  ).pipe(
+    // One instance for the whole engine: the launches follow the events the Specs commit (#113).
+    Layer.provideMerge(
+      Layer.mergeAll(databaseLayer(join(start.directory, DATABASE_FILE)), domainEventsLayer),
+    ),
+  )
 }
 
 /**

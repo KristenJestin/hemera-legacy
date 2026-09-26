@@ -339,6 +339,17 @@ describe('Hemera Auto classifies one admitted tool call before execution', () =>
     expect(human.asked).toHaveLength(1)
     expect(readFileSync(join(root, 'written.md'), 'utf8')).toBe('written once')
     expect(result.lines.filter((line) => line.type === 'classifier.decision')).toHaveLength(2)
+    const userDecisions = result.lines.filter((line) => line.type === 'tool.permission_decision')
+    expect(userDecisions).toHaveLength(1)
+    expect(userDecisions[0]).toMatchObject({
+      author: 'human',
+      payload: { tool: 'fs_write', answer: 'allowed' },
+    })
+    expect(userDecisions[0]?.payload.classifier).toBe(
+      result.lines.find(
+        (line) => line.type === 'classifier.decision' && line.payload.verdict === 'ask',
+      )?.payload.correlationId,
+    )
     expect(result.lines.filter((line) => line.type === 'classifier.mode_changed')).toMatchObject([
       {
         entityKind: 'profile',

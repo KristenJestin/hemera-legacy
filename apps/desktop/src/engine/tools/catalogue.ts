@@ -161,6 +161,7 @@ interface Classified {
   readonly verdict: 'allow' | 'ask' | 'deny'
   readonly generation: number
   readonly latestHumanSeq: number
+  readonly correlationId?: string
 }
 
 interface AuthorizedTarget {
@@ -522,6 +523,7 @@ export const toolCatalogueLayer: Layer.Layer<
           place.path,
           `${asked.tool} asks to act outside the Workspace: ${place.path}`,
           null,
+          guard?.decision.verdict === 'ask' ? guard.decision : undefined,
         )
         // Asked again once the human answered: they can take their time, and a yes given to a
         // Session whose agent has gone since is a yes nobody is left to act on.
@@ -557,6 +559,7 @@ export const toolCatalogueLayer: Layer.Layer<
       where: string,
       body: string,
       line: string | null,
+      classified?: Classified,
     ) =>
       Effect.gen(function* () {
         const id = crypto.randomUUID()
@@ -638,6 +641,33 @@ export const toolCatalogueLayer: Layer.Layer<
           correlationId: `decision:${id}`,
           state: answer === 'allowed' ? 'completed' : answer,
         }).pipe(Effect.catch(() => Effect.void))
+        const current = yield* answered(sessions.one(asked.sessionId))
+        if (current !== undefined) {
+          yield* withDatabase(
+            mutate('recording a permission decision', () =>
+              Effect.succeed({
+                result: null,
+                events: [
+                  {
+                    type: 'tool.permission_decision',
+                    entityKind: 'session' as const,
+                    entityId: asked.sessionId,
+                    source: answer === 'cancelled' ? ('system' as const) : ('ui' as const),
+                    author: answer === 'cancelled' ? ('system' as const) : ('human' as const),
+                    projectId: current.session.projectId,
+                    sessionId: asked.sessionId,
+                    payload: {
+                      tool: asked.tool,
+                      answer,
+                      callId: id,
+                      classifier: classified?.correlationId ?? null,
+                    },
+                  },
+                ],
+              }),
+            ),
+          ).pipe(Effect.catch(() => Effect.void))
+        }
         if (answer === 'cancelled') {
           return {
             allowed: false as const,
@@ -779,6 +809,7 @@ export const toolCatalogueLayer: Layer.Layer<
           model,
           policy: CLASSIFIER_POLICY_VERSION,
           generation: snapshot.generation,
+          correlationId,
         }
         if (scores !== undefined) {
           Object.assign(decisionPayload, scores)
@@ -817,7 +848,12 @@ export const toolCatalogueLayer: Layer.Layer<
           correlationId,
           state,
         }).pipe(Effect.catch(() => Effect.void))
-        return { verdict, generation: snapshot.generation, latestHumanSeq: context.latestHumanSeq }
+        return {
+          verdict,
+          generation: snapshot.generation,
+          latestHumanSeq: context.latestHumanSeq,
+          correlationId,
+        }
       })
 
     const decisionIsCurrent = (asked: ToolCall, decision: Classified): Effect.Effect<boolean> =>
@@ -1217,6 +1253,7 @@ export const toolCatalogueLayer: Layer.Layer<
                         home.path,
                         `commands_run asks to run ${commandLine} in ${home.path}`,
                         commandLine,
+                        auto,
                       )
                     : { allowed: true as const, path: home.path }
                   : auto?.verdict === 'ask' && resolvedPlace.inside
@@ -1227,6 +1264,7 @@ export const toolCatalogueLayer: Layer.Layer<
                         resolvedPlace.path,
                         `commands_run asks to run ${commandLine} in ${resolvedPlace.path}`,
                         commandLine,
+                        auto,
                       )
                     : yield* allowed(
                         asked,
@@ -1252,6 +1290,7 @@ export const toolCatalogueLayer: Layer.Layer<
                         ? `commands_run asks to run ${oneOff} in ${place.path}`
                         : `commands_run asks to run ${oneOff} outside the Workspace, in ${place.path}`,
                       oneOff,
+                      auto ?? undefined,
                     )
                   })
             if (!inside.allowed) return failed(inside.reason, inside.reason)
@@ -1621,6 +1660,7 @@ export const toolCatalogueLayer: Layer.Layer<
                   place.path,
                   `${named} asks to act on ${place.path}`,
                   null,
+                  classified,
                 )
                 if (!question.allowed)
                   return { ...failed(question.reason, question.reason), refused: true }

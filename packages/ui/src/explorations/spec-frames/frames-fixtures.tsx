@@ -369,3 +369,132 @@ export function ArrivingStage({
     </div>
   )
 }
+
+// ---------------------------------------------------------------------------------------------
+// Where the reader is in one scrolling column
+
+/** What a scroll-spy says and does, for the column of V4. */
+export interface ScrollSpy<K extends string> {
+  /** The column that scrolls: `relative`, so that what it holds is placed against it. */
+  scroller: (node: HTMLDivElement | null) => void
+  /** Where each key's block is handed in. */
+  anchor: (key: K) => (node: HTMLElement | null) => void
+  /** The key being read. */
+  active: K
+  /** How much of each block has been read, from 0 to 1: what lies above the column's foot. */
+  read: Record<K, number>
+  /** Scrolls the column to a key's block, smoothly unless `instantly`. */
+  goTo: (key: K, instantly: boolean) => void
+}
+
+/**
+ * Follows where the reader is in a column of blocks, one per key, in the keys' order: the block
+ * at the top of the column, or the last once the column is at its foot, since a short
+ * last block never reaches the top.
+ *
+ * A block pressed is the one being read until the column stops where it was sent: a smooth
+ * scroll passes through the blocks between, and a column that cannot bring a short last block
+ * up to the line would otherwise name the one above it.
+ *
+ * Here and not in the variants because it reads where the blocks are laid out, which only a
+ * story's machine may do (`tools/text-measure.ts`); built, it is an `IntersectionObserver`.
+ */
+export function useScrollSpy<K extends string>(keys: readonly K[]): ScrollSpy<K> {
+  // Followed as a node and not a ref: the column comes and goes with the frame's folding, and
+  // arrives a render after the frame, once the frame knows its size.
+  const [column, setColumn] = useState<HTMLDivElement | null>(null)
+  // And as a ref, for a block pressed in the render the column arrives in.
+  const current = useRef<HTMLDivElement | null>(null)
+  const [scroller] = useState(() => (node: HTMLDivElement | null): void => {
+    current.current = node
+    setColumn(node)
+  })
+  const blocks = useRef(new Map<K, HTMLElement>())
+  const anchors = useRef(new Map<K, (node: HTMLElement | null) => void>())
+  const sent = useRef<{ key: K; top: number } | null>(null)
+  // SAFETY: the column is never empty — a Spec always has its three phases.
+  const first = keys[0] as K
+  const [active, setActive] = useState<K>(first)
+  const [read, setRead] = useState<Record<K, number>>(
+    // SAFETY: built from every key, each given a number.
+    () => Object.fromEntries(keys.map((key) => [key, 0])) as Record<K, number>,
+  )
+
+  useLayoutEffect(() => {
+    if (column === null) return
+    const follow = (): void => {
+      const { scrollTop, clientHeight, scrollHeight } = column
+      const foot = scrollTop + clientHeight
+      // SAFETY: filled below for every key, before it is read.
+      const next = {} as Record<K, number>
+      let reading = first
+      for (const key of keys) {
+        const block = blocks.current.get(key)
+        if (block === undefined) {
+          next[key] = 0
+          continue
+        }
+        const top = block.offsetTop
+        next[key] = Math.min(1, Math.max(0, (foot - top) / Math.max(1, block.offsetHeight)))
+        if (top <= scrollTop + 1) reading = key
+      }
+      setRead((before) => (keys.every((key) => before[key] === next[key]) ? before : next))
+      if (sent.current !== null) {
+        // Arrived where it was sent: the block pressed stays named until the column moves again.
+        if (Math.abs(scrollTop - sent.current.top) < 1) sent.current = null
+        return
+      }
+      setActive(foot >= scrollHeight - 1 ? (keys.at(-1) ?? first) : reading)
+    }
+    const settle = (): void => {
+      const target = sent.current
+      sent.current = null
+      // Stopped where it was sent: the block pressed stays named. Anywhere else, the hand took
+      // over on the way, and the top of the column says again.
+      if (target !== null && Math.abs(column.scrollTop - target.top) < 1) return
+      follow()
+    }
+    // The hand taking over on the way: what it scrolls to is what the top of the column says.
+    const takeOver = (): void => {
+      sent.current = null
+    }
+    const HANDS = ['wheel', 'pointerdown', 'touchstart', 'keydown'] as const
+    follow()
+    column.addEventListener('scroll', follow, { passive: true })
+    column.addEventListener('scrollend', settle)
+    for (const hand of HANDS) column.addEventListener(hand, takeOver, { passive: true })
+    const observer = new ResizeObserver(follow)
+    observer.observe(column)
+    return () => {
+      column.removeEventListener('scroll', follow)
+      column.removeEventListener('scrollend', settle)
+      for (const hand of HANDS) column.removeEventListener(hand, takeOver)
+      observer.disconnect()
+    }
+  }, [column])
+
+  function anchor(key: K): (node: HTMLElement | null) => void {
+    const known = anchors.current.get(key)
+    if (known !== undefined) return known
+    const made = (node: HTMLElement | null): void => {
+      if (node === null) blocks.current.delete(key)
+      else blocks.current.set(key, node)
+    }
+    anchors.current.set(key, made)
+    return made
+  }
+
+  function goTo(key: K, instantly: boolean): void {
+    const scrolled = current.current
+    const block = blocks.current.get(key)
+    if (scrolled === null || block === undefined) return
+    const top = Math.min(block.offsetTop, scrolled.scrollHeight - scrolled.clientHeight)
+    setActive(key)
+    // Already there, nothing will scroll and nothing will say it stopped.
+    if (Math.abs(scrolled.scrollTop - top) < 1) return
+    sent.current = { key, top }
+    scrolled.scrollTo({ top, behavior: instantly ? 'instant' : 'smooth' })
+  }
+
+  return { scroller, anchor, active, read, goTo }
+}

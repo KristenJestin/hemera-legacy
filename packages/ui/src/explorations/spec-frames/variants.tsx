@@ -59,7 +59,7 @@ export interface VariantProps {
  * Where the keyboard goes once the hand folded or unfolded: onto the control that does the
  * other, which is what stands in place of the one pressed.
  */
-function useRefocus(
+export function useRefocus(
   folded: boolean,
   byHand: { current: boolean },
   within: { current: HTMLElement | null },
@@ -79,7 +79,13 @@ function useRefocus(
 }
 
 /** The chevron that unfolds or folds the Spec, standing open on a rim. */
-function FoldToggle({ folded, onToggle }: { folded: boolean; onToggle: () => void }): ReactNode {
+export function FoldToggle({
+  folded,
+  onToggle,
+}: {
+  folded: boolean
+  onToggle: () => void
+}): ReactNode {
   const label = folded ? 'Unfold the Spec' : 'Fold the Spec'
   return (
     <div className="flex shrink-0 justify-center pb-1.5">
@@ -329,9 +335,9 @@ export function V2Beside({ session, defaultFolded }: VariantProps): ReactNode {
 // V3 · a frame per phase
 
 /** How far along a phase is, as its glyph says it. */
-type PhaseProgress = 'done' | 'started' | 'empty'
+export type PhaseProgress = 'done' | 'started' | 'empty'
 
-function phaseProgress(group: RailGroup, following: string | undefined): PhaseProgress {
+export function phaseProgress(group: RailGroup, following: string | undefined): PhaseProgress {
   const each = group.rows.map((row) =>
     progressOf(row.target === following ? 'writing' : row.mark, group.state),
   )
@@ -348,13 +354,13 @@ const GLYPH: Record<PhaseProgress, string> = {
     'flex size-control-sm items-center justify-center rounded-md bg-muted-foreground/15 text-muted-foreground',
 }
 
-const PROGRESS_WORDS: Record<PhaseProgress, string> = {
+export const PROGRESS_WORDS: Record<PhaseProgress, string> = {
   done: 'done',
   started: 'started',
   empty: 'nothing written',
 }
 
-const STATE_WORDS: Record<PhaseState, string> = {
+export const STATE_WORDS: Record<PhaseState, string> = {
   finished: 'Finished',
   open: 'Open',
   pending: 'Not started',
@@ -366,15 +372,18 @@ const STATE_WORDS: Record<PhaseState, string> = {
  * The glyph of a phase, which travels between the folded rail and the head of its card: the
  * same `layoutId` on both, on `morph`, so it reads as one glyph moving and not two.
  */
-function PhaseGlyph({
+export function PhaseGlyph({
   phase,
   progress,
   travels,
+  family = 'phase',
 }: {
   phase: PhaseName
   progress: PhaseProgress
   /** Whether it is the one that travels; a probe's copy never is. */
   travels: boolean
+  /** Whose glyphs they are: two variants' glyphs never travel into each other. */
+  family?: string | undefined
 }): ReactNode {
   const transition = useTransition(morph)
   const Icon = SPEC_PHASE_ICONS[phase]
@@ -388,7 +397,7 @@ function PhaseGlyph({
   return (
     <motion.span
       aria-hidden="true"
-      layoutId={`phase-${phase}`}
+      layoutId={`${family}-${phase}`}
       transition={transition}
       className={GLYPH[progress]}
     >

@@ -453,7 +453,7 @@ export const MarkReadyRefused: Story = {
     await expect(foot.getByRole('alert')).toHaveTextContent(
       /^ATL-7 is not ready yet. Still to do: .*the credit-note question/,
     )
-    await expect(canvas.getByText('draft')).toBeVisible()
+    await expect(canvas.getByRole('img', { name: 'Draft' })).toBeVisible()
     await expect(markReadyOf(canvasElement)).toBeVisible()
   },
 }
@@ -519,7 +519,9 @@ export const DraftConfirmed: Story = {
     await expect(isPrimary(mark)).toBe(true)
     await userEvent.click(mark)
     await expect(args.onMarkReady).toHaveBeenCalledTimes(1)
-    await waitFor(() => expect(within(canvasElement).getByText('ready')).toBeVisible())
+    await waitFor(() =>
+      expect(within(canvasElement).getByRole('img', { name: 'Ready' })).toBeVisible(),
+    )
   },
 }
 

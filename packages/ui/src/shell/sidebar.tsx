@@ -1,7 +1,7 @@
 import { cn } from 'cn'
-import { AnimatePresence, LayoutGroup, motion } from 'motion/react'
+import { AnimatePresence, motion } from 'motion/react'
 import type { Transition } from 'motion/react'
-import { type ReactElement, type ReactNode, useId } from 'react'
+import type { ReactElement, ReactNode } from 'react'
 
 import { IconCommand, IconHome, IconPlus, IconSettings, IconTimelineEvent } from '../icons.ts'
 import {
@@ -15,6 +15,7 @@ import {
 } from '../motion.ts'
 import { Button, IconButton } from '../components/button/button.tsx'
 import { Kbd } from '../components/kbd/kbd.tsx'
+import { OVER_MARK } from '../components/sliding-mark/sliding-mark.tsx'
 import { Tooltip } from '../components/tooltip/tooltip.tsx'
 import { SidebarSessionEntry } from '../session/session.tsx'
 import {
@@ -24,6 +25,7 @@ import {
   SIDEBAR_RAIL,
   type ShellSession,
 } from './model.ts'
+import { SidebarMark } from './sidebar-mark.tsx'
 
 /**
  * The sidebar, session-first, folding to a rail of icons (design D2-03).
@@ -57,7 +59,7 @@ import {
  * weight without the active tab taking it too.
  */
 const PANEL =
-  'relative flex shrink-0 flex-col gap-1 overflow-hidden bg-sidebar p-2 text-sidebar-foreground'
+  'relative isolate flex shrink-0 flex-col gap-1 overflow-hidden bg-sidebar p-2 text-sidebar-foreground'
 
 /**
  * Every entry is padded so that the middle of its icon lands on the middle of the rail: the
@@ -76,13 +78,15 @@ const ENTRY = 'w-full shrink-0 justify-start gap-3 border-0 px-4'
 const COMMAND = 'w-full shrink-0 justify-start gap-3 px-4'
 
 /**
- * The one filled surface of the sidebar: the place being looked at, pressed into the panel.
- *
- * Denser than what surrounds it and not lighter. A light theme has nothing above white to lift
- * a selection to, so lifting it there says almost nothing; weight is a difference both themes
- * can carry. Nothing is raised, so nothing casts a shadow.
+ * The entry being looked at, drawn over the panel's mark as a whole (`OVER_MARK`, issue #127):
+ * the mark is its fill, and a ghost that is the current place draws none of its own. The others
+ * are crossed by the mark. Written out rather than imported, because a class the lint cannot
+ * read on a component is a class it refuses.
  */
-const MARK = 'absolute inset-0 rounded-md bg-sidebar-accent'
+const CHOSEN = 'relative z-1'
+
+/** Where the settings at the foot of the panel are, for the mark. */
+const SETTINGS_MARK = 'settings'
 
 /** What an icon weighs when its entry is not the one being looked at. */
 const ICON = 'text-muted-foreground'
@@ -149,10 +153,6 @@ export function Sidebar({
   settingsActive = false,
 }: SidebarProps): ReactNode {
   const transition = useTransition(morph)
-  // Scoped to this sidebar: `LayoutGroup` prefixes the `layoutId` of everything under it, and
-  // two sidebars on one page — Storybook shows both themes at once — are not one list with two
-  // marks handing a single element back and forth between them.
-  const group = useId()
   // `useTransition` hands back this very object when the system asks for less movement, and a
   // delay is still a wait: the labels take theirs only when there is a journey to wait for.
   const still = transition === instant
@@ -196,121 +196,113 @@ export function Sidebar({
         </Button>
       </Folding>
 
-      {/* The group holds the list *and* the foot of the panel: the mark is one element handed
-          between them, and a settings left outside the group would be a second mark with an
-          identifier of its own — shared, in Storybook, with every other sidebar on the page. */}
-      <LayoutGroup id={group}>
-        {/* The places scroll and the two ends do not: a window short enough to cut the list off
+      {/* The places scroll and the two ends do not: a window short enough to cut the list off
             used to cut it off for good, with the theme and the settings pushed out of reach. */}
-        <div className="scroll-quiet flex min-h-0 flex-1 flex-col gap-1 overflow-x-hidden overflow-y-auto">
-          {/* The Home of the Project is the first place, above what it holds: it is where a
+      <div className="scroll-quiet flex min-h-0 flex-1 flex-col gap-1 overflow-x-hidden overflow-y-auto">
+        {/* The Home of the Project is the first place, above what it holds: it is where a
               Session is started from, and the one page the palette is not needed to reach. */}
-          <Entry
-            id={HOME_ENTRY}
-            label="Home"
-            icon={<IconHome size="md" />}
-            active={activeEntryId === HOME_ENTRY}
-            collapsed={collapsed}
-            transition={transition}
-            labels={labels}
-            onSelect={onSelectEntry}
-          />
-          <Rule />
-          {/* Folded, the head of a group is not drawn at all rather than drawn invisible: a label
+        <Entry
+          id={HOME_ENTRY}
+          label="Home"
+          icon={<IconHome size="md" />}
+          active={activeEntryId === HOME_ENTRY}
+          collapsed={collapsed}
+          labels={labels}
+          onSelect={onSelectEntry}
+        />
+        <Rule />
+        {/* Folded, the head of a group is not drawn at all rather than drawn invisible: a label
               faded to nothing that kept its height was a hole in the rail with no icon in it
               (recette 5 of 24 September 2026). It folds away with the width and comes back with
               it. The `+` goes with it: on the rail it was never more than a clipped half. */}
-          <Folds shown={!collapsed} transition={labels}>
-            <div className="flex items-center gap-1">
-              <p className={cn(GROUP, 'flex-1')}>Sessions</p>
-              {/* The `+` is the one control that makes a Session, and it is the same control in
+        <Folds shown={!collapsed} transition={labels}>
+          <div className="flex items-center gap-1">
+            <p className={cn(GROUP, 'flex-1')}>Sessions</p>
+            {/* The `+` is the one control that makes a Session, and it is the same control in
                   the same place whatever the list holds: a second way to start, further down, is
                   a control the eye has to look for twice. */}
-              {onNewSession !== undefined && (
-                <IconButton
-                  variant="ghost"
-                  size="sm"
-                  icon={<IconPlus size="sm" />}
-                  aria-label="New Session"
-                  onClick={onNewSession}
-                />
-              )}
-            </div>
-          </Folds>
-          {/* A Session is the one entry of this list that carries commands of its own, so its
-              row is its own component — see `session/session.tsx`. The mark is still the panel's:
-              the `LayoutGroup` above prefixes the identifier, and the filled surface is handed
-              from a Session to the Journal rather than drawn once per row. */}
-          {sessions.map((session) => (
-            <SidebarSessionEntry
-              key={session.id}
-              title={session.title}
-              active={session.id === activeEntryId}
-              collapsed={collapsed}
-              onSelect={() => onSelectEntry(session.id)}
-              onRename={
-                onRenameSession === undefined ? undefined : () => onRenameSession(session.id)
-              }
-              onArchive={
-                onArchiveSession === undefined ? undefined : () => onArchiveSession(session.id)
-              }
-            />
-          ))}
-          {/* No Session yet, said in words — the way to make one is the `+` above, which is where
+            {onNewSession !== undefined && (
+              <IconButton
+                variant="ghost"
+                size="sm"
+                icon={<IconPlus size="sm" />}
+                aria-label="New Session"
+                onClick={onNewSession}
+              />
+            )}
+          </div>
+        </Folds>
+        {/* A Session is the one entry of this list that carries commands of its own, so its
+              row is its own component — see `session/session.tsx`. The mark is still the panel's,
+              drawn once below and handed from a Session to the Journal. */}
+        {sessions.map((session) => (
+          <SidebarSessionEntry
+            key={session.id}
+            id={session.id}
+            title={session.title}
+            active={session.id === activeEntryId}
+            collapsed={collapsed}
+            onSelect={() => onSelectEntry(session.id)}
+            onRename={onRenameSession === undefined ? undefined : () => onRenameSession(session.id)}
+            onArchive={
+              onArchiveSession === undefined ? undefined : () => onArchiveSession(session.id)
+            }
+          />
+        ))}
+        {/* No Session yet, said in words — the way to make one is the `+` above, which is where
               it is whether the list holds one Session or none. An empty list that says nothing is
               a list the user believes is still loading. */}
-          {/* Folded with no Session, the group is empty and its closing rule goes with it: one
+        {/* Folded with no Session, the group is empty and its closing rule goes with it: one
               rule between the Home and the Journal, not two around nothing. */}
-          {sessions.length === 0 ? (
-            <Folds shown={!collapsed} transition={labels}>
-              <div className="flex flex-col gap-1">
-                <p className="truncate px-3 py-1 text-xs text-muted-foreground">No Session yet</p>
-                <Rule />
-              </div>
-            </Folds>
-          ) : (
-            <Rule />
-          )}
+        {sessions.length === 0 ? (
           <Folds shown={!collapsed} transition={labels}>
-            <p className={GROUP}>Project</p>
+            <div className="flex flex-col gap-1">
+              <p className="truncate px-3 py-1 text-xs text-muted-foreground">No Session yet</p>
+              <Rule />
+            </div>
           </Folds>
-          <Entry
-            id={JOURNAL_ENTRY}
-            label="Journal"
-            icon={<IconTimelineEvent size="md" />}
-            active={activeEntryId === JOURNAL_ENTRY}
-            collapsed={collapsed}
-            transition={transition}
-            labels={labels}
-            onSelect={onSelectEntry}
-          />
-          <Entry
-            id={PROJECT_SETTINGS_ENTRY}
-            label="Project settings"
-            icon={<IconSettings size="md" />}
-            active={activeEntryId === PROJECT_SETTINGS_ENTRY}
-            collapsed={collapsed}
-            transition={transition}
-            labels={labels}
-            onSelect={onSelectEntry}
-          />
-        </div>
+        ) : (
+          <Rule />
+        )}
+        <Folds shown={!collapsed} transition={labels}>
+          <p className={GROUP}>Project</p>
+        </Folds>
+        <Entry
+          id={JOURNAL_ENTRY}
+          label="Journal"
+          icon={<IconTimelineEvent size="md" />}
+          active={activeEntryId === JOURNAL_ENTRY}
+          collapsed={collapsed}
+          labels={labels}
+          onSelect={onSelectEntry}
+        />
+        <Entry
+          id={PROJECT_SETTINGS_ENTRY}
+          label="Project settings"
+          icon={<IconSettings size="md" />}
+          active={activeEntryId === PROJECT_SETTINGS_ENTRY}
+          collapsed={collapsed}
+          labels={labels}
+          onSelect={onSelectEntry}
+        />
+      </div>
 
-        <Rule />
-        <div className="flex shrink-0 flex-col gap-1">
-          {/* The theme is not here: it is one of the settings, and the settings are one press
+      <Rule />
+      <div className="flex shrink-0 flex-col gap-1">
+        {/* The theme is not here: it is one of the settings, and the settings are one press
               away. A control offered twice is a control that has to be explained twice. */}
-          <Action
-            label="Settings"
-            icon={<IconSettings size="md" />}
-            active={settingsActive}
-            collapsed={collapsed}
-            transition={transition}
-            labels={labels}
-            onSelect={onOpenSettings}
-          />
-        </div>
-      </LayoutGroup>
+        <Action
+          label="Settings"
+          icon={<IconSettings size="md" />}
+          active={settingsActive}
+          collapsed={collapsed}
+          labels={labels}
+          onSelect={onOpenSettings}
+        />
+      </div>
+      {/* The mark is the panel's and is handed between the list *and* its foot. Last, so that it
+          is drawn after every entry it can cross. */}
+      <SidebarMark target={settingsActive ? SETTINGS_MARK : activeEntryId} />
     </motion.aside>
   )
 }
@@ -398,7 +390,7 @@ function Label({
   const travel = collapsed ? -LABEL_TRAVEL : 0
   return (
     <motion.span
-      className="relative truncate"
+      className={cn(OVER_MARK, 'truncate')}
       initial={false}
       animate={{ opacity: collapsed ? 0 : 1, x: travel }}
       transition={transition}
@@ -412,8 +404,7 @@ function Label({
  * One place the sidebar can take you.
  *
  * The mark of the active entry is one element that moves between them, not one per entry that
- * appears: a shared `layoutId` hands it over and motion carries it across, which is a transform
- * and costs nothing.
+ * appears: the panel's `SidebarMark`, which finds the entry by its `data-mark`.
  */
 function Entry({
   id,
@@ -421,7 +412,6 @@ function Entry({
   icon,
   active,
   collapsed,
-  transition,
   labels,
   onSelect,
 }: {
@@ -430,7 +420,6 @@ function Entry({
   icon: ReactNode
   active: boolean
   collapsed: boolean
-  transition: Transition
   labels: Transition
   onSelect: (id: string) => void
 }): ReactNode {
@@ -438,13 +427,13 @@ function Entry({
     <Folding collapsed={collapsed} label={label}>
       <Button
         variant="ghost"
-        className={ENTRY}
+        className={cn(ENTRY, active && CHOSEN)}
+        data-mark={id}
         aria-label={label}
         aria-current={active ? 'true' : undefined}
         onClick={() => onSelect(id)}
       >
-        {active && <motion.span layoutId="active-nav" className={MARK} transition={transition} />}
-        <span className={cn('relative flex shrink-0', active ? ICON_ACTIVE : ICON)}>{icon}</span>
+        <span className={cn(OVER_MARK, 'flex shrink-0', active ? ICON_ACTIVE : ICON)}>{icon}</span>
         <Label collapsed={collapsed} transition={labels}>
           {label}
         </Label>
@@ -459,7 +448,6 @@ function Action({
   icon,
   active = false,
   collapsed,
-  transition,
   labels,
   onSelect,
 }: {
@@ -468,7 +456,6 @@ function Action({
   /** Whether the window is on it. The settings are a place like any other, and say so. */
   active?: boolean | undefined
   collapsed: boolean
-  transition: Transition
   labels: Transition
   onSelect: () => void
 }): ReactNode {
@@ -476,13 +463,13 @@ function Action({
     <Folding collapsed={collapsed} label={label}>
       <Button
         variant="ghost"
-        className={ENTRY}
+        className={cn(ENTRY, active && CHOSEN)}
+        data-mark={SETTINGS_MARK}
         aria-label={label}
         aria-current={active ? 'true' : undefined}
         onClick={onSelect}
       >
-        {active && <motion.span layoutId="active-nav" className={MARK} transition={transition} />}
-        <span className={cn('relative flex shrink-0', active ? ICON_ACTIVE : ICON)}>{icon}</span>
+        <span className={cn(OVER_MARK, 'flex shrink-0', active ? ICON_ACTIVE : ICON)}>{icon}</span>
         <Label collapsed={collapsed} transition={labels}>
           {label}
         </Label>

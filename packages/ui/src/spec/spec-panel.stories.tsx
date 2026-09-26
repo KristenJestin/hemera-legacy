@@ -13,6 +13,8 @@ import {
   MID_PLAN,
   OLDER_REVISION,
   READY,
+  gate,
+  phases,
 } from './spec-fixtures.ts'
 import type { WorkspaceActionsProps } from './workspace-actions.tsx'
 
@@ -738,6 +740,25 @@ export const DraftConfirmed: Story = {
 }
 
 /**
+ * A draft the agent attested while a phase is still open: the attestation alone does not make
+ * `Mark ready` the primary action, since the press would be refused on the rest of the gate.
+ */
+export const AttestedWithAPhaseOpen: Story = {
+  args: {
+    spec: {
+      ...GATE_FULL,
+      phases: phases('finished', 'finished', 'open'),
+      readiness: gate({ phases: 'phases · the decompose phase is open, not finished' }, [
+        { label: 'decompose', target: 'tasks' },
+      ]),
+    },
+  },
+  play: async ({ canvasElement }) => {
+    await expect(isPrimary(markReadyOf(canvasElement))).toBe(false)
+  },
+}
+
+/**
  * A ready Spec with its footer (issues #135, #150): the build's actions stand in the footer under
  * the column, side by side at its end and none of them cut — not in the head, which says the
  * status and offers `Rework`.
@@ -798,6 +819,46 @@ export const BuildArrivesWhenReady: Story = {
     await waitFor(() => expect(buildFootOf(canvasElement)).toBeNull())
     await expect(canvas.queryByRole('button', { name: 'Prepare and start the build' })).toBeNull()
     await expect(isPrimary(markReadyOf(canvasElement))).toBe(false)
+  },
+}
+
+/**
+ * A Rework while the build waits for its Workspace: the launch is taken back, and the draft it
+ * leaves has its footer — `Mark ready`, with the cancelled launch said beside it, not in its place.
+ */
+export const ReworkWhileTheLaunchWaits: Story = {
+  args: {
+    spec: READY,
+    build: { ...BUILD, launch: { state: 'waiting', step: 'pnpm install' } },
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await expect(canvas.getByText(/^Preparing the Workspace/)).toBeVisible()
+    await userEvent.click(canvas.getByRole('button', { name: 'Rework' }))
+    const dialog = await within(document.body).findByRole('dialog', { name: 'Rework ATL-7' })
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Rework' }))
+    await waitFor(() => expect(footOf(canvasElement, 'ready')).not.toBeNull())
+    await waitFor(() => expect(buildFootOf(canvasElement)).toBeNull())
+    const foot = within(footOf(canvasElement, 'ready')!)
+    await expect(foot.getByRole('button', { name: 'Mark ready' })).toBeVisible()
+    await expect(foot.getByRole('status')).toHaveTextContent('Cancelled by the Rework')
+  },
+}
+
+/**
+ * A draft with a failed launch still on it: `Mark ready` holds the footer, the failure is said
+ * beside it, and nothing offers to start the agent again on a Spec that is not ready.
+ */
+export const DraftWithAFailedLaunch: Story = {
+  args: {
+    build: { ...BUILD, launch: { state: 'failed', cause: 'the agent exited with code 1' } },
+  },
+  play: async ({ canvasElement }) => {
+    await expect(buildFootOf(canvasElement)).toBeNull()
+    const foot = within(footOf(canvasElement, 'ready')!)
+    await expect(foot.getByRole('button', { name: 'Mark ready' })).toBeVisible()
+    await expect(foot.getByText(/The agent did not start: the agent exited/)).toBeVisible()
+    await expect(foot.queryByRole('button', { name: 'Retry' })).toBeNull()
   },
 }
 

@@ -365,20 +365,27 @@ export function Composer({
 
   return (
     <div className="flex flex-col gap-2">
-      <AnimatePresence initial={false}>
-        {pinned.map((one) => (
-          <motion.div
-            key={one.id}
-            className="shrink-0 overflow-hidden"
-            initial={collapse}
-            animate={expand}
-            exit={collapse}
-            transition={growing}
-          >
-            {one.content}
-          </motion.div>
-        ))}
-      </AnimatePresence>
+      {/* Bounded, and scrolled on its own past that: however many wait, the thread keeps its
+          room above them and the box stays in reach under them. Empty, it takes no gap. */}
+      <section
+        aria-label="Waiting for your answer"
+        className="scroll-quiet flex max-h-pinned shrink-0 flex-col gap-2 overflow-y-auto empty:hidden"
+      >
+        <AnimatePresence initial={false}>
+          {pinned.map((one) => (
+            <motion.div
+              key={one.id}
+              className="shrink-0 overflow-hidden"
+              initial={collapse}
+              animate={expand}
+              exit={collapse}
+              transition={growing}
+            >
+              {one.content}
+            </motion.div>
+          ))}
+        </AnimatePresence>
+      </section>
       {blocked}
       <Frame
         animated

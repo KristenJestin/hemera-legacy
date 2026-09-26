@@ -2,6 +2,7 @@ import type { Meta, StoryObj } from '@storybook/react-vite'
 import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
 import { useState } from 'react'
 
+import { expectNeverBuried, watchThereAndBack } from '../../.storybook/sliding-mark.ts'
 import type { ThemeChoice } from '../window.ts'
 import {
   Settings,
@@ -283,5 +284,23 @@ export const TurningTheTraceOn: Story = {
       expect(box).toBeChecked()
     })
     expect(args.onAcpTraceChange).toHaveBeenCalledWith(true)
+  },
+}
+
+/**
+ * The fill of the theme's segment crossing it, from one end to the other and back: on every frame
+ * of the way it is drawn over the middle choice and never under it (issue #127).
+ */
+export const MarkCrossing: Story = {
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const segment = canvas.getByRole('radiogroup', { name: 'Theme' })
+    const watched = await watchThereAndBack(
+      segment,
+      () => userEvent.click(canvas.getByRole('radio', { name: 'System' })),
+      () => userEvent.click(canvas.getByRole('radio', { name: 'Dark' })),
+    )
+    expect(canvas.getByRole('radio', { name: 'Dark' })).toBeChecked()
+    expectNeverBuried(watched)
   },
 }

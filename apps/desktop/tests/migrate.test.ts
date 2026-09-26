@@ -91,6 +91,12 @@ const CHOICES_MIGRATION = '20260926132904_session_choices'
  */
 const QUEUED_MIGRATION = '20260926173604_queued_results'
 
+/**
+ * The migration that lets a command of the catalogue run each time Hemera opens: the one a
+ * profile that ran the queued results' has never heard of (issue #114).
+ */
+const RUN_AT_OPEN_MIGRATION = '20260926185430_run_at_open'
+
 /** A folder carrying the shipped migrations up to one of them, as an older version did. */
 function shippedUpTo(last: string): string {
   const folder = join(workspace, `shipped-${last}`)
@@ -521,6 +527,7 @@ describe('A profile of lot 6 is migrated to lot 19 (specs)', () => {
       WORKSPACES_MIGRATION,
       CHOICES_MIGRATION,
       QUEUED_MIGRATION,
+      RUN_AT_OPEN_MIGRATION,
     ])
     expect(readdirSync(join(dataFolder, BACKUPS_FOLDER))).toEqual([`${SPECS_MIGRATION}.sqlite`])
 
@@ -893,6 +900,7 @@ describe('Un profil du lot 5 est migré vers le lot 6', () => {
       WORKSPACES_MIGRATION,
       CHOICES_MIGRATION,
       QUEUED_MIGRATION,
+      RUN_AT_OPEN_MIGRATION,
     ])
     expect(readdirSync(join(dataFolder, BACKUPS_FOLDER))).toEqual([`${TOOLS_MIGRATION}.sqlite`])
 
@@ -1031,7 +1039,12 @@ describe('A profile of lot 19 is migrated to lot 20', () => {
     )
 
     const standing = await on(dataFolder, openProfile(dataFolder, SHIPPED, '0.4.0'))
-    expect(standing.behind).toEqual([WORKSPACES_MIGRATION, CHOICES_MIGRATION, QUEUED_MIGRATION])
+    expect(standing.behind).toEqual([
+      WORKSPACES_MIGRATION,
+      CHOICES_MIGRATION,
+      QUEUED_MIGRATION,
+      RUN_AT_OPEN_MIGRATION,
+    ])
     expect(readdirSync(join(dataFolder, BACKUPS_FOLDER))).toEqual([
       `${WORKSPACES_MIGRATION}.sqlite`,
     ])
@@ -1152,7 +1165,7 @@ describe('A profile of lot 19 is migrated to lot 20', () => {
       'profile.backed_up',
       'profile.migrated',
     ])
-    expect(JSON.parse(kept.events.at(-1)!.payload)).toEqual({ migration: QUEUED_MIGRATION })
+    expect(JSON.parse(kept.events.at(-1)!.payload)).toEqual({ migration: RUN_AT_OPEN_MIGRATION })
   })
 
   test('a command of a word of lot 18, or a step of an unknown state, is refused', async () => {
@@ -1353,7 +1366,7 @@ describe('A profile that ran the Workspaces gains the choices of its Sessions', 
     )
 
     const standing = await on(dataFolder, openProfile(dataFolder, SHIPPED, '0.4.0'))
-    expect(standing.behind).toEqual([CHOICES_MIGRATION, QUEUED_MIGRATION])
+    expect(standing.behind).toEqual([CHOICES_MIGRATION, QUEUED_MIGRATION, RUN_AT_OPEN_MIGRATION])
     expect(readdirSync(join(dataFolder, BACKUPS_FOLDER))).toEqual([`${CHOICES_MIGRATION}.sqlite`])
 
     const kept = await on(
@@ -1401,7 +1414,7 @@ describe('A profile that ran the choices keeps a queued result across a quit', (
     )
 
     const standing = await on(dataFolder, openProfile(dataFolder, SHIPPED, '0.4.0'))
-    expect(standing.behind).toEqual([QUEUED_MIGRATION])
+    expect(standing.behind).toEqual([QUEUED_MIGRATION, RUN_AT_OPEN_MIGRATION])
     expect(readdirSync(join(dataFolder, BACKUPS_FOLDER))).toEqual([`${QUEUED_MIGRATION}.sqlite`])
 
     const read = await on(
@@ -1425,5 +1438,42 @@ describe('A profile that ran the choices keeps a queued result across a quit', (
       kept: [{ title: 'Shape the export' }],
       left: [],
     })
+  })
+})
+
+describe('A profile that ran the queued results keeps its commands, none run at open', () => {
+  test('a command of the catalogue is kept whole, and is not run when Hemera opens', async () => {
+    const dataFolder = join(workspace, 'from-queued')
+    await on(dataFolder, openProfile(dataFolder, shippedUpTo(QUEUED_MIGRATION), '0.4.0'))
+    await on(
+      dataFolder,
+      Effect.gen(function* () {
+        const sql = yield* SqliteClient
+        const at = '2026-09-26T10:00:00.000Z'
+        yield* sql`INSERT INTO projects (id, name, tone, created_at, updated_at, version)
+          VALUES ('atlas', 'Atlas', 'primary', ${at}, ${at}, 1)`
+        yield* sql`INSERT INTO project_commands (id, project_id, name, line, type, created_at, updated_at)
+          VALUES ('command-1', 'atlas', 'up', 'docker compose up -d', 'script', ${at}, ${at})`
+      }),
+    )
+
+    const standing = await on(dataFolder, openProfile(dataFolder, SHIPPED, '0.4.0'))
+    expect(standing.behind).toEqual([RUN_AT_OPEN_MIGRATION])
+    expect(readdirSync(join(dataFolder, BACKUPS_FOLDER))).toEqual([
+      `${RUN_AT_OPEN_MIGRATION}.sqlite`,
+    ])
+
+    const kept = await on(
+      dataFolder,
+      Effect.gen(function* () {
+        const sql = yield* SqliteClient
+        return yield* sql<{
+          name: string
+          line: string
+          run_at_open: number
+        }>`SELECT name, line, run_at_open FROM project_commands`
+      }),
+    )
+    expect(kept).toEqual([{ name: 'up', line: 'docker compose up -d', run_at_open: 0 }])
   })
 })

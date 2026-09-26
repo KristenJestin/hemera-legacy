@@ -17,6 +17,7 @@ import {
   nextPending,
   resumedSteps,
   slugify,
+  specWorkspaceName,
   stepsFor,
   variableKey,
   workspaceName,
@@ -255,6 +256,27 @@ describe('A slug is lowercase words joined by dashes', () => {
   test("a Project's prefix is its name as a slug, hemera when nothing is left", () => {
     expect(defaultBranchPrefix('Hemera Desktop')).toBe('hemera-desktop')
     expect(defaultBranchPrefix('!!!')).toBe('hemera')
+  })
+})
+
+// Scenario "A Spec's Workspace is proposed a readable name" (#136).
+describe("A Spec's Workspace is proposed its key and at most four words of its title", () => {
+  test('the words that say nothing are left out, and the name stops at four words', () => {
+    expect(specWorkspaceName('AAA-1', 'progress-bar-des-atomes-restent-allumes')).toBe(
+      'aaa-1-progress-bar-atomes-restent',
+    )
+  })
+
+  test('a slug cut at its full length does not end the name on part of a word', () => {
+    const cut = 'atoms-progress-bar-des-atomes-restent-allumes-au-debut-fin-l'
+    expect(cut).toHaveLength(60)
+    expect(specWorkspaceName('AAA-1', cut)).toBe('aaa-1-atoms-progress-bar-atomes')
+    expect(specWorkspaceName('HEM-2', 'the-a-login-of-x')).toBe('hem-2-login')
+  })
+
+  test('a short title is kept whole, after the key', () => {
+    expect(specWorkspaceName('HEM-7', 'login-form')).toBe('hem-7-login-form')
+    expect(specWorkspaceName('HEM-7', 'spec')).toBe('hem-7-spec')
   })
 })
 

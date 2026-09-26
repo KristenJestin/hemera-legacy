@@ -153,6 +153,21 @@ if (!app.requestSingleInstanceLock()) {
     registerChannels(window, identity, engine, data)
     await loadWindow(window)
 
+    // What the Projects run each time Hemera opens, asked once the window is shown and never
+    // before, so opening is not slowed down (#114). Nothing waits for it: a run that fails is the
+    // Project's to show, and what could not be started at all is written down here.
+    void Effect.runPromise(
+      engine.ask('engine.atOpen', {}).pipe(
+        Effect.match({
+          onSuccess: (refused) => {
+            for (const one of refused) log(one)
+          },
+          onFailure: (failed) =>
+            log(`the commands to run at open were not run: ${reported(failed)}`),
+        }),
+      ),
+    )
+
     if (process.argv.includes(REPORT_FLAG)) {
       // The transition is played and counted in the page, because that is where frames are
       // rendered; the main process only asks for it and files what came back.

@@ -38,6 +38,7 @@ import { AgentRuntime, type AgentRuntimeError } from './agents/runtime.ts'
 import { Agents, availabilityOf, type AgentUpdateRefusedError } from './agents/service.ts'
 import { type BareModeNotQualifiedError, refusedUnlessBare } from './agents/bare.ts'
 import { ADAPTERS, Discovery } from './agents/discovery.ts'
+import { runAtOpen } from './commands/at-open.ts'
 import {
   type NothingToRunError,
   type UnknownCommandFolderError,
@@ -394,6 +395,9 @@ export function answer(
       const { projectId, runId } = decision.argument
       return yield* commands.stopIn(projectId, runId)
     }
+    // Asked by the main process once the window is shown (#114): what is marked to run when
+    // Hemera opens runs in its Project's `main`, and what could not be started is answered.
+    if (decision.name === 'engine.atOpen') return yield* runAtOpen
     // What a human decides of a command the agent proposed: the one way into the catalogue
     // besides the settings (D8-11).
     if (decision.name === 'commands.proposeAccept') {

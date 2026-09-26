@@ -918,3 +918,9 @@ describe('A Session that takes the write right is briefed as the writer at the n
     expect(handedAt(agent, 0, contextUri('brief'))?.startsWith(DEFINE_MISSION_BRIEF)).toBe(true)
   })
 })
+
+describe('The main process asks for the commands to run at open', () => {
+  test('engine.atOpen asked with no argument answers what could not start: nothing, here', async () => {
+    expect(await send('engine.atOpen', {})).toEqual([])
+  })
+})

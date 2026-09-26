@@ -78,7 +78,12 @@ jobs:
       # The suites that need a window are not run here: a runner has no display server and no
       # GPU, and what this lot proves about a window is proved on a real target. The stories
       # run headless, which is a page and not a window.
-      - working-directory: source
+      #
+      # The step is capped: a whole run takes under ten minutes on either system, so a suite
+      # that hangs fails the job here in twenty rather than at the six-hour limit.
+      - name: Test
+        working-directory: source
+        timeout-minutes: 20
         run: pnpm test
 
   # The beta is the application the user runs every day, and it is built from every push to the

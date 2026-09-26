@@ -154,7 +154,11 @@ export const providedSchema = z.object({
     'edit',
     'internal',
   ]),
-  /** The file it came from, `''` for the base, which is not one, and what a brief was composed for. */
+  /**
+   * The file it came from, `''` for the base, which is not one; what a brief was composed for
+   * (`shape · revision 1 · writer`), the sections an edit touched (`scope,plan`), the question an
+   * answer answered, and `''` for a sub-agent's result.
+   */
   path: z.string(),
   fingerprint: z.string(),
   deliveredAt: z.string(),

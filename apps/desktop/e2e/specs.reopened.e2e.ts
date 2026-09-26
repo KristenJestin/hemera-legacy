@@ -64,19 +64,20 @@ async function specNow() {
 }
 
 /**
- * The heading of a phase's group in the rail — the group's first row — which says its state to a
- * screen reader.
+ * Where a phase stands, as the heading of the phase in the panel's column names it to a screen
+ * reader: `Shape phase, open`, before how much of it is written.
  */
 async function phaseHeading(phase: string): Promise<string> {
-  return await browser.execute(
-    (scope: string, name: string) =>
+  const name = await browser.execute(
+    (scope: string, key: string) =>
       document
         .querySelector(scope)
-        ?.querySelector(`[role="group"][aria-label="${name}"] [data-heading]`)
+        ?.querySelector(`[data-phase="${key}"] [data-heading] button`)
         ?.getAttribute('aria-label') ?? '',
-    `nav[aria-label="Parts of ${KEY}"]`,
-    phase,
+    `[role="region"][aria-label="Contents of ${KEY}"]`,
+    phase.toLowerCase(),
   )
+  return name.split(', ').slice(0, 2).join(', ')
 }
 
 describe('Phases survive a restart', () => {
@@ -94,9 +95,9 @@ describe('Phases survive a restart', () => {
     expect(panel).toContain('draft')
     await showPart(KEY, 'Problem')
     expect(await region(PANEL)).toContain(PROBLEM)
-    expect(await phaseHeading('Shape')).toBe('Shape phase, open, show all its parts')
-    expect(await phaseHeading('Plan')).toBe('Plan phase, pending, show all its parts')
-    expect(await phaseHeading('Decompose')).toBe('Decompose phase, pending, show all its parts')
+    expect(await phaseHeading('Shape')).toBe('Shape phase, open')
+    expect(await phaseHeading('Plan')).toBe('Plan phase, pending')
+    expect(await phaseHeading('Decompose')).toBe('Decompose phase, pending')
     // The write right stayed with the Session that took it.
     expect(await region('[role="group"][aria-label="Write right"]')).toContain(`« ${OPENED} »`)
   })

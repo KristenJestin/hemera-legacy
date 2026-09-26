@@ -1,8 +1,8 @@
 {
   "version": "7",
   "dialect": "sqlite",
-  "id": "11be5fe5-b162-4d85-9168-83dafdd2899c",
-  "prevIds": ["af6b9af5-29c4-4a53-a74f-2ecd286e1525"],
+  "id": "a2534d56-04d6-4b7b-ab0b-65681b50cb6d",
+  "prevIds": ["0e27ebe3-49f4-406f-9f36-88a85bff28e3"],
   "ddl": [
     {
       "name": "acceptance_criteria",
@@ -441,6 +441,16 @@
       "default": null,
       "generated": null,
       "name": "reason",
+      "entityType": "columns",
+      "table": "build_blockers"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "note",
       "entityType": "columns",
       "table": "build_blockers"
     },
@@ -1666,6 +1676,36 @@
     },
     {
       "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "line",
+      "entityType": "columns",
+      "table": "project_preparation_steps"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "line_windows",
+      "entityType": "columns",
+      "table": "project_preparation_steps"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "line_linux",
+      "entityType": "columns",
+      "table": "project_preparation_steps"
+    },
+    {
+      "type": "text",
       "notNull": true,
       "autoincrement": false,
       "default": null,
@@ -2056,6 +2096,16 @@
     },
     {
       "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": "'{}'",
+      "generated": null,
+      "name": "choices",
+      "entityType": "columns",
+      "table": "sessions"
+    },
+    {
+      "type": "text",
       "notNull": false,
       "autoincrement": false,
       "default": null,
@@ -2161,6 +2211,16 @@
       "default": null,
       "generated": null,
       "name": "build_paused_at",
+      "entityType": "columns",
+      "table": "sessions"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "build_review_at",
       "entityType": "columns",
       "table": "sessions"
     },
@@ -3051,6 +3111,16 @@
       "default": null,
       "generated": null,
       "name": "base",
+      "entityType": "columns",
+      "table": "workspace_steps"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "path",
       "entityType": "columns",
       "table": "workspace_steps"
     },
@@ -4629,7 +4699,7 @@
       "table": "session_entries"
     },
     {
-      "value": "\"kind\" IN ('message', 'thought', 'tool_call', 'diff', 'terminal', 'plan', 'permission_request', 'permission_decision', 'usage', 'turn', 'note', 'hemera_tool_call', 'command_run', 'context_delivery', 'mission_brief', 'spec_question', 'spec_answer', 'spec_proposal', 'command_proposal')",
+      "value": "\"kind\" IN ('message', 'thought', 'tool_call', 'diff', 'terminal', 'plan', 'permission_request', 'permission_decision', 'usage', 'turn', 'note', 'hemera_tool_call', 'classifier_decision', 'command_run', 'context_delivery', 'mission_brief', 'spec_question', 'spec_answer', 'spec_proposal', 'command_proposal')",
       "name": "entry_kind_is_known",
       "entityType": "checks",
       "table": "session_entries"

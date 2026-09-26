@@ -273,6 +273,7 @@ const RELAYED = [
   // and steps the engine holds and runs (D8-01 to D8-06).
   'workspaces.list',
   'workspaces.plan',
+  'workspaces.planRepository',
   'workspaces.create',
   'workspaces.createOnFolder',
   'workspaces.status',
@@ -295,6 +296,7 @@ const RELAYED = [
   'specs.read',
   'specs.revisions',
   'specs.create',
+  'specs.declineProposal',
   'specs.openSession',
   'specs.writeSection',
   'specs.writeStories',

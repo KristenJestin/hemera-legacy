@@ -1,8 +1,8 @@
 {
   "version": "7",
   "dialect": "sqlite",
-  "id": "ad522c07-540e-4738-a62b-c34f8e6d3a9e",
-  "prevIds": ["9e3fdbe1-cf30-4de1-954f-d8c4a14faa4e"],
+  "id": "0e27ebe3-49f4-406f-9f36-88a85bff28e3",
+  "prevIds": ["4057833d-61c4-4479-a017-6b12486d8001"],
   "ddl": [
     {
       "name": "acceptance_criteria",
@@ -2091,6 +2091,16 @@
       "default": null,
       "generated": null,
       "name": "cwd",
+      "entityType": "columns",
+      "table": "sessions"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": "'{}'",
+      "generated": null,
+      "name": "choices",
       "entityType": "columns",
       "table": "sessions"
     },
@@ -4689,7 +4699,7 @@
       "table": "session_entries"
     },
     {
-      "value": "\"kind\" IN ('message', 'thought', 'tool_call', 'diff', 'terminal', 'plan', 'permission_request', 'permission_decision', 'usage', 'turn', 'note', 'hemera_tool_call', 'classifier_decision', 'command_run', 'context_delivery', 'mission_brief', 'spec_question', 'spec_answer', 'spec_proposal', 'command_proposal')",
+      "value": "\"kind\" IN ('message', 'thought', 'tool_call', 'diff', 'terminal', 'plan', 'permission_request', 'permission_decision', 'usage', 'turn', 'note', 'hemera_tool_call', 'command_run', 'context_delivery', 'mission_brief', 'spec_question', 'spec_answer', 'spec_proposal', 'command_proposal')",
       "name": "entry_kind_is_known",
       "entityType": "checks",
       "table": "session_entries"

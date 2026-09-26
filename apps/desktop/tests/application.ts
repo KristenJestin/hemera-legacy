@@ -38,7 +38,7 @@ import {
 import { agentDirectoriesLayer } from '#engine/agents/bare.ts'
 import { type HeldWords, heldWordsLayer } from '#engine/agents/held.ts'
 import { type Commands, commandsLayer } from '#engine/commands/service.ts'
-import { classifierSettingsLayer } from '#engine/classifier/settings.ts'
+import { classifierSettingsLayer, type ClassifierSettings } from '#engine/classifier/settings.ts'
 import { type Context as AgentContext, contextLayer } from '#engine/context/service.ts'
 import { type Journal, journalLayer } from '#engine/journal.ts'
 import { openProfile } from '#engine/migrate.ts'
@@ -213,6 +213,7 @@ export function application(
       | Sessions
       | Specs
       | Preferences
+      | ClassifierSettings
       | AgentRuntime
       | ToolAccess
       | Database
@@ -222,7 +223,7 @@ export function application(
       | AgentContext
     > = runtimeLayer.pipe(
       Layer.provideMerge(toolAccessLayer),
-      Layer.provide(classifierSettingsLayer),
+      Layer.provideMerge(classifierSettingsLayer),
       Layer.provideMerge(contextLayer),
       // No build runs here: a Session that is none passes through the builds untouched.
       Layer.provide(idleBuilds),
@@ -256,6 +257,7 @@ export function application(
         | Sessions
         | Specs
         | Preferences
+        | ClassifierSettings
         | AgentRuntime
         | ToolAccess
         | Database

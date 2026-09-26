@@ -640,6 +640,72 @@ describe('A sub-agent result arrives as internal', () => {
   })
 })
 
+describe('The Context tab lists what a define Session handed its agent', () => {
+  test('the brief, an edit, an answer and a sub-agent result are each reported with what they were about and when', async () => {
+    const gate = gated(1)
+    const agent = fakeAgent({ steps: SHAPING, between: gate.between })
+
+    await application(dataFolder)(agent)(
+      Effect.gen(function* () {
+        const { sessionId, specId } = yield* defining
+        const runtime = yield* AgentRuntime
+        const specs = yield* Specs
+        const running = yield* Effect.forkScoped(runtime.prompt(sessionId, 'First turn.'))
+        yield* heldInThread(sessionId, (entries) =>
+          entries.some((entry) => entry.role === 'agent' && entry.body.startsWith('Shaping')),
+        )
+
+        // While the turn runs the user writes `scope` and answers a question: both go at once
+        // when it is over.
+        yield* write(humanOf(sessionId), specId, 'scope', 'CSV only.')
+        const raised = yield* specs.raiseQuestion(
+          { kind: 'agent', sessionId },
+          {
+            specId,
+            body: 'Which format?',
+            blocking: true,
+            phase: 'shape',
+            options: [{ id: 'csv', label: 'CSV', recommended: true }],
+          },
+        )
+        yield* specs.answerQuestion({
+          specId,
+          questionId: raised.questions[0]?.id ?? '',
+          optionId: 'csv',
+        })
+        gate.carryOn()
+        yield* Fiber.join(running)
+        yield* heldInThread(sessionId, (entries) =>
+          entries.some((entry) => entry.body.endsWith('the answer to “Which format?”.')),
+        )
+
+        // A sub-agent of the Session's finishes once its turns are over.
+        yield* runtime.deliverInternal(sessionId, 'Three call sites read the Journal.')
+        yield* heldInThread(sessionId, (entries) =>
+          entries.some((entry) => entry.body.endsWith('the result of a sub-agent.')),
+        )
+        // Its row is written once the agent took it, as its delivery turn ends.
+        const context = yield* AgentContext
+        let provided = yield* context.provided(sessionId)
+        for (let look = 0; look < 400 && !provided.some((one) => one.kind === 'internal'); look++) {
+          yield* pause(5)
+          provided = yield* context.provided(sessionId)
+        }
+        const handed = provided.filter((one) =>
+          ['brief', 'edit', 'answer', 'internal'].includes(one.kind),
+        )
+        expect(handed.map((one) => [one.kind, one.path, one.reached])).toEqual([
+          ['brief', 'shape · revision 1 · writer', 'delivery_prompt'],
+          ['answer', 'Which format?', 'delivery_prompt'],
+          ['edit', 'scope', 'delivery_prompt'],
+          ['internal', '', 'delivery_prompt'],
+        ])
+        for (const one of handed) expect(Date.parse(one.deliveredAt)).not.toBeNaN()
+      }),
+    )
+  })
+})
+
 describe('A free turn opens no Spec transaction', () => {
   test('the brief of a free Session is null before any transaction; a define one opens one', async () => {
     const agent = fakeAgent()

@@ -67,8 +67,11 @@ export interface WorkspaceActionsProps {
   onUseWorkspace: (id: string) => void
   /** Starts the build in the Workspace the Spec is set on. */
   onStart: () => void
-  /** Starts the agent again, after it refused to. */
-  onRetry: () => void
+  /**
+   * Starts the agent again, after it refused to. Absent where there is nothing to start again: on
+   * a draft, whose launch is only said.
+   */
+  onRetry?: (() => void) | undefined
   /** Opens the build Session. */
   onOpen: () => void
 }
@@ -162,10 +165,12 @@ export function WorkspaceActions({
         <div role="alert" className={FAILURE}>
           <IconAlertTriangle size="sm" aria-hidden="true" />
           <span>{`The agent did not start: ${launch.cause}`}</span>
-          <Button size="sm" onClick={onRetry}>
-            <IconRefresh size="sm" aria-hidden="true" />
-            Retry
-          </Button>
+          {onRetry !== undefined && (
+            <Button size="sm" onClick={onRetry}>
+              <IconRefresh size="sm" aria-hidden="true" />
+              Retry
+            </Button>
+          )}
         </div>
       )
     case 'cancelled':

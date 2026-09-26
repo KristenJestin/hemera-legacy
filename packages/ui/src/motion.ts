@@ -347,3 +347,37 @@ export const pinging: Transition = {
   ease: easing,
   repeat: Number.POSITIVE_INFINITY,
 }
+
+/**
+ * The `swap` kind: two surfaces trading places at the window's edge, in two moves that overlap —
+ * the Spec folded to its small frame, and the Spec open as its panel (issue #164).
+ *
+ * The surface that leaves goes first, out by the edge; a beat later, while it is still going, the
+ * one that arrives comes in from that edge. The two moves always overlap, so there is no frame
+ * where neither is there, and the whole exchange is about a third of a second: a gesture, not a
+ * scene.
+ *
+ * - `move` is what the panel slides on, and what the chat beside it is pushed on: `lead`, the
+ *   quickest spring of the preset that still reads as a slide, started from rest so that a swap
+ *   turned round half-way leaves from where it is rather than carrying on for a frame.
+ * - `fade` is what the small frame slides and fades on: `crossfade`, short, a tween, since it
+ *   only has to get out of the way and to come back.
+ * - `beat` is how long the second move waits for the first, the beat a folding panel's labels
+ *   already wait for its width.
+ *
+ * A reader asking for less movement gets both moves at once, with no beat between them: read
+ * `move` and `fade` through `useTransition`, and delay the second through `onTheBeat`.
+ */
+export const swap = {
+  move: { ...lead, velocity: 0 },
+  fade: crossfade,
+  beat: LABEL_DELAY,
+} as const
+
+/**
+ * The second move of a swap: the transition it is handed, a beat late. `instant` stays instant —
+ * a reader asking for less movement has nothing to wait for.
+ */
+export function onTheBeat(transition: Transition): Transition {
+  return transition === instant ? instant : { ...transition, delay: swap.beat }
+}

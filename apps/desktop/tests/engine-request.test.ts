@@ -34,6 +34,7 @@ import { type Preferences, preferencesLayer } from '#engine/preferences.ts'
 import { Projects, projectsLayer } from '#engine/projects.ts'
 import { answer, decideRequest } from '#engine/request.ts'
 import { Sessions, sessionsLayer } from '#engine/sessions.ts'
+import { domainEventsLayer } from '#engine/domain-events.ts'
 import { NoSpecNotices } from '#engine/specs/notices.ts'
 import { Specs, specsLayer } from '#engine/specs/specs.ts'
 import { type EngineStatus, engineStatusLayer } from '#engine/status.ts'
@@ -220,7 +221,11 @@ function running<A, E>(
       Layer.provide(agents),
       Layer.provideMerge(launches),
     ),
-  ).pipe(Layer.provideMerge(databaseLayer(join(dataFolder, 'hemera.sqlite'))))
+  ).pipe(
+    Layer.provideMerge(
+      Layer.mergeAll(databaseLayer(join(dataFolder, 'hemera.sqlite')), domainEventsLayer),
+    ),
+  )
 
   return Effect.runPromise(
     // The program's scope closes before the services': what it holds ends first.

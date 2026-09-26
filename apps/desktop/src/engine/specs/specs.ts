@@ -47,6 +47,7 @@ import { and, asc, desc, eq, inArray, sql } from 'drizzle-orm'
 import { Context, Data, Effect, Layer } from 'effect'
 import { z } from 'zod'
 
+import { DomainEvents } from '../domain-events.ts'
 import type { NewEvent } from '../journal.ts'
 import { UnknownProjectError } from '../projects.ts'
 import { UnknownWorkspaceError } from '../workspaces/described.ts'
@@ -951,13 +952,15 @@ export const specsLayer = Layer.effect(
   Effect.gen(function* () {
     const database = yield* Database
     const notices = yield* SpecNotices
+    const domainEvents = yield* DomainEvents
 
     const withDatabase = <A, E>(effect: Effect.Effect<A, E, Database>): Effect.Effect<A, E> =>
       effect.pipe(Effect.provideService(Database, database))
 
     /**
      * One mutation of a Spec: its step, then the snapshot it leaves, then the window told — of
-     * the Spec, and of every entry the step wrote into a thread.
+     * the Spec, and of every entry the step wrote into a thread — then the events it committed
+     * handed to the services that follow them (#113).
      */
     const stepping = <S extends Step, A, E>(
       doing: string,
@@ -974,7 +977,10 @@ export const specsLayer = Layer.effect(
             const step = yield* body(transaction)
             const snapshot = yield* readSnapshot(transaction, step.specId)
             const result = yield* answering(transaction, step, snapshot)
-            return { result: { result, snapshot, wrote: step.wrote ?? [] }, events: step.events }
+            return {
+              result: { result, snapshot, wrote: step.wrote ?? [], events: step.events },
+              events: step.events,
+            }
           }),
         ),
       ).pipe(
@@ -984,6 +990,7 @@ export const specsLayer = Layer.effect(
             for (const { sessionId, entry } of wrote) notices.wrote(sessionId, entry)
           }),
         ),
+        Effect.tap(({ events }) => domainEvents.committed(events)),
         Effect.map(({ result }) => result),
       )
 

@@ -797,13 +797,17 @@ describe('The agent starts the app and the user opens it', () => {
     const call = reported('e2', 'tool_call', 'mcp__hemera__commands_run', 'in_progress')
     const check = aRun('e3', 'check', 'test', 'running')
 
-    expect(activityOf([said, call, check])).toEqual({ state: 'running', detail: 'Running check' })
+    expect(activityOf([said, call, check])).toEqual({ state: 'running', detail: 'check' })
     // Once it has ended, the row goes back to what the turn is doing.
     const ended = aRun('e3', 'check', 'test', 'exited')
-    expect(activityOf([said, call, ended])).toEqual({
-      state: 'running',
-      detail: 'mcp__hemera__commands_run',
-    })
+    expect(activityOf([said, call, ended])).toEqual({ state: 'running', detail: 'Run command' })
+  })
+
+  test("one of Hemera's tools running is named as the thread names it (issue #159)", () => {
+    const said = entry('e1', 'user', 'Write the problem')
+    const call = reported('e2', 'tool_call', 'mcp__hemera__spec_write', 'in_progress')
+
+    expect(activityOf([said, call])).toEqual({ state: 'running', detail: 'Write Spec' })
   })
 
   test('an app left running is not what the turn is doing', () => {

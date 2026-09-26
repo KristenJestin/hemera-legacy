@@ -586,6 +586,7 @@ describe('A dedicated Workspace is made from the settings with no Spec', () => {
       const branch = branchOfName(plan!.branchPrefix)('Spike one')
       const worktrees = worktreesOf({
         name: 'spike-one',
+        root: plan!.root,
         repositories: planLinesOf(plan!, reads).map((one) => ({
           path: one.path,
           base: one.read!.base!,

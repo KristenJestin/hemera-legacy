@@ -156,7 +156,7 @@ function Controlled({
 }
 
 const meta = {
-  tags: ['autodocs'],
+  tags: ['autodocs', 'updated'],
   title: 'Blocks/Workspace/CreateWorkspaceDialog',
   component: CreateWorkspaceDialog,
   render: (args) => <Controlled {...args} />,
@@ -164,6 +164,7 @@ const meta = {
   args: {
     open: true,
     root: '/home/someone/.local/share/hemera/workspaces/atlas',
+    onBrowse: fn(async () => await Promise.resolve('/home/someone/trees')),
     defaultName: 'login-form',
     repositories: [API, FRONT],
     gitMissing: false,
@@ -174,7 +175,11 @@ const meta = {
   argTypes: {
     open: { control: 'boolean', description: 'Whether the dialog is on screen.' },
     root: { control: 'text', description: 'Where the dedicated Workspaces of the Project live.' },
-    defaultName: { control: 'text', description: 'The name proposed: the Spec’s slug.' },
+    onBrowse: { control: false, description: 'Asks the system for a folder.' },
+    defaultName: {
+      control: 'text',
+      description: 'The name proposed: the Spec’s key and a few words of its title.',
+    },
     repositories: {
       control: 'object',
       description:
@@ -285,6 +290,7 @@ async function aLocationWithoutARepositoryGetsNoWorktree({ args }: Context) {
   await waitFor(() => {
     expect(args.onCreate).toHaveBeenCalledWith({
       name: 'login-form',
+      root: '/home/someone/.local/share/hemera/workspaces/atlas',
       repositories: [{ path: './sources/api', base: 'main', branch: 'hemera/HEM-7-login-form' }],
     })
   })
@@ -376,6 +382,7 @@ async function aFailedCheckRefusesTheWholeCreation({ args }: Context) {
   await waitFor(() => {
     expect(args.onCreate).toHaveBeenCalledWith({
       name: 'login-form',
+      root: '/home/someone/.local/share/hemera/workspaces/atlas',
       repositories: [
         { path: './sources/api', base: 'main', branch: 'hemera/HEM-7-login-form' },
         { path: './sources/front', base: 'dev', branch: 'hemera/HEM-7-login-form' },
@@ -511,6 +518,7 @@ export const FromSettings: Story = {
     await waitFor(() => {
       expect(args.onCreate).toHaveBeenCalledWith({
         name: 'spike-auth',
+        root: '/home/someone/.local/share/hemera/workspaces/atlas',
         repositories: [
           { path: './sources/api', base: 'main', branch: 'atlas/spike-auth' },
           { path: './sources/front', base: 'dev', branch: 'kris/front-spike' },
@@ -530,12 +538,19 @@ async function walkRow(row: ReturnType<typeof rowOf>) {
   await expect(row.getByRole('textbox', { name: 'Branch' })).toHaveFocus()
 }
 
-/** The name, then each repository's box, its base, its branch, then Create, then Cancel. */
+/**
+ * The name, the folder and its Browse, then each repository's box, its base, its branch, then
+ * Create, then Cancel.
+ */
 export const Keyboard: Story = {
   play: async ({ args }) => {
     const dialog = within(document.body).getByRole('dialog')
     const name = within(dialog).getByRole('textbox', { name: 'Name' })
     name.focus()
+    await userEvent.tab()
+    await expect(within(dialog).getByRole('textbox', { name: 'Workspaces folder' })).toHaveFocus()
+    await userEvent.tab()
+    await expect(within(dialog).getByRole('button', { name: 'Browse…' })).toHaveFocus()
     await walkRow(rowOf(dialog, './sources/api'))
     await walkRow(rowOf(dialog, './sources/front'))
     await userEvent.tab()
@@ -570,4 +585,49 @@ async function aRepositoryGitKeepsRefusingIsShownWithItsReason() {
 export const Unread: Story = {
   args: { repositories: [API, UNREAD] },
   play: aRepositoryGitKeepsRefusingIsShownWithItsReason,
+}
+
+// Scenario "The folder of a Workspace is chosen in its dialog, the Project's stays the default".
+async function theFolderIsChosenForThisWorkspaceAlone({ args }: Context) {
+  args.onCreate.mockClear()
+  const dialog = within(document.body).getByRole('dialog')
+  const inside = within(dialog)
+  const folder = inside.getByRole('textbox', { name: 'Workspaces folder' })
+  // The Project's folder is what is proposed, and where the Workspace would be.
+  await expect(folder).toHaveValue('/home/someone/.local/share/hemera/workspaces/atlas')
+  await expect(
+    inside.getByText('/home/someone/.local/share/hemera/workspaces/atlas/login-form'),
+  ).toBeVisible()
+  // Browse puts the folder picked in the field, and the Workspace's folder follows.
+  await userEvent.click(inside.getByRole('button', { name: 'Browse…' }))
+  await expect(args.onBrowse).toHaveBeenCalledWith(
+    '/home/someone/.local/share/hemera/workspaces/atlas',
+  )
+  await waitFor(() => {
+    expect(folder).toHaveValue('/home/someone/trees')
+  })
+  await expect(inside.getByText('/home/someone/trees/login-form')).toBeVisible()
+  // Typed, it is taken as typed; emptied, it holds Create back and says why.
+  await userEvent.clear(folder)
+  await waitFor(() => {
+    expect(inside.getByText('A Workspace needs a folder.')).toHaveStyle({ opacity: '1' })
+  })
+  await expect(inside.getByRole('button', { name: 'Create' })).toBeDisabled()
+  await userEvent.type(folder, '/srv/trees')
+  await userEvent.click(inside.getByRole('button', { name: 'Create' }))
+  await waitFor(() => {
+    expect(args.onCreate).toHaveBeenCalledWith({
+      name: 'login-form',
+      root: '/srv/trees',
+      repositories: [
+        { path: './sources/api', base: 'main', branch: 'hemera/HEM-7-login-form' },
+        { path: './sources/front', base: 'dev', branch: 'hemera/HEM-7-login-form' },
+      ],
+    })
+  })
+}
+
+/** The folder changed for this Workspace, picked with Browse then typed. */
+export const FolderChosen: Story = {
+  play: theFolderIsChosenForThisWorkspaceAlone,
 }

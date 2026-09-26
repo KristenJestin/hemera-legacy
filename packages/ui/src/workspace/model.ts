@@ -93,6 +93,8 @@ export interface PlanRepositoryLine {
 /** What the creation dialog hands over: the name, and the included repositories only. */
 export interface WorkspaceDraft {
   readonly name: string
+  /** The folder it is made under: the Project's, or one chosen for this Workspace alone (#136). */
+  readonly root: string
   readonly repositories: readonly {
     readonly path: string
     readonly base: string

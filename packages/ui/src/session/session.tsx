@@ -6,6 +6,7 @@ import { type ReactNode, useEffect, useRef, useState } from 'react'
 import { Button, IconButton } from '../components/button/button.tsx'
 import { Card } from '../components/card/card.tsx'
 import { List, ListItem } from '../components/list/list.tsx'
+import { OVER_MARK } from '../components/sliding-mark/sliding-mark.tsx'
 import { Menu, type MenuItem } from '../components/menu/menu.tsx'
 import { Tooltip } from '../components/tooltip/tooltip.tsx'
 import {
@@ -438,10 +439,13 @@ export function ArchivedSessions({ sessions, onRestore }: ArchivedSessionsProps)
  * for two commands that fit. It is also why nothing here is a menu: the row is a button, and a
  * button inside a button is not a row anybody can press.
  *
- * The mark's `layoutId` is the sidebar's own, so that the one filled surface of the panel is
- * handed from a Session to the Journal rather than each entry drawing its own.
+ * The mark is the sidebar's own and not the row's (issue #127): the row says which one it is
+ * with `data-mark`, is drawn over the mark while it is the one looked at, and is crossed by it
+ * otherwise — so the one filled surface of the panel is handed from a Session to the Journal
+ * rather than each entry drawing its own.
  */
 export function SidebarSessionEntry({
+  id,
   title,
   active,
   collapsed,
@@ -449,6 +453,8 @@ export function SidebarSessionEntry({
   onRename,
   onArchive,
 }: {
+  /** Which Session it is: what the sidebar's mark finds the row by. */
+  id: string
   /** What the Session is called, said in the row and read out as its name. */
   title: string
   /** Whether the window is on it. */
@@ -468,7 +474,7 @@ export function SidebarSessionEntry({
   const labels = collapsed || still ? transition : { ...transition, delay: LABEL_DELAY }
   const commands = !collapsed && (onRename !== undefined || onArchive !== undefined)
   return (
-    <div className="group relative flex w-full">
+    <div data-mark={id} className={cn('group relative flex w-full', active && OVER_MARK)}>
       <Tooltip label={title} side="right" disabled={!collapsed}>
         <Button
           variant="ghost"
@@ -477,7 +483,6 @@ export function SidebarSessionEntry({
           aria-current={active ? 'true' : undefined}
           onClick={onSelect}
         >
-          {active && <motion.span layoutId="active-nav" className={MARK} transition={transition} />}
           <span className={cn(ICON_PLACE, active ? ICON_ACTIVE : ICON)}>
             <IconMessages size="md" />
           </span>
@@ -521,9 +526,6 @@ export function SidebarSessionEntry({
  */
 const ENTRY = 'w-full shrink-0 justify-start'
 
-/** The one filled surface of the sidebar: the place being looked at, pressed into the panel. */
-const MARK = 'absolute inset-0 rounded-md bg-sidebar-accent'
-
 /**
  * Where the icon of a row sits, and what it weighs when the row is not the one looked at.
  *
@@ -533,7 +535,7 @@ const MARK = 'absolute inset-0 rounded-md bg-sidebar-accent'
  * the transparent border the ghost variant draws, which lands it one pixel right of the middle
  * of the rail. The day the button's density changes, this is the number that follows it.
  */
-const ICON_PLACE = 'relative ml-1 flex shrink-0'
+const ICON_PLACE = 'relative z-1 ml-1 flex shrink-0'
 
 const ICON = 'text-muted-foreground'
 
@@ -547,7 +549,7 @@ const ICON_ACTIVE = 'text-sidebar-accent-foreground'
  * The row is a button, so they are its siblings and never its children.
  */
 const COMMANDS =
-  'absolute inset-y-0 right-2 flex items-center gap-1 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100'
+  'absolute inset-y-0 right-2 z-1 flex items-center gap-1 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100'
 
 /** The part of a row that goes away with the width, and comes back after it. */
 function Label({
@@ -562,7 +564,7 @@ function Label({
   const travel = collapsed ? -LABEL_TRAVEL : 0
   return (
     <motion.span
-      className="relative ml-3 truncate"
+      className="relative z-1 ml-3 truncate"
       initial={false}
       animate={{ opacity: collapsed ? 0 : 1, x: travel }}
       transition={transition}

@@ -38,6 +38,7 @@ import { StderrSink, hostProcessesLayer } from '#engine/agents/supervisor.ts'
 import { proposalsLayer } from '#engine/commands/proposals.ts'
 import { commandsLayer } from '#engine/commands/service.ts'
 import { contextLayer } from '#engine/context/service.ts'
+import { domainEventsLayer } from '#engine/domain-events.ts'
 import { type EngineServices, PUSHED, named } from '#engine/index.ts'
 import { journalLayer } from '#engine/journal.ts'
 import { openProfile } from '#engine/migrate.ts'
@@ -163,7 +164,7 @@ async function openOver(
         preferencesLayer,
         listed,
         engineStatusLayer({ directory: dataFolder, channel: 'dev', version: VERSION }),
-      ).pipe(Layer.provideMerge(database)),
+      ).pipe(Layer.provideMerge(Layer.mergeAll(database, domainEventsLayer))),
     ),
     Layer.provideMerge(discoveryLayer.pipe(Layer.provide(over))),
     Layer.provideMerge(

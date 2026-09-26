@@ -74,6 +74,7 @@ import {
   createForSpec,
   isPlanReadingOpen,
   openPlanReading,
+  pickWorkspacesFolder,
   planForSpec,
   readPlanRepositories,
 } from '../workspaces-store.ts'
@@ -908,6 +909,7 @@ export function SessionPage({
             }
           }}
           root={workspacePlan.root}
+          onBrowse={pickWorkspacesFolder}
           defaultName={workspacePlan.name}
           repositories={planLinesOf(workspacePlan, workspaceReads)}
           gitMissing={!workspacePlan.gitAvailable}
@@ -921,6 +923,7 @@ export function SessionPage({
               held.spec.id,
               draft.name,
               worktreesOf(draft),
+              draft.root,
             )
             if (made.workspace === null) return made.refusal
             // A build asked for while the preparation runs waits for it, then starts (D8-13):

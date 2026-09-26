@@ -164,7 +164,7 @@ function WorkspacesCards({
   projectVariables: readonly Variable[]
   catalogue: readonly Command[]
   actions: WorkspaceActions
-  onBrowse: () => Promise<string | null>
+  onBrowse: (start?: string) => Promise<string | null>
   onPlan: () => Promise<WorkspacePlan | null>
   /**
    * Reads the locations of the plan the dialog is open on, in the plan's order, one after the
@@ -175,7 +175,12 @@ function WorkspacesCards({
     reading: number,
     onRead: (read: PlanRepository) => void,
   ) => Promise<void>
-  onCreateDedicated: (name: string, repositories: readonly Worktree[]) => Promise<string | null>
+  /** Creates it under `root`: the Project's folder of Workspaces, or one chosen for it (#136). */
+  onCreateDedicated: (
+    name: string,
+    repositories: readonly Worktree[],
+    root: string,
+  ) => Promise<string | null>
   onCreate: (path: string, name: string) => Promise<string | null>
   onCleanup: (id: string) => Promise<string | null>
 }): ReactNode {
@@ -246,12 +251,15 @@ function WorkspacesCards({
             setCreating(open)
           }}
           root={plan.root}
+          onBrowse={onBrowse}
           defaultName={plan.name}
           repositories={planLinesOf(plan, reads)}
           // No Spec to name the branches after: they follow the name (D8-04).
           branchOf={branchOfName(plan.branchPrefix)}
           gitMissing={!plan.gitAvailable}
-          onCreate={async (draft) => await onCreateDedicated(draft.name, worktreesOf(draft))}
+          onCreate={async (draft) =>
+            await onCreateDedicated(draft.name, worktreesOf(draft), draft.root)
+          }
         />
       )}
       {cleaning !== null && (
@@ -364,7 +372,12 @@ export function ProjectSettingsPage({
     onRead: (read: PlanRepository) => void,
   ) => Promise<void>
   /** Creates it from what the dialog kept, then prepares it; answers the refusal, or null. */
-  onCreateDedicated: (name: string, repositories: readonly Worktree[]) => Promise<string | null>
+  /** Creates it under `root`: the Project's folder of Workspaces, or one chosen for it (#136). */
+  onCreateDedicated: (
+    name: string,
+    repositories: readonly Worktree[],
+    root: string,
+  ) => Promise<string | null>
   /** Makes a Workspace on a folder the user picked; answers the engine's refusal, or null. */
   onCreateWorkspace: (path: string, name: string) => Promise<string | null>
   /** Cleans a dedicated Workspace up; answers the engine's refusal, or null (D8-14). */

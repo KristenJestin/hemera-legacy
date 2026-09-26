@@ -17,7 +17,7 @@
 
 import { existsSync, realpathSync, statSync } from 'node:fs'
 import { rm } from 'node:fs/promises'
-import { basename, join } from 'node:path'
+import { basename, isAbsolute, join, relative, sep } from 'node:path'
 
 import {
   MAIN_WORKSPACE,
@@ -231,6 +231,11 @@ export interface WorkspacePlan {
 export interface WorkspaceDraft {
   readonly specId: string | null
   readonly name: string
+  /**
+   * The folder the Workspace is made under, chosen in the dialog for this Workspace alone (#136),
+   * or null for the Project's own folder of Workspaces, which stays the default.
+   */
+  readonly root?: string | null | undefined
   readonly repositories: readonly WorktreeRecord[]
 }
 
@@ -347,6 +352,21 @@ export function workspaceEvent(
 /** A location as its label reads: `sources/api` for `./sources/api`, and `.` for the root. */
 export function labelOf(relativePath: string): string {
   return relativePath.replace(/^\.\//, '')
+}
+
+/** Whether `folder` is `parent` itself or somewhere under it, as the system compares paths. */
+function isWithin(folder: string, parent: string): boolean {
+  const below = relative(parent, folder)
+  return below === '' || !(below === '..' || below.startsWith(`..${sep}`) || isAbsolute(below))
+}
+
+/** A folder as the system resolves it, or as it is written when it does not exist yet. */
+function resolved(path: string): string {
+  try {
+    return realpathSync.native(path)
+  } catch {
+    return path
+  }
 }
 
 export const workspacesLayer = Layer.effect(
@@ -497,6 +517,25 @@ export const workspacesLayer = Layer.effect(
     /** Where a Project's dedicated Workspaces are made (D8-02). */
     const rootOf = (project: typeof projects.$inferSelect) =>
       project.workspacesRoot ?? join(hemeraRoot, project.id)
+
+    /**
+     * The folder a Workspace is made under: the one chosen in the dialog for this Workspace alone,
+     * or the Project's own (#136). A chosen one is held to what the settings hold the Project's
+     * to (D8-02): an absolute path, and never inside `main`.
+     */
+    const chosenRoot = (
+      project: typeof projects.$inferSelect,
+      main: string,
+      asked: string | null | undefined,
+    ) => {
+      const root = asked?.trim() ?? ''
+      if (root === '') return Effect.succeed(rootOf(project))
+      if (!isAbsolute(root)) return refuse('folder', `the folder ${root} is not an absolute path`)
+      if (isWithin(resolved(root), resolved(main))) {
+        return refuse('folder', `the folder ${root} is inside main (${main})`)
+      }
+      return Effect.succeed(root)
+    }
 
     /** Whether a Workspace of this Project already has that name. */
     const nameTaken = (projectId: string, name: string) =>
@@ -766,7 +805,7 @@ export const workspacesLayer = Layer.effect(
             Effect.catchTag('GitUnavailableError', (missing) => refuse('git', missing.message)),
           )
           const name = yield* checkedName(projectId, draft.name)
-          const path = join(rootOf(project), name)
+          const path = join(yield* chosenRoot(project, main, draft.root), name)
           if (existsSync(path)) return yield* refuse('folder', `the folder ${path} already exists`)
 
           const worktrees: WorktreeRecord[] = []

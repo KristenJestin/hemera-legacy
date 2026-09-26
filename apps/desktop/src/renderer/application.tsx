@@ -1212,8 +1212,8 @@ export function Application() {
           onReadPlanWorkspace={async (relativePaths, reading, onRead) =>
             await readPlanRepositories(current.id, null, '', relativePaths, reading, onRead)
           }
-          onCreateDedicated={async (name, worktrees) =>
-            await createDedicated(current.id, name, worktrees)
+          onCreateDedicated={async (name, worktrees, root) =>
+            await createDedicated(current.id, name, worktrees, root)
           }
           onCreateWorkspace={async (path, name) => await createOnFolder(current.id, path, name)}
           onCleanupWorkspace={async (id) => await cleanUp(current.id, id)}

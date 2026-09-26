@@ -611,7 +611,8 @@ describe('A dedicated Workspace is made from the settings, then prepared', () =>
     answersForShowing()
     const worktree = { relativePath: 'sources/api', branch: 'atlas/login-form', base: 'a' }
 
-    expect(await createDedicated('atlas', 'login-form', [worktree])).toBeNull()
+    // Made under the folder the dialog was left on (#136).
+    expect(await createDedicated('atlas', 'login-form', [worktree], '/data/trees')).toBeNull()
 
     expect(asked.slice(0, 3).map((one) => one.name)).toEqual([
       'workspaces.create',
@@ -622,6 +623,7 @@ describe('A dedicated Workspace is made from the settings, then prepared', () =>
       projectId: 'atlas',
       specId: null,
       name: 'login-form',
+      root: '/data/trees',
       repositories: [worktree],
     })
     expect(asked[1]?.argument).toEqual({ workspaceId: 'login-form' })
@@ -750,6 +752,7 @@ describe("A Workspace is made for a Spec's build (D8-12)", () => {
       projectId: 'atlas',
       specId: 'spec-7',
       name: 'csv-invoice-export',
+      root: null,
       repositories: [worktree],
     })
     expect(asked[1]?.argument).toEqual({ specId: 'spec-7', workspaceId: 'login-form' })

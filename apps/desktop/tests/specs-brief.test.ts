@@ -803,3 +803,46 @@ describe('A queued sub-agent result survives a quit', () => {
     )
   })
 })
+
+describe('A queued sub-agent result goes as soon as the agent is back', () => {
+  test('after a reopen, the agent resumed idle is handed the result without any prompt of the user', async () => {
+    const opened = application(dataFolder)
+    const gate = gated(1)
+    const result = 'One call site reads the Journal: export.ts.'
+    let sessionId = ''
+
+    // Queued while a turn runs, then the application quits before that turn is over.
+    await opened(fakeAgent({ steps: SHAPING, between: gate.between }))(
+      Effect.gen(function* () {
+        sessionId = (yield* defining).sessionId
+        const runtime = yield* AgentRuntime
+        yield* Effect.forkScoped(runtime.prompt(sessionId, 'First turn.'))
+        yield* heldInThread(sessionId, (entries) =>
+          entries.some((entry) => entry.role === 'agent' && entry.body.startsWith('Shaping')),
+        )
+        yield* runtime.deliverInternal(sessionId, result)
+      }),
+    )
+
+    // Reopened: the Session's agent is taken back, and nobody types.
+    const reopened = fakeAgent({ continues: true })
+    await opened(reopened)(
+      Effect.gen(function* () {
+        yield* (yield* AgentRuntime).resume(sessionId)
+        const context = yield* AgentContext
+        let provided = yield* context.provided(sessionId)
+        for (let look = 0; look < 400 && !provided.some((one) => one.kind === 'internal'); look++) {
+          yield* pause(5)
+          provided = yield* context.provided(sessionId)
+        }
+
+        const handed = deliveriesTo(reopened).flatMap((one) =>
+          [...one].filter(([uri]) => uri === contextUri('internal')).map(([, text]) => text),
+        )
+        expect(handed).toEqual([internalText(result)])
+        expect(reopened.answers.prompts.every((text) => text === DELIVERY_MARKER)).toBe(true)
+        expect(provided.filter((one) => one.kind === 'internal')).toHaveLength(1)
+      }),
+    )
+  })
+})

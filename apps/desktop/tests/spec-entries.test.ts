@@ -168,19 +168,45 @@ describe('A picked answer reads as a human choice, not as a typed message', () =
     expect(answerWords(answerOf(answer, [QUESTION, answer])!)).toBe('The payment date')
   })
 
-  test('an option the question does not hold, an unknown question or an unread entry: nothing', () => {
-    const unknown = entry(
+  test('an answer whose question is no longer in the thread is still drawn, without it', () => {
+    const chosen = {
+      ...entry(
+        'spec_answer',
+        JSON.stringify({ questionId: 'q-gone', optionId: 'month' }),
+        'chosen',
+      ),
+      body: 'One CSV per month',
+    }
+    expect(answerOf(chosen, [chosen])).toEqual({
+      question: undefined,
+      choices: [{ letter: undefined, label: 'One CSV per month' }],
+    })
+    const typed = entry(
       'spec_answer',
-      JSON.stringify({ questionId: 'q-date', optionId: 'refund' }),
-      'unknown',
+      JSON.stringify({ questionId: 'q-gone', text: 'One per client' }),
+      'typed',
     )
-    const elsewhere = entry(
-      'spec_answer',
-      JSON.stringify({ questionId: 'q-gone', text: 'Anything' }),
-      'elsewhere',
-    )
-    expect(answerOf(unknown, [QUESTION, unknown])).toBe(null)
-    expect(answerOf(elsewhere, [QUESTION, elsewhere])).toBe(null)
+    expect(answerOf(typed, [typed])).toEqual({
+      question: undefined,
+      choices: [{ letter: undefined, label: 'Other' }],
+      text: 'One per client',
+    })
+  })
+
+  test('an option the question no longer holds is drawn in the words written on the entry', () => {
+    const unknown = {
+      ...entry('spec_answer', JSON.stringify({ questionId: 'q-date', optionId: 'refund' }), 'x'),
+      body: 'The refund date',
+    }
+    expect(answerOf(unknown, [QUESTION, unknown])).toEqual({
+      question: 'Which date decides the month?',
+      choices: [{ letter: undefined, label: 'The refund date' }],
+    })
+    const bare = { ...unknown, body: '' }
+    expect(answerOf(bare, [bare])?.choices).toEqual([{ letter: undefined, label: 'refund' }])
+  })
+
+  test('an entry that does not parse is not drawn', () => {
     expect(answerOf(entry('spec_answer', '{'), [QUESTION])).toBe(null)
   })
 })

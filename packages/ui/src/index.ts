@@ -233,6 +233,12 @@ export {
 /** What an agent says, drawn from the Markdown that is still arriving. */
 export { AgentText } from './message/agent-text.tsx'
 export { MessageText } from './message/message-text.tsx'
+/** The reader's answer to a question of the agent: the choice they made, not words they typed. */
+export {
+  AnswerChoice,
+  type AnswerChoiceItem,
+  type AnswerChoiceProps,
+} from './message/answer-choice.tsx'
 export {
   type MessageAuthor,
   type MessageLine,

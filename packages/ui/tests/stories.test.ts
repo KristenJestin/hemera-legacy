@@ -216,16 +216,7 @@ const NAMED_STATES = new Map([
   // path picked outside its base.
   [
     'project/preparation-editor',
-    [
-      'Empty',
-      'Filled',
-      'Adding',
-      'Editing',
-      'SourceMissing',
-      'OwnLine',
-      'Suggestions',
-      'Keyboard',
-    ],
+    ['Empty', 'Filled', 'Adding', 'Editing', 'SourceMissing', 'OwnLine', 'Suggestions', 'Keyboard'],
   ],
   // Recette 1 of lot 20: the settings of a Project, one section at a time, each its story.
   [
@@ -423,6 +414,8 @@ describe('Catalogue, coquille et surfaces, et rien d’autre', () => {
       'MessageGroup',
       'MessageRow',
       'MessageText',
+      // #165: the reader's answer to a question, drawn as the choice they made.
+      'AnswerChoice',
       'MessageBubble',
       'MessageHeader',
       'MessageFooter',

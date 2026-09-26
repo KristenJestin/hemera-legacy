@@ -25,6 +25,12 @@ describe('Every tool has a label and a mark', () => {
     expect(TOOL_LABELS.commands_propose.label).toBe('Propose command')
     expect(TOOL_LABELS.session_get.label).toBe('Session')
   })
+
+  test('each says what it is doing while it runs, as a present participle (#170)', () => {
+    for (const tool of TOOL_NAMES) expect(TOOL_LABELS[tool].doing).toMatch(/^[A-Z][a-z]*ing /)
+    expect(TOOL_LABELS.spec_write.doing).toBe('Writing the Spec')
+    expect(TOOL_LABELS.fs_read.doing).toBe('Reading a file')
+  })
 })
 
 describe('A mission is offered its own tools', () => {

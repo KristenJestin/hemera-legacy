@@ -7,7 +7,7 @@ import { Checkbox } from '../components/checkbox/checkbox.tsx'
 import { Input } from '../components/field/field.tsx'
 import { Dialog } from '../components/dialog/dialog.tsx'
 import { Select, type SelectItem } from '../components/select/select.tsx'
-import { IconLoader } from '../icons.ts'
+import { IconFolderOpen, IconLoader } from '../icons.ts'
 import type { PlanRepositoryLine, PlanRepositoryRead, WorkspaceDraft } from './model.ts'
 
 /**
@@ -30,9 +30,15 @@ import type { PlanRepositoryLine, PlanRepositoryRead, WorkspaceDraft } from './m
  * keeps its height while the answers arrive, and Create waits for the last of them — a repository
  * that is slow, refused or gone holds back its own row alone, and never the dialog.
  *
- * Opened from a Spec, the name is the Spec's slug and the branches are the Spec's. Opened from the
- * settings, there is no Spec: the name may start empty, and each branch follows the name as it is
- * typed (`branchOf`) until the user writes that branch by hand.
+ * The folder the Workspace is made under is the Project's folder of Workspaces, and it can be
+ * changed here for this Workspace alone, typed or picked with Browse: the Project's setting stays
+ * the default (#136). A default folder under the system's temporary directory is said to be one,
+ * since a restart may empty it.
+ *
+ * Opened from a Spec, the name is the Spec's key and a few words of its title (#136), and the
+ * branches are the Spec's. Opened from the settings, there is no Spec: the name may start empty,
+ * and each branch follows the name as it is typed (`branchOf`) until the user writes that branch
+ * by hand.
  */
 const FORM = 'flex flex-col gap-4'
 
@@ -41,6 +47,9 @@ const NOTE = 'text-sm text-muted-foreground'
 const FOLDER = 'min-w-0 font-mono text-sm break-all text-foreground'
 
 const REFUSAL = 'text-sm text-destructive-muted-foreground'
+
+/** What is said of a folder a restart may empty (#136): a warning, not a refusal. */
+const TEMPORARY = 'text-sm text-warning-muted-foreground'
 
 const ROWS = 'flex flex-col gap-2'
 
@@ -201,9 +210,16 @@ function folderOf(root: string, name: string): string {
 export interface CreateWorkspaceDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
-  /** Where the Project's dedicated Workspaces live (D8-02). */
+  /**
+   * Where the Project's dedicated Workspaces live (D8-02): the folder proposed, which the user may
+   * change for this Workspace alone (#136).
+   */
   root: string
-  /** The name proposed: the Spec's slug, or empty when there is no Spec to take one from. */
+  /** Whether `root` is under the system's temporary directory, which a restart may empty (#136). */
+  temporary?: boolean | undefined
+  /** Asks the system for a folder, from the one given, and answers null when it was dismissed. */
+  onBrowse?: ((start: string) => Promise<string | null>) | undefined
+  /** The name proposed: the Spec's key and a few words of its title, or empty with no Spec. */
   defaultName: string
   /** The plan: each repository of the Project, with its base and its branch. */
   repositories: readonly PlanRepositoryLine[]
@@ -223,6 +239,8 @@ export function CreateWorkspaceDialog({
   open,
   onOpenChange,
   root,
+  temporary = false,
+  onBrowse,
   defaultName,
   repositories,
   branchOf,
@@ -230,6 +248,8 @@ export function CreateWorkspaceDialog({
   onCreate,
 }: CreateWorkspaceDialogProps): ReactNode {
   const [name, setName] = useState(defaultName)
+  /** The folder the Workspace is made under: the Project's, until it is changed here (#136). */
+  const [folder, setFolder] = useState(root)
   /** Whether the name was typed in: an empty one is only said to be wrong once it was. */
   const [typed, setTyped] = useState(false)
   const [rows, setRows] = useState(() => rowsOf(repositories))
@@ -240,6 +260,7 @@ export function CreateWorkspaceDialog({
   useEffect(() => {
     if (!open) return
     setName(defaultName)
+    setFolder(root)
     setTyped(false)
     setRows(rowsOf(repositories))
     setRefusal(null)
@@ -278,7 +299,13 @@ export function CreateWorkspaceDialog({
   // repository that is slow, refused or gone holds back its own row alone, and never what the
   // other rows say.
   const reading = rows.some((row) => !row.read)
-  const refused = nameRefusal !== undefined || reading || noneIncluded || incomplete
+  const folderRefusal = folder.trim() === '' ? 'A Workspace needs a folder.' : undefined
+  const refused =
+    nameRefusal !== undefined ||
+    folderRefusal !== undefined ||
+    reading ||
+    noneIncluded ||
+    incomplete
 
   const change = (path: string, next: Partial<Row>) => {
     setRows(rows.map((row) => (row.path === path ? { ...row, ...next } : row)))
@@ -292,10 +319,17 @@ export function CreateWorkspaceDialog({
     setRows(rows.map((row) => (row.written ? row : { ...row, branch })))
   }
 
+  const browse = async () => {
+    if (onBrowse === undefined) return
+    const picked = await onBrowse(folder.trim())
+    if (picked !== null) setFolder(picked)
+  }
+
   const create = async () => {
     setCreating(true)
     const said = await onCreate({
       name: name.trim(),
+      root: folder.trim(),
       repositories: included.map((row) => ({
         path: row.path,
         base: row.base.trim(),
@@ -340,11 +374,35 @@ export function CreateWorkspaceDialog({
           </p>
         )}
         <Input label="Name" value={name} onValueChange={rename} error={nameShown} />
+        {/* The Project's folder of Workspaces, changed here for this Workspace alone: the
+            setting itself stays as it is, and is what the next Workspace is proposed (#136). */}
+        <Input
+          label="Workspaces folder"
+          description="For this Workspace only: the Project's setting stays the default."
+          value={folder}
+          onValueChange={setFolder}
+          error={folderRefusal}
+          action={
+            onBrowse !== undefined && (
+              <Button variant="secondary" onClick={() => void browse()}>
+                <IconFolderOpen size="sm" aria-hidden="true" />
+                Browse…
+              </Button>
+            )
+          }
+        />
+        {/* Said of the default only: a folder the user chose here is one they chose knowingly. */}
+        {temporary && folder.trim() === root && (
+          <p className={TEMPORARY}>
+            This folder is temporary: it may be cleared on restart. Choose another here, or set the
+            Workspaces folder in the Project settings.
+          </p>
+        )}
         {/* The folder is the Workspace's own, so it is shown once the name makes one: before
             that the line reads as the Project's folder, which is Hemera's own id for it. */}
-        {name.trim() !== '' && (
+        {name.trim() !== '' && folder.trim() !== '' && (
           <p className={NOTE}>
-            Folder <span className={FOLDER}>{folderOf(root, name)}</span>
+            Folder <span className={FOLDER}>{folderOf(folder.trim(), name)}</span>
           </p>
         )}
         <ul className={ROWS} aria-label="Repositories">

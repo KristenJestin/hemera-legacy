@@ -18,9 +18,9 @@ import {
   writeFileSync,
 } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, parse } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vite-plus/test'
-import { Effect } from 'effect'
+import { Effect, Result } from 'effect'
 
 import { InvalidRepositoryPathError } from '@hemera/core'
 import { Commands } from '#engine/commands/service.ts'
@@ -34,6 +34,7 @@ import {
   CleanupRefusedError,
   CreationRefusedError,
   Workspaces,
+  isTemporary,
 } from '#engine/workspaces/workspaces.ts'
 
 import { git } from './repositories.ts'
@@ -156,7 +157,9 @@ describe('A dedicated Workspace assembles one worktree per repository', () => {
     // The plan names its locations and reads none of them: the dialog opens on the folder and on
     // the rows, and each row is read on its own afterwards (#110).
     expect(seen.plan.repositories).toEqual([API, FRONT])
-    expect(seen.plan.path).toBe(join(seen.plan.root, 'login-form'))
+    // Named after the Spec's key and the words of its title (#136).
+    expect(seen.plan.name).toBe('hem-7-login-form')
+    expect(seen.plan.path).toBe(join(seen.plan.root, 'hem-7-login-form'))
     // One location read on its own: the branch it is checked out on, out of the branches it has
     // here — a branch name as the base, and never the sha it points at (D8-04) — and the branch
     // it would be given under the prefix set since.
@@ -199,13 +202,135 @@ describe('A dedicated Workspace assembles one worktree per repository', () => {
         git(join(main, 'sources', repository), 'rev-parse', 'HEAD'),
       )
     }
-    expect(workspace.path.endsWith(join('workspaces', workspace.projectId, 'login-form'))).toBe(
-      true,
-    )
+    expect(
+      workspace.path.endsWith(join('workspaces', workspace.projectId, 'hem-7-login-form')),
+    ).toBe(true)
     expect(workspace.state).toBe('ready')
     expect(workspace.specId).toBe('HEM-7')
     expect(workspace.repositories.map((one) => one.relativePath)).toEqual([API, FRONT])
     expect(git(join(main, 'sources', 'api'), 'remote')).toBe('')
+  })
+})
+
+// Scenario "A Spec's Workspace is proposed a readable name" (#136).
+describe("A Spec's Workspace is proposed its key and at most four words of its title", () => {
+  it('names the plan after the key and the meaningful words, and one from the settings as asked', async () => {
+    const seen = await workspaceEngine(folder)(
+      Effect.gen(function* () {
+        const workspaces = yield* Workspaces
+        const project = yield* atlas(main, [API, FRONT])
+        return {
+          spec: yield* workspaces.plan(
+            project.id,
+            'AAA-1',
+            'progress-bar-des-atomes-restent-allumes-au-debut',
+          ),
+          settings: yield* workspaces.plan(project.id, null, 'spike'),
+        }
+      }),
+    )
+
+    expect(seen.spec.name).toBe('aaa-1-progress-bar-atomes-restent')
+    expect(seen.spec.path).toBe(join(seen.spec.root, 'aaa-1-progress-bar-atomes-restent'))
+    expect(seen.settings.name).toBe('spike')
+  })
+})
+
+// Scenario "The folder of a Workspace is chosen in its dialog, the Project's stays the default".
+describe('The folder of a Workspace can be chosen at its creation', () => {
+  /** The plan for `HEM-7`, created under `root` as the dialog hands it over. */
+  const createdUnder = (root: string | null) =>
+    workspaceEngine(folder)(
+      Effect.gen(function* () {
+        const workspaces = yield* Workspaces
+        const project = yield* atlas(main, [API, FRONT])
+        const plan = yield* workspaces.plan(project.id, 'HEM-7', 'login-form')
+        const reads = yield* readPlan(project.id, 'HEM-7', 'login-form', plan.repositories)
+        const made = yield* Effect.result(
+          workspaces.create(project.id, {
+            specId: 'HEM-7',
+            name: plan.name,
+            root,
+            repositories: reads
+              .filter((one) => one.included)
+              .map((one) => ({
+                relativePath: one.relativePath,
+                base: one.base ?? '',
+                branch: one.branch,
+              })),
+          }),
+        )
+        // The Project's own folder is what the next plan proposes again: the choice was this
+        // Workspace's alone.
+        const after = yield* workspaces.plan(project.id, 'HEM-7', 'login-form')
+        return { plan, made, after }
+      }),
+    )
+
+  it('makes the Workspace under the folder chosen, and leaves the Project its own', async () => {
+    const chosen = join(folder, 'elsewhere')
+    const seen = await createdUnder(chosen)
+
+    if (!Result.isSuccess(seen.made)) throw seen.made.failure
+    expect(seen.made.success.path).toBe(join(chosen, 'hem-7-login-form'))
+    expect(seen.after.root).toBe(seen.plan.root)
+  })
+
+  it('makes it under the Project’s folder when none is chosen', async () => {
+    const seen = await createdUnder(null)
+
+    if (!Result.isSuccess(seen.made)) throw seen.made.failure
+    expect(seen.made.success.path).toBe(seen.plan.path)
+  })
+
+  it('refuses a folder that is not absolute', async () => {
+    const seen = await createdUnder('workspaces')
+
+    if (!Result.isFailure(seen.made)) throw new Error('a relative folder was taken')
+    expect(seen.made.failure).toMatchObject({ check: 'folder' })
+    expect(seen.made.failure.message).toBe('the folder workspaces is not an absolute path')
+  })
+
+  it('refuses a folder inside main', async () => {
+    const seen = await createdUnder(join(main, 'trees'))
+
+    if (!Result.isFailure(seen.made)) throw new Error('a folder inside main was taken')
+    expect(seen.made.failure).toMatchObject({ check: 'folder' })
+    expect(seen.made.failure.message).toBe(
+      `the folder ${join(main, 'trees')} is inside main (${main})`,
+    )
+  })
+})
+
+// Scenario "A default folder under the temporary directory is said so" (#136).
+describe('A folder of Workspaces under the temporary directory is said to be temporary', () => {
+  it('says so of the default folder of a data folder in the temporary directory, and not of another', async () => {
+    // Out of the temporary directory, at the root of its drive; never made, only named.
+    const kept = join(parse(folder).root, 'hemera-workspaces-kept')
+    const seen = await workspaceEngine(folder)(
+      Effect.gen(function* () {
+        const projects = yield* Projects
+        const workspaces = yield* Workspaces
+        const project = yield* atlas(main, [API, FRONT])
+        const before = yield* workspaces.plan(project.id, 'HEM-7', 'login-form')
+        yield* projects.setWorkspacesRoot(project.id, project.version, kept)
+        const after = yield* workspaces.plan(project.id, 'HEM-7', 'login-form')
+        return { before, after }
+      }),
+    )
+
+    // The suite's data folder is a temporary one, like a trial run's `--data-dir` in %TEMP%.
+    expect(seen.before.temporary).toBe(true)
+    expect(seen.after.root).toBe(kept)
+    expect(seen.after.temporary).toBe(false)
+  })
+
+  it('compares a folder with the temporary directory, itself included', () => {
+    const temporary = join(parse(folder).root, 'scratch')
+    expect(isTemporary(join(temporary, 'hemera', 'workspaces'), temporary)).toBe(true)
+    expect(isTemporary(temporary, temporary)).toBe(true)
+    expect(isTemporary(join(parse(folder).root, 'scratch-kept'), temporary)).toBe(false)
+    expect(isTemporary(join(parse(folder).root, 'data'), temporary)).toBe(false)
   })
 })
 
@@ -466,7 +591,7 @@ describe('A failed check refuses the whole creation', () => {
         const refused = yield* Effect.flip(
           workspaces.create(project.id, {
             specId: 'HEM-7',
-            name: 'login-form',
+            name: plan.name,
             repositories: edit(
               reads
                 .filter((one) => one.included)
@@ -705,7 +830,7 @@ describe('Cleanup removes the worktrees and keeps the branches', () => {
         // The old branches stay, so the new Workspace is made on branches of its own.
         const again = yield* workspaces.create(project.id, {
           specId: 'HEM-7',
-          name: 'login-form',
+          name: 'hem-7-login-form',
           repositories: first.repositories.map((one) => ({
             relativePath: one.relativePath,
             base: one.base,
@@ -716,13 +841,13 @@ describe('Cleanup removes the worktrees and keeps the branches', () => {
       }),
     )
 
-    expect(seen.again.name).toBe('login-form')
+    expect(seen.again.name).toBe('hem-7-login-form')
     expect(seen.again.specId).toBe('HEM-7')
     expect(seen.again.id).not.toBe(seen.first.id)
     expect(seen.listed.map((one) => [one.name, one.state])).toEqual([
       ['main', 'ready'],
-      ['login-form', 'cleaned'],
-      ['login-form', 'preparing'],
+      ['hem-7-login-form', 'cleaned'],
+      ['hem-7-login-form', 'preparing'],
     ])
   })
 })
@@ -788,7 +913,7 @@ describe('Cleanup is refused while a service runs or Git refuses', () => {
     )
 
     expect(seen.whileRunning).toBeInstanceOf(CleanupRefusedError)
-    expect(seen.whileRunning.message).toBe('the service dev of login-form is running')
+    expect(seen.whileRunning.message).toBe('the service dev of hem-7-login-form is running')
     expect(seen.whileChanged).toBeInstanceOf(CleanupRefusedError)
     expect(seen.whileChanged.message).toMatch(
       /^fatal: .*sources[\\/]front.* contains modified or untracked files/,
@@ -836,10 +961,10 @@ describe('A Workspace with a running build Session is not cleaned up', () => {
     )
 
     expect(seen.running).toBeInstanceOf(CleanupRefusedError)
-    expect(seen.running.message).toBe('the build of login-form is still open')
+    expect(seen.running.message).toBe('the build of hem-7-login-form is still open')
     expect(seen.kept).toEqual({ api: true, folder: true, front: true, state: 'ready' })
     expect(seen.events).toEqual([
-      { payload: JSON.stringify({ reason: 'the build of login-form is still open' }) },
+      { payload: JSON.stringify({ reason: 'the build of hem-7-login-form is still open' }) },
     ])
     expect(seen.cleaned.state).toBe('cleaned')
     expect(existsSync(seen.workspace.path)).toBe(false)

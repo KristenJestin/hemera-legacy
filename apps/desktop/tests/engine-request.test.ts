@@ -521,7 +521,7 @@ describe('Every Workspace channel reaches its use case', () => {
     expect(seen.moved.map((step) => step.kind)).toEqual(['link', 'copy'])
     expect(seen.recipe.map((step) => [step.kind, step.path])).toEqual([['copy', './.env']])
 
-    expect(seen.plan).toMatchObject({ name: 'login-form', gitAvailable: true })
+    expect(seen.plan).toMatchObject({ name: 'hem-7-login-form', gitAvailable: true })
     // The plan names its locations and reads none of them; each read answers on its own (#110).
     expect(seen.plan.repositories).toEqual(['./sources/api'])
     expect(seen.reads).toEqual([
@@ -537,7 +537,7 @@ describe('Every Workspace channel reaches its use case', () => {
     expect(seen.twice.message).toBe('this Workspace is already being prepared')
     expect(seen.listed.map((one) => [one.name, one.main])).toEqual([
       ['main', true],
-      ['login-form', false],
+      ['hem-7-login-form', false],
     ])
     expect(seen.steps.map((step) => step.state)).toEqual(['done', 'done'])
     expect(seen.status).toEqual([

@@ -9,7 +9,7 @@ import {
 } from 'react'
 
 import { Tooltip } from '../components/tooltip/tooltip.tsx'
-import { IconCheck, IconCircleHalf2, type IconProps } from '../icons.ts'
+import { IconCircleCheck, IconCircleDashed, IconCircleHalf2, type IconProps } from '../icons.ts'
 
 /**
  * The rail of a mission panel: what the mission is made of, one quiet row each, grouped under
@@ -20,15 +20,16 @@ import { IconCheck, IconCircleHalf2, type IconProps } from '../icons.ts'
  * a count, and the one thing that needs attention about it, if anything does; and it draws them
  * the way the maintainer decided for the Spec (lot 19, the rail's states; issue #135): every row
  * says its own state, in the row, without being opened. A written one is plain, its name in the
- * foreground text; an empty one is quiet, its name muted and `empty` in its accessible name. The
- * one the agent is working on is tinted in the primary, the tint breathing; one to review is
+ * foreground text; an empty one is quiet, its name muted. The one the agent is working on is tinted in the primary, the tint breathing; one to review is
  * tinted in the warning colour. One edited by the reader wears nothing more: the part itself says
- * who wrote it. Each says its state in a sentence in its tooltip, and to a screen reader: an
- * empty one in its name, the others as its accessible description.
+ * who wrote it. Each says its state in a sentence in its tooltip, and to a screen reader as its
+ * accessible description.
  *
- * How far along a row is shows at its end, after its count, without a dot (issue #150): a check
- * when it is done, a circle half hatched when it is started, and nothing when it is empty — its
- * muted name says that. The mark is the glyph's only; its words are the row's sentence.
+ * How far along a row is, when its caller says it, is the row's glyph (issues #150, #159): one
+ * family of circles in place of the item's own icon — a dashed circle when nothing is written, a
+ * half circle when it is started, a circle with a check when it is done. The headers keep their
+ * own icons. The mark is the glyph's only; its words are the row's sentence, and the word `empty`
+ * is said nowhere.
  *
  * What is on the stage says so with a plain selected surface, and nothing else. A group opens on
  * its header, which reads as the header of a section and not as one more row: its name in the
@@ -104,7 +105,7 @@ const TINTS: Partial<Record<RailAttention, string>> = {
   review: 'bg-warning/15',
 }
 
-/** The name of an empty item: quiet, the muted text, where a written one is the foreground. */
+/** The name of an item not begun: quiet, the muted text, where a written one is the foreground. */
 const EMPTY = 'text-muted-foreground'
 
 /** The name of a written item, whatever else it says: plain. */
@@ -203,28 +204,27 @@ const LABEL = 'min-w-0 flex-1 truncate'
 
 const COUNT = 'text-xs text-muted-foreground tabular-nums'
 
-/** The mark at a row's end: a check in the success tone for done, the muted half for started. */
-const DONE = 'flex shrink-0 text-success-muted-foreground'
+/** The circle of each step of how far along an item is, and its colour. */
+const PROGRESS_GLYPHS: Record<RailProgress, { icon: RailIcon; tone: string }> = {
+  empty: { icon: IconCircleDashed, tone: 'text-muted-foreground' },
+  started: { icon: IconCircleHalf2, tone: 'text-muted-foreground' },
+  done: { icon: IconCircleCheck, tone: 'text-success-muted-foreground' },
+}
 
-const STARTED = 'flex shrink-0 text-muted-foreground'
-
-/** The mark of how far along a row is, at its end; an empty row wears none. */
-function ProgressMark({ progress }: { progress: RailProgress | undefined }): ReactNode {
-  if (progress === 'done') {
-    return (
-      <span aria-hidden="true" data-progress="done" className={DONE}>
-        <IconCheck size="sm" />
-      </span>
-    )
-  }
-  if (progress === 'started') {
-    return (
-      <span aria-hidden="true" data-progress="started" className={STARTED}>
-        <IconCircleHalf2 size="sm" />
-      </span>
-    )
-  }
-  return null
+/** An item's glyph: the circle of how far along it is, or its own icon when that is not said. */
+function ItemGlyph({ item }: { item: MissionRailItem }): ReactNode {
+  if (item.progress === undefined) return <Glyph icon={item.icon} />
+  const { icon: Icon, tone } = PROGRESS_GLYPHS[item.progress]
+  return (
+    <span
+      aria-hidden="true"
+      data-icon={Icon.displayName}
+      data-progress={item.progress}
+      className={cn('flex shrink-0', tone)}
+    >
+      <Icon size="sm" />
+    </span>
+  )
 }
 
 export interface MissionRailProps {
@@ -338,12 +338,9 @@ export function MissionRail({
                   const on = 'item' in current && current.item === item.id
                   const rowSaid = `${said}-item-${item.id}`
                   const empty = item.attention === 'empty'
-                  const counted =
+                  const name =
                     item.count === undefined ? item.label : `${item.label}, ${item.count}`
-                  // An empty item says so in its name, which is what a screen reader reads first;
-                  // its sentence would only say it twice.
-                  const name = empty ? `${counted}, empty` : counted
-                  const described = item.description !== undefined && !empty
+                  const described = item.description !== undefined
                   const tip =
                     item.description === undefined
                       ? item.label
@@ -369,14 +366,13 @@ export function MissionRail({
                           onClick={() => onSelect(item.id)}
                         >
                           <Tint attention={item.attention} folded={folded} />
-                          <Glyph icon={item.icon} />
+                          <ItemGlyph item={item} />
                           {!folded && (
                             <>
                               <span className={LABEL}>{item.label}</span>
                               {item.count !== undefined && (
                                 <span className={COUNT}>{item.count}</span>
                               )}
-                              <ProgressMark progress={item.progress} />
                             </>
                           )}
                         </button>

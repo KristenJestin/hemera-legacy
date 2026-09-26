@@ -13,7 +13,7 @@ import type { Mark } from './model.ts'
 
 /** What each mark says to whoever cannot see it. */
 export const MARK_WORDS: Record<Mark, string> = {
-  empty: 'empty',
+  empty: 'nothing written yet',
   agent: 'written by the agent',
   human: 'edited by you',
   stale: 'to review',

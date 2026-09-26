@@ -673,6 +673,27 @@ export const contextDeliveries = sqliteTable(
 )
 
 /**
+ * A sub-agent's result waiting for its Session's next safe point (D7-14, issue #72).
+ *
+ * Written when it is queued and deleted once the agent took it, in the same transaction as its
+ * `internal` row of `context_deliveries`: a quit before the safe point leaves it here, and the
+ * first safe point after the agent starts again hands it over, once. Oldest first by `queued_at`,
+ * then by insertion order.
+ */
+export const queuedResults = sqliteTable(
+  'queued_results',
+  {
+    id: text('id').primaryKey(),
+    sessionId: text('session_id')
+      .notNull()
+      .references(() => sessions.id, { onDelete: 'cascade' }),
+    text: text('text').notNull(),
+    queuedAt: text('queued_at').notNull(),
+  },
+  (table) => [index('queued_by_session').on(table.sessionId, table.queuedAt)],
+)
+
+/**
  * What an event is about. `session` is lot 5's, `spec` lot 19's (design D7-13); `workspace`,
  * `command` and `launch` are lot 20's (D8-16): a Workspace prepared and cleaned, a run started,
  * ready and ended, a proposal decided, a build launched.

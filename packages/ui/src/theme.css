@@ -601,11 +601,11 @@
    instead, and they find those edges the same way the cut does: through the two properties that
    say where they are. */
 @utility tab-mark-start {
-  right: calc(100% - var(--tab-mark-left, 0px));
+  right: calc(100% - var(--mark-left, 0px));
 }
 
 @utility tab-mark-end {
-  left: calc(100% - var(--tab-mark-right, 0px));
+  left: calc(100% - var(--mark-right, 0px));
 }
 
 @utility tab-flare {
@@ -717,8 +717,7 @@
      belongs to is a mark with nothing to say, and the other default — cut nothing — is a sheet
      lying across the whole strip. */
   clip-path: inset(
-    0 var(--tab-mark-right, 100%) 0 var(--tab-mark-left, 0px) round var(--radius-md)
-      var(--radius-md) 0 0
+    0 var(--mark-right, 100%) 0 var(--mark-left, 0px) round var(--radius-md) var(--radius-md) 0 0
   );
 }
 

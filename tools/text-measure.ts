@@ -60,7 +60,6 @@ const COMPUTED_SIZE = /getComputedStyle\([\s\S]*?\)\s*\.\s*(width|height)/g
 export const MEASURE_EXCEPTIONS = [
   'packages/ui/src/shell/gutter.tsx',
   'packages/ui/src/components/sliding-mark/sliding-mark.tsx',
-  'packages/ui/src/shell/tab-mark.tsx',
   'packages/ui/src/composer/effort-slider.tsx',
   'packages/ui/src/motion.ts',
   'packages/ui/src/workspace/workspace-list.tsx',

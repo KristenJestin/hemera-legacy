@@ -3,6 +3,8 @@ import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
 
 import { useState } from 'react'
 
+import { expectNeverBuried, watchThereAndBack } from '../../.storybook/sliding-mark.ts'
+
 import { ChromeBar, type ChromeBarProps } from './chrome-bar.tsx'
 import type { ShellProject } from './model.ts'
 
@@ -13,7 +15,7 @@ const PROJECTS: ShellProject[] = [
 ]
 
 const meta = {
-  tags: ['autodocs'],
+  tags: ['autodocs', 'updated'],
   title: 'Shell/ChromeBar',
   component: ChromeBar,
   parameters: { layout: 'fullscreen' },
@@ -125,6 +127,9 @@ export const States: Story = {
  *
  * It stretches: one sheet opens over both the tab it leaves and the tab it is going to, holds,
  * then closes onto the second, the leading edge first. Press another Project to see it.
+ *
+ * On every frame of the way out to the last Project and back to the first, the sheet is drawn
+ * over the tabs it crosses and never under one (issue #127).
  */
 export const SwitchingProject: Story = {
   // Held here, because a mark that travels needs something to travel between: the bar itself
@@ -136,6 +141,15 @@ export const SwitchingProject: Story = {
     await waitFor(() => {
       expect(canvas.getByRole('button', { name: /Notes/ })).toHaveAttribute('aria-current', 'page')
     })
+
+    const strip = canvas.getByRole('navigation', { name: 'Projects' })
+    const watched = await watchThereAndBack(
+      strip,
+      () => userEvent.click(canvas.getByRole('button', { name: /Hemera docs/ })),
+      () => userEvent.click(canvas.getByRole('button', { name: /Atlas/ })),
+    )
+    expect(canvas.getByRole('button', { name: /Atlas/ })).toHaveAttribute('aria-current', 'page')
+    expectNeverBuried(watched)
   },
 }
 

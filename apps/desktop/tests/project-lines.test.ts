@@ -30,13 +30,14 @@ function command(change: Partial<Command> = {}): Command {
     scope: 'project',
     portless: true,
     portlessName: 'atlas-front',
+    runAtOpen: true,
     createdAt: 0,
     ...change,
   }
 }
 
 describe('A command is read and saved with nothing lost', () => {
-  test('its base, its folder under it and its Portless name go to the dialog and come back', () => {
+  test('its base, its folder under it, its Portless name and its run at open go to the dialog and come back', () => {
     const line = commandLineOf(command())
 
     expect(line).toMatchObject({
@@ -57,6 +58,7 @@ describe('A command is read and saved with nothing lost', () => {
       scope: 'project',
       portless: true,
       portlessName: 'atlas-front',
+      runAtOpen: true,
     })
   })
 

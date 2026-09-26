@@ -146,6 +146,7 @@ const inCatalogue = (
         scope: 'workspace',
         portless: false,
         portlessName: null,
+        runAtOpen: false,
       },
       false,
     )
@@ -1023,6 +1024,7 @@ describe('A command saved in the settings is listed to the agent at once', () =>
           scope: 'workspace',
           portless: false,
           portlessName: null,
+          runAtOpen: false,
         })
         yield* runtime.prompt(session.id, 'what can I run?')
       }),

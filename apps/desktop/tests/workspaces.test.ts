@@ -1135,6 +1135,7 @@ describe('A repository is rewritten with its icon, and what named it follows', (
             scope: 'workspace',
             portless: false,
             portlessName: null,
+            runAtOpen: false,
           },
           false,
         )

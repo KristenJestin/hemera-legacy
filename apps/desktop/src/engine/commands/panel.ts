@@ -65,6 +65,8 @@ export interface CommandDraft {
   readonly portless: boolean
   /** The name Portless serves it under, and null for the Project's name as a slug (D8-10). */
   readonly portlessName: string | null
+  /** Whether Hemera runs it in the Project's `main` each time it opens (#114). */
+  readonly runAtOpen: boolean
 }
 
 /** The Project a command or a Session belongs to, read among every Project. */

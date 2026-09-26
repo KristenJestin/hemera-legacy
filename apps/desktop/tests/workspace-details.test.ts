@@ -133,6 +133,7 @@ describe('The cards say the engine views in their own words', () => {
           scope: 'workspace',
           portless: true,
           portlessName: null,
+          runAtOpen: false,
           createdAt: 0,
         },
       ],

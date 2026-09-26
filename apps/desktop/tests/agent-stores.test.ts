@@ -800,14 +800,17 @@ describe('The agent starts the app and the user opens it', () => {
     expect(activityOf([said, call, check])).toEqual({ state: 'running', detail: 'check' })
     // Once it has ended, the row goes back to what the turn is doing.
     const ended = aRun('e3', 'check', 'test', 'exited')
-    expect(activityOf([said, call, ended])).toEqual({ state: 'running', detail: 'Run command' })
+    expect(activityOf([said, call, ended])).toEqual({
+      state: 'running',
+      doing: 'Running a command',
+    })
   })
 
-  test("one of Hemera's tools running is named as the thread names it (issue #159)", () => {
+  test("one of Hemera's tools running says what it is doing (issues #159, #170)", () => {
     const said = entry('e1', 'user', 'Write the problem')
     const call = reported('e2', 'tool_call', 'mcp__hemera__spec_write', 'in_progress')
 
-    expect(activityOf([said, call])).toEqual({ state: 'running', detail: 'Write Spec' })
+    expect(activityOf([said, call])).toEqual({ state: 'running', doing: 'Writing the Spec' })
   })
 
   test('an app left running is not what the turn is doing', () => {
@@ -881,6 +884,43 @@ describe('A running turn that hears nothing says so (#131)', () => {
     expect(quiet.heardAt).toBeNull()
     expect(heardSince(quiet, [{ ...entry('e1', 'user', 'go'), createdAt: 1_000 }])).toBe(1_000)
     expect(heardSince(quiet, [])).toBeNull()
+  })
+})
+
+describe('Silence does not count while Hemera works for the turn (#170)', () => {
+  /** A run of a command Hemera runs for the turn, as the thread holds its entry. */
+  function aCheck(state: string, type: 'serve' | 'test' = 'test'): SessionEntry {
+    return {
+      ...reported('e3', 'command_run', 'test', state, null),
+      role: 'hemera',
+      createdAt: 2_000,
+      payload: JSON.stringify({ runId: 'run-e3', name: 'test', line: 'pnpm test', type, state }),
+    }
+  }
+
+  const said: SessionEntry = { ...entry('e1', 'user', 'Run the tests'), createdAt: 1_000 }
+  const aCall = (state: string, body = 'mcp__hemera__commands_run'): SessionEntry => ({
+    ...reported('e2', 'tool_call', body, state),
+    createdAt: 1_500,
+  })
+
+  test('a command Hemera is running for the turn is no silence of the agent', () => {
+    const quiet = agentOf('session-never-heard')
+    expect(heardSince(quiet, [said, aCall('in_progress'), aCheck('running')])).toBeNull()
+    // Once it has ended, the silence counts again, from what was written last.
+    expect(heardSince(quiet, [said, aCall('completed'), aCheck('exited')])).toBe(2_000)
+  })
+
+  test("one of Hemera's tools that has not answered is no silence of the agent", () => {
+    const quiet = agentOf('session-never-heard')
+    expect(heardSince(quiet, [said, aCall('in_progress', 'mcp__hemera__spec_write')])).toBeNull()
+    // The agent's own tool is the agent's, and its silence is counted.
+    expect(heardSince(quiet, [said, aCall('in_progress', 'Bash')])).toBe(1_500)
+  })
+
+  test('an app left running is not what the turn waits on', () => {
+    const quiet = agentOf('session-never-heard')
+    expect(heardSince(quiet, [said, aCall('completed'), aCheck('running', 'serve')])).toBe(2_000)
   })
 })
 

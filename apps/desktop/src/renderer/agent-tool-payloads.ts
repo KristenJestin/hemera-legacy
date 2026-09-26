@@ -677,11 +677,12 @@ export function hemeraPermissionOf(
 
 /**
  * A note about the agent rather than about Hemera (issue #131): a line it wrote on its standard
- * error while the turn ran, a request it is waiting on that no block draws, a request Hemera
- * refused. Each carries what the agent wrote or asked, which the row shows word for word.
+ * error while the turn ran, a request it is waiting on that no block draws (and answered since,
+ * #170), a request Hemera refused. Each carries what the agent wrote or asked, which the row
+ * shows word for word.
  */
 const agentReportPayloadSchema = z.object({
-  reason: z.enum(['agent_stderr', 'unanswered_request', 'refused_request']),
+  reason: z.enum(['agent_stderr', 'unanswered_request', 'answered_request', 'refused_request']),
   line: z.string().optional(),
   method: z.string().optional(),
 })

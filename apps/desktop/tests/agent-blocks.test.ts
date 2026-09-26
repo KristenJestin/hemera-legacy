@@ -696,6 +696,19 @@ describe('What the agent reported outside the conversation is drawn as a quiet r
     expect(agentReportOf(note)?.detail).toBe('elicitation/create')
   })
 
+  test('a request answered since is drawn as answered, with its method (#170)', () => {
+    const note = entryOf(
+      'note',
+      'hemera',
+      'Hemera answered what the agent was waiting for',
+      JSON.stringify({ reason: 'answered_request', method: 'elicitation/create' }),
+    )
+    expect(agentReportOf(note)).toEqual({
+      title: 'Hemera answered what the agent was waiting for',
+      detail: 'elicitation/create',
+    })
+  })
+
   test('a refused request is drawn with its method and what it was answered', () => {
     const note = entryOf(
       'note',

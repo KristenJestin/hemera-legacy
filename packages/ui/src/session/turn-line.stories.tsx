@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
-import { expect, userEvent, waitFor, within } from 'storybook/test'
+import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
 
 import { onOneLine } from '../../.storybook/one-line.ts'
 import { TurnLine } from './turn-line.tsx'
@@ -77,5 +77,30 @@ export const MeterOnly: Story = {
     const canvas = within(canvasElement)
     await expect(canvas.getByLabelText(/12,400 of 200,000 tokens used/)).toBeVisible()
     await expect(canvas.queryByRole('button')).toBeNull()
+  },
+}
+
+/**
+ * A turn that has heard nothing for two minutes, as the page draws it (issue #170): the line says
+ * how long, Stop and the trace stand beside it, and the meter keeps its end of the same row.
+ */
+export const Stuck: Story = {
+  args: {
+    activity: {
+      state: 'running',
+      detail: 'cat recap.md',
+      quietMs: 150_000,
+      onStop: fn(),
+      onOpenTrace: fn(),
+    },
+  },
+  play: async ({ args, canvasElement }) => {
+    const canvas = within(canvasElement)
+    const line = canvas.getByText('Running cat recap.md · 2 min, no answer yet')
+    const meter = canvas.getByLabelText(/12,400 of 200,000 tokens used/)
+    await expect(onOneLine(line, meter), 'the meter left the activity’s line').toBe(true)
+    await userEvent.click(canvas.getByRole('button', { name: 'Stop' }))
+    await expect(args.activity?.onStop).toHaveBeenCalledOnce()
+    await expect(canvas.getByRole('button', { name: 'Open the trace' })).toBeVisible()
   },
 }

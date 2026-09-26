@@ -419,8 +419,8 @@ async function unfold(canvasElement: HTMLElement): Promise<void> {
 
 /**
  * Screen 1 · a feature being planned, as the Session opens it: the chat has the width, the panel
- * a band beside it — the glyph of each part, the plan the agent writes tinted and breathing,
- * `Plan` open, and no readiness. The thread says what the agent was handed in one folded
+ * a band beside it — the glyph of each phase, the Plan one tinted and breathing while the agent
+ * writes the plan, and no readiness. The thread says what the agent was handed in one folded
  * Hemera line, and asks the blocking question as a block.
  */
 export const MidPlan: Story = {
@@ -434,12 +434,13 @@ export const MidPlan: Story = {
     await expect(
       within(band).getByRole('button', { name: 'Plan phase, open, show all its parts' }),
     ).toBeVisible()
-    await expect(within(band).getByRole('button', { name: 'Plan' })).toHaveAttribute(
-      'aria-current',
-      'true',
-    )
-    // The tasks, not written yet, say so in the band without being opened.
-    await expect(within(band).getByRole('button', { name: 'Tasks, 0, empty' })).toBeVisible()
+    // Folded, the phases alone (issue #159): the one the agent writes in breathes.
+    await expect(
+      within(band)
+        .getByRole('button', { name: 'Plan phase, open, show all its parts' })
+        .querySelector('[data-tint="writing"]'),
+    ).not.toBeNull()
+    await expect(within(band).queryByRole('button', { name: /^Tasks/ })).toBeNull()
     await expect(canvas.getByRole('button', { name: 'Unfold the Spec' })).toBeVisible()
     await expect(canvas.queryByRole('region', { name: 'Stage of ATL-7' })).toBeNull()
     await expect(canvas.getByRole('group', { name: /^Question: Credit notes/ })).toBeVisible()

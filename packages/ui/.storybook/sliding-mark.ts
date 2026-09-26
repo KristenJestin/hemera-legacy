@@ -38,6 +38,7 @@ const STILL_FRAMES = 12
 const LONGEST = 3000
 
 export async function watchMark(list: Element, move: () => Promise<void>): Promise<MarkWatch> {
+  await markAtRest(list)
   const style = document.createElement('style')
   style.textContent = `${SHAPE} { pointer-events: auto !important; }`
   document.head.append(style)
@@ -93,6 +94,44 @@ export async function watchMark(list: Element, move: () => Promise<void>): Promi
     style.remove()
   }
   return { frames, places: seen.size, buried }
+}
+
+/**
+ * Waits for the mark to stand on its item before a journey is asked of it.
+ *
+ * A list puts its mark on the chosen item before its first paint, but motion writes a placement
+ * on its own frame loop, so the frame after mounting is the earliest the mark is drawn there. A
+ * play started at once, as a story run alone is, would otherwise click while the mark is still
+ * at the list's corner with no size, and watch a journey from nowhere: the first frames of it
+ * are a mark narrower than its shape's insets, which draws nothing a hit test can find.
+ */
+function markAtRest(list: Element): Promise<void> {
+  return new Promise((rested, failed) => {
+    const started = performance.now()
+    let still = 0
+    let last = ''
+    const frame = (): void => {
+      const mark = list.querySelector<HTMLElement>(MARK)
+      const shape = mark?.querySelector<HTMLElement>(SHAPE)
+      if (mark !== null && mark !== undefined && shape !== null && shape !== undefined) {
+        const box = shape.getBoundingClientRect()
+        const point = centreOf(mark, shape)
+        const at = `${point.x.toFixed(1)},${point.y.toFixed(1)}`
+        still = box.width > 0 && box.height > 0 && at === last ? still + 1 : 0
+        last = at
+      }
+      if (still >= STILL_FRAMES) {
+        rested()
+        return
+      }
+      if (performance.now() - started > LONGEST) {
+        failed(new Error('The mark never came to rest on its item before the move.'))
+        return
+      }
+      requestAnimationFrame(frame)
+    }
+    requestAnimationFrame(frame)
+  })
 }
 
 /** A point of the screen, in the pixels `elementsFromPoint` takes. */

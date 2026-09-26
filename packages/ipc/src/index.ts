@@ -120,6 +120,7 @@ export type {
 } from './tools.ts'
 export {
   launchViewSchema,
+  planRepositorySchema,
   recipeKindSchema,
   recipeStepSchema,
   repositoryStateSchema,
@@ -132,6 +133,7 @@ export {
 } from './workspaces.ts'
 export type {
   LaunchView,
+  PlanRepository,
   RecipeStep,
   RepositoryState,
   Variable,

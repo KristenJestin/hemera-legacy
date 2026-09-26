@@ -120,6 +120,7 @@ import {
   listenToWorkspaces,
   moveRecipeStep,
   planDedicated,
+  readPlanRepositories,
   readMainStatus,
   readProjectVariables,
   readRecipe,
@@ -1297,6 +1298,9 @@ export function Application() {
             onStopService: (runId) => void stopService(runId),
           }}
           onPlanWorkspace={async () => await planDedicated(current.id)}
+          onReadPlanWorkspace={async (relativePaths, reading, onRead) =>
+            await readPlanRepositories(current.id, null, '', relativePaths, reading, onRead)
+          }
           onCreateDedicated={async (name, worktrees) =>
             await createDedicated(current.id, name, worktrees)
           }

@@ -725,6 +725,32 @@ export const toolCatalogueLayer: Layer.Layer<
           policy: CLASSIFIER_POLICY_VERSION,
           generation: snapshot.generation,
         })
+        let state = 'ask'
+        if (source === 'unavailable') state = 'unavailable'
+        else if (verdict === 'deny') state = 'denied'
+        else if (verdict === 'allow') state = 'allowed'
+        let reason = 'No usable evaluator result; your confirmation is required.'
+        if (source === 'local') reason = 'Local policy'
+        else if (source === 'jev') reason = 'Jev evaluation'
+        let by: 'rules' | 'judge' | undefined
+        if (source === 'local') by = 'rules'
+        else if (source === 'jev') by = 'judge'
+        yield* inThread(asked.sessionId, {
+          role: 'hemera',
+          kind: 'classifier_decision',
+          body: `Hemera Auto ${state} ${action.tool}`,
+          payload: JSON.stringify({
+            call: action.tool,
+            target: detail.resolvedTarget ?? detail.cwd ?? action.target,
+            state,
+            reason,
+            by,
+            policyVersion: CLASSIFIER_POLICY_VERSION,
+            model: model || undefined,
+          }),
+          correlationId: `classifier:${crypto.randomUUID()}`,
+          state,
+        }).pipe(Effect.catch(() => Effect.void))
         return { verdict, generation: snapshot.generation, latestHumanSeq: context.latestHumanSeq }
       })
 

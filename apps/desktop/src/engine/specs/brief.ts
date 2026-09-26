@@ -173,7 +173,9 @@ function composed(sessionId: string, holdsNone: boolean) {
 
 /**
  * The agent took the delivery: what it listed is not listed again, and a brief's key is what the
- * next is measured against (Decided 17). One row per kind it carried, in the same transaction.
+ * next is measured against (Decided 17). Its rows are written in the same transaction, each with
+ * what the Context tab names it by (#74): the brief with its key, the edits with the sections they
+ * touched, and one row per question answered, with the question.
  */
 export function briefed(sessionId: string, delivery: SpecDelivery) {
   return mutate('marking the brief', (transaction) =>
@@ -187,9 +189,12 @@ export function briefed(sessionId: string, delivery: SpecDelivery) {
       if (delivery.brief !== null) {
         given.push({ kind: 'brief', path: delivery.brief.key, text: delivery.brief.block })
       }
-      if (delivery.edits !== null) given.push({ kind: 'edit', path: '', text: delivery.edits.text })
-      if (delivery.answers !== null) {
-        given.push({ kind: 'answer', path: '', text: delivery.answers.text })
+      if (delivery.edits !== null) {
+        const sections = delivery.edits.sections.join(',')
+        given.push({ kind: 'edit', path: sections, text: delivery.edits.text })
+      }
+      for (const question of delivery.answers?.questions ?? []) {
+        given.push({ kind: 'answer', path: question, text: delivery.answers?.text ?? '' })
       }
       const deliveredAt = now()
       yield* transaction

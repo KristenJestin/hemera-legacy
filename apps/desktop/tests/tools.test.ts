@@ -482,6 +482,52 @@ describe('Hemera Auto classifies one admitted tool call before execution', () =>
     expect(existsSync(join(root, 'late.md'))).toBe(false)
     expect(human.asked).toHaveLength(0)
   })
+
+  it('discards a human grant received after the global mode changes', async () => {
+    let signalAsked: (() => void) | undefined
+    const asked = new Promise<void>((resolve) => {
+      signalAsked = resolve
+    })
+    let release: (() => void) | undefined
+    const held = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const human: Human = {
+      asked: [],
+      service: {
+        askOutside: (question) =>
+          Effect.promise(async () => {
+            human.asked.push(question)
+            signalAsked?.()
+            await held
+            return 'allowed' as const
+          }),
+        answer: () => Effect.succeed(false),
+        withdrawn: () => Effect.void,
+      },
+    }
+    const result = await engine(human)(
+      Effect.gen(function* () {
+        const session = yield* opened
+        const settings = yield* ClassifierSettings
+        yield* settings.select('hemera-auto')
+        const call = yield* Effect.forkScoped(
+          calling({
+            sessionId: session.sessionId,
+            tool: 'fs_write',
+            arguments: { path: 'late-human.md', content: 'no', key: 'late-human' },
+          }),
+        )
+        yield* Effect.promise(() => asked)
+        yield* settings.select('agent-default')
+        release?.()
+        return yield* Fiber.join(call)
+      }),
+    )
+    expect(human.asked).toHaveLength(1)
+    expect(result.state).toBe('refused')
+    expect(existsSync(join(root, 'late-human.md'))).toBe(false)
+  })
 })
 
 describe('A tool not offered is refused all the same', () => {

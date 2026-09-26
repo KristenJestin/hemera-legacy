@@ -262,6 +262,8 @@ export interface AgentRuntimeService {
    * starts it again, its conversation resumed, with the tools of the Session's mission (D7-14).
    */
   readonly releaseWhenIdle: (sessionId: string) => Effect.Effect<void>
+  /** Revokes old tool grants and restarts live agents after an application classifier change. */
+  readonly classifierChanged: Effect.Effect<void>
   /**
    * The agent's proposal accepted (issue #130): lets go of the agent as `releaseWhenIdle` does,
    * then starts it again at once, its conversation resumed with the tools of a `define` Session,
@@ -1716,7 +1718,52 @@ export const runtimeLayer = Layer.effect(
      */
     const opened = (sessionId: string): Effect.Effect<Live, AgentRuntimeError, Scope.Scope> =>
       gateOf(`session:${sessionId}`)
-        .withPermits(1)(openAgent(sessionId))
+        .withPermits(1)(
+          Effect.gen(function* () {
+            const held = yield* openAgent(sessionId)
+            if (yield* hemeraAuto) {
+              // A resumed native Session may restore its own permission mode even when Hemera
+              // skipped the remembered choice. Neutralize it before handing out a new prompt.
+              const neutralized = yield* Effect.result(
+                Effect.gen(function* () {
+                  for (const option of held.connection.options()) {
+                    if (!nativePermissionMode(option, option.value) || option.value === 'default')
+                      continue
+                    if (!option.values.some((value) => value.id === 'default')) {
+                      return yield* Effect.fail(
+                        new AgentRuntimeError({
+                          what: 'starting the agent',
+                          cause: 'its native permission mode cannot be reset for Hemera Auto',
+                        }),
+                      )
+                    }
+                    const changed = yield* attempt(
+                      'resetting native permissions for Hemera Auto',
+                      held.connection.setOption(option.id, 'default'),
+                    )
+                    if (changed.find((value) => value.id === option.id)?.value !== 'default') {
+                      return yield* Effect.fail(
+                        new AgentRuntimeError({
+                          what: 'starting the agent',
+                          cause: 'the agent did not accept its default permission mode',
+                        }),
+                      )
+                    }
+                  }
+                }),
+              )
+              if (Result.isFailure(neutralized)) {
+                yield* access.revoked(sessionId)
+                if (live.get(sessionId) === held) live.delete(sessionId)
+                yield* Queue.shutdown(held.queue).pipe(Effect.ignore)
+                yield* attempt('stopping the agent', held.process.stop).pipe(Effect.ignore)
+                yield* letGo(sessionId)
+                return yield* Effect.fail(neutralized.failure)
+              }
+            }
+            return held
+          }),
+        )
         .pipe(Effect.tap(() => kept(sessionId)))
 
     /** Says the Session goes on with the agent it already had, and remembers where it runs. */
@@ -3079,6 +3126,18 @@ export const runtimeLayer = Layer.effect(
       resume: (sessionId) => owned(resume(sessionId)),
       release: (sessionId) => owned(release(sessionId)),
       releaseWhenIdle: (sessionId) => owned(releaseWhenIdle(sessionId)),
+      classifierChanged: owned(
+        Effect.gen(function* () {
+          const activeSessionIds = [...live.keys()]
+          // No process from the previous mode may submit another Hemera tool call while its
+          // turn is being cancelled or its native session is still held.
+          for (const sessionId of activeSessionIds) yield* access.revoked(sessionId)
+          for (const sessionId of activeSessionIds) {
+            yield* stop(sessionId)
+            yield* releaseWhenIdle(sessionId)
+          }
+        }),
+      ),
       briefWhenIdle: (sessionId) => owned(briefWhenIdle(sessionId)),
       tell,
       alive: Effect.sync(() => [...live.keys()]),

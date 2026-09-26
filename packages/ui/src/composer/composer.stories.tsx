@@ -6,6 +6,8 @@ import { onOneLine } from '../../.storybook/one-line.ts'
 import { emulateReducedMotion } from '../../.storybook/reduced-motion.ts'
 import { AgentModelMenu, type ModelChoice, type OfferedAgent } from './agent-model-menu.tsx'
 import { CreateSpecProposal } from '../spec/create-spec-proposal.tsx'
+import { CREDIT_NOTES } from '../spec/spec-fixtures.ts'
+import { SpecQuestion } from '../spec/spec-question.tsx'
 import { BlockedBanner } from './blocked-banner.tsx'
 import { Composer, type ComposerProps } from './composer.tsx'
 
@@ -408,6 +410,59 @@ export const Pinned: Story = {
     // Above the box, in reading order as on screen.
     expect(card.compareDocumentPosition(box) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     expect(canvas.getByRole('button', { name: 'Create' })).toBeEnabled()
+  },
+}
+
+/** Three blocking questions of the Spec, each asked with its options, all waiting at once. */
+const THREE_QUESTIONS = [
+  CREDIT_NOTES,
+  {
+    ...CREDIT_NOTES,
+    id: 'q-which-date',
+    body: 'Which date decides the month: the issue date or the payment date?',
+    options: [
+      { id: 'issue', label: 'The issue date', recommended: true },
+      { id: 'payment', label: 'The payment date' },
+    ],
+  },
+  {
+    ...CREDIT_NOTES,
+    id: 'q-currency',
+    body: 'Which currency are the totals written in: the invoice’s own, or the Project’s?',
+    options: [
+      { id: 'invoice', label: 'The invoice’s own currency', recommended: true },
+      { id: 'project', label: 'The Project’s currency' },
+    ],
+  },
+]
+
+/**
+ * Three blocking questions pinned at once: the room they take is bounded and scrolls of its own,
+ * so the thread above keeps its room however many wait, and the box stays in reach under them.
+ */
+export const ThreePinnedQuestions: Story = {
+  args: {
+    variant: 'inline',
+    action: 'Send',
+    placeholder: 'Say something to claude…',
+    pinned: THREE_QUESTIONS.map((question) => ({
+      id: question.id,
+      content: <SpecQuestion question={question} onAnswer={fn()} />,
+    })),
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const area = canvas.getByRole('region', { name: 'Waiting for your answer' })
+    await expect(within(area).getAllByRole('group', { name: /^Question:/ })).toHaveLength(3)
+    // Bounded: it scrolls rather than grow, and takes less than half the window.
+    await waitFor(() => {
+      expect(area.scrollHeight).toBeGreaterThan(area.clientHeight)
+    })
+    expect(area.getBoundingClientRect().height).toBeLessThan(window.innerHeight / 2)
+    // The last question is reached by scrolling the area, and the box stays under it.
+    const box = canvas.getByRole('textbox', { name: 'Say something to claude…' })
+    expect(area.compareDocumentPosition(box) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    await expect(box).toBeVisible()
   },
 }
 

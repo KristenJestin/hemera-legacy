@@ -68,12 +68,13 @@ const QUIET: AgentSessionState = {
 /**
  * Since when a running turn has heard nothing (issue #131): the last push this window heard, or
  * — for a Session opened while its turn was already running — when the last entry of its thread
- * was written. Null when neither says anything.
+ * was written. Null when neither says anything, and while the turn waits on Hemera itself.
  */
 export function heardSince(
   agent: AgentSessionState,
   thread: readonly SessionEntry[],
 ): number | null {
+  if (waitsOnHemera(thread)) return null
   const written = thread.at(-1)?.createdAt ?? null
   if (agent.heardAt === null) return written
   return written === null ? agent.heardAt : Math.max(agent.heardAt, written)
@@ -181,6 +182,8 @@ export interface Activity {
   state: ActivityState
   /** What is being run, when a tool call is: its title, as the agent wrote it. */
   detail?: string | undefined
+  /** What one of Hemera's own tools is doing, said whole: "Writing the Spec" (issue #170). */
+  doing?: string | undefined
   /** The thought arriving now, which is the last one of the turn that is running. */
   thought?: string | undefined
   /** How long the last turn took, from the user's message to its `turn` entry, once it is over. */
@@ -288,14 +291,11 @@ export function activityOf(
 
   const call = [...running].reverse().find((entry) => entry.kind === 'tool_call')
   if (call !== undefined && UNFINISHED.includes(call.state ?? '')) {
-    // One of Hemera's own tools is named the way the thread names it, never by the agent's word
-    // for it, `mcp__hemera__spec_write` (issue #159).
+    // One of Hemera's own tools says what it is doing in words of its own, never by the agent's
+    // word for it, `mcp__hemera__spec_write` (issue #159), nor as "Running Write Spec" (#170).
     const named = hemeraToolNamed(call.body)
-    return {
-      state: 'running',
-      detail: named === null ? call.body : TOOL_LABELS[named].label,
-      thought,
-    }
+    if (named !== null) return { state: 'running', doing: TOOL_LABELS[named].doing, thought }
+    return { state: 'running', detail: call.body, thought }
   }
 
   // A message has no state while it is being written — the engine writes the same entry again
@@ -306,6 +306,24 @@ export function activityOf(
   }
 
   return { state: 'thinking', thought }
+}
+
+/**
+ * Whether the running turn waits on Hemera rather than on its agent (issue #170): a command
+ * Hemera runs for it, or one of Hemera's tools that has not answered yet. Nothing is pushed
+ * while a three-minute test runs, and that silence is Hemera's, not the agent's. An app left
+ * running is not what the turn waits on.
+ */
+function waitsOnHemera(entries: readonly SessionEntry[]): boolean {
+  const running = entries.slice(Math.max(lastSaid(entries), lastEnd(entries)) + 1)
+  return running.some((entry) => {
+    if (entry.kind === 'command_run') {
+      const run = commandRunOf(entry)
+      return run !== null && run.state === 'running' && run.type !== 'serve'
+    }
+    const unfinished = entry.kind === 'tool_call' && UNFINISHED.includes(entry.state ?? '')
+    return unfinished && hemeraToolNamed(entry.body) !== null
+  })
 }
 
 /** Whether the agent is waiting on an answer: a request with no decision written after it. */

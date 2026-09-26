@@ -1,3 +1,4 @@
+import { type BlockNode, type InlineNode, parseMarkdown } from '@tanstack/markdown'
 import { cn } from 'cn'
 import { motion } from 'motion/react'
 import { type ReactNode, useState } from 'react'
@@ -65,6 +66,60 @@ export interface AnswerChoiceProps {
   atLabel?: string | undefined
 }
 
+/** The words of a run of inline Markdown, without its marks. */
+function wordsOf(nodes: readonly InlineNode[]): string {
+  return nodes
+    .map((node) => {
+      switch (node.type) {
+        case 'text':
+        case 'inlineCode':
+          return node.value
+        case 'break':
+          return ' '
+        case 'image':
+          return node.alt
+        case 'strong':
+        case 'emphasis':
+        case 'strike':
+        case 'link':
+        case 'inlineComponent':
+          return wordsOf(node.children)
+        default:
+          return ''
+      }
+    })
+    .join('')
+}
+
+/** The words of one block of Markdown, without its marks. */
+function blockWords(node: BlockNode): string {
+  switch (node.type) {
+    case 'heading':
+    case 'paragraph':
+      return wordsOf(node.children)
+    case 'code':
+      return node.value
+    case 'list':
+      return node.items.map((item) => item.children.map(blockWords).join(' ')).join(' ')
+    case 'blockquote':
+    case 'callout':
+    case 'component':
+      return node.children.map(blockWords).join(' ')
+    default:
+      return ''
+  }
+}
+
+/**
+ * The question as words (issue #170): the agent writes it in Markdown, and the card draws it so;
+ * on one muted line, under the hand and in the accessible name, its stars and backticks would be
+ * read as they were typed.
+ */
+function plainQuestion(markdown: string): string {
+  const words = parseMarkdown(markdown).children.map(blockWords).join(' ')
+  return words.replaceAll(/\s+/g, ' ').trim()
+}
+
 /**
  * What a screen reader hears: `You answered «question»: B, One CSV per month`, or `You answered: B,
  * One CSV per month` without its question, and the label alone without a letter.
@@ -80,7 +135,7 @@ export function answerChoiceLabel({
     )
     .join('; ')
   const typed = text === undefined ? '' : `: ${text}`
-  const asked = question === undefined ? '' : ` «${question}»`
+  const asked = question === undefined ? '' : ` «${plainQuestion(question)}»`
   return `You answered${asked}: ${chosen}${typed}`
 }
 
@@ -95,6 +150,7 @@ export function AnswerChoice({
   const transition = useTransition(arrival)
   // The time is the quiet half of the foot, drawn under the hand as a message's is.
   const [underTheHand, setUnderTheHand] = useState(false)
+  const asked = question === undefined ? undefined : plainQuestion(question)
   return (
     <div
       role="group"
@@ -105,10 +161,10 @@ export function AnswerChoice({
       onFocus={() => setUnderTheHand(true)}
       onBlur={() => setUnderTheHand(false)}
     >
-      {question !== undefined && (
-        <p className={ASKED} title={question}>
+      {asked !== undefined && (
+        <p className={ASKED} title={asked}>
           <span aria-hidden="true">↳</span>
-          <span className="truncate">{question}</span>
+          <span className="truncate">{asked}</span>
         </p>
       )}
       <motion.ul

@@ -1,3 +1,4 @@
+import { cn } from 'cn'
 import { motion } from 'motion/react'
 import { type ReactNode, useState } from 'react'
 
@@ -19,6 +20,9 @@ import { MessageText } from './message-text.tsx'
  *
  * `Other` is a choice as well, and its pill says so; what the reader typed in it is theirs, and is
  * drawn as their message, under the pill. Several choices are several pills under one question.
+ *
+ * An answer whose question is no longer in the thread never vanishes: it is the same pill without
+ * the `↳` line, and without a letter when the card that gave it is not there to say which.
  */
 
 const GROUP = 'flex w-full flex-col items-end gap-1.5'
@@ -30,7 +34,7 @@ const CHOICES = 'flex flex-col items-end gap-1'
 
 /** A choice made: the outline of the button it was, with no fill of a message. */
 const PILL =
-  'flex max-w-3xl min-w-0 items-center gap-2 rounded-full border border-primary py-1 pr-3 pl-1 text-sm text-foreground'
+  'flex max-w-3xl min-w-0 items-center gap-2 rounded-full border border-primary py-1 pr-3 text-sm text-foreground'
 
 /** The choice's letter, in a circle: the letter the question card gave it. */
 const LETTER =
@@ -38,8 +42,8 @@ const LETTER =
 
 /** One choice, as the question card offered it. */
 export interface AnswerChoiceItem {
-  /** Its letter on the card: A, B, C…, and the next one for `Other`. */
-  letter: string
+  /** Its letter on the card: A, B, C…, and the next one for `Other`; none when unknown. */
+  letter?: string | undefined
   /** What the card called it; `Other` for the reader's own answer. */
   label: string
   /** Whether the agent recommended it, which the card said with a badge. */
@@ -47,8 +51,8 @@ export interface AnswerChoiceItem {
 }
 
 export interface AnswerChoiceProps {
-  /** The question answered, as the agent asked it. */
-  question: string
+  /** The question answered, as the agent asked it; none when it is no longer in the thread. */
+  question?: string | undefined
   /** The choices made, in the card's order: one, or several for a question that takes several. */
   choices: AnswerChoiceItem[]
   /** What the reader typed under `Other`, drawn as their message. */
@@ -61,15 +65,23 @@ export interface AnswerChoiceProps {
   atLabel?: string | undefined
 }
 
-/** What a screen reader hears: `You answered «question»: B, One CSV per month`. */
+/**
+ * What a screen reader hears: `You answered «question»: B, One CSV per month`, or `You answered: B,
+ * One CSV per month` without its question, and the label alone without a letter.
+ */
 export function answerChoiceLabel({
   question,
   choices,
   text,
 }: Pick<AnswerChoiceProps, 'question' | 'choices' | 'text'>): string {
-  const chosen = choices.map((choice) => `${choice.letter}, ${choice.label}`).join('; ')
+  const chosen = choices
+    .map((choice) =>
+      choice.letter === undefined ? choice.label : `${choice.letter}, ${choice.label}`,
+    )
+    .join('; ')
   const typed = text === undefined ? '' : `: ${text}`
-  return `You answered «${question}»: ${chosen}${typed}`
+  const asked = question === undefined ? '' : ` «${question}»`
+  return `You answered${asked}: ${chosen}${typed}`
 }
 
 export function AnswerChoice({
@@ -93,10 +105,12 @@ export function AnswerChoice({
       onFocus={() => setUnderTheHand(true)}
       onBlur={() => setUnderTheHand(false)}
     >
-      <p className={ASKED} title={question}>
-        <span aria-hidden="true">↳</span>
-        <span className="truncate">{question}</span>
-      </p>
+      {question !== undefined && (
+        <p className={ASKED} title={question}>
+          <span aria-hidden="true">↳</span>
+          <span className="truncate">{question}</span>
+        </p>
+      )}
       <motion.ul
         aria-label="Chosen"
         className={CHOICES}
@@ -107,8 +121,12 @@ export function AnswerChoice({
         transition={transition}
       >
         {choices.map((choice) => (
-          <li key={choice.letter} className={PILL}>
-            <span className={LETTER}>{choice.letter}</span>
+          <li
+            key={choice.letter ?? choice.label}
+            // The letter's circle sits close to the rim; words alone keep the rim's own inset.
+            className={cn(PILL, choice.letter === undefined ? 'pl-3' : 'pl-1')}
+          >
+            {choice.letter !== undefined && <span className={LETTER}>{choice.letter}</span>}
             <span className="min-w-0 break-words">{choice.label}</span>
             {choice.recommended === true && <Badge tone="success">recommended</Badge>}
             <span className="flex text-primary">

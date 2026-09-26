@@ -37,7 +37,10 @@ const meta = {
     specKey: { control: 'text', description: 'The human key, `PREFIX-n`.' },
     title: { control: 'text' },
     type: { control: 'inline-radio', options: ['feature', 'bug', 'maintenance'] },
-    status: { control: 'inline-radio', options: ['draft', 'ready'] },
+    status: {
+      control: 'inline-radio',
+      options: ['draft', 'ready', 'in_progress', 'cancelled'],
+    },
     revision: { control: 'number', description: 'The revision shown.' },
     revisions: { control: 'object', description: 'Every revision, newest first.' },
     superseded: { control: 'boolean', description: 'Whether an older revision is shown.' },
@@ -59,12 +62,44 @@ export const Draft: Story = {
   play: async ({ canvasElement, args }) => {
     const canvas = within(canvasElement)
     await expect(canvas.getByRole('heading', { name: 'CSV invoice export' })).toBeVisible()
-    await expect(canvas.getByText('draft')).toBeVisible()
+    await expect(canvas.getByRole('img', { name: 'Draft' })).toBeVisible()
     await expect(canvas.queryByRole('button', { name: /rev/ })).toBeNull()
     await expect(canvas.queryByRole('button', { name: 'Rework' })).toBeNull()
     await expect(canvas.queryByRole('button', { name: 'Mark ready' })).toBeNull()
     await userEvent.click(canvas.getByRole('button', { name: 'Fold the Spec' }))
     await expect(args.onFold).toHaveBeenCalled()
+  },
+}
+
+/**
+ * Every status as the head draws it (issue #159): an icon in its colour between the key and the
+ * title, no word on the line — the word is the tooltip and the accessible name.
+ */
+export const Statuses: Story = {
+  parameters: { controls: { disable: true } },
+  render: (args) => (
+    <div className="flex flex-col gap-4">
+      <SpecHead {...args} status="draft" />
+      <SpecHead {...args} status="ready" />
+      <SpecHead {...args} status="in_progress" />
+      <SpecHead {...args} status="cancelled" />
+    </div>
+  ),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await Promise.all(
+      ['Draft', 'Ready', 'Building', 'Cancelled'].map((word) =>
+        expect(canvas.getByRole('img', { name: word })).toBeVisible(),
+      ),
+    )
+    await expect(canvas.queryByText('draft')).toBeNull()
+    const line = canvas.getAllByRole('heading', { level: 2 })[0]?.parentElement
+    const [key, status, title] = [...(line?.children ?? [])]
+    await expect(key).toHaveTextContent('ATL-7')
+    await expect(status).toHaveAccessibleName('Draft')
+    await expect(title?.tagName).toBe('H2')
+    await userEvent.hover(canvas.getByRole('img', { name: 'Ready' }))
+    await expect(await within(document.body).findByRole('tooltip')).toHaveTextContent('Ready')
   },
 }
 

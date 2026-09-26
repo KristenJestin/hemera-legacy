@@ -422,7 +422,8 @@ export type RunState = (typeof COMMAND_RUN_STATES)[number]
  * What a delivery of the context was: the base, the record of a native read, the file given at
  * the start to an agent that does not read it, or a change; and, for a `define` Session, the
  * mission brief, the human's answers and edits of the Spec, and a sub-agent's result (D7-09,
- * D7-14).
+ * D7-14); and Hemera's own words to the agent: a notice that the user declined its proposal, and
+ * the request a Session started with New Spec carries on its first turn.
  */
 export const CONTEXT_DELIVERY_KINDS = [
   'base',
@@ -433,6 +434,8 @@ export const CONTEXT_DELIVERY_KINDS = [
   'answer',
   'edit',
   'internal',
+  'notice',
+  'request',
 ] as const
 
 /** The kinds recorded once per Session and fingerprint: what a Session starts with. */

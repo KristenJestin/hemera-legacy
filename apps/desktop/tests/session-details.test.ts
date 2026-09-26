@@ -422,6 +422,26 @@ describe('The Context tab lists what a define Session handed its agent', () => {
   })
 })
 
+describe('The Context tab lists what Hemera said to the agent of its own', () => {
+  test('a declined proposal and the New Spec request are each a line with its time', () => {
+    const view = aViewOf([
+      { ...aHanding('request', '', '2026-09-23T13:40:00.000Z'), reached: 'embedded_resource' },
+      aHanding('notice', '', '2026-09-23T13:45:00.000Z'),
+    ])
+
+    expect(contextListsOf(view, ROOT).handed).toEqual([
+      {
+        label: 'The New Spec request went to the agent',
+        at: atOf('2026-09-23T13:40:00.000Z'),
+      },
+      {
+        label: 'Hemera told the agent you declined its proposal',
+        at: atOf('2026-09-23T13:45:00.000Z'),
+      },
+    ])
+  })
+})
+
 describe('A one-off command shows and is not promoted', () => {
   withQualifiedOpenCode()
 

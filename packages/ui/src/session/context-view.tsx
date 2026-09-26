@@ -2,7 +2,7 @@ import { cn } from 'cn'
 import type { ReactNode } from 'react'
 
 import { Disclosure } from '../activity/disclosure.tsx'
-import { IconCommand, IconFileText, IconFolder } from '../icons.ts'
+import { IconCommand, IconFileDescription, IconFileText, IconFolder } from '../icons.ts'
 
 /**
  * What the agent is working from (design D6-10), in the two parts a reader takes in at a glance
@@ -20,6 +20,10 @@ import { IconCommand, IconFileText, IconFolder } from '../icons.ts'
  * it last changed under the Session (recette 5 of 24 September 2026): a context that arrived at a
  * moment is a fact about the Session and not a permanent truth, and a tab of lines with no time on
  * them read as one written once and never again.
+ *
+ * Handed over, in a `define` Session (#74): what Hemera gave the agent since, one sentence and its
+ * time each — the instructions of each phase, the user's edits and answers, the results of
+ * sub-agents. Drawn only when there is something.
  *
  * Tools: the tools Hemera lends, folded on one line that says how many and when they were lent,
  * each with the bound it is held to once the line is opened, and the catalogue `commands_run` runs
@@ -76,6 +80,12 @@ export interface ContextViewProps {
    * base. Empty while nothing has gone to the agent yet.
    */
   instructions: readonly ContextEntry[]
+  /**
+   * What was handed to the agent since, in a `define` Session (#74): the instructions of each
+   * phase, the user's edits and answers, the results of sub-agents, oldest first, each a sentence
+   * with its time. Left out or empty, the part is not drawn.
+   */
+  handed?: readonly ContextEntry[] | undefined
   /** The tools it lends it. */
   tools: readonly ContextTool[]
   /** When they were lent: the moment the agent's session was opened with them. */
@@ -124,6 +134,7 @@ const NOTHING = 'pl-8 text-sm text-muted-foreground'
 export function ContextView({
   workspace,
   instructions,
+  handed = [],
   tools,
   lentAt,
   commands,
@@ -166,6 +177,25 @@ export function ContextView({
           </ul>
         )}
       </section>
+      {handed.length > 0 && (
+        <section className={GROUP} aria-label="Handed over">
+          <div className={HEAD}>
+            <span aria-hidden="true" className={MARK}>
+              <IconFileDescription size="sm" />
+            </span>
+            <span className={TITLE}>Handed over</span>
+          </div>
+          <ul className={LIST}>
+            {handed.map((entry, index) => (
+              // Two results of sub-agents can read alike, so a line is also its place.
+              <li key={`${index}:${entry.label}`} className={ROW}>
+                <span className={LABEL}>{entry.label}</span>
+                {entry.at !== undefined && <span className={DETAIL}>{` · ${entry.at}`}</span>}
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
       {/* Folded by default: the count is what a reader checks, and the list is there when
           asked. */}
       <Disclosure

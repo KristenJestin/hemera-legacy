@@ -590,6 +590,39 @@ export const MentionAtTheCaret: Story = {
   },
 }
 
+/**
+ * The band open, and left open: the one story that ends with the list on screen.
+ *
+ * Every other story that opens the list chooses from it and waits for it to go, so the
+ * accessibility pass, which runs once the play is over, never saw the band's own label or its
+ * rows. Here it does, in both themes, once the frame has finished growing around the band: a
+ * colour read while the frame is still moving is not the colour the reader gets.
+ */
+export const Mentioning: Story = {
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const box = canvas.getByRole('textbox')
+    const frame = frameOf(box)
+
+    await userEvent.type(box, 'See @sources')
+    const menu = await within(document.body).findByRole('listbox', {
+      name: 'Files of the Project',
+    })
+    await waitFor(() => {
+      expect(within(menu).getAllByRole('option').length).toBeGreaterThan(1)
+    })
+    expect(canvas.getByText('A file of the Project…')).toBeVisible()
+
+    // Settled: the frame is the same height on two reads a frame apart.
+    await waitFor(async () => {
+      const before = frame.getBoundingClientRect().height
+      await new Promise((resolve) => requestAnimationFrame(resolve))
+      expect(frame.getBoundingClientRect().height).toBe(before)
+    })
+    expect(document.activeElement).toBe(box)
+  },
+}
+
 /** The paperclip reaches the same files and sends them along, which is what the header holds. */
 export const AttachAFile: Story = {
   play: async ({ canvasElement }) => {

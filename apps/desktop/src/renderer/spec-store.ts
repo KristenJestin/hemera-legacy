@@ -39,7 +39,8 @@ export interface SpecState {
   refusal: string | null
   /**
    * What the last "Mark ready" was refused with, or null: said by the readiness bar it was
-   * pressed on rather than under the thread, and forgotten with the next act that goes through.
+   * pressed on rather than under the thread, and forgotten with the next act that goes through or
+   * once the Spec moves on from the content it was refused on.
    */
   readyRefused: string | null
   /**
@@ -97,6 +98,19 @@ function message(cause: unknown): string {
  */
 let started = 0
 
+/**
+ * The revision and content version the last refused "Mark ready" was read on once refused, or
+ * null. The refusal is about that content: once the Spec moves on from it — the agent writes, a
+ * Rework opens a new revision — it no longer says anything true, and is forgotten.
+ */
+let refusedOn: string | null = null
+
+/** A Spec's current revision and content version, as one value to compare. */
+function versionOf(current: SpecSnapshot | null): string | null {
+  if (current === null) return null
+  return `${current.spec.currentRevisionId}@${String(current.spec.contentVersion)}`
+}
+
 /** Reads the open Spec, its revisions and its Journal again. */
 async function reload(specId: string): Promise<void> {
   started += 1
@@ -126,6 +140,8 @@ async function reload(specId: string): Promise<void> {
     // the same thing to the panel.
     launches: launches ?? null,
     journal: journal.entries,
+    readyRefused:
+      refusedOn !== null && refusedOn !== versionOf(current) ? null : state.readyRefused,
   })
 }
 
@@ -242,8 +258,11 @@ export async function markReady(sessionId: string): Promise<boolean> {
       sessionId,
     })
   } catch (cause) {
+    // Read again first: a Spec that changed as it was pressed is refused on what it is now.
+    refusedOn = null
     replace({ ...state, readyRefused: message(cause) })
     await refresh(specId)
+    refusedOn = versionOf(state.current)
     return false
   }
   replace({ ...state, refusal: null, readyRefused: null })

@@ -31,7 +31,6 @@ import {
   CLASSIFIER_POLICY_VERSION,
   classifierHumanContext,
   commandPlace,
-  lineFor,
   localClassifierVerdict,
   offeredTools,
   runsInMain,
@@ -47,9 +46,8 @@ import { AgentNotices } from '../agents/notices.ts'
 import { Builds } from '../build/build.ts'
 import { ClassifierSettings } from '../classifier/settings.ts'
 import { evaluateJev, JevTransportPort } from '../classifier/jev.ts'
-import { invocationOf } from '../commands/line.ts'
-import { Platform, ProgramLookup } from '../commands/service.ts'
-import { Commands } from '../commands/service.ts'
+import type { Invocation } from '../commands/line.ts'
+import { Commands, Platform, type RunRequest } from '../commands/service.ts'
 import { Projects } from '../projects.ts'
 import { Sessions, type ThreadWrite } from '../sessions.ts'
 import { Specs } from '../specs/specs.ts'
@@ -175,7 +173,7 @@ interface ClassifierDetail {
   readonly resolvedTarget?: string
   readonly line?: string
   readonly cwd?: string
-  readonly invocation?: NonNullable<ReturnType<typeof invocationOf>>
+  readonly invocation?: Invocation
   readonly portless?: boolean
   readonly environmentNames?: readonly string[]
 }
@@ -335,7 +333,6 @@ export const toolCatalogueLayer: Layer.Layer<
     const classifier = yield* ClassifierSettings
     const jevTransport = yield* JevTransportPort
     const platform = yield* Platform
-    const lookupIn = yield* ProgramLookup
 
     /**
      * One entry of a call written into its Session's thread, below what the agent said before it.
@@ -672,13 +669,18 @@ export const toolCatalogueLayer: Layer.Layer<
       Effect.gen(function* () {
         const snapshot = yield* answered(classifier.current)
         if (snapshot === undefined) return { verdict: 'ask', generation: -1, latestHumanSeq: -1 }
-        const entries = (yield* answered(sessions.humanMessages(asked.sessionId))) ?? []
+        const entries = yield* answered(sessions.humanMessages(asked.sessionId))
+        if (entries === undefined) return { verdict: 'ask', generation: -1, latestHumanSeq: -1 }
         const frozen =
           mission === 'build' ? yield* answered(builds.view(asked.sessionId)) : undefined
+        if (mission === 'build' && frozen === undefined)
+          return { verdict: 'ask', generation: -1, latestHumanSeq: -1 }
         const frozenSnapshot =
           frozen === undefined
             ? undefined
             : yield* answered(specs.read(frozen.specId, frozen.revision))
+        if (mission === 'build' && frozenSnapshot === undefined)
+          return { verdict: 'ask', generation: -1, latestHumanSeq: -1 }
         const context = classifierHumanContext(
           mission,
           entries,
@@ -732,11 +734,11 @@ export const toolCatalogueLayer: Layer.Layer<
           answered(classifier.current),
           answered(sessions.humanMessages(asked.sessionId)),
         ])
+        if (entries === undefined) return false
         return (
           settings?.mode === 'hemera-auto' &&
           settings.generation === decision.generation &&
-          classifierHumanContext('free', entries ?? []).latestHumanSeq ===
-            decision.latestHumanSeq &&
+          classifierHumanContext('free', entries).latestHumanSeq === decision.latestHumanSeq &&
           (yield* access.live(asked.sessionId))
         )
       })
@@ -1030,23 +1032,46 @@ export const toolCatalogueLayer: Layer.Layer<
               return failed("could not read the Project's main", 'the Workspace main did not read')
             }
             const environment = (yield* answered(variables.givenFor(projectId, home.id))) ?? {}
-            const commandLine = lineFor(
-              {
-                line: entry?.line ?? line ?? '',
-                lineWindows: entry?.lineWindows ?? null,
-                lineLinux: entry?.lineLinux ?? null,
-              },
-              platform,
-            )
             const resolvedPlace = yield* placeOf(entry === undefined ? root : home.path, folder)
             if (resolvedPlace.inside === null)
               return failed(resolvedPlace.reason, resolvedPlace.reason)
-            const invocation = invocationOf(commandLine, platform, lookupIn(resolvedPlace.path))
+            const runRequest: RunRequest = {
+              sessionId: asked.sessionId,
+              projectId,
+              commandId: entry?.id ?? null,
+              name: entry?.name ?? named ?? (line ?? '').split(/\s+/)[0] ?? 'command',
+              line: entry?.line ?? line ?? '',
+              lineWindows: entry?.lineWindows ?? null,
+              lineLinux: entry?.lineLinux ?? null,
+              type: entry?.type ?? 'script',
+              scope: entry?.scope ?? 'workspace',
+              portless: entry?.portless ?? false,
+              portlessName: entry?.portlessName ?? null,
+              folder: folder === '.' ? null : folder,
+              cwd: resolvedPlace.path,
+              workspaceId: home.id,
+              workspaceName: home.name,
+              environment,
+              startedBy: 'agent',
+            }
+            const prepared = yield* answered(commands.preview(runRequest))
+            if (prepared === undefined)
+              return failed('the command could not be resolved', 'nothing was started')
+            if (prepared.missingPortless)
+              return failed('Portless is unavailable', 'nothing was started')
+            const commandLine = prepared.line
+            const invocation = prepared.invocation
             if (invocation === null)
               return failed('the command line is empty', 'nothing was started')
             const settings = yield* answered(classifier.current)
+            if (settings === undefined) {
+              return {
+                ...failed('classifier settings are unavailable', 'Nothing was started.'),
+                refused: true,
+              }
+            }
             const auto =
-              settings?.mode === 'hemera-auto'
+              settings.mode === 'hemera-auto'
                 ? yield* classify(
                     asked,
                     { projectId, agent: 'agent', milliseconds: 0 },
@@ -1071,6 +1096,12 @@ export const toolCatalogueLayer: Layer.Layer<
                     Object.values(environment),
                   )
                 : null
+            if (auto !== null && auto.generation < 0) {
+              return {
+                ...failed('classifier context is unavailable', 'Nothing was started.'),
+                refused: true,
+              }
+            }
             if (auto?.verdict === 'deny') {
               return {
                 ...failed(
@@ -1161,27 +1192,8 @@ export const toolCatalogueLayer: Layer.Layer<
             }
             const started = yield* answered(
               commands.run({
-                sessionId: asked.sessionId,
-                projectId,
-                commandId: entry?.id ?? null,
-                name: entry?.name ?? named ?? (line ?? '').split(/\s+/)[0] ?? 'command',
-                line: entry?.line ?? line ?? '',
-                lineWindows: entry?.lineWindows ?? null,
-                lineLinux: entry?.lineLinux ?? null,
-                type: entry?.type ?? 'script',
-                scope: entry?.scope ?? 'workspace',
-                portless: entry?.portless ?? false,
-                portlessName: entry?.portlessName ?? null,
-                folder: folder === '.' ? null : folder,
-                cwd: inside.path,
-                // D8-08: the run belongs to the Workspace it runs in, which names it too.
-                workspaceId: home.id,
-                workspaceName: home.name,
-                // D8-06: the Project's variables overridden by that Workspace's, kept on the run.
-                environment,
-                expectedInvocation:
-                  auto === null || entry?.portless === true ? undefined : invocation,
-                startedBy: 'agent',
+                ...runRequest,
+                expectedInvocation: auto === null ? undefined : invocation,
               }),
             )
             if (started === undefined) {
@@ -1472,7 +1484,13 @@ export const toolCatalogueLayer: Layer.Layer<
           const answer = yield* Effect.gen(function* () {
             let guard: AuthorizedTarget | undefined
             const settings = yield* answered(classifier.current)
-            if (settings?.mode === 'hemera-auto' && parsed.call.tool !== 'commands_run') {
+            if (settings === undefined) {
+              return {
+                ...failed('classifier settings are unavailable', 'Nothing was executed.'),
+                refused: true,
+              }
+            }
+            if (settings.mode === 'hemera-auto' && parsed.call.tool !== 'commands_run') {
               const namedTarget = targetName(parsed.call)
               const place =
                 namedTarget === null
@@ -1488,6 +1506,12 @@ export const toolCatalogueLayer: Layer.Layer<
                 { tool: named, target: place.inside ? 'inside' : 'outside' },
                 { arguments: parsed.call.arguments, resolvedTarget: place.path },
               )
+              if (classified.generation < 0) {
+                return {
+                  ...failed('classifier context is unavailable', 'Nothing was executed.'),
+                  refused: true,
+                }
+              }
               if (classified.verdict === 'deny') {
                 return {
                   ...failed(

@@ -42,6 +42,7 @@ import {
   contextUri,
   hemeraToolNamed,
   internalText,
+  nativePermissionMode,
   type Session,
   type SessionEntryOrigin,
 } from '@hemera/core'
@@ -71,6 +72,7 @@ import { rebuiltContext } from './resume.ts'
 import { ProcessSupervisor, StderrSink, type SupervisedProcess } from './supervisor.ts'
 import { type BuildDelivery, Builds } from '../build/build.ts'
 import { Commands } from '../commands/service.ts'
+import { ClassifierSettings } from '../classifier/settings.ts'
 import { Context as AgentContext, fingerprintOf } from '../context/service.ts'
 import { Preferences } from '../preferences.ts'
 import { Projects } from '../projects.ts'
@@ -552,6 +554,12 @@ export const runtimeLayer = Layer.effect(
     const server = yield* ToolServer
     const context = yield* AgentContext
     const commands = yield* Commands
+    const classifier = yield* ClassifierSettings
+    const hemeraAuto = classifier.current.pipe(
+      Effect.map((current) => current.mode === 'hemera-auto'),
+      // A failed Profile read must not replay a remembered permissive native mode.
+      Effect.catch(() => Effect.succeed(true)),
+    )
     const permissions = yield* ToolPermissions
     const heldWords = yield* HeldWords
     const pool = yield* Pool
@@ -1281,6 +1289,10 @@ export const runtimeLayer = Layer.effect(
         // of the model picked before it would announce the options of an agent on its defaults,
         // and the effort that model publishes would not be among them (D5-13, D5-17).
         for (const [optionId, value] of chosen.get(key) ?? []) {
+          if (yield* hemeraAuto) {
+            const option = probe.connection.options().find((one) => one.id === optionId)
+            if (option !== undefined && nativePermissionMode(option, value)) continue
+          }
           yield* attempt('choosing an option', probe.connection.setOption(optionId, value)).pipe(
             // A choice this agent will not take again is not an offer that failed: the composer
             // is drawn from what the agent announces, which is what it is on.
@@ -1326,6 +1338,7 @@ export const runtimeLayer = Layer.effect(
 
         const answered = yield* probeOf(projectId, provider)
         if (!isProbe(answered)) return answered
+
         const announced = answered.connection.options()
         offered.set(key, announced)
         // The agent this Project's composer is on, kept for the next start: a Home opens on the
@@ -1352,6 +1365,16 @@ export const runtimeLayer = Layer.effect(
         const key = `${projectId}:${provider}`
         const answered = yield* probeOf(projectId, provider)
         if (!isProbe(answered)) return answered
+
+        if (yield* hemeraAuto) {
+          const option = answered.connection.options().find((one) => one.id === optionId)
+          if (option !== undefined && nativePermissionMode(option, value)) {
+            return offerRefused(
+              'failed',
+              'Permission modes are managed by Hemera Auto in App Settings.',
+            )
+          }
+        }
 
         const set = yield* Effect.result(
           attempt('choosing an option', answered.connection.setOption(optionId, value)),
@@ -1620,6 +1643,10 @@ export const runtimeLayer = Layer.effect(
         // agent has just opened knows nothing of them until it is told (D5-17).
         if (fresh) {
           for (const [optionId, value] of chosen.get(`${session.projectId}:${provider}`) ?? []) {
+            if (yield* hemeraAuto) {
+              const option = connection.options().find((one) => one.id === optionId)
+              if (option !== undefined && nativePermissionMode(option, value)) continue
+            }
             yield* attempt('choosing an option', connection.setOption(optionId, value)).pipe(
               // A choice the agent will not take is not a Session that cannot start: it opens on
               // what the agent is on, and the composer shows what that is.
@@ -2474,6 +2501,17 @@ export const runtimeLayer = Layer.effect(
     const setOption = (sessionId: string, optionId: string, value: string) =>
       Effect.gen(function* () {
         const held = yield* opened(sessionId)
+        if (yield* hemeraAuto) {
+          const option = held.connection.options().find((one) => one.id === optionId)
+          if (option !== undefined && nativePermissionMode(option, value)) {
+            return yield* Effect.fail(
+              new AgentRuntimeError({
+                what: 'choosing an option',
+                cause: 'permission modes are managed by Hemera Auto in App Settings',
+              }),
+            )
+          }
+        }
         yield* attempt('choosing an option', held.connection.setOption(optionId, value))
       })
 

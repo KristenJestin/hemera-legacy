@@ -846,3 +846,47 @@ describe('A queued sub-agent result goes as soon as the agent is back', () => {
     )
   })
 })
+
+describe('The Context tab lists the edits and answers a brief carried', () => {
+  test('an edit and an answer made before the first brief are each reported beside it', async () => {
+    const agent = fakeAgent({ steps: SHAPING })
+
+    await application(dataFolder)(agent)(
+      Effect.gen(function* () {
+        const { sessionId, specId } = yield* defining
+        const specs = yield* Specs
+        // Before the agent was ever briefed, the user writes `scope` and answers a question: the
+        // first brief carries both.
+        yield* write(humanOf(sessionId), specId, 'scope', 'CSV only.')
+        const raised = yield* specs.raiseQuestion(
+          { kind: 'agent', sessionId },
+          {
+            specId,
+            body: 'Which format?',
+            blocking: true,
+            phase: 'shape',
+            options: [{ id: 'csv', label: 'CSV', recommended: true }],
+          },
+        )
+        yield* specs.answerQuestion({
+          specId,
+          questionId: raised.questions[0]?.id ?? '',
+          optionId: 'csv',
+        })
+
+        yield* (yield* AgentRuntime).prompt(sessionId, 'First turn.')
+
+        const delivered = deliveriesTo(agent)
+        expect(delivered).toHaveLength(1)
+        expect(delivered[0]?.has(contextUri('brief'))).toBe(true)
+        const provided = yield* (yield* AgentContext).provided(sessionId)
+        const handed = provided.filter((one) => ['brief', 'edit', 'answer'].includes(one.kind))
+        expect(handed.map((one) => [one.kind, one.path])).toEqual([
+          ['answer', 'Which format?'],
+          ['brief', 'shape · revision 1 · writer'],
+          ['edit', 'scope'],
+        ])
+      }),
+    )
+  })
+})

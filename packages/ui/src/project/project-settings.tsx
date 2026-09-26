@@ -88,7 +88,7 @@ const NAV = 'relative isolate flex w-menu-side shrink-0 flex-col gap-1'
 
 /** The section chosen is drawn over the fill; the others are crossed by it. */
 const NAV_ITEM =
-  'relative flex h-control-md w-full items-center gap-2 rounded-md px-3 text-sm text-muted-foreground outline-none select-none focus-ring data-selected:z-1 data-selected:text-foreground'
+  'relative flex h-control-md w-full items-center gap-2 rounded-md px-3 text-sm text-muted-foreground outline-none select-none focus-ring data-active:z-1 data-active:text-foreground'
 
 /** What an entry says, drawn over the fill whichever entry the fill is crossing. */
 const NAV_CONTENT = 'flex items-center gap-2'

@@ -864,6 +864,11 @@ describe('Declining a proposal tells the agent', () => {
       'Export the Journal.',
     ])
     expect(entries.some((entry) => entry.kind === 'context_delivery')).toBe(true)
+    // And the Context tab lists it, as something Hemera handed the agent.
+    const context = await bridge.invoke('context.read', { sessionId: session.id })
+    expect(context.provided.filter((one) => one.kind === 'notice')).toEqual([
+      expect.objectContaining({ path: '', reached: 'delivery_prompt' }),
+    ])
     const listed = await bridge.invoke('sessions.list', { projectId: project.id })
     expect(listed.find((one) => one.id === session.id)).toMatchObject({
       mission: 'free',

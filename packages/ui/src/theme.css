@@ -441,6 +441,11 @@
      token rather than what it holds, because it is one end of the slot the swap moves. */
   --spacing-spec-frame: 3.5rem;
 
+  /* How tall what waits above the composer may grow before it scrolls of its own: several blocking
+     questions at once would otherwise push the thread out of the window. A share of the window,
+     for the reason a wide dialog is one: it is the thread above that has to keep its room. */
+  --spacing-pinned: 40vh;
+
   /* The Spec open: a share of the Session's row, the container it is asked of. A length of the
      row rather than a fraction of the panel's own box, because the panel's box is what slides in
      while it opens: what the panel holds is laid at this width from the first frame, so nothing

@@ -1,8 +1,9 @@
 import { cn } from 'cn'
-import { type ReactNode, type RefObject, useRef } from 'react'
+import type { ReactNode, RefObject } from 'react'
 
 import { Badge } from '../components/badge/badge.tsx'
 import { Button, IconButton } from '../components/button/button.tsx'
+import { OVER_MARK } from '../components/sliding-mark/sliding-mark.tsx'
 import { Tooltip } from '../components/tooltip/tooltip.tsx'
 import { IconLayoutSidebar, IconPlus } from '../icons.ts'
 import { NotificationBell } from '../notifications/notifications.tsx'
@@ -166,18 +167,18 @@ function Tabs({
   onSelectProject: (id: string) => void
   onAddProject: () => void
 }): ReactNode {
-  const tabs = useRef<(HTMLElement | null)[]>([])
-  const active = projects.findIndex((project) => project.id === activeProjectId)
   return (
     <Scrollable label="Projects" className="tab-bleed flex-1 self-stretch">
-      <TabMark tabs={tabs} active={active} count={projects.length} />
-      {projects.map((project, rank) => (
+      {projects.map((project) => (
+        // The active tab is drawn over the mark, which is its sheet; the others are drawn under
+        // it and say what they say over it, so the mark crosses them and never goes under one.
         <span
           key={project.id}
-          ref={(node) => {
-            tabs.current[rank] = node
-          }}
-          className="relative flex shrink-0 items-center"
+          data-mark={project.id}
+          className={cn(
+            'relative flex shrink-0 items-center',
+            project.id === activeProjectId && OVER_MARK,
+          )}
         >
           <Button
             variant="ghost"
@@ -185,9 +186,11 @@ function Tabs({
             aria-current={project.id === activeProjectId ? 'page' : undefined}
             onClick={() => onSelectProject(project.id)}
           >
-            <span className={cn('size-2 shrink-0 rounded-full', TONE[project.tone])} />
-            {project.name}
-            {project.pending > 0 && <Badge tone="neutral">{project.pending}</Badge>}
+            <span className={cn(OVER_MARK, 'flex items-center gap-2')}>
+              <span className={cn('size-2 shrink-0 rounded-full', TONE[project.tone])} />
+              {project.name}
+              {project.pending > 0 && <Badge tone="neutral">{project.pending}</Badge>}
+            </span>
           </Button>
         </span>
       ))}
@@ -203,6 +206,8 @@ function Tabs({
           onClick={onAddProject}
         />
       </Tooltip>
+      {/* Last, so that it is drawn after every tab it can cross. */}
+      <TabMark active={activeProjectId} />
     </Scrollable>
   )
 }

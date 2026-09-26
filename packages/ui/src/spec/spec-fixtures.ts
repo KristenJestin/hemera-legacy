@@ -531,3 +531,13 @@ export const JUST_CREATED: SpecView = {
     ],
   ),
 }
+
+/**
+ * A Spec with nothing written yet: created, `shape` open, and the agent not started on any part.
+ * Every phase is empty, and every part says so.
+ */
+export const EMPTY: SpecView = {
+  ...JUST_CREATED,
+  focus: undefined,
+  sections: [],
+}

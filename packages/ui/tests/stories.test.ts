@@ -216,16 +216,7 @@ const NAMED_STATES = new Map([
   // path picked outside its base.
   [
     'project/preparation-editor',
-    [
-      'Empty',
-      'Filled',
-      'Adding',
-      'Editing',
-      'SourceMissing',
-      'OwnLine',
-      'Suggestions',
-      'Keyboard',
-    ],
+    ['Empty', 'Filled', 'Adding', 'Editing', 'SourceMissing', 'OwnLine', 'Suggestions', 'Keyboard'],
   ],
   // Recette 1 of lot 20: the settings of a Project, one section at a time, each its story.
   [
@@ -504,13 +495,12 @@ describe('Catalogue, coquille et surfaces, et rien d’autre', () => {
       'PreparationSteps',
       'WorkspaceList',
       'CleanupDialog',
-      // Lot 19: the Spec panel of a `define` Session, its rail and its parts, and the three
-      // blocks of the thread: what the agent was handed, a question of the Spec asked in the
-      // chat, and the agent proposing a Spec in a `free` Session.
+      // Lot 19: the Spec panel of a `define` Session and its parts — folded to a small frame and
+      // open as one column since #164 — and the three blocks of the thread: what the agent was
+      // handed, a question of the Spec asked in the chat, and the agent proposing a Spec in a
+      // `free` Session.
       'SpecPanel',
       'SpecPart',
-      'SpecStage',
-      'SpecRail',
       'SpecHead',
       'SectionPart',
       'StoriesPart',
@@ -524,10 +514,6 @@ describe('Catalogue, coquille et surfaces, et rien d’autre', () => {
       // The build of a frozen Spec: what it is launched in, and where that launch stands
       // (D8-12, D8-13).
       'WorkspaceActions',
-      // The shell the Spec panel stands in, which any mission's panel opens in beside the chat,
-      // and the rail it is fed with.
-      'MissionPanel',
-      'MissionRail',
       // Recette 1 of lot 20: every addition and every edit of the settings is a dialog.
       'CommandDialog',
       'RepositoryDialog',

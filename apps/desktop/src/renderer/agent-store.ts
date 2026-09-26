@@ -68,12 +68,13 @@ const QUIET: AgentSessionState = {
 /**
  * Since when a running turn has heard nothing (issue #131): the last push this window heard, or
  * — for a Session opened while its turn was already running — when the last entry of its thread
- * was written. Null when neither says anything.
+ * was written. Null when neither says anything, and while the turn waits on Hemera itself.
  */
 export function heardSince(
   agent: AgentSessionState,
   thread: readonly SessionEntry[],
 ): number | null {
+  if (waitsOnHemera(thread)) return null
   const written = thread.at(-1)?.createdAt ?? null
   if (agent.heardAt === null) return written
   return written === null ? agent.heardAt : Math.max(agent.heardAt, written)
@@ -306,6 +307,24 @@ export function activityOf(
   }
 
   return { state: 'thinking', thought }
+}
+
+/**
+ * Whether the running turn waits on Hemera rather than on its agent (issue #170): a command
+ * Hemera runs for it, or one of Hemera's tools that has not answered yet. Nothing is pushed
+ * while a three-minute test runs, and that silence is Hemera's, not the agent's. An app left
+ * running is not what the turn waits on.
+ */
+function waitsOnHemera(entries: readonly SessionEntry[]): boolean {
+  const running = entries.slice(Math.max(lastSaid(entries), lastEnd(entries)) + 1)
+  return running.some((entry) => {
+    if (entry.kind === 'command_run') {
+      const run = commandRunOf(entry)
+      return run !== null && run.state === 'running' && run.type !== 'serve'
+    }
+    const unfinished = entry.kind === 'tool_call' && UNFINISHED.includes(entry.state ?? '')
+    return unfinished && hemeraToolNamed(entry.body) !== null
+  })
 }
 
 /** Whether the agent is waiting on an answer: a request with no decision written after it. */

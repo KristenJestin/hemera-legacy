@@ -284,12 +284,11 @@ export function SpecPanel({
   const buildable = spec.replacedBy === undefined && (spec.status !== 'draft' || launched)
   // `Mark ready` is offered on the current revision of a draft, whatever it holds: never disabled,
   // what the Spec still lacks is what the engine refuses it with (issue #135). It turns primary
-  // once the agent's `ready` proposal was accepted — its attestation stands on the content the
-  // Spec is at now (D7-10) — and stays quiet before (issue #150).
+  // once the whole gate passes — the agent's attestation on the content the Spec is at now among
+  // it (D7-10) — and stays quiet before (issue #150): an attestation given with a phase open or a
+  // blocking question raised is a press the engine refuses.
   const markable = spec.status === 'draft' && spec.replacedBy === undefined
-  const confirmed = spec.readiness.checks.some(
-    (check) => check.check === 'attestation' && check.passed,
-  )
+  const confirmed = spec.readiness.checks.every((check) => check.passed)
   const foot: FootContent | null =
     buildable && build !== undefined
       ? { kind: 'build', build }
@@ -394,7 +393,7 @@ type FootContent =
   | { kind: 'build'; build: WorkspaceActionsProps }
   | {
       kind: 'ready'
-      /** Whether the agent confirmed the Spec complete, which makes `Mark ready` the primary. */
+      /** Whether the whole gate passes, the agent's attestation among it: `Mark ready` primary. */
       confirmed: boolean
       /** What the last `Mark ready` was refused with. */
       refused: string | undefined

@@ -547,9 +547,17 @@ export const Complete: Story = {
         .getAllByRole('tab')
         .map((tab) => tab.textContent),
     ).toEqual(['General', 'Repositories', 'Workspaces', 'Commands', 'Preparation', 'Variables'])
-    await expect(canvas.getByRole('tab', { name: 'General' })).toHaveAttribute(
-      'aria-selected',
-      'true',
+    const general = canvas.getByRole('tab', { name: 'General' })
+    await expect(general).toHaveAttribute('aria-selected', 'true')
+    // The section chosen says its name in the foreground colour, the others stay muted.
+    const probe = document.createElement('span')
+    probe.className = 'text-foreground'
+    canvasElement.append(probe)
+    const foreground = getComputedStyle(probe).color
+    probe.remove()
+    await expect(getComputedStyle(general).color).toBe(foreground)
+    await expect(getComputedStyle(canvas.getByRole('tab', { name: 'Variables' })).color).not.toBe(
+      foreground,
     )
     // One section on screen at a time.
     await expect(canvas.getAllByRole('tabpanel')).toHaveLength(1)

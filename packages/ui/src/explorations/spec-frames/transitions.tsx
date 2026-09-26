@@ -1,21 +1,38 @@
+import { Menu as BaseMenu } from '@base-ui/react/menu'
 import { AnimatePresence, type Transition, motion } from 'motion/react'
 import { type ReactNode, type RefObject, useEffect, useRef, useState } from 'react'
 
+import { IconChevronDown } from '../../icons.ts'
 import {
   CROSSFADE,
-  arrival,
+  LABEL_DELAY,
   crossfade,
   instant,
+  lead,
   morph,
   slide,
   useTransition,
 } from '../../motion.ts'
+import { useOverlayContainer } from '../../overlay.ts'
+import { SpecPart } from '../../spec/spec-panel.tsx'
+import type { RailGroup } from '../../spec/spec-rail.tsx'
 import { PHASE_TITLES, type PhaseName } from '../../spec/model.ts'
 import { OVER_MARK, SlidingMark } from '../../components/sliding-mark/sliding-mark.tsx'
 import { Tooltip } from '../../components/tooltip/tooltip.tsx'
-import { ANCHORED, FoldedPhases, RimLayer } from './column-variants.tsx'
+import {
+  ANCHORED,
+  BODY_COLUMN,
+  FoldedPhases,
+  RimLayer,
+  SpecColumn,
+  writtenOf,
+} from './column-variants.tsx'
 import {
   BODY_FIT,
+  FOOT_BAND,
+  HEAD_BAND,
+  Head,
+  MarkReady,
   Probe,
   RIM,
   type ScrollSpy,
@@ -43,9 +60,11 @@ import {
  *   frame, which fades away into it. Nothing grows.
  * - C · Reveal · the panel, laid at its size, is uncovered from the folded frame's rectangle to
  *   its whole, the glyphs travelling to their segments while it is.
- * - Drawer 1 · Swap and Drawer 2 · Carried · two takes on B (third verdict: B leaned to, not there
- *   yet): the folded frame trading places with the panel, one after the other; or the folded
- *   frame kept as it is and docked as the panel's navigation, the panel sliding in beside it.
+ * - Swap · Spine and Swap · Heading · the drawer chosen (fourth verdict): the folded frame and the
+ *   panel trading places in two overlapping moves, the rim's phase band gone — the phases kept
+ *   as a spine of the folded frame's glyphs, or as sticky headings in the column.
+ * - Drawer 2 · Carried · the folded frame kept as it is and docked as the panel's navigation,
+ *   the panel sliding in beside it.
  *
  * Every one pushes the chat on the same spring as its own movement, and every one answers a
  * reader asking for less movement by landing at once.
@@ -327,11 +346,8 @@ export function TransitionMorph({
 // ---------------------------------------------------------------------------------------------
 // B · Drawer and C · Reveal: the panel laid at its size
 
-/**
- * Where B and C are: folded, on the way in, open, on the way out — and, for Drawer 1, the folded
- * frame retreating before the panel comes in.
- */
-type PanelStage = 'folded' | 'retreating' | 'opening' | 'open' | 'closing'
+/** Where B, C and the swaps are: folded, on the way in, open, on the way out. */
+type PanelStage = 'folded' | 'opening' | 'open' | 'closing'
 
 /**
  * What B and C share: the stage, the probes, and the room the panel takes in the row — an empty
@@ -340,13 +356,15 @@ type PanelStage = 'folded' | 'retreating' | 'opening' | 'open' | 'closing'
  */
 function usePanel(
   { session, defaultFolded, signal, onSettle }: TransitionProps,
-  /** Whether the folded frame leaves first, the panel coming in only once it has. */
-  retreat = false,
+  /** What the panel moves on, and the chat is pushed on. */
+  preset: Transition = morph,
+  /** How long after the press the panel starts coming in, and the chat starts being pushed. */
+  entering = 0,
 ) {
   const [stage, setStage] = useState<PanelStage>(defaultFolded ? 'folded' : 'open')
   const [foldedProbe, folded] = useSize()
   const [openProbe, opened] = useSize()
-  const answered = useTransition(morph)
+  const answered = useTransition(preset)
   const still = answered === instant
   const dock = useRef<HTMLDivElement>(null)
   const byHand = useRef(false)
@@ -354,7 +372,9 @@ function usePanel(
   const spy = useScrollSpy(session.groups.map((group) => group.phase))
   const shown = stage === 'opening' || stage === 'open'
   const room = shown ? opened : folded
-  const transition = usePlaced(room, answered)
+  const placed = usePlaced(room, answered)
+  const late = stage === 'opening' && entering > 0 && placed !== instant
+  const transition = late ? { ...placed, delay: entering } : placed
   useLanding(stage === 'folded' || stage === 'open' ? stage : null, byHand, dock, onSettle)
   useEffect(() => {
     if (!shown || pressed === null) return
@@ -366,7 +386,7 @@ function usePanel(
     if (stage !== 'folded') return
     byHand.current = true
     setPressed(phase)
-    setStage(still ? 'open' : retreat ? 'retreating' : 'opening')
+    setStage(still ? 'open' : 'opening')
   }
 
   function fold(): void {
@@ -563,44 +583,41 @@ export function TransitionReveal(props: TransitionProps): ReactNode {
 }
 
 // ---------------------------------------------------------------------------------------------
-// Drawer 1 · Swap
+// Swap · Spine and Swap · Heading
 
 /**
- * Drawer 1 · Swap. B's drawer, the folded frame no longer fading in place over it: the two trade
- * places one after the other, each way the mirror of the other. Unfolding, the folded frame first
- * retreats by the window's edge — sliding out and fading on the `crossfade` beat — and only once
- * it has gone does the panel slide in from that edge on `morph`, the chat pushed on the same
- * spring. Folding, the panel slides out the same way, and once it has gone the folded frame comes
- * back in from the edge on `arrival`, something putting itself in place. They are never in sight
- * together.
+ * The swap, both ways, as one short gesture of two overlapping moves. Unfolding, the folded frame
+ * slides out by the window's edge and fades on `crossfade`, and a beat later (`LABEL_DELAY`),
+ * while it is still going, the panel starts sliding in from that edge on `lead` — the quickest
+ * spring of the presets that still reads as a slide — the chat pushed on the same spring and the
+ * same beat. Folding, the exact reverse: the panel slides out at once, and a beat later, while
+ * it is still going, the frame starts coming back. The frame is drawn over the panel,
+ * so its leaving and its return are seen whole; there is no frame where neither is.
  */
-export function DrawerSwap(props: TransitionProps): ReactNode {
+function SwapFrame({
+  props,
+  family,
+  middle,
+}: {
+  props: TransitionProps
+  family: string
+  /** What stands between the head and `Mark ready`: the column and its way to the phases. */
+  middle: (panel: ReturnType<typeof usePanel>) => ReactNode
+}): ReactNode {
   const { session } = props
-  const family = 'v4b-swap'
-  const panel = usePanel(props, true)
-  const leave = useTransition(crossfade)
-  const come = useTransition(arrival)
+  const panel = usePanel(props, lead, LABEL_DELAY)
+  const fade = useTransition(crossfade)
+  const still = fade === instant
   const away = slide('stage').enter
-  const present = panel.stage === 'folded'
+  const present = panel.stage === 'folded' || panel.stage === 'closing'
+  const frameTransition = present && !still ? { ...fade, delay: LABEL_DELAY } : fade
+  const moves = panel.answered
+  const late = panel.stage === 'opening' && !still
+  const slideIn = late ? { ...moves, delay: LABEL_DELAY } : moves
   return (
     <div ref={panel.dock} className="relative flex h-full shrink-0 items-center py-3 pr-3">
       {panel.probes}
       {panel.spacer}
-      <motion.div
-        inert={!present}
-        aria-hidden={present ? undefined : 'true'}
-        className="pointer-events-none absolute inset-y-3 right-3 flex items-center"
-        initial={false}
-        animate={present ? { x: 0, ...CROSSFADE.to } : { x: away, ...CROSSFADE.from }}
-        transition={present ? come : leave}
-        onAnimationComplete={() => {
-          if (panel.stage === 'retreating') panel.setStage('opening')
-        }}
-      >
-        <div className={`${RIM} pointer-events-auto`}>
-          <FoldedPhases session={session} family={family} travels={false} onOpen={panel.unfold} />
-        </div>
-      </motion.div>
       <div className="pointer-events-none absolute inset-y-3 right-3 w-mission-panel overflow-hidden rounded-xl">
         <AnimatePresence initial={false} onExitComplete={() => panel.setStage('folded')}>
           {panel.shown && (
@@ -611,26 +628,278 @@ export function DrawerSwap(props: TransitionProps): ReactNode {
               initial={{ x: away }}
               animate={{ x: 0 }}
               exit={{ x: away }}
-              transition={panel.answered}
+              transition={slideIn}
               onAnimationComplete={() => {
                 if (panel.stage === 'opening') panel.setStage('open')
               }}
             >
-              <PanelContent session={session} panel={panel} family={family} />
+              <div className="flex size-full flex-col border border-transparent p-1.5">
+                <div className={HEAD_BAND}>
+                  <Head session={session} onFold={panel.fold} />
+                </div>
+                {middle(panel)}
+                <div className={FOOT_BAND}>
+                  <MarkReady session={session} />
+                </div>
+              </div>
               <RimLine />
             </motion.section>
           )}
         </AnimatePresence>
       </div>
+      {/* Drawn over the panel: its leaving and its return are seen whole. */}
+      <motion.div
+        inert={panel.stage !== 'folded'}
+        aria-hidden={panel.stage === 'folded' ? undefined : 'true'}
+        className="pointer-events-none absolute inset-y-3 right-3 z-1 flex items-center"
+        initial={false}
+        animate={present ? { x: 0, ...CROSSFADE.to } : { x: away, ...CROSSFADE.from }}
+        transition={frameTransition}
+      >
+        <div className={`${RIM} pointer-events-auto`}>
+          <FoldedPhases session={session} family={family} travels={false} onOpen={panel.unfold} />
+        </div>
+      </motion.div>
     </div>
+  )
+}
+
+/** How much of a phase is written, as the quiet words beside it say it. */
+function writtenWords(group: RailGroup): string {
+  return `${writtenOf(group)} of ${group.rows.length} written`
+}
+
+/** The mark of the phase being read, behind its glyph. */
+const SPINE_MARK = 'absolute -inset-1 rounded-lg bg-accent ring-1 ring-border'
+
+/**
+ * The phases' glyphs as the folded frame draws them — the same body, the same squares, the same
+ * tints — and, open, a way through the column: a mark behind the glyph of the phase being read,
+ * and a glyph pressed scrolling the column to its phase. Folded, a glyph unfolds onto its phase.
+ */
+function PhaseNav({
+  session,
+  spy,
+  open,
+  onUnfold,
+}: {
+  session: SpecSession
+  spy: ScrollSpy<PhaseName>
+  open: boolean
+  onUnfold: (phase: PhaseName | null) => void
+}): ReactNode {
+  const fade = useTransition(crossfade)
+  return (
+    <div className={BODY_FIT}>
+      <nav
+        aria-label={`Phases of ${session.spec.key}`}
+        className="relative isolate flex flex-col gap-1 p-1"
+      >
+        {session.groups.map((group) => {
+          const progress = phaseProgress(group, session.spec.focus)
+          const title = PHASE_TITLES[group.phase]
+          const reading = open && spy.active === group.phase
+          return (
+            <Tooltip key={group.phase} label={`${title} · ${writtenWords(group)}`} side="left">
+              <button
+                type="button"
+                data-mark={group.phase}
+                aria-current={reading ? 'location' : undefined}
+                aria-label={
+                  open
+                    ? `Go to the ${title} phase, ${writtenWords(group)}`
+                    : `${title} phase, ${PROGRESS_WORDS[progress]}, open it`
+                }
+                className="relative flex rounded-md outline-none focus-ring"
+                onClick={() =>
+                  open ? spy.goTo(group.phase, fade === instant) : onUnfold(group.phase)
+                }
+              >
+                <span className={`flex ${OVER_MARK}`}>
+                  <PhaseGlyph phase={group.phase} progress={progress} travels={false} />
+                </span>
+              </button>
+            </Tooltip>
+          )
+        })}
+        <motion.div initial={false} animate={{ opacity: open ? 1 : 0 }} transition={fade}>
+          <SlidingMark target={open ? spy.active : null} shape={SPINE_MARK} />
+        </motion.div>
+      </nav>
+    </div>
+  )
+}
+
+/**
+ * Swap · Spine. The folded frame's three glyphs stand in the open panel too, as a thin spine on
+ * its rim against the column's left edge, centred on its height: the same body, squares, tints
+ * and size as folded. The phase being read is marked behind its glyph, a glyph pressed scrolls
+ * the column to its phase, and how much of each is written is said on hover and in its name. The
+ * glyphs never move on their own: the frame leaves by the edge and the panel comes in with its
+ * spine, so the small frame reads as having become the panel's spine.
+ */
+export function SwapSpine(props: TransitionProps): ReactNode {
+  return (
+    <SwapFrame
+      props={props}
+      family="v4b-spine"
+      middle={(panel) => (
+        <div className="flex min-h-0 flex-1 gap-1.5">
+          <div className="flex shrink-0 flex-col justify-center">
+            <PhaseNav session={props.session} spy={panel.spy} open onUnfold={NOTHING} />
+          </div>
+          <div className={BODY_COLUMN}>
+            <SpecColumn session={props.session} spy={panel.spy} first={null} />
+          </div>
+        </div>
+      )}
+    />
+  )
+}
+
+/** The popup of the heading's menu and its items, as `Menu` draws them. */
+const MENU_POPUP =
+  'min-w-48 rounded-lg border border-border bg-card p-1 text-sm text-card-foreground shadow-lg outline-none translate-y-0 popup-motion data-starting-style:-translate-y-2 data-starting-style:opacity-0 data-ending-style:-translate-y-2 data-ending-style:opacity-0'
+
+const MENU_ITEM =
+  'flex cursor-default items-center gap-2 rounded-md px-2 py-1.5 outline-none select-none data-highlighted:bg-accent'
+
+/**
+ * A phase's heading, which is also the way to the others: pressed, a small menu of the three
+ * phases, each taking the column to it.
+ *
+ * On Base UI's menu, as `Menu` is, with its popup and items drawn the same way: `Menu` only takes
+ * a button as its trigger, and this one is a heading. Built, `Menu` takes a trigger of its own.
+ */
+function PhaseHeading({
+  session,
+  group,
+  spy,
+  still,
+}: {
+  session: SpecSession
+  group: RailGroup
+  spy: ScrollSpy<PhaseName>
+  still: boolean
+}): ReactNode {
+  const anchor = useRef<HTMLSpanElement>(null)
+  const container = useOverlayContainer()
+  const title = PHASE_TITLES[group.phase]
+  return (
+    <BaseMenu.Root>
+      <h3 className="flex">
+        <span ref={anchor} className="flex">
+          <BaseMenu.Trigger
+            aria-label={`${title}, ${writtenWords(group)}, go to another phase`}
+            className="flex items-center gap-2 rounded-md py-0.5 pr-1 text-left text-sm outline-none focus-ring hover:bg-accent"
+          >
+            <PhaseGlyph
+              phase={group.phase}
+              progress={phaseProgress(group, session.spec.focus)}
+              travels={false}
+            />
+            <span className="font-medium text-foreground">{title}</span>
+            <span className="text-muted-foreground">{writtenWords(group)}</span>
+            <IconChevronDown size="sm" aria-hidden="true" className="text-muted-foreground" />
+          </BaseMenu.Trigger>
+        </span>
+      </h3>
+      <BaseMenu.Portal container={container}>
+        <BaseMenu.Positioner anchor={anchor} side="bottom" align="start" sideOffset={4}>
+          <BaseMenu.Popup className={MENU_POPUP}>
+            {session.groups.map((one) => (
+              <BaseMenu.Item
+                key={one.phase}
+                className={MENU_ITEM}
+                onClick={() => spy.goTo(one.phase, still)}
+              >
+                <PhaseGlyph
+                  phase={one.phase}
+                  progress={phaseProgress(one, session.spec.focus)}
+                  travels={false}
+                />
+                <span>{PHASE_TITLES[one.phase]}</span>
+                <span className="ml-auto pl-3 text-muted-foreground">{writtenWords(one)}</span>
+              </BaseMenu.Item>
+            ))}
+          </BaseMenu.Popup>
+        </BaseMenu.Positioner>
+      </BaseMenu.Portal>
+    </BaseMenu.Root>
+  )
+}
+
+/**
+ * The column with its phases' headings as its only navigation: each phase opens on a heading —
+ * its glyph, its name, a quiet "5 of 5 written" — which sticks to the top of the column while
+ * the phase scrolls under it, and is pushed away by the next one's. The heading stuck at the top
+ * is therefore always the phase being read.
+ */
+function HeadedColumn({
+  session,
+  spy,
+  still,
+}: {
+  session: SpecSession
+  spy: ScrollSpy<PhaseName>
+  still: boolean
+}): ReactNode {
+  const { spec } = session
+  return (
+    <div
+      ref={spy.scroller}
+      role="region"
+      aria-label={`Stage of ${spec.key}`}
+      tabIndex={0}
+      // Isolated: the headings stuck over the column stay above it, and under a menu opened on them.
+      className="relative isolate min-h-0 min-w-0 flex-1 overflow-y-auto outline-none focus-ring"
+    >
+      {session.groups.map((group) => (
+        <section
+          key={group.phase}
+          ref={spy.anchor(group.phase)}
+          data-phase={group.phase}
+          aria-label={`${PHASE_TITLES[group.phase]} phase`}
+          className="border-b border-border last:border-b-0"
+        >
+          <div className="sticky top-0 z-1 border-b border-border bg-surface-body px-5 py-1.5">
+            <PhaseHeading session={session} group={group} spy={spy} still={still} />
+          </div>
+          <div className="flex flex-col gap-6 px-6 pt-4 pb-8">
+            {group.rows.map((row) => (
+              <div key={row.target} data-part={row.target}>
+                <SpecPart spec={spec} target={row.target} onGoToQuestion={NOTHING} />
+              </div>
+            ))}
+          </div>
+        </section>
+      ))}
+    </div>
+  )
+}
+
+/**
+ * Swap · Heading. No navigation beside the column at all: each phase is a heading inside it —
+ * glyph, name and a quiet "5 of 5 written" — the heading of the phase being read stuck at the top
+ * while its content scrolls under it. Pressed, that heading opens a small menu of the three
+ * phases to go to.
+ */
+export function SwapHeading(props: TransitionProps): ReactNode {
+  return (
+    <SwapFrame
+      props={props}
+      family="v4b-heading"
+      middle={(panel) => (
+        <div className={BODY_COLUMN}>
+          <HeadedColumn session={props.session} spy={panel.spy} still={panel.still} />
+        </div>
+      )}
+    />
   )
 }
 
 // ---------------------------------------------------------------------------------------------
 // Drawer 2 · Carried
-
-/** The mark of the phase being read, behind its glyph in the docked frame. */
-const DOCK_MARK = 'absolute -inset-1 rounded-lg bg-accent ring-1 ring-border'
 
 /**
  * The folded frame, which is also the open panel's navigation: the same frame in both states,
@@ -651,51 +920,10 @@ function DockedPhases({
   onUnfold: (phase: PhaseName | null) => void
   onFold: () => void
 }): ReactNode {
-  const fade = useTransition(crossfade)
   return (
     <div className={RIM}>
       <FoldToggle folded={!open} onToggle={() => (open ? onFold() : onUnfold(null))} />
-      <div className={BODY_FIT}>
-        <nav
-          aria-label={`Phases of ${session.spec.key}`}
-          className="relative isolate flex flex-col gap-1 p-1"
-        >
-          {session.groups.map((group) => {
-            const progress = phaseProgress(group, session.spec.focus)
-            const title = PHASE_TITLES[group.phase]
-            const reading = open && spy.active === group.phase
-            return (
-              <Tooltip
-                key={group.phase}
-                label={`${title} · ${PROGRESS_WORDS[progress]}`}
-                side="left"
-              >
-                <button
-                  type="button"
-                  data-mark={group.phase}
-                  aria-current={reading ? 'location' : undefined}
-                  aria-label={
-                    open
-                      ? `Go to the ${title} phase, ${PROGRESS_WORDS[progress]}`
-                      : `${title} phase, ${PROGRESS_WORDS[progress]}, open it`
-                  }
-                  className="relative flex rounded-md outline-none focus-ring"
-                  onClick={() =>
-                    open ? spy.goTo(group.phase, fade === instant) : onUnfold(group.phase)
-                  }
-                >
-                  <span className={`flex ${OVER_MARK}`}>
-                    <PhaseGlyph phase={group.phase} progress={progress} travels={false} />
-                  </span>
-                </button>
-              </Tooltip>
-            )
-          })}
-          <motion.div initial={false} animate={{ opacity: open ? 1 : 0 }} transition={fade}>
-            <SlidingMark target={open ? spy.active : null} shape={DOCK_MARK} />
-          </motion.div>
-        </nav>
-      </div>
+      <PhaseNav session={session} spy={spy} open={open} onUnfold={onUnfold} />
     </div>
   )
 }

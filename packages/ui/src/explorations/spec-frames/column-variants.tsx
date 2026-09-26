@@ -131,7 +131,7 @@ export function writtenOf(group: RailGroup): number {
  * scroll-spy reads: each phase is a block of it. Its content arrives a phase per beat, from
  * `first` on.
  */
-function SpecColumn({
+export function SpecColumn({
   session,
   spy,
   first,

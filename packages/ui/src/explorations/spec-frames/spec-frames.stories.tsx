@@ -10,9 +10,10 @@ import { Chat, useSpecSession } from './frames-fixtures.tsx'
 import { V4Strip, V4bRim } from './column-variants.tsx'
 import {
   DrawerCarried,
-  DrawerSwap,
   TransitionDrawer,
   TransitionMorph,
+  SwapHeading,
+  SwapSpine,
   TransitionReveal,
 } from './transitions.tsx'
 import { V1Grow, V2Beside, V3Cards } from './variants.tsx'
@@ -39,9 +40,11 @@ import { V1Grow, V2Beside, V3Cards } from './variants.tsx'
  * - V4b · Transition A/B/C · V4b's two states kept, three journeys between them (second verdict
  *   of 26 September: V4b chosen, its fold refused): the folded frame morphing into the rim, the
  *   panel sliding in as a drawer, the panel uncovered by a clip. Each with a replay.
- * - V4b · Drawer 1 · Swap and Drawer 2 · Carried · two takes on the drawer (third verdict: B
- *   leaned to): the folded frame and the panel trading places one after the other, or the
- *   folded frame docked as the panel's navigation while the panel slides in beside it.
+ * - V4b · Swap · Spine and Swap · Heading · the swap chosen (fourth verdict), its two moves
+ *   overlapping, the rim's phase band gone: the phases as a spine of the folded frame's glyphs,
+ *   or as sticky headings in the column that open a menu of the phases.
+ * - V4b · Drawer 2 · Carried · the folded frame docked as the panel's navigation while the panel
+ *   slides in beside it.
  *
  * Every chevron folds and unfolds, as many times as wanted; the `reducedMotion` control shows
  * the same thing with the journey taken out.
@@ -56,7 +59,8 @@ type Variant =
   | 'v4b-a'
   | 'v4b-b'
   | 'v4b-c'
-  | 'v4b-swap'
+  | 'v4b-spine'
+  | 'v4b-heading'
   | 'v4b-carried'
 
 const VARIANTS = { v1: V1Grow, v2: V2Beside, v3: V3Cards, v4: V4Strip, v4b: V4bRim }
@@ -66,7 +70,8 @@ const TRANSITIONS = {
   'v4b-a': TransitionMorph,
   'v4b-b': TransitionDrawer,
   'v4b-c': TransitionReveal,
-  'v4b-swap': DrawerSwap,
+  'v4b-spine': SwapSpine,
+  'v4b-heading': SwapHeading,
   'v4b-carried': DrawerCarried,
 }
 
@@ -490,19 +495,68 @@ export const V4bRevealReducedMotion: Story = {
 // ---------------------------------------------------------------------------------------------
 // V4b · two drawers
 
-export const V4bSwap: Story = {
-  name: 'V4b · Drawer 1 · Swap · open ↔ folded',
-  args: { variant: 'v4b-swap', folded: true },
+export const V4bSpine: Story = {
+  name: 'V4b · Swap · Spine · open ↔ folded',
+  args: { variant: 'v4b-spine', folded: true },
   play: async ({ canvasElement }) => {
     await unfoldThenFold(canvasElement)
     await replays(canvasElement)
   },
 }
 
-export const V4bSwapReducedMotion: Story = {
-  name: 'V4b · Drawer 1 · Swap · reduced motion',
-  args: { variant: 'v4b-swap', folded: true, reducedMotion: true },
+export const V4bSpineReducedMotion: Story = {
+  name: 'V4b · Swap · Spine · reduced motion',
+  args: { variant: 'v4b-spine', folded: true, reducedMotion: true },
   play: async ({ canvasElement }) => unfoldThenFold(canvasElement),
+}
+
+/** A glyph of the spine pressed: the column goes to its phase, and the spine marks it. */
+export const V4bSpineGoesToAPhase: Story = {
+  name: 'V4b · Swap · Spine · a phase pressed',
+  args: { variant: 'v4b-spine' },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await isOpen(canvasElement)
+    const decompose = canvas.getByRole('button', {
+      name: /^Go to the Decompose phase, 2 of 3 written/,
+    })
+    await userEvent.click(decompose)
+    await waitFor(() => expect(decompose).toHaveAttribute('aria-current', 'location'))
+    await waitFor(() =>
+      expect(canvas.getByRole('region', { name: 'Stage of ATL-7' }).scrollTop).toBeGreaterThan(0),
+    )
+  },
+}
+
+export const V4bHeading: Story = {
+  name: 'V4b · Swap · Heading · open ↔ folded',
+  args: { variant: 'v4b-heading', folded: true },
+  play: async ({ canvasElement }) => {
+    await unfoldThenFold(canvasElement)
+    await replays(canvasElement)
+  },
+}
+
+export const V4bHeadingReducedMotion: Story = {
+  name: 'V4b · Swap · Heading · reduced motion',
+  args: { variant: 'v4b-heading', folded: true, reducedMotion: true },
+  play: async ({ canvasElement }) => unfoldThenFold(canvasElement),
+}
+
+/** The heading stuck at the top pressed: its menu takes the column to another phase. */
+export const V4bHeadingJumps: Story = {
+  name: 'V4b · Swap · Heading · jump from the menu',
+  args: { variant: 'v4b-heading' },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const page = within(canvasElement.ownerDocument.body)
+    await isOpen(canvasElement)
+    await userEvent.click(canvas.getByRole('button', { name: /^Shape, 5 of 5 written/ }))
+    await userEvent.click(await page.findByRole('menuitem', { name: /^Decompose/ }))
+    await waitFor(() =>
+      expect(canvas.getByRole('region', { name: 'Stage of ATL-7' }).scrollTop).toBeGreaterThan(0),
+    )
+  },
 }
 
 export const V4bCarried: Story = {

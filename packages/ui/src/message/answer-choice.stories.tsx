@@ -177,3 +177,25 @@ export const InTheThread: Story = {
     await expect(canvas.getByRole('group', { name: 'Messages from You' })).toBeVisible()
   },
 }
+
+/**
+ * An answer whose question is no longer in the thread never vanishes: the same pill, with no `↳`
+ * line. Without the card to say which letter it had, the pill is the label alone.
+ */
+export const WithoutItsQuestion: Story = {
+  args: { question: undefined },
+  render: (args) => (
+    <div className="flex flex-col gap-4">
+      <AnswerChoice {...args} />
+      <AnswerChoice {...args} choices={[{ label: 'One CSV per quarter' }]} />
+    </div>
+  ),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const lettered = canvas.getByRole('group', { name: 'You answered: B, One CSV per month' })
+    await expect(within(lettered).getByRole('listitem')).toHaveTextContent('BOne CSV per month')
+    const bare = canvas.getByRole('group', { name: 'You answered: One CSV per quarter' })
+    await expect(within(bare).getByRole('listitem')).toHaveTextContent(/^One CSV per quarter$/)
+    await expect(canvas.queryByText('↳')).toBeNull()
+  },
+}

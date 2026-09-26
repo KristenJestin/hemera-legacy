@@ -127,7 +127,7 @@ function answeredIn(questionId: string, thread: readonly SessionEntry[]): SpecAn
 
 /** What an answer is drawn from: the question it answers, the choices made, the words typed. */
 export interface AnswerView {
-  question: string
+  question?: string | undefined
   choices: AnswerChoiceItem[]
   text?: string | undefined
 }
@@ -143,29 +143,34 @@ function letterOf(index: number): string {
  * the words typed in it. It is drawn as the choice it was, on the reader's side, rather than as a
  * message they wrote (issue #149 drew it that way) or as Hemera saying it passed it on.
  *
- * Null when the entry does not parse, when the question it answers is not in the thread, and when
- * it names an option that question does not hold: an answer drawn from a guess would be words put
- * in the reader's mouth.
+ * An answer is never dropped for want of its question. When the question is no longer in the
+ * thread, or no longer holds the option, the answer is drawn from what the engine wrote on the
+ * entry — the option's words, or `Other` and the words typed — without a question and without a
+ * letter, since nothing is left to say which it was. Null only when the entry does not parse.
  */
 export function answerOf(entry: SessionEntry, thread: readonly SessionEntry[]): AnswerView | null {
   const answer = parsed(answerSchema, entry.payload)
   if (answer === null) return null
-  for (const asked of thread) {
-    if (asked.kind !== 'spec_question') continue
-    const question = parsed(questionSchema, asked.payload)
-    if (question?.id !== answer.questionId) continue
-    if (answer.optionId === undefined) {
-      if (answer.text === undefined) return null
-      const other = { letter: letterOf(question.options.length), label: 'Other' }
-      return { question: question.body, choices: [other], text: answer.text }
-    }
-    const index = question.options.findIndex((option) => option.id === answer.optionId)
-    const option = question.options[index]
-    if (option === undefined) return null
-    const choice = { letter: letterOf(index), label: option.label, recommended: option.recommended }
-    return { question: question.body, choices: [choice] }
+  const question =
+    thread
+      .filter((asked) => asked.kind === 'spec_question')
+      .map((asked) => parsed(questionSchema, asked.payload))
+      .find((asked) => asked?.id === answer.questionId) ?? undefined
+  const body = question?.body
+  if (answer.optionId === undefined) {
+    if (answer.text === undefined) return null
+    const letter = question === undefined ? undefined : letterOf(question.options.length)
+    return { question: body, choices: [{ letter, label: 'Other' }], text: answer.text }
   }
-  return null
+  const index = question?.options.findIndex((option) => option.id === answer.optionId) ?? -1
+  const option = question?.options[index]
+  if (option === undefined) {
+    // The engine wrote the option's words on the entry; the option id is the last resort.
+    const label = entry.body === '' ? answer.optionId : entry.body
+    return { question: body, choices: [{ letter: undefined, label }] }
+  }
+  const choice = { letter: letterOf(index), label: option.label, recommended: option.recommended }
+  return { question: body, choices: [choice] }
 }
 
 /** The words an answer is marked by on the rail: what was typed, or the choices' labels. */

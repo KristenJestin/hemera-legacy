@@ -1,5 +1,4 @@
 import {
-  DETAILS,
   FACE_SIZES,
   FaceFigure,
   type FacePainter,
@@ -11,7 +10,7 @@ import { cn } from 'cn'
 import { type ReactNode, useMemo, useRef } from 'react'
 
 import { useSprite } from '../sprites.tsx'
-import { type Played, type Telling, playerOver } from '../story.ts'
+import { type Played, type Telling, detailFor, playerOver } from '../story.ts'
 
 /** The story of the stage, told at one size, with what that size can hold. */
 function AtSize({
@@ -34,7 +33,11 @@ function AtSize({
   return (
     <div className="flex flex-col items-center gap-2 text-xs text-muted-foreground">
       <span className={cn('block', SIZE_CLASSES[size])}>
-        <FaceFigure detail={DETAILS[detailOf(size)]} gain={telling.tuning.gain} painter={painter} />
+        <FaceFigure
+          detail={detailFor({ ...telling, detail: detailOf(size) })}
+          gain={telling.tuning.gain}
+          painter={painter}
+        />
       </span>
       <span>{size}</span>
       <span>{detailOf(size)}</span>

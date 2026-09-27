@@ -23,6 +23,7 @@ export {
   TUNING,
   createFace,
   type DetailName,
+  type FaceAct,
   type FaceDetail,
   type FaceFrame,
   type FaceLayer,

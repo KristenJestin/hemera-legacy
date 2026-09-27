@@ -186,17 +186,11 @@ export const CHOREOGRAPHIES: Record<ChangeName, Choreography> = {
     windows: windows({ shape: [0.3, 0.9], tone: [0.2, 0.8] }),
     beat: ({ q }) => beat({ yaw: 0.28 * shake(q, 0, 0.65) }),
   },
-  /** Falling asleep: a yawn, and the eyes close slowly while the head goes down. */
+  /** Falling asleep: the eyes grow heavy and close slowly while the head goes down. The yawn
+   * is the sleeping face's own, now and then, and not something every falling asleep does. */
   drift: {
-    windows: windows({ lid: [0.45, 1], shape: [0.45, 1], head: [0.3, 1], tone: [0.3, 1] }),
-    beat: ({ q }) => {
-      const yawn = bump(q, 0, 0.45)
-      return beat({
-        pitch: -0.18 * yawn,
-        lid: 0.3 * bump(q, 0.05, 0.4) + 0.4 * bump(q, 0.45, 1),
-        mouth: yawn <= 0 ? null : { to: MOUTHS.gape, k: yawn },
-      })
-    },
+    windows: windows({ lid: [0.2, 1], shape: [0.2, 1], head: [0.1, 1], tone: [0.2, 1] }),
+    beat: ({ q }) => beat({ lid: 0.4 * bump(q, 0.2, 1), pitch: 0.1 * bump(q, 0.2, 1) }),
   },
   /**
    * Waking up: the eyes open, fall shut once more — the one heavy blink of someone waking — and

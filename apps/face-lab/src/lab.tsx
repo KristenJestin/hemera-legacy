@@ -1,6 +1,7 @@
 import { Button, Checkbox, Kbd, Select, Tabs } from '@hemera/ui'
 import {
   type ChangeName,
+  type FaceAct,
   EXPRESSIONS,
   FACE_SIZES,
   FACE_STATES,
@@ -99,6 +100,7 @@ export function Lab(): ReactNode {
   const [mono, setMono] = useState(false)
   const [guides, setGuides] = useState(false)
   const [reduced, setReduced] = useState(false)
+  const [mouth, setMouth] = useState(true)
   const [tuning, setTuning] = useState<FaceTuning>(TUNING)
   const [speed, setSpeed] = useState(1)
   const [paused, setPaused] = useState(false)
@@ -115,8 +117,8 @@ export function Lab(): ReactNode {
   const [copied, setCopied] = useState(false)
 
   const telling = useMemo<Telling>(
-    () => ({ seed, detail: detailOf(size), reduced, tuning }),
-    [seed, size, reduced, tuning],
+    () => ({ seed, detail: detailOf(size), reduced, tuning, mouth }),
+    [seed, size, reduced, tuning, mouth],
   )
   const current = history.at(-1)?.state ?? 'asleep'
 
@@ -159,12 +161,26 @@ export function Lab(): ReactNode {
     [clock],
   )
 
+  /** Has the face do `act` now, in the state it is in. */
+  const act = useCallback(
+    (asked: FaceAct) => {
+      const at = clock.now()
+      setHistory((was) => {
+        const kept = was.filter((played) => played.at <= at)
+        const state = kept.at(-1)?.state ?? 'asleep'
+        return [...kept, { state, at, act: asked }].slice(-REMEMBERED)
+      })
+    },
+    [clock],
+  )
+
   /** Plays the last change again, from a face at rest in the state it came from. */
   const again = useCallback(() => {
     const at = clock.now()
     setHistory((was) => {
-      const to = was.at(-1)
-      const from = was.at(-2)
+      const changes = was.filter((played) => played.act === undefined)
+      const to = changes.at(-1)
+      const from = changes.at(-2)
       if (to === undefined || from === undefined) return was
       return [
         { state: from.state, at },
@@ -402,6 +418,12 @@ export function Lab(): ReactNode {
             />
             <Checkbox checked={dark} onCheckedChange={setDark} label="Dark theme" />
             <Checkbox
+              checked={mouth}
+              onCheckedChange={setMouth}
+              label="Mouth"
+              description="Drawn at every size unless the caller leaves it out."
+            />
+            <Checkbox
               checked={mono}
               onCheckedChange={setMono}
               label="Without colour"
@@ -573,6 +595,8 @@ export function Lab(): ReactNode {
                     magnify={magnify}
                     ground={ground}
                     guides={guides}
+                    state={current}
+                    onAct={act}
                   />
                 ),
               },

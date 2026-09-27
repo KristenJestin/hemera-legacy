@@ -1140,7 +1140,10 @@ export const ReworkWhileTheLaunchWaits: Story = {
  */
 export const DraftWithAFailedLaunch: Story = {
   args: {
-    build: { ...BUILD, launch: { state: 'failed', cause: 'the agent exited with code 1' } },
+    build: {
+      ...BUILD,
+      launch: { state: 'failed', stage: 'agent', cause: 'the agent exited with code 1' },
+    },
   },
   play: async ({ canvasElement }) => {
     await expect(buildFootOf(canvasElement)).toBeNull()

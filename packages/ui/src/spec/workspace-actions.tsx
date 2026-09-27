@@ -35,8 +35,14 @@ import type { LaunchView, LaunchWorkspace } from './model.ts'
  * A launch is a request that waits: the Workspace is prepared first, then the agent is started,
  * and each of those says where it is in the width of a sentence — the step running, then the
  * agent — beside the indicator that says it is still going, without a count and without anything
- * to press. A start the engine refused keeps its own words and offers `Retry`; started, it offers
- * the build Session; taken back by a Rework, it says so and offers nothing.
+ * to press. An agent the engine could not start keeps its own words and offers `Retry`; started,
+ * it offers the build Session; taken back by a Rework, it says so and offers nothing while the Spec
+ * is a draft.
+ *
+ * A launch nothing can start again — failed before any Session was made, by the preparation of its
+ * Workspace or a refused start, taken back by a Rework whose revision is ready since, or by the
+ * cleanup of its Workspace — says what became of it, and offers under it what a Spec with no
+ * launch offers: the build is asked for again, by hand.
  *
  * Everything it shows is handed to it and everything it does is reported: the Workspaces, the
  * launch and what a press becomes belong to the caller.
@@ -48,7 +54,20 @@ const SAYS = 'flex flex-wrap items-center gap-2 text-sm text-muted-foreground'
 
 const FAILURE = 'flex flex-wrap items-center gap-2 text-sm text-destructive-muted-foreground'
 
+/** A sentence above the actions it goes with, both at the end of the footer. */
+const STACK = 'flex flex-col items-end gap-2'
+
 const PREPARING = 'Preparing the Workspace'
+
+/** What a launch taken back says of what took it (D8-13). */
+const CANCELLED = { rework: 'Cancelled by the Rework', removed: 'The Workspace was removed' }
+
+/** What a failed launch says before the engine's own words, after what failed (D8-13). */
+const FAILED = {
+  agent: 'The agent did not start',
+  preparation: 'The Workspace could not be prepared',
+  start: 'The build did not start',
+}
 
 const GROUP = 'The build of this Spec'
 
@@ -78,53 +97,11 @@ export interface WorkspaceActionsProps {
 
 export function WorkspaceActions({
   launch,
-  workspace,
-  workspaces,
-  onPrepareAndStart,
-  onPrepareOnly,
-  onUseWorkspace,
-  onStart,
   onRetry,
   onOpen,
+  ...offers
 }: WorkspaceActionsProps): ReactNode {
-  if (launch === null && workspace === undefined) {
-    // `Prepare a Workspace only` first, and the Workspaces after it: the separator between the
-    // two groups is what says the one is not the other.
-    const prepareOnly: MenuItem = {
-      label: 'Prepare a Workspace only',
-      icon: <IconFolderPlus size="sm" aria-hidden="true" />,
-      onSelect: onPrepareOnly,
-    }
-    const existing: MenuItem[] = workspaces.map((one) => ({
-      label: one.name,
-      icon: <IconGitBranch size="sm" aria-hidden="true" />,
-      onSelect: () => onUseWorkspace(one.id),
-    }))
-    return (
-      <div role="group" aria-label={GROUP} className={ACTIONS}>
-        <Menu
-          label="Use an existing Workspace"
-          size="sm"
-          groups={existing.length === 0 ? [[prepareOnly]] : [[prepareOnly], existing]}
-        />
-        <Button variant="primary" size="sm" onClick={onPrepareAndStart}>
-          <IconHammer size="sm" aria-hidden="true" />
-          Prepare and start the build
-        </Button>
-      </div>
-    )
-  }
-
-  if (launch === null) {
-    return (
-      <div role="group" aria-label={GROUP} className={ACTIONS}>
-        <Button variant="primary" size="sm" onClick={onStart}>
-          <IconPlayerPlay size="sm" aria-hidden="true" />
-          Start the build
-        </Button>
-      </div>
-    )
-  }
+  if (launch === null) return <Offers {...offers} />
 
   switch (launch.state) {
     case 'waiting': {
@@ -158,14 +135,14 @@ export function WorkspaceActions({
           </Button>
         </div>
       )
-    case 'failed':
+    case 'failed': {
       // Its own words, whole: what the start was refused with is the only thing that says what to
       // do about it.
-      return (
+      const said = (
         <div role="alert" className={FAILURE}>
           <IconAlertTriangle size="sm" aria-hidden="true" />
-          <span>{`The agent did not start: ${launch.cause}`}</span>
-          {onRetry !== undefined && (
+          <span>{`${FAILED[launch.stage]}: ${launch.cause}`}</span>
+          {launch.stage === 'agent' && onRetry !== undefined && (
             <Button size="sm" onClick={onRetry}>
               <IconRefresh size="sm" aria-hidden="true" />
               Retry
@@ -173,12 +150,80 @@ export function WorkspaceActions({
           )}
         </div>
       )
-    case 'cancelled':
+      // An agent that did not start is started again on its Session; a launch that never made one
+      // has nothing to start again, and the build is asked for anew.
+      if (launch.stage === 'agent') return said
       return (
+        <div className={STACK}>
+          {said}
+          <Offers {...offers} />
+        </div>
+      )
+    }
+    case 'cancelled': {
+      const said = (
         <p role="status" className={SAYS}>
           <StatusDot status="cancelled" size="sm" />
-          Cancelled by the Rework
+          {CANCELLED[launch.reason]}
         </p>
       )
+      if (!launch.again) return said
+      return (
+        <div className={STACK}>
+          {said}
+          <Offers {...offers} />
+        </div>
+      )
+    }
   }
+}
+
+/**
+ * What a Spec with no launch offers, from where its Workspace stands (D8-12): none yet, the two
+ * ways in; one set, `Start the build` in it.
+ */
+function Offers({
+  workspace,
+  workspaces,
+  onPrepareAndStart,
+  onPrepareOnly,
+  onUseWorkspace,
+  onStart,
+}: Omit<WorkspaceActionsProps, 'launch' | 'onRetry' | 'onOpen'>): ReactNode {
+  if (workspace === undefined) {
+    // `Prepare a Workspace only` first, and the Workspaces after it: the separator between the
+    // two groups is what says the one is not the other.
+    const prepareOnly: MenuItem = {
+      label: 'Prepare a Workspace only',
+      icon: <IconFolderPlus size="sm" aria-hidden="true" />,
+      onSelect: onPrepareOnly,
+    }
+    const existing: MenuItem[] = workspaces.map((one) => ({
+      label: one.name,
+      icon: <IconGitBranch size="sm" aria-hidden="true" />,
+      onSelect: () => onUseWorkspace(one.id),
+    }))
+    return (
+      <div role="group" aria-label={GROUP} className={ACTIONS}>
+        <Menu
+          label="Use an existing Workspace"
+          size="sm"
+          groups={existing.length === 0 ? [[prepareOnly]] : [[prepareOnly], existing]}
+        />
+        <Button variant="primary" size="sm" onClick={onPrepareAndStart}>
+          <IconHammer size="sm" aria-hidden="true" />
+          Prepare and start the build
+        </Button>
+      </div>
+    )
+  }
+
+  return (
+    <div role="group" aria-label={GROUP} className={ACTIONS}>
+      <Button variant="primary" size="sm" onClick={onStart}>
+        <IconPlayerPlay size="sm" aria-hidden="true" />
+        Start the build
+      </Button>
+    </div>
+  )
 }

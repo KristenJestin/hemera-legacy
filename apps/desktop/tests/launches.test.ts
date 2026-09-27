@@ -5,7 +5,7 @@
  * Every suite is named after the scenario of `Spec · build-launch` that it covers, and runs over
  * the whole engine on the fake agent `window.ts` composes.
  */
-import { mkdirSync, mkdtempSync, realpathSync, rmSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, realpathSync, renameSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -921,6 +921,83 @@ describe('The engine comes back to what a stopped engine left', () => {
         workspace_id: left.workspace.id,
       },
     ])
+  })
+})
+
+describe('A Spec whose launch was cancelled or never got an agent can be launched again', () => {
+  test('A launch cancelled by a Rework can be asked for again on the new revision', async () => {
+    opened = await openWindow(dataFolder, fakeAgent())
+    const seen = await opened.running(
+      Effect.gen(function* () {
+        const { project, key, specId, session } = yield* atlas()
+        const launched = yield* Launches
+        const preparation = yield* Preparation
+        const workspace = yield* making(project.id, specId, key)
+        const first = yield* launched.request(specId, workspace.id)
+        // Reworked while it waits, then made ready again: the new revision is launched by hand.
+        yield* yield* rework(specId, session.id)
+        yield* frozen(specId, session.id)
+        yield* preparation.prepare(workspace.id)
+        const cancelled = yield* launched.one(first.id)
+        const again = yield* launched.request(specId, workspace.id)
+        const started = yield* until(
+          launched.one(again.id),
+          (one) => one.state === 'started' || one.state === 'failed',
+        )
+        const panel = yield* launched.forSpec(specId)
+        return { again, builds: yield* builds, cancelled, first, panel, started }
+      }),
+    )
+    expect(seen.cancelled.state).toBe('cancelled')
+    expect(seen.cancelled.detail).toBe('reworked')
+    expect(seen.again.revisionId).not.toBe(seen.first.revisionId)
+    expect(seen.started.state).toBe('started')
+    expect(seen.panel.launch?.id).toBe(seen.again.id)
+    expect(seen.builds).toEqual([
+      {
+        id: seen.started.sessionId,
+        spec_id: seen.again.specId,
+        revision_id: seen.again.revisionId,
+        workspace_id: seen.again.workspaceId,
+      },
+    ])
+  })
+
+  test('A launch failed by its preparation is asked for again after a resume', async () => {
+    opened = await openWindow(dataFolder, fakeAgent())
+    const seen = await opened.running(
+      Effect.gen(function* () {
+        const { project, key, specId } = yield* atlas()
+        const launched = yield* Launches
+        const preparation = yield* Preparation
+        const workspace = yield* making(project.id, specId, key)
+        const first = yield* launched.request(specId, workspace.id)
+        // The repository is moved away while the Workspace is prepared: the step fails, and the
+        // launch with it, before any Session was made.
+        const source = join(dataFolder, 'main', 'sources', 'api')
+        const away = join(dataFolder, 'api-moved-away')
+        renameSync(source, away)
+        yield* preparation.prepare(workspace.id)
+        const failed = yield* launched.one(first.id)
+        // Retry has no agent to start again: that launch is refused, and a new request is asked.
+        const retried = yield* Effect.flip(launched.retry(first.id))
+        renameSync(away, source)
+        const resumed = yield* preparation.resume(workspace.id)
+        const again = yield* launched.request(specId, workspace.id)
+        const started = yield* until(
+          launched.one(again.id),
+          (one) => one.state === 'started' || one.state === 'failed',
+        )
+        return { builds: yield* builds, failed, resumed, retried, started }
+      }),
+    )
+    expect(seen.failed.state).toBe('failed')
+    expect(seen.failed.sessionId).toBeNull()
+    expect(seen.failed.detail).toContain('The Workspace could not be prepared: ')
+    expect(seen.retried.message).toBe('only a build whose agent failed is started again.')
+    expect(seen.resumed.state).toBe('ready')
+    expect(seen.started.state).toBe('started')
+    expect(seen.builds.map((one) => one.id)).toEqual([seen.started.sessionId])
   })
 })
 

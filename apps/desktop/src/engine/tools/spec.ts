@@ -192,6 +192,19 @@ export function specTools({ specs, sessions, held, inThread }: SpecToolsNeeds) {
           `${snapshot.spec.key} holds ${snapshot.stories.length} stories and ${snapshot.criteria.length} criteria.`,
         )
       }
+      if (call.title !== undefined || call.type !== undefined) {
+        const snapshot = yield* specs.writeHeading(agent, {
+          specId,
+          title: call.title,
+          type: call.type,
+        })
+        return completed(
+          call.title === undefined
+            ? `made ${snapshot.spec.key} a ${snapshot.revision.type}`
+            : `renamed ${snapshot.spec.key} "${snapshot.revision.title}"`,
+          `${snapshot.spec.key} is the ${snapshot.revision.type} Spec "${snapshot.revision.title}".`,
+        )
+      }
       if (call.tasks !== undefined) {
         const tasks = jsonList(TASK_SENT).parse(call.tasks)
         const snapshot = yield* specs.writeTasks(agent, { specId, tasks })

@@ -1,14 +1,14 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
-import { expect, fn, userEvent, within } from 'storybook/test'
+import { expect, fn, screen, userEvent, waitFor, within } from 'storybook/test'
 
-import { MessageText } from '../message/message-text.tsx'
-import { MessageGroup } from '../message/message.tsx'
 import { CREDIT_NOTES } from './spec-fixtures.ts'
 import { SpecQuestion } from './spec-question.tsx'
 
 /**
- * A question of the Spec asked in the thread: the options the agent offers, one recommended, and
- * a field of your own; folded to the question once answered, the answer being your own message.
+ * A question of the Spec asked in the thread (issue #199, card B of the exploration of issue
+ * #182): a frame whose choices are lettered A, B, C, the recommended one marked without a line of
+ * its own, `Other…` turning into its field in place, and whether the Spec waits on the answer said
+ * in the rim below. Pressing a choice answers.
  */
 const meta = {
   title: 'Blocks/Spec/SpecQuestion',
@@ -27,95 +27,103 @@ export default meta
 
 type Story = StoryObj<typeof meta>
 
+/** The rows of the card: the choices the agent offered, then `Other`. */
+function rowsOf(canvasElement: HTMLElement): HTMLElement[] {
+  const canvas = within(canvasElement)
+  return within(canvas.getByRole('list', { name: 'Answers' })).getAllByRole('listitem')
+}
+
 /**
- * Open: the question and its phase, the options, and a field of your own. No `blocking` chip,
- * though this question holds the gate (issue #149).
+ * Open, and blocking: the agent asks, the phase at the end of the head, the choices lettered, and
+ * the rim below saying the Spec waits on the answer. No `Answer` button: a press is the answer.
  */
 export const Open: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    await expect(canvas.getByText('plan')).toBeVisible()
-    await expect(canvas.queryByText('blocking')).toBeNull()
-    await expect(canvas.getByRole('list', { name: 'Answers' })).toBeVisible()
-    await expect(canvas.getByRole('textbox', { name: 'Other' })).toBeVisible()
+    await expect(canvas.getByText('The agent asks')).toBeVisible()
+    await expect(canvas.getByText('Plan')).toBeVisible()
+    await expect(canvas.getByText(/^Blocking · /)).toBeVisible()
+    await expect(canvas.getByRole('button', { name: /Other/ })).toBeVisible()
+    await expect(canvas.queryByRole('button', { name: 'Answer' })).toBeNull()
+    await expect(canvas.queryByRole('textbox')).toBeNull()
   },
 }
 
-/** The recommended option is marked, and pressing it is the answer. */
+/** A question the Spec goes on without: the rim says it can wait. */
+export const NotBlocking: Story = {
+  args: { question: { ...CREDIT_NOTES, blocking: false } },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await expect(canvas.getByText(/^Not blocking · /)).toBeVisible()
+    await expect(canvas.queryByText(/^Blocking · /)).toBeNull()
+  },
+}
+
+/**
+ * The recommended choice wears a small mark at its end, which takes no line of its own: the row
+ * is as tall as the others and its label where theirs is. The words are in its tooltip and its
+ * name. Pressing it answers at once.
+ */
 export const Recommended: Story = {
   play: async ({ canvasElement, args }) => {
     const canvas = within(canvasElement)
-    const recommended = canvas.getByRole('button', { name: /recommended/ })
+    const recommended = canvas.getByRole('button', { name: /recommended by the agent/ })
     await expect(recommended).toHaveTextContent('Negative rows in the same file')
+    await expect(canvas.queryByText('Recommended by the agent')).toBeNull()
+    const other = canvas.getByRole('button', { name: /A second file for credit notes/ })
+    expect(recommended.getBoundingClientRect().height).toBe(other.getBoundingClientRect().height)
+    await userEvent.hover(recommended)
+    await expect(await screen.findByRole('tooltip')).toHaveTextContent('Recommended by the agent')
     recommended.focus()
     await userEvent.keyboard('{Enter}')
     await expect(args.onAnswer).toHaveBeenCalledWith({ optionId: 'negative' })
   },
 }
 
-/** Other: your own words, handed over by `Answer` once there are some. */
-export const FreeText: Story = {
+/**
+ * `Other…` pressed turns into its field in place, the caret in it; Enter sends the words typed.
+ * Escape leaves the field and gives `Other…` back.
+ */
+export const OtherBeingTyped: Story = {
   play: async ({ canvasElement, args }) => {
     const canvas = within(canvasElement)
-    const answer = canvas.getByRole('button', { name: 'Answer' })
-    await expect(answer).toBeDisabled()
+    await userEvent.click(canvas.getByRole('button', { name: /Other/ }))
+    const field = await canvas.findByRole('textbox', { name: 'Other' })
+    await waitFor(() => expect(field).toHaveFocus())
+    await userEvent.keyboard('{Escape}')
+    const back = await canvas.findByRole('button', { name: /Other/ })
+    await waitFor(() => expect(back).toHaveFocus())
+    await userEvent.click(canvas.getByRole('button', { name: /Other/ }))
     await userEvent.type(
-      canvas.getByRole('textbox', { name: 'Other' }),
-      'Negative rows, marked by a type column.',
+      await canvas.findByRole('textbox', { name: 'Other' }),
+      'Negative rows, marked by a type column.{Enter}',
     )
-    await userEvent.click(answer)
     await expect(args.onAnswer).toHaveBeenCalledWith({
       text: 'Negative rows, marked by a type column.',
     })
   },
 }
 
-/**
- * Answered: folded to the question alone. The answer is not said again under it: it is your own
- * message, which the thread draws where you gave it (issue #149).
- */
-export const Answered: Story = {
-  args: { question: { ...CREDIT_NOTES, answer: { optionId: 'negative' } } },
-  play: async ({ canvasElement }) => {
+/** The small send icon inside the field sends as Enter does, once there are words. */
+export const OtherSentByItsIcon: Story = {
+  play: async ({ canvasElement, args }) => {
     const canvas = within(canvasElement)
-    await expect(canvas.getByText(/Credit notes: negative rows/)).toBeVisible()
-    await expect(canvas.queryByText('Negative rows in the same file')).toBeNull()
-    await expect(canvas.queryByRole('button')).toBeNull()
+    await userEvent.click(canvas.getByRole('button', { name: /Other/ }))
+    const send = await canvas.findByRole('button', { name: 'Send your answer' })
+    await expect(send).toBeDisabled()
+    await userEvent.type(canvas.getByRole('textbox', { name: 'Other' }), 'A type column.')
+    await userEvent.click(send)
+    await expect(args.onAnswer).toHaveBeenCalledWith({ text: 'A type column.' })
   },
 }
 
-/**
- * Answered, in the thread: the folded question, and under it the answer as your own message —
- * the option you chose, in its words, on your side of the thread, where Hemera used to write that
- * it had handed the agent the answer, with an id (issue #149).
- */
-export const AnsweredInTheThread: Story = {
-  args: { question: { ...CREDIT_NOTES, answer: { optionId: 'negative' } } },
-  render: (args) => (
-    <div className="flex flex-col gap-5">
-      <SpecQuestion {...args} />
-      <MessageGroup
-        author="user"
-        name="You"
-        lines={[{ id: 'answer', body: <MessageText body="Negative rows in the same file" /> }]}
-      />
-    </div>
-  ),
-  play: async ({ canvasElement }) => {
-    const canvas = within(canvasElement)
-    const mine = canvas.getByRole('group', { name: 'Messages from You' })
-    await expect(mine).toHaveTextContent('Negative rows in the same file')
-    await expect(canvasElement).not.toHaveTextContent(/handed the agent/)
-  },
-}
-
-/** Cancelled: the turn was stopped; folded, and still open in the Spec's register. */
+/** Cancelled: the turn was stopped; nothing can be pressed, and it stays open in the Spec. */
 export const Cancelled: Story = {
   args: { cancelled: true },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     await expect(canvas.getByText(/the turn was stopped/)).toBeVisible()
-    await expect(canvas.queryByRole('button')).toBeNull()
+    for (const button of canvas.queryAllByRole('button')) expect(button).toBeDisabled()
   },
 }
 
@@ -138,38 +146,18 @@ export const Markdown: Story = {
   },
 }
 
-/** Answered, the folded question still reads its Markdown. */
-export const MarkdownAnswered: Story = {
-  args: {
-    question: {
-      ...CREDIT_NOTES,
-      body: 'Credit notes: **where do they go** in the export?',
-      answer: { optionId: 'negative' },
-    },
-  },
-  play: async ({ canvasElement }) => {
-    const canvas = within(canvasElement)
-    await expect(canvas.getByText('where do they go').tagName).toBe('STRONG')
-    await expect(canvas.queryByText('Negative rows in the same file')).toBeNull()
-  },
-}
-
 /**
- * Hemera labels the choices (issue #134): A, B, C in the order the agent gave them, the
- * recommended one marked, and `Other` always last, lettered after them, with its field.
+ * Hemera labels the choices (issue #134): A, B, C in the order the agent gave them, and `Other`
+ * always last, lettered after them.
  */
 export const Lettered: Story = {
   play: async ({ canvasElement }) => {
-    const canvas = within(canvasElement)
-    const choices = within(canvas.getByRole('list', { name: 'Answers' })).getAllByRole('listitem')
+    const choices = rowsOf(canvasElement)
     await expect(choices).toHaveLength(4)
-    await expect(choices[0]).toHaveTextContent(/^ANegative rows in the same filerecommended$/)
+    await expect(choices[0]).toHaveTextContent(/^ANegative rows in the same file/)
     await expect(choices[1]).toHaveTextContent(/^BA second file for credit notes$/)
     await expect(choices[2]).toHaveTextContent(/^CLeft out of the export$/)
-    // Other, the last choice, with its field in it.
-    await expect(choices[3]).toHaveTextContent(/^D/)
-    await expect(within(choices[3]!).getByRole('textbox', { name: 'Other' })).toBeVisible()
-    await expect(within(choices[3]!).getByRole('button', { name: 'Answer' })).toBeVisible()
+    await expect(choices[3]).toHaveTextContent(/^DOther…$/)
   },
 }
 
@@ -178,10 +166,14 @@ export const OtherOnly: Story = {
   args: { question: { ...CREDIT_NOTES, options: [] } },
   play: async ({ canvasElement, args }) => {
     const canvas = within(canvasElement)
-    const choices = within(canvas.getByRole('list', { name: 'Answers' })).getAllByRole('listitem')
+    const choices = rowsOf(canvasElement)
     await expect(choices).toHaveLength(1)
     await expect(choices[0]).toHaveTextContent(/^A/)
-    await userEvent.type(canvas.getByRole('textbox', { name: 'Other' }), 'A type column.{Enter}')
+    await userEvent.click(canvas.getByRole('button', { name: /Other/ }))
+    await userEvent.type(
+      await canvas.findByRole('textbox', { name: 'Other' }),
+      'A type column.{Enter}',
+    )
     await expect(args.onAnswer).toHaveBeenCalledWith({ text: 'A type column.' })
   },
 }

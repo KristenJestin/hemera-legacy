@@ -644,6 +644,12 @@ export const ENGINE_REQUESTS = {
     arguments: z.object({ sessionId: z.string() }),
     response: z.object({ state: resumeStateSchema, reason: z.string().nullable() }),
   },
+  // What waits for a Session's agent, handed over again after a delivery it did not take: the
+  // Retry of the row that said so (issue #211). Answered at once; the delivery is a turn of its own.
+  'agents.handOver': {
+    arguments: z.object({ sessionId: z.string() }),
+    response: z.void(),
+  },
 
   // What the Agents section of the settings asks for, and what it does about the answer
   // (design D5-18). `check` is the one use case here that leaves the machine: it reads the

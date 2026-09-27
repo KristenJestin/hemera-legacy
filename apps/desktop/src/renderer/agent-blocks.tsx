@@ -3,7 +3,6 @@ import type { CommandRun as Run, SessionEntry, SpecType } from '@hemera/ipc'
 import {
   AgentReport,
   AgentText,
-  AnswerChoice,
   CommandProposal,
   CommandRun,
   CreateSpecProposal,
@@ -49,7 +48,6 @@ import {
 } from './agent-tool-payloads.ts'
 import {
   type DefinedSpec,
-  answerOf,
   briefOf,
   proposalIdOf,
   proposalOf,
@@ -355,6 +353,11 @@ export interface SpecContext {
   defined: DefinedSpec | null
   /** The ids of the current revision's questions, null until the Spec is read. */
   asked: ReadonlySet<string> | null
+  /**
+   * The question entries the page pinned above the composer while it was open: answered, one of
+   * them comes back to the thread answered in front of the reader, and draws its check there.
+   */
+  waited: ReadonlySet<string>
   onAnswer: (questionId: string, answer: SpecAnswer) => void
   onCreate: (title: string, type: SpecType) => void
   /** `Continue it`: this Session defines the existing Spec the agent pointed to (issue #198). */
@@ -550,8 +553,8 @@ export function drawEntry(entry: SessionEntry, context: AgentContext): ReactNode
     return <MissionBrief title={title} detail={detail} brief={brief} />
   }
 
-  // A question of the Spec, asked here and answered here (D7-01). Once answered it folds to the
-  // question alone: the answer is the reader's message, drawn where it was given (issue #149).
+  // A question of the Spec, asked here and answered here (D7-01). Once answered it stays as it was
+  // asked, the choice made marked in it (issue #199).
   if (entry.kind === 'spec_question') {
     const block = questionEntryOf(entry, context.spec.thread, context.spec.asked)
     if (block === null) return null
@@ -561,28 +564,16 @@ export function drawEntry(entry: SessionEntry, context: AgentContext): ReactNode
         <SpecQuestion
           question={question}
           cancelled={cancelled}
+          arrives={context.spec.waited.has(entry.id)}
           onAnswer={(answer) => context.spec.onAnswer(question.id, answer)}
         />
       </div>
     )
   }
 
-  // The answer is the reader's, on their side where they gave it (issue #149), and drawn as the
-  // choice they made rather than as words they typed; only what they typed under `Other` is a
-  // message (issue #165). The question above folds to itself.
-  if (entry.kind === 'spec_answer') {
-    const view = answerOf(entry, context.spec.thread)
-    if (view === null) return null
-    return (
-      <AnswerChoice
-        {...view}
-        at={new Date(entry.createdAt).toLocaleTimeString('en-GB', {
-          hour: '2-digit',
-          minute: '2-digit',
-        })}
-      />
-    )
-  }
+  // The answer is drawn by the question's card, where it was given (issue #199): the thread draws
+  // nothing more for it.
+  if (entry.kind === 'spec_answer') return null
 
   // The Spec the agent of a `free` Session proposed, which `Create` accepts (D7-07).
   if (entry.kind === 'spec_proposal') {

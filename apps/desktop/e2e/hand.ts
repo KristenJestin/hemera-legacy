@@ -315,21 +315,37 @@ export async function pressIn(area: string, name: string): Promise<void> {
 }
 
 /**
- * Answers the question asked in the thread with the option that says this.
+ * Answers the question asked in the thread with the option that says this, and waits for its card
+ * to say it was answered.
  *
  * Not through `pressIn`: an option is lettered by Hemera (issue #134), so what the button says
- * starts with its letter — `AThe issue date` — and a hand reads the option, not the letter.
+ * starts with its letter — `AThe issue date` — and a hand reads the option, not the letter. A
+ * press on a choice is the answer (issue #199); the card then stays where it was, the choice
+ * marked in it, and names itself after the answer.
  */
 export async function answerWith(option: string): Promise<void> {
   const pressed = await browser.execute((label: string) => {
-    const options = document.querySelectorAll('[id^="ask-"] [aria-label="Answers"] button')
+    // An answered card's rows stay, and can no longer be pressed: only an open one is looked at.
+    const options = document.querySelectorAll(
+      '[id^="ask-"] [aria-label="Answers"] button:not(:disabled)',
+    )
     const button = [...options].find((one) => (one.textContent ?? '').includes(label))
     if (!(button instanceof HTMLButtonElement)) return false
     button.click()
     return true
   }, option)
   expect(pressed).toBe(true)
-  await browser.pause(300)
+  await browser.waitUntil(
+    async () =>
+      await browser.execute(
+        (label: string) =>
+          [...document.querySelectorAll('[id^="ask-"] [role="group"]')].some((card) =>
+            (card.getAttribute('aria-label') ?? '').endsWith(label),
+          ),
+        option,
+      ),
+    { timeout: 5000, timeoutMsg: `the question's card never says it was answered with ${option}` },
+  )
 }
 
 /**

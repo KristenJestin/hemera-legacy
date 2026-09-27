@@ -26,7 +26,7 @@ function sectionOf(sections: SectionView[], name: SectionView['name']): SectionV
 const meta = {
   title: 'Blocks/Spec/SectionPart',
   component: SectionPart,
-  tags: ['autodocs', 'updated'],
+  tags: ['autodocs'],
   parameters: { layout: 'padded' },
   args: { section: sectionOf(GATE_FULL.sections, 'expected_outcome') },
   argTypes: {

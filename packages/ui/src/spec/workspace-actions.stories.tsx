@@ -20,7 +20,7 @@ const SPIKE: LaunchWorkspace = { id: 'ws-spike', name: 'spike' }
 const meta = {
   title: 'Blocks/Spec/WorkspaceActions',
   component: WorkspaceActions,
-  tags: ['autodocs', 'updated'],
+  tags: ['autodocs'],
   parameters: { layout: 'padded' },
   args: {
     launch: null,

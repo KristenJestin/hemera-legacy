@@ -90,7 +90,7 @@ function Controlled({
 }
 
 const meta = {
-  tags: ['autodocs', 'updated'],
+  tags: ['autodocs'],
   title: 'Blocks/Workspace/CommandDialog',
   component: CommandDialog,
   render: (args) => <Controlled {...args} />,

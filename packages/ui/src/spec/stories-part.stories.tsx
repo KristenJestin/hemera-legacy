@@ -10,7 +10,7 @@ const MARKS = ['empty', 'agent', 'human', 'stale', 'writing']
 const meta = {
   title: 'Blocks/Spec/StoriesPart',
   component: StoriesPart,
-  tags: ['autodocs', 'updated'],
+  tags: ['autodocs'],
   parameters: { layout: 'padded' },
   args: { stories: STORIES, mark: 'agent', type: 'feature' },
   argTypes: {

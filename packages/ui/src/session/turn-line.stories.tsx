@@ -17,7 +17,7 @@ the planner does not use it on the export's own query, which sorts on the date f
 const USAGE = { used: 12_400, size: 200_000, cost: { amount: 0.42, currency: 'EUR' } }
 
 const meta = {
-  tags: ['autodocs', 'new'],
+  tags: ['autodocs'],
   title: 'Blocks/Session/TurnLine',
   component: TurnLine,
   parameters: { layout: 'fullscreen' },

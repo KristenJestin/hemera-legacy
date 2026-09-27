@@ -13,7 +13,7 @@ import { MessageGroup } from './message.tsx'
  * `↳` line that names the question. Only what the reader did type under `Other` is a message.
  */
 const meta = {
-  tags: ['autodocs', 'new'],
+  tags: ['autodocs'],
   title: 'Blocks/Message/AnswerChoice',
   component: AnswerChoice,
   parameters: { layout: 'padded' },

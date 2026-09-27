@@ -606,6 +606,71 @@ export const FromSettings: Story = {
   },
 }
 
+/** What the story dispatches to have Git answer the rest of the plan, while the dialog is open. */
+const GIT_ANSWERS = 'story:git-answers'
+
+/** The dialog of `FromSettings`, whose plan is answered while it is open, when the story says so. */
+function AnsweredWhileOpen({
+  answered,
+  ...rest
+}: CreateWorkspaceDialogProps & { answered: readonly PlanRepositoryLine[] }) {
+  const [read, setRead] = useState(false)
+  useEffect(() => {
+    const answer = () => setRead(true)
+    window.addEventListener(GIT_ANSWERS, answer)
+    return () => window.removeEventListener(GIT_ANSWERS, answer)
+  }, [])
+  return <CreateWorkspaceDialog {...rest} repositories={read ? answered : rest.repositories} />
+}
+
+/**
+ * From the settings, a name typed before Git answered for a repository: the branch that repository
+ * gets once it is read is the one the name makes, and not the plan's empty `atlas/`.
+ */
+export const NamedBeforeRead: Story = {
+  args: {
+    defaultName: '',
+    repositories: [
+      { ...API, read: { ...API.read, branch: 'atlas/' } },
+      { path: './sources/front', read: null },
+    ],
+    branchOf: (name) => `atlas/${name}`,
+  },
+  render: (args) => (
+    <AnsweredWhileOpen
+      {...args}
+      answered={[
+        { ...API, read: { ...API.read, branch: 'atlas/' } },
+        { ...FRONT, read: { ...FRONT.read, branch: 'atlas/' } },
+      ]}
+    />
+  ),
+  play: async () => {
+    const dialog = within(document.body).getByRole('dialog')
+    const inside = within(dialog)
+    rowOf(dialog, './sources/front').getByText('being read')
+    await userEvent.type(inside.getByRole('textbox', { name: 'Name' }), 'spike')
+
+    window.dispatchEvent(new Event(GIT_ANSWERS))
+    await waitFor(() => {
+      expect(inside.queryByText('being read')).toBeNull()
+    })
+    await expect(
+      rowOf(dialog, './sources/api').getByRole('textbox', { name: 'Branch' }),
+    ).toHaveValue('atlas/spike')
+    await expect(
+      rowOf(dialog, './sources/front').getByRole('textbox', { name: 'Branch' }),
+    ).toHaveValue('atlas/spike')
+    // Create comes on by a fade once the last row is read: the accessibility pass measures its
+    // contrast once it has.
+    const create = inside.getByRole('button', { name: 'Create' })
+    await expect(create).toBeEnabled()
+    await waitFor(() => {
+      expect(getComputedStyle(create).opacity).toBe('1')
+    })
+  },
+}
+
 /** One repository with the keyboard: its box, its base, its branch. */
 async function walkRow(row: ReturnType<typeof rowOf>) {
   await userEvent.tab()

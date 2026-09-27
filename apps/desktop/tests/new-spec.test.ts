@@ -16,7 +16,15 @@ import { DELIVERY_MARKER, QUESTION_RULE } from '@hemera/core'
 import { fakeAgent } from '#engine/agents/fake.ts'
 import { SPEC_REQUEST, SPEC_REQUEST_URI, requestedSpec } from '#engine/agents/spec-request.ts'
 import { listenToAgents, say } from '#renderer/agent-store.ts'
-import { closeSessions, openSessions, startSession } from '#renderer/sessions-store.ts'
+import {
+  closeSessions,
+  openSession,
+  openSessions,
+  readSessions,
+  sessionsSnapshot,
+  startSession,
+} from '#renderer/sessions-store.ts'
+import { closeSpec, openSpec, specSnapshot } from '#renderer/spec-store.ts'
 
 import { type OpenWindow, install, openWindow } from './window.ts'
 
@@ -116,6 +124,64 @@ describe('A Session started with New Spec defines its Spec from the first turn',
     expect(first).toHaveLength(2)
     for (const text of first) expect(text).toContain(JSON.stringify(QUESTION_RULE).slice(1, -1))
     expect(SPEC_REQUEST).toContain(QUESTION_RULE)
+  })
+
+  test('New Spec, then the Spec exists and its panel is open before the agent first answers', async () => {
+    /** What the window holds at the moment the agent is about to answer for the first time. */
+    let before: {
+      mission: string | null
+      shown: string | null
+      title: string | null
+      answered: number
+    } | null = null
+    let projectId = ''
+    let sessionId = ''
+    const agent = fakeAgent({
+      steps: [{ does: 'says', text: 'Is it a feature, a bug or maintenance?' }],
+      between: async () => {
+        if (before !== null) return
+        // What the window does as the Session's first entry arrives: it reads the Sessions again,
+        // and opens the Spec of the one on screen once it defines one (`application.tsx`).
+        await readSessions(projectId)
+        const session = sessionsSnapshot().sessions.find((one) => one.id === sessionId)
+        if (session?.specId !== null && session?.specId !== undefined)
+          await openSpec(session.specId)
+        const read = await window.hemera.invoke('sessions.read', { sessionId })
+        before = {
+          mission: session?.mission ?? null,
+          shown: specSnapshot().snapshot?.spec.id ?? null,
+          title: specSnapshot().snapshot?.revision.title ?? null,
+          answered: read.entries.filter((entry) => entry.role === 'agent').length,
+        }
+      },
+    })
+    opened = await openWindow(dataFolder, agent)
+    install(opened.bridge)
+    stops = [listenToAgents()]
+    const project = await opened.bridge.invoke('projects.create', {
+      name: 'Atlas',
+      tone: 'primary',
+      mainPath: main,
+    })
+    projectId = project.id
+    await openSessions(project.id)
+
+    // The Home's New Spec, as `application.tsx` wires it: the Session, the page, then the message.
+    const made = await startSession(project.id, 'claude', null)
+    sessionId = made?.id ?? ''
+    await openSession(sessionId)
+    expect(
+      await say(sessionId, 'Mise en place d’une interface du menu simple en html', 'spec'),
+    ).toBeNull()
+
+    const [spec] = await opened.bridge.invoke('specs.list', { projectId: project.id })
+    expect(before).toEqual({
+      mission: 'define',
+      shown: spec?.id,
+      title: 'Mise en place d’une interface du menu simple en html',
+      answered: 0,
+    })
+    closeSpec()
   })
 
   test('the title is the first line of the request, cut on a word when it is long', () => {

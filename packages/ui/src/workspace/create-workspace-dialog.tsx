@@ -278,6 +278,12 @@ export function CreateWorkspaceDialog({
         const line = repositories.find((one) => one.path === row.path)
         if (line === undefined || line.read === null) return row
         filled = true
+        // A name typed while this row was being read has already made its branch: the plan's
+        // is the one of the name it was proposed with, and the row follows the name as the
+        // others did.
+        if (typed && branchOf !== undefined) {
+          return { ...row, ...answered(line.read), branch: branchOf(name.trim()) }
+        }
         return { ...row, ...answered(line.read) }
       })
       return filled ? next : current

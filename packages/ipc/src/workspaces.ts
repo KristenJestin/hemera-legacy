@@ -92,20 +92,27 @@ export type WorkspacePlan = z.infer<typeof workspacePlanSchema>
 /**
  * One repository of a Workspace as Git answers for it now, never stored (D8-15): its branch, its
  * commit and its counts of changes, or Git's own words when it refused.
+ *
+ * A repository whose worktree step is not done is not read at all (#217): its folder is not made
+ * yet, and Git would only say so. `step` is then that step's state and `git` is null. Once the
+ * step is done, or for a repository no step makes, `step` is null and `git` is Git's answer.
  */
 export const repositoryStateSchema = z.object({
   relativePath: z.string(),
-  git: z.discriminatedUnion('ok', [
-    z.object({
-      ok: z.literal(true),
-      branch: z.string(),
-      commit: z.string(),
-      staged: z.number(),
-      unstaged: z.number(),
-      untracked: z.number(),
-    }),
-    z.object({ ok: z.literal(false), error: z.string() }),
-  ]),
+  step: z.enum(['pending', 'running', 'failed', 'skipped']).nullable(),
+  git: z
+    .discriminatedUnion('ok', [
+      z.object({
+        ok: z.literal(true),
+        branch: z.string(),
+        commit: z.string(),
+        staged: z.number(),
+        unstaged: z.number(),
+        untracked: z.number(),
+      }),
+      z.object({ ok: z.literal(false), error: z.string() }),
+    ])
+    .nullable(),
 })
 
 export type RepositoryState = z.infer<typeof repositoryStateSchema>

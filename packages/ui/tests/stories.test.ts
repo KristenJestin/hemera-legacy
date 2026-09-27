@@ -175,7 +175,10 @@ const NAMED_STATES = new Map([
       'Keyboard',
     ],
   ],
-  ['workspace/workspace-repositories', ['Ready', 'Empty', 'Cleaned', 'Loading', 'GitError']],
+  [
+    'workspace/workspace-repositories',
+    ['Ready', 'Empty', 'Cleaned', 'Loading', 'GitError', 'Preparing'],
+  ],
   [
     'workspace/create-workspace-dialog',
     [

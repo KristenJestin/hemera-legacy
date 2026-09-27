@@ -383,3 +383,76 @@ export const swap = {
 export function onTheBeat(transition: Transition): Transition {
   return transition === instant ? instant : { ...transition, delay: swap.beat }
 }
+
+/**
+ * The `face` kind: the beats Hemera's face lives on (issue #140).
+ *
+ * The face is not moved by motion. Every expression it has is the same seven numbers per stroke
+ * moved around, eased on the frame by the face's own player, so that any shape travels into any
+ * other and a change that arrives half-way through another is taken from wherever the face is.
+ * What that player plays by is written here, in one table, so that whatever documents the face
+ * reads the real numbers and the lab that tries others starts from them.
+ *
+ * - `blink`: the lid coming down, and going back up a little slower, the way a real one moves;
+ *   `gap` is what separates the two halves of a double blink, long enough to read as two and
+ *   short enough to read as one gesture. `hold` is how long a lid stays shut when a change of
+ *   state is carried across it — the way an animator cuts on a blink.
+ * - `shape`: a change of shape inside a state: a gesture pulling one eye, a flourish handing it
+ *   back.
+ * - `handover`: how long a new gesture takes to take the head over from the one before it. The
+ *   head is handed on, never seized: a gesture that seized it would snap it to wherever its own
+ *   first frame is.
+ * - `change`: how long each change of state lasts, by what it says. Going from one kind of work
+ *   to another is a glance and a flinch is quick; falling asleep and waking up are not.
+ * - `fade`: the one thing a reader asking for less movement is still given — a soft cross-fade
+ *   from one still expression to the next, in opacity alone, so the face never jumps at them.
+ */
+export const face = {
+  blink: { down: 0.09, up: 0.15, gap: 0.09, hold: 0.06 },
+  shape: 0.28,
+  handover: 0.42,
+  change: {
+    shift: 0.36,
+    focus: 0.6,
+    release: 0.7,
+    alert: 0.66,
+    resume: 0.62,
+    turn: 0.5,
+    cheer: 0.95,
+    flinch: 0.8,
+    recover: 0.9,
+    relax: 1.1,
+    fade: 1.6,
+    perk: 0.55,
+    drift: 2.4,
+    wake: 1.4,
+  },
+  fade: durations.slow,
+} as const
+
+/**
+ * How far a number of the face has travelled at a share `k` of its change: at rest at both
+ * ends and fastest in the middle.
+ *
+ * Not the theme's `easing`, which eases out only. That reads as calm on a panel putting itself in
+ * place in a quarter of a second, and as a snap followed by a long tail on a face, where a change
+ * is slow enough to be watched: an eye has to build into its new shape and then arrive.
+ */
+export function faceArrive(k: number): number {
+  const q = Math.min(1, Math.max(0, k))
+  return q * q * (3 - 2 * q)
+}
+
+/**
+ * What is left of the speed a number of the face had when a change took it over, at a share `k`
+ * of the change and in lengths of it.
+ *
+ * A change arriving half-way through another leaves from where the face is, and at the speed it
+ * had: a head turning left that is told to look right finishes the turn it was in rather than
+ * stopping dead on the frame the word came, and has spent that speed by the end of the change.
+ * Nothing is left of it at either end, so the change still arrives at rest.
+ */
+export function faceCarry(k: number): number {
+  const q = Math.min(1, Math.max(0, k))
+  return q * (1 - q) * (1 - q)
+}

@@ -92,7 +92,14 @@ describe('Phases survive a restart', () => {
 
     const panel = await region(PANEL)
     expect(panel).toContain(PROPOSAL.title)
-    expect(panel).toContain('draft')
+    // The status is an icon named by its word, not a word on the line (issue #159).
+    expect(
+      await browser.execute(
+        (scope: string) =>
+          document.querySelector(`${scope} [role="img"][aria-label="Draft"]`) !== null,
+        PANEL,
+      ),
+    ).toBe(true)
     await showPart(KEY, 'Problem')
     expect(await region(PANEL)).toContain(PROBLEM)
     expect(await phaseHeading('Shape')).toBe('Shape phase, open')

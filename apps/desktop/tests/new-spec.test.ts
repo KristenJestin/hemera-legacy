@@ -184,6 +184,60 @@ describe('A Session started with New Spec defines its Spec from the first turn',
     closeSpec()
   })
 
+  test('a New Spec Session lists spec_write and spec_read on its first turn, and writes its title', async () => {
+    // The page reads what the Session's agent offers as soon as it is on screen, which starts the
+    // agent while the message is still on its way (`readOptions` in `application.tsx`). Its start
+    // is held until the Spec exists, as a cold start on the machine outlasts the prompt's request.
+    let hold: () => void = () => undefined
+    const held = new Promise<void>((resolve) => {
+      hold = resolve
+    })
+    const early = fakeAgent({ listsTools: true, holdsStart: () => held })
+    // The agent started for the turn, if the first one is let go of: each start takes the next.
+    const agent = fakeAgent({
+      listsTools: true,
+      steps: [
+        { does: 'uses', call: 'spec_write', arguments: { title: 'Invoice export', key: 't-1' } },
+      ],
+    })
+    opened = await openWindow(dataFolder, early, agent)
+    install(opened.bridge)
+    stops = [listenToAgents()]
+    const project = await opened.bridge.invoke('projects.create', {
+      name: 'Atlas',
+      tone: 'primary',
+      mainPath: main,
+    })
+    await openSessions(project.id)
+    const made = await startSession(project.id, 'claude', null)
+    const sessionId = made?.id ?? ''
+
+    const options = opened.bridge.invoke('agents.options', { sessionId })
+    const said = say(sessionId, 'Export the invoices with HT and TTC', 'spec')
+    for (let look = 0; look < 200; look += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- a poll: each look waits for the one before it
+      const [session] = await opened.bridge.invoke('sessions.list', { projectId: project.id })
+      if (session?.mission === 'define') break
+      // oxlint-disable-next-line no-await-in-loop -- the same poll, after its pause
+      await new Promise((resolve) => setTimeout(resolve, 10))
+    }
+    hold()
+    await options
+    expect(await said).toBeNull()
+
+    // The agent started while the Session was free took no turn: it listed the tools of a free
+    // Session. The one that took the first turn listed the define tools, and its write went in.
+    expect(early.answers.prompts).toEqual([])
+    const listed = agent.answers.tools.at(-1) ?? []
+    expect(listed).toContain('spec_write')
+    expect(listed).toContain('spec_read')
+    expect(agent.answers.used).toEqual([
+      expect.objectContaining({ tool: 'spec_write', isError: false }),
+    ])
+    const specs = await opened.bridge.invoke('specs.list', { projectId: project.id })
+    expect(specs.map((spec) => spec.title)).toEqual(['Invoice export'])
+  })
+
   test('the title is the first line of the request, cut on a word when it is long', () => {
     expect(requestedSpec('\n  Fix   the menu \nmore').title).toBe('Fix the menu')
     const long = requestedSpec(`${'word '.repeat(30)}end`).title

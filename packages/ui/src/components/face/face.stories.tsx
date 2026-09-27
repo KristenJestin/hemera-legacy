@@ -4,6 +4,7 @@ import { type ReactNode, useEffect, useState } from 'react'
 import { expect, userEvent, waitFor, within } from 'storybook/test'
 
 import { Button } from '../button/button.tsx'
+import { List, ListItem } from '../list/list.tsx'
 import { FACE_SIZES, Face } from './face.tsx'
 import { EXPRESSIONS, FACE_STATES, type FaceState } from './states.ts'
 
@@ -163,6 +164,122 @@ export const States: Story = {
     })
     const labels = FACE_STATES.map((state) => EXPRESSIONS[state].label)
     expect(new Set(labels).size).toBe(FACE_STATES.length)
+  },
+}
+
+/**
+ * The face inside a line of text, at the sizes a line takes. Small, it is drawn larger than its
+ * box and past it: the line keeps the height it has without a face, and the face still reads.
+ */
+export const InText: Story = {
+  parameters: { controls: { disable: true } },
+  render: () => (
+    <div className="flex max-w-sm flex-col gap-3 text-sm">
+      <p>
+        <Face state="writing" size="icon" seed={2} className="-my-1 mx-0.5 align-middle" /> Hemera is
+        writing the migration for the profile table, and will run the tests next.
+      </p>
+      <p>Hemera is writing the migration for the profile table, and will run the tests next.</p>
+      <p className="text-base">
+        <Face state="question" size="icon" seed={5} className="-my-1 mx-0.5 align-middle" /> Hemera has a
+        question before it goes on:{' '}
+        <Face state="permission" size="icon" seed={6} className="-my-1 mx-0.5 align-middle" /> may it write
+        outside the workspace?
+      </p>
+    </div>
+  ),
+  play: async ({ canvasElement }) => {
+    const [withFace, without] = [...canvasElement.querySelectorAll('p')]
+    // The face takes no more room than its box: the line is as tall as the one without it.
+    expect(withFace!.getBoundingClientRect().height).toBe(without!.getBoundingClientRect().height)
+  },
+}
+
+const RUNS = [
+  { agent: 'Claude Code', task: 'Profile migration', state: 'writing' },
+  { agent: 'Codex', task: 'Journal filter tests', state: 'running' },
+  { agent: 'OpenCode', task: 'Spec review', state: 'question' },
+  { agent: 'Claude Code', task: 'Workspace cleanup', state: 'done' },
+  { agent: 'Codex', task: 'Release notes', state: 'error' },
+  { agent: 'OpenCode', task: 'Nothing yet', state: 'asleep' },
+] as const satisfies readonly { agent: string; task: string; state: FaceState }[]
+
+/** The face in the rows of a table, where it stands for each agent's state beside its words. */
+export const InTable: Story = {
+  parameters: { controls: { disable: true } },
+  render: () => (
+    <table className="w-full max-w-xl border-collapse text-sm">
+      <thead>
+        <tr>
+          <th className="border border-border px-2 py-1 text-left font-medium">Agent</th>
+          <th className="border border-border px-2 py-1 text-left font-medium">Task</th>
+          <th className="border border-border px-2 py-1 text-left font-medium">State</th>
+        </tr>
+      </thead>
+      <tbody>
+        {RUNS.map((run, index) => (
+          <tr key={run.task}>
+            <td className="border border-border px-2 py-1">
+              <span className="flex items-center gap-2">
+                <Face state={run.state} size="icon" seed={index + 1} />
+                {run.agent}
+              </span>
+            </td>
+            <td className="border border-border px-2 py-1">{run.task}</td>
+            <td className="border border-border px-2 py-1 text-muted-foreground">
+              {EXPRESSIONS[run.state].label}
+            </td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  ),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    expect(canvas.getAllByRole('img')).toHaveLength(RUNS.length)
+  },
+}
+
+/** The face in the controls it will sit in: a list of sessions, and buttons. */
+export const InControls: Story = {
+  parameters: { controls: { disable: true } },
+  render: () => (
+    <div className="flex w-full max-w-sm flex-col gap-6">
+      <List label="Sessions">
+        <ListItem
+          icon={<Face state="thinking" size="sm" seed={1} />}
+          title="Profile migration"
+          description="Claude Code · thinking"
+          trailing="2 min"
+        />
+        <ListItem
+          icon={<Face state="blocked" size="sm" seed={2} />}
+          title="Journal filter tests"
+          description="Codex · blocked on a permission"
+          trailing="5 min"
+        />
+        <ListItem
+          icon={<Face state="done" size="sm" seed={3} />}
+          title="Spec review"
+          description="OpenCode · done"
+          trailing="1 h"
+        />
+      </List>
+      <div className="flex items-center gap-2">
+        <Button size="sm">
+          <Face state="reading" size="icon" seed={4} />
+          Open the session
+        </Button>
+        <Button size="md">
+          <Face state="question" size="icon" seed={5} />
+          Answer
+        </Button>
+      </div>
+    </div>
+  ),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    expect(canvas.getByRole('button', { name: /Answer/ })).toBeVisible()
   },
 }
 

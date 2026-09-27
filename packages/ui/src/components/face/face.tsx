@@ -1,5 +1,5 @@
 import { cn } from 'cn'
-import { type ReactNode, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { type ReactNode, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 
 import { crossfade, instant, useTransition } from '../../motion.ts'
 import { FaceFigure, type FacePainter } from './figure.tsx'
@@ -21,8 +21,8 @@ import { clock, onFrame } from './ticker.ts'
  * Telling two states apart never depends on the colour; it only says again what the shape says.
  * The state is said in words too — to whatever reads the page, and on hover.
  *
- * Small, it simplifies rather than blurs: no mouth, heavier strokes, gestures that travel further
- * so they still read. A reader asking for less movement gets still expressions and a soft
+ * Small, it simplifies rather than blurs: heavier strokes, gestures that travel further so they
+ * still read. A reader asking for less movement gets still expressions and a soft
  * cross-fade between them.
  */
 
@@ -68,13 +68,22 @@ export interface FaceProps {
   seed?: number | undefined
   /** What the face says in words; the state's own words when left out. */
   label?: string | undefined
+  /** Whether the mouth is drawn: at every size unless it is turned off here. */
+  mouth?: boolean | undefined
   /** Where the face sits; never how it looks. */
   className?: string | undefined
 }
 
-export function Face({ state, size = 'md', seed, label, className }: FaceProps): ReactNode {
+export function Face({
+  state,
+  size = 'md',
+  seed,
+  label,
+  mouth = true,
+  className,
+}: FaceProps): ReactNode {
   const reduced = useTransition(crossfade) === instant
-  const detail = DETAILS[detailOf(size)]
+  const detail = useMemo(() => ({ ...DETAILS[detailOf(size)], mouth }), [size, mouth])
   const [drawn] = useState(() => Math.floor(Math.random() * 2 ** 31))
   const chosen = seed ?? drawn
   const painter = useRef<FacePainter | null>(null)

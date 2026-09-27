@@ -11,6 +11,7 @@ import { Menu, type MenuItem } from '../components/menu/menu.tsx'
 import { Tooltip } from '../components/tooltip/tooltip.tsx'
 import {
   IconArchive,
+  IconCommand,
   IconDots,
   IconInfoCircle,
   IconMessages,
@@ -121,6 +122,11 @@ export interface SessionHeaderProps {
    * #18), and this is the one way to them, at the end of the head's line.
    */
   onOpenDetails?: (() => void) | undefined
+  /**
+   * Opens those details on their Commands tab (#217): the catalogue the Session can run, what it
+   * runs and the Workspace's services. Found at the head, where a command was not before.
+   */
+  onOpenCommands?: (() => void) | undefined
 }
 
 /**
@@ -148,6 +154,7 @@ export function SessionHeader({
   onArchive,
   archiveDisabled = false,
   onOpenDetails,
+  onOpenCommands,
 }: SessionHeaderProps): ReactNode {
   const titleControl = useRef<HTMLButtonElement>(null)
   const wasEditing = useRef(false)
@@ -197,6 +204,17 @@ export function SessionHeader({
         )}
       </div>
       <div className={ACTIONS}>
+        {onOpenCommands !== undefined && (
+          <Tooltip label="Commands">
+            <IconButton
+              variant="ghost"
+              size="sm"
+              icon={<IconCommand size="sm" />}
+              aria-label="Commands"
+              onClick={onOpenCommands}
+            />
+          </Tooltip>
+        )}
         {onOpenDetails !== undefined && (
           <Tooltip label="Session details">
             <IconButton

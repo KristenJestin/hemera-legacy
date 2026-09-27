@@ -1,6 +1,7 @@
 import { MAIN_WORKSPACE, PHASE_IDS } from '@hemera/core'
-import type { CommandRun, ContextView, Provided } from '@hemera/ipc'
+import type { CommandRun, ContextView, Provided, Workspace } from '@hemera/ipc'
 import type {
+  CatalogueCommandLine,
   CommandPanelRun,
   ContextCommand,
   ContextEntry,
@@ -49,6 +50,27 @@ export function panelRunsOf(runs: readonly CommandRun[], root: string | null): C
     // Its address as it stands, its variables and its conflict, as the thread's block shows them.
     ...runFactsOf(run),
   }))
+}
+
+/**
+ * The Project's catalogue as the Commands tab lists it, each command a row with its Run (#217):
+ * the one the Context view answered, which is the catalogue the agent may run as well. None until
+ * that view was read, and the tab then lists no catalogue rather than an empty one.
+ */
+export function catalogueLinesOf(view: ContextView | null): CatalogueCommandLine[] | undefined {
+  return view?.commands.map((one) => ({ name: one.name, line: one.line }))
+}
+
+/**
+ * The Workspace whose services the Commands tab lists (#217): the Session's own. `main`'s are
+ * asked for as `main`'s — null — whichever row its runs were written with, as its settings do.
+ */
+export function servicesWorkspaceOf(
+  workspaceId: string | null,
+  workspaces: readonly Workspace[],
+): string | null {
+  if (workspaceId === null) return null
+  return workspaces.find((one) => one.id === workspaceId)?.main === true ? null : workspaceId
 }
 
 /**

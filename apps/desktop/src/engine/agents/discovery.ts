@@ -3,7 +3,7 @@ import { accessSync, constants, existsSync, readFileSync, readdirSync, statSync 
 import { createRequire } from 'node:module'
 import { homedir } from 'node:os'
 import { delimiter, dirname, extname, join } from 'node:path'
-import { Context, Data, Effect, Layer } from 'effect'
+import { Context, Data, Deferred, Duration, Effect, Layer, Option } from 'effect'
 import { z } from 'zod'
 
 import type { InstallerTool } from '@hemera/ipc'
@@ -17,6 +17,7 @@ import {
 import { claude } from './adapters/claude.ts'
 import { codex } from './adapters/codex.ts'
 import { opencode } from './adapters/opencode.ts'
+import { AgentNotices } from './notices.ts'
 
 /**
  * The agents this machine has, and which of them can be used (D5-02, D5-21).
@@ -289,24 +290,107 @@ export interface DiscoveryService {
 export class Discovery extends Context.Service<Discovery, DiscoveryService>()('Discovery') {}
 
 /**
+ * How long a list waits for a version this engine has never heard before it answers without it.
+ *
+ * A version is the one thing a list asks by starting a process — the agent's own command with
+ * `--version`, a Node program behind a `.cmd` shim on Windows — and on a loaded machine that is
+ * seconds per command. The window gives a question five of them, and a list that waited for three
+ * commands to start was an agent menu left empty while a Session's agent was starting beside it.
+ * What a list cannot wait for arrives later: the answer is kept, and the window is told the agents
+ * changed, so it reads them again.
+ */
+const VERSION_GRACE = Duration.seconds(1)
+
+/**
  * Discovery over the machine it is given.
  *
- * Nothing here is memoized: the `PATH` changes while the application is running, an agent can
- * be installed while the window is open, and the page is read rarely enough that asking again
- * is cheaper than being wrong.
+ * Whether a command is on the `PATH` and whether its login file is there are asked of the file
+ * system on every call: the `PATH` changes while the application is running, an agent can be
+ * installed while the window is open, and neither question starts anything. The version is the
+ * exception. What each command printed is kept, by the path it resolved to, and every list asks
+ * it again in the background: a list answers from what is known, and a version that changed
+ * since — an update, a command answering for the first time — is announced through
+ * `AgentNotices.agents`, which is the window's cue to read the list again.
  */
 export const discoveryLayer = Layer.effect(
   Discovery,
   Effect.gen(function* () {
     const machine = yield* MachineEnvironment
+    const notices = yield* AgentNotices
+    const scope = yield* Effect.scope
+
+    /** What each command printed for `--version` last, by the path it resolved to. */
+    const printed = new Map<string, string | undefined>()
+    /** The question in flight for a path, so that two lists never start one command twice. */
+    const asking = new Map<string, Deferred.Deferred<void>>()
+    /** The paths a list answered without a version, because the command had not answered yet. */
+    const owed = new Set<string>()
+
+    /**
+     * Asks a command its version in the background, or joins the question already asked.
+     *
+     * The answer is kept, and the window is told when it is one no list has given yet: a version
+     * a list went without, or another one than the list gave.
+     */
+    const askVersion = (command: string, path: string): Effect.Effect<Deferred.Deferred<void>> =>
+      Effect.gen(function* () {
+        const running = asking.get(path)
+        if (running !== undefined) return running
+        const done = yield* Deferred.make<void>()
+        asking.set(path, done)
+        yield* Effect.forkIn(scope)(
+          machine.readVersion(command).pipe(
+            Effect.flatMap((answer) =>
+              Effect.sync(() => {
+                const known = printed.has(path)
+                const before = printed.get(path)
+                printed.set(path, answer)
+                const went = owed.delete(path)
+                if (went || (known && before !== answer)) notices.agents()
+              }),
+            ),
+            Effect.ensuring(
+              Effect.suspend(() => {
+                asking.delete(path)
+                return Deferred.succeed(done, undefined)
+              }),
+            ),
+          ),
+        )
+        return done
+      })
+
+    /**
+     * The version to give for a command found at a path: the one it printed last and, the first
+     * time, the one it prints within `VERSION_GRACE`. Either way it is asked again.
+     */
+    const versionAt = (command: string, path: string): Effect.Effect<string | undefined> =>
+      Effect.gen(function* () {
+        const known = printed.has(path)
+        const done = yield* askVersion(command, path)
+        if (!known) {
+          const waited = yield* Deferred.await(done).pipe(Effect.timeoutOption(VERSION_GRACE))
+          if (Option.isNone(waited) && asking.has(path)) owed.add(path)
+        }
+        return printed.get(path)
+      })
+
+    /**
+     * Where the agent's command is and whether it is signed in: the file system's answer, with
+     * nothing started for it. The login is asked before the command because the answer does not
+     * depend on it: a reader who signed in and then removed the command is still signed in.
+     */
+    const presence = (adapter: AgentAdapter) =>
+      Effect.gen(function* () {
+        const authenticated = yield* machine.holds(adapter.loginFiles(machine.home, machine.env))
+        const path = yield* machine.locate(adapter.command)
+        return { authenticated, path }
+      })
 
     /** One agent's answer: found or not, signed in or not, and the version it gave. */
     const probe = (adapter: AgentAdapter): Effect.Effect<DiscoveredAgent, never> =>
       Effect.gen(function* () {
-        // Asked before the command is looked for, because the answer does not depend on it: a
-        // reader who signed in and then removed the command is still signed in.
-        const authenticated = yield* machine.holds(adapter.loginFiles(machine.home, machine.env))
-        const path = yield* machine.locate(adapter.command)
+        const { authenticated, path } = yield* presence(adapter)
         if (path === undefined) {
           return {
             id: adapter.id,
@@ -319,8 +403,8 @@ export const discoveryLayer = Layer.effect(
             latest: null,
           }
         }
-        const printed = yield* machine.readVersion(adapter.command)
-        const version = printed === undefined ? undefined : adapter.readVersion(printed)
+        const answer = yield* versionAt(adapter.command, path)
+        const version = answer === undefined ? undefined : adapter.readVersion(answer)
         if (version === undefined) {
           return {
             id: adapter.id,
@@ -362,8 +446,8 @@ export const discoveryLayer = Layer.effect(
       })
 
     return {
-      // The three commands are asked at once: the page waits for the slowest of them, which is
-      // the difference between one command that will not answer and three of them in a row.
+      // The three agents are asked at once, and a version none of them has answered yet is waited
+      // for `VERSION_GRACE` at most: a list never waits on three processes being started.
       list: () =>
         Effect.forEach(AGENT_PROVIDERS, (id) => probe(ADAPTERS[id]), { concurrency: 'unbounded' }),
       resolve: (id) =>
@@ -373,8 +457,11 @@ export const discoveryLayer = Layer.effect(
           // has the agent and has signed it in is what decides if there is anything to start,
           // and both are refused here rather than by a process that would be started to find
           // out (D5-17, D5-21).
-          const found = yield* probe(adapter)
-          if (!found.found) return yield* Effect.fail(new AgentNotInstalledError({ id }))
+          // The file system alone is asked: a Session being started has no use for the version,
+          // and a command started to print one was a start waiting on a second process.
+          const found = yield* presence(adapter)
+          if (found.path === undefined)
+            return yield* Effect.fail(new AgentNotInstalledError({ id }))
           if (!found.authenticated) return yield* Effect.fail(new AgentNotSignedInError({ id }))
 
           const own = yield* ownOf(adapter)

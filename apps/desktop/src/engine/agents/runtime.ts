@@ -397,6 +397,12 @@ export interface AgentRuntimeService {
    */
   readonly specChanged: (specId: string) => Effect.Effect<void>
   /**
+   * Hands the Session's agent what waits for it, once it holds its session — started and
+   * resumed first when it is not running and something waits (issue #211). The Retry of a
+   * delivery the agent did not take. Returns at once, never waiting on a turn.
+   */
+  readonly handOver: (sessionId: string) => Effect.Effect<void>
+  /**
    * Queues a sub-agent's result for the Session's agent, handed over at its next safe point as
    * an `internal` delivery, never as a message of the user's (D7-14). Returns at once.
    */
@@ -3301,6 +3307,7 @@ export const runtimeLayer = Layer.effect(
       alive: Effect.sync(() => [...live.keys()]),
       running: (sessionId) => turns.has(sessionId) || starting.has(sessionId),
       specChanged,
+      handOver: handOverWhenReady,
       deliverInternal: (sessionId, text) =>
         context.queueInternal(sessionId, text).pipe(
           Effect.tap(() => handOverWhenReady(sessionId)),

@@ -231,6 +231,7 @@ const RELAYED = [
   'agents.stop',
   'agents.decide',
   'agents.resume',
+  'agents.handOver',
   'agents.check',
   'agents.update',
   // What Hemera lends the agent: the commands of a Project and the runs they became, and what a

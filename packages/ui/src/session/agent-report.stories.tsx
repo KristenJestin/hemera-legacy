@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
-import { expect, within } from 'storybook/test'
+import { expect, fn, userEvent, within } from 'storybook/test'
 
 import { AgentReport } from './agent-report.tsx'
 
@@ -10,7 +10,7 @@ import { AgentReport } from './agent-report.tsx'
 const meta = {
   title: 'Blocks/Session/AgentReport',
   component: AgentReport,
-  tags: ['autodocs', 'new'],
+  tags: ['autodocs', 'updated'],
   parameters: { layout: 'padded' },
   args: {
     title: 'The agent reported an error',
@@ -21,6 +21,7 @@ const meta = {
     title: { control: 'text', description: 'What happened, in one sentence.' },
     detail: { control: 'text', description: 'What the agent wrote or asked, word for word.' },
     at: { control: 'text', description: 'When, already written for the platform.' },
+    onRetry: { description: 'Tries again what failed; no Retry is drawn without it.' },
     className: { table: { disable: true } },
   },
 } satisfies Meta<typeof AgentReport>
@@ -73,5 +74,20 @@ export const WithoutDetail: Story = {
     const canvas = within(canvasElement)
     await expect(canvas.getByText('The agent reported an error')).toBeVisible()
     await expect(canvasElement.querySelectorAll('p')).toHaveLength(1)
+  },
+}
+
+/** A delivery the agent did not take (issue #211): said in words, with Retry to hand it over again. */
+export const WithRetry: Story = {
+  args: {
+    title: 'Hemera could not hand this over to the agent',
+    detail: 'no session has been opened',
+    onRetry: fn(),
+  },
+  play: async ({ args, canvasElement }) => {
+    const canvas = within(canvasElement)
+    await expect(canvas.getByText('Hemera could not hand this over to the agent')).toBeVisible()
+    await userEvent.click(canvas.getByRole('button', { name: 'Retry' }))
+    await expect(args.onRetry).toHaveBeenCalledOnce()
   },
 }

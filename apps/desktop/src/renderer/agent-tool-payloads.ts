@@ -557,6 +557,29 @@ export function elsewhereOf(run: CommandRun, own: string | undefined): string | 
 export interface ContextDeliveryDrawn {
   readonly id: string
   readonly body: string
+  /** Whether it is still waiting to be handed over, which the thread says as a quiet row. */
+  readonly waiting: boolean
+}
+
+/**
+ * What waits to be handed over, by the kind of the delivery, said as the reader would say it
+ * (issue #211). What is not a kind of these is said in general terms.
+ */
+function waitingWords(kind: string | undefined): string {
+  switch (kind) {
+    case 'answer':
+      return 'The answer will be handed over when the agent is ready.'
+    case 'edit':
+      return 'Your edits will be handed over when the agent is ready.'
+    case 'internal':
+      return 'The result of a sub-agent will be handed over when the agent is ready.'
+    case 'instructions':
+      return 'The new instructions of the Workspace will be handed over when the agent is ready.'
+    case 'notice':
+      return 'What Hemera had to tell the agent will be handed over when it is ready.'
+    default:
+      return 'What Hemera had for the agent will be handed over when it is ready.'
+  }
 }
 
 /**
@@ -565,14 +588,52 @@ export interface ContextDeliveryDrawn {
  * `null` too for the answers to the Spec's questions once handed over (issue #149): the answer is
  * drawn as the reader's own message where it was given, and a line of Hemera's saying it handed
  * it over, with a fingerprint, said the reader's words a second time in words nobody wrote. One
- * that could not be handed over yet is still said: that is news.
+ * that could not be handed over yet is still said: that is news. It is said in words, with no
+ * fingerprint, because what it is waiting for is the agent and not an id (issue #211).
  */
 export function contextDeliveryOf(entry: SessionEntry): ContextDeliveryDrawn | null {
   const read = readPayload(contextDeliveryPayloadSchema, entry.payload)
   if (read === null) return null
-  if (read.kind === 'answer' && entry.state !== 'failed') return null
+  if (entry.state === 'failed') {
+    return { id: entry.id, body: waitingWords(read.kind), waiting: true }
+  }
+  if (read.kind === 'answer') return null
   const short = read.fingerprint.slice(0, FINGERPRINT_CHARACTERS)
-  return { id: entry.id, body: `${entry.body} (${short})` }
+  return { id: entry.id, body: `${entry.body} (${short})`, waiting: false }
+}
+
+/** A failure of Hemera's or of the agent's, drawn as an error row rather than as a message. */
+const failureNotePayloadSchema = z.object({ reason: z.enum(['delivery_failed', 'prompt_failed']) })
+
+/** What an error row draws: a sentence in words, the error as it came, and whether to retry. */
+export interface FailureNoteDrawn {
+  title: string
+  detail: string
+  /** Whether a Retry is offered: a delivery is Hemera's to hand over again. */
+  retry: boolean
+}
+
+/**
+ * The error row a note is, or null for a note that is not an error (issue #211).
+ *
+ * A turn that failed leaves the error it failed with in a note, and a raw error — "no session
+ * has been opened" — drawn as a line of Hemera's read as if Hemera were saying it. It is said in
+ * words, with what came under it as #131 draws what the agent reported. A delivery that failed
+ * offers Retry: what waits is still waiting, and Hemera can hand it over again. A prompt that
+ * failed does not: sending the message again is the reader's to do, from the composer.
+ */
+export function failureNoteOf(entry: SessionEntry): FailureNoteDrawn | null {
+  if (entry.kind !== 'note') return null
+  const read = readPayload(failureNotePayloadSchema, entry.payload)
+  if (read === null) return null
+  if (read.reason === 'delivery_failed') {
+    return {
+      title: 'Hemera could not hand this over to the agent',
+      detail: entry.body,
+      retry: true,
+    }
+  }
+  return { title: 'The agent answered with an error', detail: entry.body, retry: false }
 }
 
 /**

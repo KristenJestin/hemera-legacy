@@ -631,6 +631,23 @@ describe('An answer given after a restart reaches the agent', () => {
       }),
     )
   })
+
+  test('Retry on a delivery that failed hands over what waits, the agent started if it is not running', async () => {
+    const opened = application(dataFolder)
+    const { sessionId, specId, questionId } = await askedThenQuit(opened)
+
+    const reopened = fakeAgent()
+    await opened(reopened)(
+      Effect.gen(function* () {
+        // The answer is recorded and nothing asked for its delivery: what a failed one leaves.
+        yield* (yield* Specs).answerQuestion({ specId, questionId, optionId: 'csv' })
+        yield* (yield* AgentRuntime).handOver(sessionId)
+
+        yield* heldInThread(sessionId, deliveredAlone)
+        expect(answersTo(reopened)).toEqual([ANSWERED])
+      }),
+    )
+  })
 })
 
 describe('A define Session whose agent lost its session is briefed again', () => {

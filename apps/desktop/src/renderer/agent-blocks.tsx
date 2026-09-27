@@ -37,6 +37,7 @@ import {
   commandRunOf,
   contextDeliveryOf,
   elsewhereOf,
+  failureNoteOf,
   hemeraPermissionOf,
   hemeraToolCallOf,
   reportedFailureOf,
@@ -326,6 +327,8 @@ export interface AgentContext {
   onOpenUrl: (url: string) => void
   /** Stops a run and everything it started. */
   onStopRun: (runId: string) => void
+  /** Hands the agent again what waits for it, after a delivery it did not take (issue #211). */
+  onHandOver: () => void
   /**
    * The agent's report of a call, by the identifier the agent gave it: what a question about
    * that call is headed by — the label and the subject of its line (recette 3 of 23 September
@@ -590,6 +593,21 @@ export function drawEntry(entry: SessionEntry, context: AgentContext): ReactNode
   }
 
   if (entry.kind === 'note') {
+    // An error a turn failed with is a row in words, never the raw error as a line of Hemera's.
+    const failure = failureNoteOf(entry)
+    if (failure !== null) {
+      return (
+        <AgentReport
+          title={failure.title}
+          detail={failure.detail}
+          at={new Date(entry.createdAt).toLocaleTimeString('en-GB', {
+            hour: '2-digit',
+            minute: '2-digit',
+          })}
+          onRetry={failure.retry ? context.onHandOver : undefined}
+        />
+      )
+    }
     const report = agentReportOf(entry)
     if (report !== null) {
       return (
@@ -654,7 +672,13 @@ export function drawEntry(entry: SessionEntry, context: AgentContext): ReactNode
     const drawn = contextDeliveryOf(entry)
     if (drawn === null) return null
     return (
-      <MessageGroup author="hemera" name="Hemera" lines={[{ id: drawn.id, body: drawn.body }]} />
+      <MessageGroup
+        author="hemera"
+        name="Hemera"
+        // What still waits for the agent is a state of Hemera's, said as a quiet row (#211).
+        tone={drawn.waiting ? 'ghost' : undefined}
+        lines={[{ id: drawn.id, body: drawn.body }]}
+      />
     )
   }
 

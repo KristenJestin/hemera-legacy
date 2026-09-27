@@ -28,9 +28,9 @@ import { PlanPanel, type PlanEntry } from './plan-panel.tsx'
  *
  * Three tabs and not three stacked panels, because a reader who comes back to a Session where a
  * command is running wants that tab, not a scroll; the tab it opens on is the page's to say.
- * The dialog is the same height on all three (third review of #18): one that took the height of
- * each tab changed size under the hand switching them. What changes is the panel, crossfaded in
- * place, and a panel taller than the dialog scrolls inside it.
+ * The dialog is as tall as the tab it shows, and goes from the height of one tab to the height of
+ * the next on `morph` rather than at once (issue #183): the panel is crossfaded in place while
+ * the dialog around it grows or folds to it, and a panel taller than the dialog scrolls inside it.
  *
  * Nothing here is a second inbox: what is listed is what the turn has done, and a file is listed
  * because a call named it.
@@ -57,8 +57,8 @@ const TRACE = 'flex pt-1'
  * A tab's panel, faded in as it is chosen.
  *
  * The tabs mount only the panel that is shown, so each one arrives as it is chosen and plays the
- * `crossfade` from there; the one that was left is gone at once, and the dialog around them does
- * not move.
+ * `crossfade` from there; the one that was left is gone at once, and the dialog around them
+ * follows the height of the one that came.
  */
 function Crossfaded({ children }: { children: ReactNode }): ReactNode {
   const transition = useTransition(crossfade)

@@ -302,6 +302,13 @@ export {
   type CommandProposalProps,
   type CommandProposalState,
 } from './activity/command-proposal.tsx'
+/** A change to the Project's setup the agent proposes, and the human's answer (#218). */
+export {
+  SetupProposal,
+  type SetupProposalDetail,
+  type SetupProposalProps,
+  type SetupProposalState,
+} from './activity/setup-proposal.tsx'
 /** The seven types of a command and the icon the design system fixes for each (D8-07). */
 export {
   COMMAND_SCOPES,

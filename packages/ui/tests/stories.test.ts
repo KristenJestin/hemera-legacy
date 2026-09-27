@@ -388,6 +388,8 @@ describe('Catalogue, coquille et surfaces, et rien d’autre', () => {
       'Sidebar',
       'Gutter',
       'CommandPalette',
+      // What the window shows while it starts, before its first page is ready.
+      'StartScreen',
     ]
     const surfaces = [
       'ProjectDialog',

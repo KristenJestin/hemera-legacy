@@ -2,8 +2,8 @@
  * The Spec entries of a thread, as their blocks are drawn from them (design D7-01, D7-07, D7-09).
  *
  * `agent-blocks.tsx` draws a `mission_brief` entry as the folded Hemera line, a `spec_question`
- * as the question card — folded to its answer once the `spec_answer` entry written beside it is
- * in the thread — and a `spec_proposal` as the agent's proposal. What each block is handed is
+ * as the question card — its answer marked in it once the `spec_answer` entry written beside it
+ * is in the thread — and a `spec_proposal` as the agent's proposal. What each block is handed is
  * read by `spec-entries.ts`, which is what is tested here: the design system is a browser's to
  * load, and its blocks are proved in Storybook.
  */
@@ -12,12 +12,11 @@ import { describe, expect, test } from 'vite-plus/test'
 
 import type { SessionEntry } from '@hemera/ipc'
 import {
-  answerOf,
-  answerWords,
   briefOf,
   proposalIdOf,
   proposalOf,
   questionEntryOf,
+  questionMarkOf,
   waitsForAnswer,
 } from '#renderer/spec-entries.ts'
 
@@ -120,94 +119,31 @@ describe('A question is asked and answered in the chat', () => {
   })
 })
 
-describe('A picked answer reads as a human choice, not as a typed message', () => {
-  test('an option chosen is the choice, lettered as the card lettered it, under its question', () => {
+describe('An answered question stays in place, its answer marked in it', () => {
+  test('an open question marks nothing on the rail', () => {
+    expect(questionMarkOf(QUESTION, [QUESTION], null)).toBeUndefined()
+  })
+
+  test('answered by a choice, the question is marked on the rail by the choice’s label', () => {
     const answer = entry(
       'spec_answer',
       JSON.stringify({ questionId: 'q-date', optionId: 'payment' }),
       'answer',
     )
-    expect(answerOf(answer, [QUESTION, answer])).toEqual({
-      question: 'Which date decides the month?',
-      choices: [{ letter: 'B', label: 'The payment date', recommended: undefined }],
-    })
+    expect(questionMarkOf(QUESTION, [QUESTION, answer], null)).toBe('The payment date')
   })
 
-  test('the recommended choice keeps its mark', () => {
-    const answer = entry(
-      'spec_answer',
-      JSON.stringify({ questionId: 'q-date', optionId: 'issue' }),
-      'answer',
-    )
-    expect(answerOf(answer, [QUESTION, answer])?.choices).toEqual([
-      { letter: 'A', label: 'The issue date', recommended: true },
-    ])
-  })
-
-  test('words typed are the Other choice, the card’s last letter, with the words as typed', () => {
+  test('answered in the reader’s own words, it is marked by the words typed', () => {
     const own = entry(
       'spec_answer',
       JSON.stringify({ questionId: 'q-date', text: 'The delivery date' }),
       'own',
     )
-    const view = answerOf(own, [QUESTION, own])
-    expect(view).toEqual({
-      question: 'Which date decides the month?',
-      choices: [{ letter: 'C', label: 'Other' }],
-      text: 'The delivery date',
-    })
-    expect(answerWords(view!)).toBe('The delivery date')
+    expect(questionMarkOf(QUESTION, [QUESTION, own], null)).toBe('The delivery date')
   })
 
-  test('the rail marks a choice by its label', () => {
-    const answer = entry(
-      'spec_answer',
-      JSON.stringify({ questionId: 'q-date', optionId: 'payment' }),
-      'answer',
-    )
-    expect(answerWords(answerOf(answer, [QUESTION, answer])!)).toBe('The payment date')
-  })
-
-  test('an answer whose question is no longer in the thread is still drawn, without it', () => {
-    const chosen = {
-      ...entry(
-        'spec_answer',
-        JSON.stringify({ questionId: 'q-gone', optionId: 'month' }),
-        'chosen',
-      ),
-      body: 'One CSV per month',
-    }
-    expect(answerOf(chosen, [chosen])).toEqual({
-      question: undefined,
-      choices: [{ letter: undefined, label: 'One CSV per month' }],
-    })
-    const typed = entry(
-      'spec_answer',
-      JSON.stringify({ questionId: 'q-gone', text: 'One per client' }),
-      'typed',
-    )
-    expect(answerOf(typed, [typed])).toEqual({
-      question: undefined,
-      choices: [{ letter: undefined, label: 'Other' }],
-      text: 'One per client',
-    })
-  })
-
-  test('an option the question no longer holds is drawn in the words written on the entry', () => {
-    const unknown = {
-      ...entry('spec_answer', JSON.stringify({ questionId: 'q-date', optionId: 'refund' }), 'x'),
-      body: 'The refund date',
-    }
-    expect(answerOf(unknown, [QUESTION, unknown])).toEqual({
-      question: 'Which date decides the month?',
-      choices: [{ letter: undefined, label: 'The refund date' }],
-    })
-    const bare = { ...unknown, body: '' }
-    expect(answerOf(bare, [bare])?.choices).toEqual([{ letter: undefined, label: 'refund' }])
-  })
-
-  test('an entry that does not parse is not drawn', () => {
-    expect(answerOf(entry('spec_answer', '{'), [QUESTION])).toBe(null)
+  test('an entry that does not parse marks nothing', () => {
+    expect(questionMarkOf(entry('spec_question', '{'), [], null)).toBeUndefined()
   })
 })
 

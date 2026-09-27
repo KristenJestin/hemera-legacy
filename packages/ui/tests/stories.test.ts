@@ -17,7 +17,7 @@
  */
 
 import { execFileSync } from 'node:child_process'
-import { readFileSync, readdirSync } from 'node:fs'
+import { existsSync, readFileSync, readdirSync } from 'node:fs'
 import { join, relative } from 'node:path'
 import { describe, expect, test } from 'vite-plus/test'
 
@@ -416,8 +416,6 @@ describe('Catalogue, coquille et surfaces, et rien d’autre', () => {
       'MessageGroup',
       'MessageRow',
       'MessageText',
-      // #165: the reader's answer to a question, drawn as the choice they made.
-      'AnswerChoice',
       'MessageBubble',
       'MessageHeader',
       'MessageFooter',
@@ -634,6 +632,10 @@ describe('Les cinq racines du catalogue', () => {
     // The alphabet, asked for rather than hoped for: Storybook keeps the index's own order for
     // every name the list above does not mention, so the method is what makes the rule true.
     expect(settings).toContain("method: 'alphabetical'")
+  })
+
+  test('an exploration goes once the variant chosen is built: the questions, card B (#199)', () => {
+    expect(existsSync(join(designSystem, 'explorations', 'questions'))).toBe(false)
   })
 
   test('every story file is filed under one of the five roots', () => {

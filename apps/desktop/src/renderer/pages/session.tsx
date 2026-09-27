@@ -56,7 +56,7 @@ import { whenOf } from '../journal-lines.ts'
 import { contextListsOf, detailsTabsOf, openingTabOf, panelRunsOf } from '../session-details.ts'
 import { openSessions, type OfferedWorkspace, workspaceFixedOf } from '../sessions-store.ts'
 import { selectEntry } from '../shell-store.ts'
-import { type DefinedSpec, answerOf, answerWords, waitsForAnswer } from '../spec-entries.ts'
+import { type DefinedSpec, questionMarkOf, waitsForAnswer } from '../spec-entries.ts'
 import {
   answerQuestion,
   askForBuild,
@@ -370,6 +370,9 @@ export function SessionPage({
   // proposal just made, and it arrives rather than standing there (issue #130). The page is
   // keyed by the Session, so this is read once per Session opened.
   const openedFree = useRef(session.mission === 'free')
+  // The questions pinned above the composer since the page opened: one answered comes back to
+  // its place in the thread in front of the reader, and draws its check there (issue #199).
+  const waitedRef = useRef(new Set<string>())
   const defined = stored.snapshot?.spec.id === session.specId ? stored.snapshot : null
   // New Spec's provisional Spec, while this Session has no Spec of its own (issue #198).
   const provisional = stored.provisional.get(session.id) ?? null
@@ -514,6 +517,7 @@ export function SessionPage({
    * agent goes on writing under it, and the reader had to scroll back up past all of it to answer.
    */
   const pinned: { id: string; content: ReactNode }[] = []
+  const waited = waitedRef.current
   for (let at = 0; at < thread.length; at += 1) {
     const entry = thread[at]
     if (entry === undefined || folded.hidden.has(entry.id)) continue
@@ -536,6 +540,7 @@ export function SessionPage({
         specId: session.specId,
         defined: definedOf(defined, stored.revisions),
         asked,
+        waited,
         onAnswer: (questionId, answer) => void answerQuestion(questionId, answer),
         onCreate: (title, type) => void createSpec(session.id, type, title),
         onJoin: (proposalId) => void joinSpec(session.id, proposalId),
@@ -547,12 +552,13 @@ export function SessionPage({
     if (block === null) continue
     if (waitsForAnswer(entry, thread, session.specId, asked)) {
       pinned.push({ id: entry.id, content: block })
+      // Answered, it comes back to the thread in front of the reader, and draws its check there.
+      waited.add(entry.id)
       continue
     }
     // An answer to a question is the reader's, and marked on the rail as their messages are (issue
-    // #149), by what they typed or the choices they made.
-    const answer = entry.kind === 'spec_answer' ? answerOf(entry, thread) : null
-    const mark = answer === null ? undefined : answerWords(answer)
+    // #149), by what they typed or the choice they made; the card that holds it carries the mark.
+    const mark = entry.kind === 'spec_question' ? questionMarkOf(entry, thread, asked) : undefined
     byEntry.set(entry.id, { id: entry.id, mark, content: block })
     groupings.set(entry.id, groupingOf(drawn))
   }

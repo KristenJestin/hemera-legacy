@@ -544,8 +544,9 @@ export const LastQuestionAnswered: Story = {
     const canvas = within(canvasElement)
     await userEvent.click(canvas.getByRole('button', { name: 'Mark ready' }))
     await expect(canvas.getByRole('alert')).toHaveTextContent(/the credit-note question/)
+    await userEvent.click(canvas.getByRole('button', { name: /Other/ }))
     await userEvent.type(
-      canvas.getByRole('textbox', { name: 'Other' }),
+      await canvas.findByRole('textbox', { name: 'Other' }),
       'Negative rows, marked by a type column.{Enter}',
     )
     await expect(

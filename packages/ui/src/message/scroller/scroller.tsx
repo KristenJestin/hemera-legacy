@@ -1,6 +1,6 @@
 import { cn } from 'cn'
 import { LayoutGroup, motion } from 'motion/react'
-import { type ReactNode, useCallback, useEffect, useRef, useState } from 'react'
+import { type ReactNode, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 
 import { Button } from '../../components/button/button.tsx'
 import { Tooltip } from '../../components/tooltip/tooltip.tsx'
@@ -221,13 +221,16 @@ export function MessageScroller({ label, entries, className }: MessageScrollerPr
   // there to be measured — a scroll container's own box never changes when its content grows,
   // and the content's does.
   const list = useRef<HTMLDivElement>(null)
-  // Where each entry of the thread is, by index, and `null` for the ones the rail steps over.
-  // Read off the elements themselves, which is a place in a column already laid out and not a
-  // size taken off a string: `offsetTop` and a scroll position are the same axis, and the two
-  // are what tells the rail where the reader is.
-  const anchors = useRef<(HTMLElement | null)[]>([])
-  // The list is as long as the thread drawn now: a thread that got shorter leaves no stale node.
-  anchors.current.length = entries.length
+  // Where each entry of the thread is, by its id. Read off the elements themselves, which is a
+  // place in a column already laid out and not a size taken off a string: `offsetTop` and a
+  // scroll position are the same axis, and the two are what tells the rail where the reader is.
+  //
+  // By id and not by index: a motion element hands its ref the element once, when it mounts, and
+  // never again. An index taken then is wrong as soon as an entry is written above it, and one
+  // written past entries that moved leaves holes in an array read as though it had none.
+  const anchors = useRef(new Map<string, HTMLElement>())
+  // The ids the rail draws a mark for, in the thread's order: what the walk below counts.
+  const marked = useRef<readonly string[]>([])
   const [active, setActive] = useState(-1)
   const [overflowing, setOverflowing] = useState(false)
   const [atEdge, setAtEdge] = useState(true)
@@ -257,11 +260,10 @@ export function MessageScroller({ label, entries, className }: MessageScrollerPr
     const middle = node.scrollTop + node.clientHeight / 2
     let mark = -1
     let seen = -1
-    // An entry whose node is not attached yet leaves a hole in the list: the walk passes over it.
-    for (const anchor of anchors.current) {
-      if (anchor === null || anchor === undefined) continue
+    for (const id of marked.current) {
       seen += 1
-      if (anchor.offsetTop < middle) mark = seen
+      const anchor = anchors.current.get(id)
+      if (anchor !== undefined && anchor.offsetTop < middle) mark = seen
     }
     const edge = node.scrollHeight - node.scrollTop - node.clientHeight <= LIVE_EDGE
     // At the live edge the reading position is the last thing written, whatever the middle of
@@ -369,8 +371,8 @@ export function MessageScroller({ label, entries, className }: MessageScrollerPr
    */
   const goToMark = (id: string): void => {
     const node = box.current
-    const anchor = anchors.current[entries.findIndex((entry) => entry.id === id)]
-    if (node === null || anchor === null || anchor === undefined) return
+    const anchor = anchors.current.get(id)
+    if (node === null || anchor === undefined) return
     pinned.current = false
     requestAnimationFrame(() => {
       anchor.scrollIntoView({ block: 'center', behavior: still ? 'auto' : 'smooth' })
@@ -378,6 +380,10 @@ export function MessageScroller({ label, entries, className }: MessageScrollerPr
   }
 
   const marks = entries.filter(isMarked).map((entry) => ({ id: entry.id, label: entry.mark }))
+  // Handed to the walk once the thread is laid out, which is before anything can measure it.
+  useLayoutEffect(() => {
+    marked.current = marks.map((one) => one.id)
+  })
 
   return (
     <div className={cn(FRAME, className)}>
@@ -414,16 +420,16 @@ export function MessageScroller({ label, entries, className }: MessageScrollerPr
           block simply being where it belongs.
           */}
           <LayoutGroup>
-            {entries.map((entry, index) => (
+            {entries.map((entry) => (
               <motion.div
                 key={entry.id}
                 layout={still ? false : 'position'}
                 transition={transition}
                 ref={(node) => {
-                  // A day registers as nothing, and so does an entry that asked for no mark: the
-                  // rail counts what it drew and only what it drew, so the walk above lands on
-                  // the same index the rail drew its marks with.
-                  anchors.current[index] = isMarked(entry) ? node : null
+                  // Every entry is registered; the walk above reads only the ones the rail drew
+                  // a mark for, so it lands on the same index the rail drew its marks with.
+                  if (node === null) anchors.current.delete(entry.id)
+                  else anchors.current.set(entry.id, node)
                 }}
               >
                 {entry.content}

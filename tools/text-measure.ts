@@ -56,6 +56,9 @@ const COMPUTED_SIZE = /getComputedStyle\([\s\S]*?\)\s*\.\s*(width|height)/g
  *
  * The room of a Workspace row is the same case, a height at a time: the details of a row arrive by
  * pieces, so the height of the room is one it follows rather than one it decided (issue #108).
+ * The body of a dialog is that case again (issue #183): it grows and folds to what it holds, and
+ * what it holds was laid out by the theme; the height it reads is one it follows, never one it
+ * decides.
  */
 export const MEASURE_EXCEPTIONS = [
   'packages/ui/src/shell/gutter.tsx',
@@ -63,6 +66,7 @@ export const MEASURE_EXCEPTIONS = [
   'packages/ui/src/composer/effort-slider.tsx',
   'packages/ui/src/motion.ts',
   'packages/ui/src/workspace/workspace-list.tsx',
+  'packages/ui/src/components/dialog/dialog.tsx',
 ]
 
 export interface Refusal {

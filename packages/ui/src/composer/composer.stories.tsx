@@ -264,7 +264,7 @@ export const Empty: Story = {
     expect(canvas.queryByText('Choose an agent first')).toBeNull()
     expect(canvas.getByRole('button', { name: /New Spec/ })).toBeDisabled()
     // The Workspace is a real choice, drawn as one.
-    expect(canvas.getByRole('combobox', { name: 'Workspace' })).toHaveTextContent('main')
+    expect(canvas.getByRole('combobox', { name: /^Workspace:/ })).toHaveTextContent('main')
     // Nothing is attached, so the header is not there at all.
     expect(canvas.queryByText('Attached')).toBeNull()
 
@@ -277,7 +277,7 @@ export const Empty: Story = {
     expect(canvas.queryByRole('combobox', { name: 'Mode' })).toBeNull()
 
     // The foot below it: the Workspace, and the two buttons at the other end. One line.
-    const pill = canvas.getByRole('combobox', { name: 'Workspace' })
+    const pill = canvas.getByRole('combobox', { name: /^Workspace:/ })
     expect(onOneLine(pill, send), 'the foot of the composer wrapped').toBe(true)
     // And the foot is below the box, not beside it.
     expect(menu.getBoundingClientRect().bottom).toBeLessThanOrEqual(

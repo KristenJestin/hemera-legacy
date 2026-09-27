@@ -2716,14 +2716,36 @@ export const runtimeLayer = Layer.effect(
       ).catch(() => undefined)
     }
 
+    /**
+     * Hands a Session's agent what waits for it — an answer, an edit, a sub-agent's result — once
+     * that agent holds its own session again (issue #211). An agent still being started, as the
+     * page reading what it offers starts it after a restart, runs before it has resumed or loaded
+     * its session, and a prompt sent to it then is refused: the delivery waits for the start to
+     * end, through the same gate. One that is not running is started, and its session taken back
+     * as a prompt of the user's would, when something waits for it.
+     */
+    const handOverWhenReady = (sessionId: string) =>
+      Effect.gen(function* () {
+        if (!live.has(sessionId)) {
+          const spec = yield* briefFor(sessionId).pipe(
+            Effect.provideService(Database, database),
+            Effect.orElseSucceed(() => null),
+          )
+          const queued = yield* context
+            .queuedInternal(sessionId)
+            .pipe(Effect.orElseSucceed(() => []))
+          if (spec === null && queued.length === 0) return
+        }
+        wakeSoon(sessionId)
+      })
+
     const specChanged = (specId: string) =>
       definedBy(specId).pipe(
         Effect.provideService(Database, database),
-        Effect.map((defining) => {
-          // A Session whose agent is not running is handed it when its next prompt starts one.
-          for (const sessionId of defining) if (live.has(sessionId)) deliverSoon(sessionId, false)
-        }),
-        // Unread, it waits for that next prompt all the same.
+        Effect.flatMap((defining) =>
+          Effect.forEach(defining, handOverWhenReady, { discard: true }),
+        ),
+        // Unread, it waits for the next prompt, which hands it over itself.
         Effect.ignore,
       )
 
@@ -3281,12 +3303,7 @@ export const runtimeLayer = Layer.effect(
       specChanged,
       deliverInternal: (sessionId, text) =>
         context.queueInternal(sessionId, text).pipe(
-          Effect.tap(() =>
-            Effect.sync(() => {
-              // An agent that is not running is handed it when its next prompt starts one.
-              if (live.has(sessionId)) deliverSoon(sessionId, false)
-            }),
-          ),
+          Effect.tap(() => handOverWhenReady(sessionId)),
           Effect.catch((refusal) =>
             diagnostic.write(
               `agents: the result of a sub-agent for Session ${sessionId} could not be queued: ${describe(refusal)}`,

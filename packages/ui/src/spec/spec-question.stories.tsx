@@ -60,13 +60,19 @@ export const Open: Story = {
   },
 }
 
-/** A question the Spec goes on without: the rim says it can wait. */
+/**
+ * A question the Spec goes on without (issue #209): the card says nothing about it — no rim, no
+ * line saying it can wait — and its name is the question's alone.
+ */
 export const NotBlocking: Story = {
   args: { question: { ...CREDIT_NOTES, blocking: false } },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    await expect(canvas.getByText(/^Not blocking · /)).toBeVisible()
-    await expect(canvas.queryByText(/^Blocking · /)).toBeNull()
+    await expect(canvas.queryByText(/blocking/i)).toBeNull()
+    await expect(canvas.queryByText(/can go on without/)).toBeNull()
+    await expect(
+      canvas.getByRole('group', { name: `Question: ${CREDIT_NOTES.body}` }),
+    ).toBeVisible()
   },
 }
 

@@ -21,6 +21,9 @@ import { SPEC_TYPE_ICONS } from './spec-icons.ts'
  * #198): it points to that one, by its key, and the reader answers `Continue it` — this Session
  * then defines that Spec, and the panel shows it — or `Not now`. Nothing is edited in that card:
  * the Spec exists, with its own title and type.
+ *
+ * In a Session New Spec started, the user asked for a Spec already: a new one the agent proposes
+ * is created at once, and the card is only ever the quiet line that says so (issue #205).
  */
 
 const CARD = 'flex flex-col gap-2.5 rounded-lg border border-border bg-card p-3'
@@ -60,6 +63,8 @@ export interface CreateSpecProposalProps {
   state?: ProposalState | undefined
   /** The key the Spec was given, once created: `ATL-7`. */
   createdKey?: string | undefined
+  /** Whether Hemera created it at once, with nothing asked, in a Session New Spec started. */
+  atOnce?: boolean | undefined
   /**
    * The key of a Spec that already exists, when the agent points to it rather than proposing a
    * new one (issue #198): the card then offers to continue that Spec, and `onContinue` answers.
@@ -77,6 +82,7 @@ export function CreateSpecProposal({
   type: understood,
   state = 'proposed',
   createdKey,
+  atOnce = false,
   existingKey,
   onContinue,
   onCreate,
@@ -117,6 +123,14 @@ export function CreateSpecProposal({
           </Button>
         </div>
       </div>
+    )
+  }
+  if (state === 'created' && atOnce) {
+    return (
+      <p
+        role="status"
+        className={FOLDED}
+      >{`${createdKey === undefined ? 'Spec' : `Spec ${createdKey}`} created · ${understood}`}</p>
     )
   }
   if (state === 'created') {

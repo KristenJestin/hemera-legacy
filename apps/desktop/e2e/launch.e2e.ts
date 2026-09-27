@@ -480,3 +480,33 @@ describe('A Rework takes a launch back where it waits', () => {
     expect(await region(panelOf(TAKEN))).toContain('Cancelled by the Rework')
   })
 })
+
+describe('A Spec whose launch a Rework cancelled is launched again by hand', () => {
+  it('marks the new revision ready, starts the build, and opens its Session', async () => {
+    // The new revision is attested and frozen as the first one was; the launch the Rework took
+    // back is still said, and the Workspace the Spec is set on is offered to start in.
+    await write(COMPLETE)
+    await press('Send')
+    await browser.pause(1500)
+    await markedReady(TAKEN)
+    await awaits('Cancelled by the Rework')
+    await pressIn(BUILD_GROUP, 'Start the build')
+    await awaits('Build started', 60_000)
+
+    const built = await stateOf(TAKEN)
+    expect(built.revision).toBe(2)
+    expect(built.launch?.state).toBe('started')
+    expect(built.launch?.revisionId).toBe(built.revisionId)
+    const sessions = await buildsOf(TAKEN)
+    expect(sessions).toHaveLength(1)
+    expect(sessions[0]?.id).toBe(built.launch?.sessionId)
+
+    await pressIn(BUILD_GROUP, 'Open')
+    await browser.pause(1500)
+    expect(await region(panelOf(TAKEN))).toBe('')
+    // Its brief is the Spec as it stood on the revision the new launch names.
+    const briefs = await briefsOf(TAKEN)
+    expect(briefs).toHaveLength(1)
+    expect(briefs[0]).toContain(PROPOSAL.title)
+  })
+})

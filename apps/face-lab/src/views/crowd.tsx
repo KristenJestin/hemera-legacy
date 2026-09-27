@@ -34,7 +34,7 @@ const LIKELY: readonly FaceState[] = [
   'thinking',
   'writing',
   'done',
-  'idle',
+  'asleep',
 ]
 
 /** The sizes a crowd's faces are drawn at: what sits beside the name of a Session. */

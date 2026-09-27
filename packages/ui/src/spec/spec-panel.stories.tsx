@@ -104,6 +104,20 @@ function isStuck(canvasElement: HTMLElement, phase: string): boolean {
   return Math.abs(band.getBoundingClientRect().top - column.top) < 1
 }
 
+/**
+ * How far an element is drawn from where it is laid out, in pixels, off its computed transform:
+ * the translation of its matrix, which a scale about its centre leaves at nothing.
+ */
+function translationOf(element: HTMLElement): number[] {
+  const drawn = getComputedStyle(element).transform
+  if (drawn === 'none') return [0, 0]
+  const values = drawn
+    .slice(drawn.indexOf('(') + 1, -1)
+    .split(',')
+    .map(Number)
+  return drawn.startsWith('matrix3d') ? [values[12]!, values[13]!] : [values[4]!, values[5]!]
+}
+
 /** Resolves on the next frame, once whatever was asked has been drawn. */
 function nextFrame(): Promise<void> {
   return new Promise((resolve) => requestAnimationFrame(() => resolve()))
@@ -138,7 +152,6 @@ const meta = {
     defaultFolded: false,
     onFoldChange: fn(),
     onAnswer: fn(),
-    onGoToQuestion: fn(),
     onMarkReady: fn(),
     onRework: fn(),
     onPickRevision: fn(),
@@ -182,7 +195,7 @@ function dockWidth(canvasElement: HTMLElement): number {
 const FOLDED = 56 + 12
 
 /**
- * Folded, as a Session opens it: the small frame at the window's edge, centred on its height — the
+ * Folded, as a Session opens it: the small frame at the window's edge, at the top of the row — the
  * unfold chevron and the three phases' glyphs, each tinted by how far along it is and named with
  * its phase and its state. No head and no column: the chat has the width.
  */
@@ -207,10 +220,10 @@ export const Folded: Story = {
     await expect(plan.querySelector('[data-progress="started"][data-writing]')).not.toBeNull()
     await expect(decompose.querySelector('[data-progress="started"]')).not.toBeNull()
     await expect(canvas.getByRole('button', { name: 'Unfold the Spec' })).toBeVisible()
-    // Centred on the row's height.
-    const row = dockOf(canvasElement).getBoundingClientRect()
+    // At the top of the row, where the open panel's top is (issue #181).
+    const top = panelOf(canvasElement).parentElement!.getBoundingClientRect().top
     const box = frameOf(canvasElement).firstElementChild!.getBoundingClientRect()
-    await expect(box.top - row.top).toBeCloseTo(row.bottom - box.bottom, 0)
+    await expect(box.top).toBeCloseTo(top, 0)
     await expect(canvas.queryByRole('region', { name: 'Contents of ATL-7' })).toBeNull()
     await expect(canvas.queryByRole('heading', { name: 'CSV invoice export' })).toBeNull()
     // The column is there, laid out for the swap, and nothing of it takes the keyboard: neither
@@ -623,6 +636,170 @@ export const TurnsRoundMidWay: Story = {
   },
 }
 
+/** Where the panel and what it slides against stand on one frame, in pixels. */
+interface Edges {
+  /** Whether the panel is stowed: folded and at rest, not drawn. */
+  stowed: boolean
+  /** The panel's leading edge, the one that comes in first. */
+  lead: number
+  /** The edge the panel is cut at: its clip's trailing edge. */
+  cut: number
+  /** The edge of the content the Spec stands at: its dock's trailing edge. */
+  edge: number
+  /** How far `Mark ready` stands from the panel's leading edge. */
+  markReady: number
+  /** How far `Mark ready` is drawn from where it is laid out. */
+  carried: number[]
+}
+
+/** The edges, frame after frame, from the frame before an action until nothing has moved for 20. */
+async function edgesOf(canvasElement: HTMLElement, action: () => Promise<void>): Promise<Edges[]> {
+  const read = (): Edges => {
+    const panel = panelOf(canvasElement)
+    const box = panel.getBoundingClientRect()
+    // Read whether it is drawn or not: stowed, the panel names nothing, and it is its one button.
+    const button = footOf(canvasElement, 'ready')!.querySelector('button')!
+    return {
+      stowed: isStowed(canvasElement),
+      lead: box.left,
+      cut: panel.parentElement!.getBoundingClientRect().right,
+      edge: dockOf(canvasElement).getBoundingClientRect().right,
+      markReady: button.getBoundingClientRect().left - box.left,
+      carried: translationOf(button),
+    }
+  }
+  const frames = [read()]
+  const sampled = new Promise<Edges[]>((resolve) => {
+    let still = 0
+    // Counted from the first frame the panel moved on: opening, it waits a beat before it does.
+    let started = false
+    const sample = (): void => {
+      const now = read()
+      started ||= now.lead !== frames[0]!.lead
+      still = started && now.lead === frames.at(-1)!.lead ? still + 1 : 0
+      frames.push(now)
+      if (still < 20) requestAnimationFrame(sample)
+      else resolve(frames)
+    }
+    requestAnimationFrame(sample)
+  })
+  await action()
+  return sampled
+}
+
+/**
+ * The panel comes in and goes out by the content's edge, as the small frame does (issue #181).
+ *
+ * The small frame slides out past the edge of the content, and the panel used to slide in from
+ * inside the margin the Spec keeps at that edge: it was cut twelve pixels short of the edge, so
+ * its leading edge appeared out of nothing inside the page rather than coming in from beyond it,
+ * and left the same way. It is cut at the edge itself now, on every frame, and starts and ends
+ * the slide entirely past it. `Mark ready` travels with it and is never carried on its own: it
+ * stands where the footer puts it, on every frame and once the panel is in place (issue #183).
+ */
+export const SlidesFromTheEdge: Story = {
+  args: { defaultFolded: true },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const opening = await edgesOf(canvasElement, () =>
+      userEvent.click(canvas.getByRole('button', { name: 'Unfold the Spec' })),
+    )
+    const closing = await edgesOf(canvasElement, () =>
+      userEvent.click(canvas.getByRole('button', { name: 'Fold the Spec' })),
+    )
+    await waitFor(() => expect(isStowed(canvasElement)).toBe(true))
+    const drawn = [...opening, ...closing].filter((frame) => !frame.stowed)
+    await expect(drawn.length).toBeGreaterThan(0)
+    // Cut at the edge of the content on every frame, never short of it.
+    await expect(
+      drawn.filter((frame) => Math.abs(frame.cut - frame.edge) > 0.5),
+      'the panel is cut inside the margin at the edge',
+    ).toEqual([])
+    // Where the slide starts and where it ends is the panel folded: laid past the edge, whole,
+    // before the opening and once the closing is over — read at rest rather than on whichever
+    // frame a busy machine drew last. Cut in the margin, it stood the margin short of the edge.
+    for (const [rest, said] of [
+      [opening[0]!, 'the panel came in from inside the page'],
+      [closing.at(-1)!, 'the panel went out inside the page'],
+    ] as const) {
+      // oxlint-disable-next-line no-await-in-loop -- the two ends are read one after the other
+      await expect(rest.lead, said).toBeGreaterThanOrEqual(rest.edge - 0.5)
+    }
+    // In place, it stands where the small frame stood: in from the edge by the same margin.
+    const open = opening.at(-1)!
+    const box = panelOf(canvasElement).getBoundingClientRect()
+    await expect(open.edge - (open.lead + box.width)).toBeCloseTo(12, 0)
+    // `Mark ready` moves with the panel, and nothing carries it on its own.
+    const place = open.markReady
+    await expect(
+      drawn.filter(
+        (frame) =>
+          Math.abs(frame.markReady - place) > 0.5 ||
+          frame.carried.some((axis) => Math.abs(axis) > 0.01),
+      ),
+      '`Mark ready` moved on its own',
+    ).toEqual([])
+  },
+}
+
+/**
+ * Where a control stands on the screen, to the pixel: its centre, which the hover's growth under
+ * the pointer that just pressed there leaves where it is.
+ */
+function placeOf(button: HTMLElement): string {
+  const box = button.getBoundingClientRect()
+  return [box.left + box.width / 2, box.top + box.height / 2].map(Math.round).join(' ')
+}
+
+/**
+ * Unfolded then folded again, and the pointer's target never moves (issue #181): the fold chevron
+ * of the open panel stands exactly where the unfold chevron of the small frame stood, so the same
+ * spot pressed twice unfolds the Spec and folds it back. Read at rest on both sides of the swap.
+ */
+async function chevronStaysPut(canvasElement: HTMLElement): Promise<void> {
+  const canvas = within(canvasElement)
+  const unfold = canvas.getByRole('button', { name: 'Unfold the Spec' })
+  const folded = placeOf(unfold)
+  await userEvent.click(unfold)
+  await nextFrame()
+  const fold = canvas.getByRole('button', { name: 'Fold the Spec' })
+  await expect(placeOf(fold)).toBe(folded)
+  await userEvent.click(fold)
+  await nextFrame()
+  await expect(placeOf(canvas.getByRole('button', { name: 'Unfold the Spec' }))).toBe(folded)
+}
+
+/** A draft: the fold chevron of its head is where the small frame's unfold chevron was. */
+export const ChevronInPlace: Story = {
+  args: { defaultFolded: true },
+  // Settled at once, so that each side of the swap is read where it lands.
+  decorators: [
+    (Story) => (
+      <MotionConfig reducedMotion="always">
+        <Story />
+      </MotionConfig>
+    ),
+  ],
+  play: async ({ canvasElement }) => chevronStaysPut(canvasElement),
+}
+
+/**
+ * A ready Spec, whose head holds the taller picker of the revisions and `Rework`: the fold chevron
+ * is still where the unfold chevron was.
+ */
+export const ChevronInPlaceWhenReady: Story = {
+  args: { spec: READY, defaultFolded: true },
+  // Settled at once, so that each side of the swap is read where it lands.
+  decorators: [
+    (Story) => (
+      <MotionConfig reducedMotion="always">
+        <Story />
+      </MotionConfig>
+    ),
+  ],
+  play: async ({ canvasElement }) => chevronStaysPut(canvasElement),
+}
+
 /**
  * Told to move less, the swap jumps: on the frame after the hand unfolds it, the panel is at its
  * open width — a share of the row — the chat has the rest, and the small frame is gone. Folded
@@ -676,12 +853,47 @@ export const MarkReadyRefused: Story = {
   },
 }
 
-/** An open question of the register takes the thread to where it is asked. */
-export const QuestionLinked: Story = {
-  play: async ({ canvasElement, args }) => {
-    const canvas = within(canvasElement)
-    await userEvent.click(canvas.getByRole('button', { name: /^Answer in the chat: Credit notes/ }))
-    await expect(args.onGoToQuestion).toHaveBeenCalledWith('q-credit-notes')
+/**
+ * The refusal coming in beside `Mark ready` does not carry it (issue #183): the footer makes room
+ * for the words and the button is where the footer puts it. A button used to measure where it had
+ * been whenever it was drawn again and play the difference, so a sibling arriving made it jump
+ * back to its old place and slide. Pressed, it is drawn around its centre and never moved.
+ */
+export const MarkReadyStaysPut: Story = {
+  play: async ({ canvasElement }) => {
+    const button = markReadyOf(canvasElement)
+    const moves: number[][] = []
+    let watching = true
+    const watch = (): void => {
+      moves.push(translationOf(button))
+      if (watching) requestAnimationFrame(watch)
+    }
+    watch()
+    await userEvent.click(button)
+    await expect(within(footOf(canvasElement, 'ready')!).getByRole('alert')).toBeVisible()
+    for (const _ of Array.from({ length: 30 })) {
+      // oxlint-disable-next-line no-await-in-loop -- the frames are waited for one after the other
+      await nextFrame()
+    }
+    watching = false
+    await expect(
+      moves.filter(([x, y]) => Math.abs(x!) > 0.01 || Math.abs(y!) > 0.01),
+      '`Mark ready` was carried from where it had been',
+    ).toEqual([])
+  },
+}
+
+/**
+ * An open question in the register: said, with its chips, and nothing to press — it is answered on
+ * its card in the chat (issue #181).
+ */
+export const QuestionOpen: Story = {
+  play: async ({ canvasElement }) => {
+    const register = within(within(canvasElement).getByRole('list', { name: 'Questions' }))
+    await expect(register.getByText(/^Credit notes/)).toBeVisible()
+    await expect(register.getByText('blocking')).toBeVisible()
+    await expect(register.queryByRole('button')).toBeNull()
+    await expect(register.queryByText(/answer in the chat/i)).toBeNull()
   },
 }
 

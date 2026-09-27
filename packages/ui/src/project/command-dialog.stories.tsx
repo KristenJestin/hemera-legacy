@@ -2,6 +2,8 @@ import type { Meta, StoryObj } from '@storybook/react-vite'
 import { useState } from 'react'
 import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
 
+import { movesLess } from '../../.storybook/reduced-motion.ts'
+
 import { Button } from '../components/button/button.tsx'
 import type { PathEntry, PathListing } from '../components/suggest/path-input.tsx'
 import { CommandDialog, type CommandDialogProps } from './command-dialog.tsx'
@@ -498,6 +500,54 @@ export const Keyboard: Story = {
     })
     await waitFor(() => {
       expect(opener).toHaveFocus()
+    })
+  },
+}
+
+/**
+ * Choosing Portless brings its name in with the dialog around it (issue #183): the room under the
+ * box grows while what it holds fades in, the dialog grows with it on the same beat, and unticking
+ * the box folds both back to where they were.
+ */
+export const PortlessArrives: Story = {
+  play: async () => {
+    const inside = dialog()
+    const box = inside.getByRole('checkbox', { name: /Serve through Portless/ })
+    const frame = within(document.body).getByRole('dialog')
+    const from = frame.getBoundingClientRect().height
+
+    const heights: number[] = []
+    let watching = true
+    const watch = (): void => {
+      heights.push(frame.getBoundingClientRect().height)
+      if (watching) requestAnimationFrame(watch)
+    }
+    watch()
+    await userEvent.click(box)
+    const name = await waitFor(() => inside.getByRole('textbox', { name: 'Portless name' }))
+    // It lands in full: the room as tall as what it holds, faded all the way in.
+    await waitFor(() => {
+      expect(getComputedStyle(name.closest('[data-reveal]')!).filter).toBe('opacity(1)')
+    })
+    await waitFor(() => {
+      expect(frame.getBoundingClientRect().height).toBe(heights.at(-1))
+      expect(frame.getBoundingClientRect().height).toBeGreaterThan(from + 1)
+    })
+    watching = false
+    const to = frame.getBoundingClientRect().height
+    if (!movesLess()) {
+      expect(
+        heights.some((height) => height > from + 1 && height < to - 1),
+        'the dialog jumped to the height of the Portless name',
+      ).toBe(true)
+    }
+
+    await userEvent.click(box)
+    await waitFor(() => {
+      expect(inside.queryByRole('textbox', { name: 'Portless name' })).toBeNull()
+    })
+    await waitFor(() => {
+      expect(frame.getBoundingClientRect().height).toBeCloseTo(from, 0)
     })
   },
 }

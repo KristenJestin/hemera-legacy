@@ -208,13 +208,6 @@ function askId(id: string): string {
   return `ask-${id}`
 }
 
-/** Takes the thread to where a question is asked, and the keyboard to its first answer. */
-function goToQuestion(id: string): void {
-  const block = document.getElementById(askId(id))
-  block?.scrollIntoView({ block: 'center' })
-  block?.querySelector('button')?.focus()
-}
-
 /** The chat of a Session: its head, its thread and its composer. */
 function Chat({ title, thread }: { title: string; thread: ScrollerEntry[] }): ReactNode {
   const [value, setValue] = useState('')
@@ -245,7 +238,6 @@ function Chat({ title, thread }: { title: string; thread: ScrollerEntry[] }): Re
 /** The actions a story reports, for the paths that assert on them. */
 const ON = {
   onAnswer: fn(),
-  onGoToQuestion: goToQuestion,
   onMarkReady: fn(),
   onRework: fn(),
   onPickRevision: fn(),
@@ -289,7 +281,6 @@ function DefineSession({
         reader={reader}
         defaultReworkOpen={reworkOpen}
         defaultFolded={folded}
-        onGoToQuestion={actions.onGoToQuestion}
         onMarkReady={actions.onMarkReady}
         onRework={actions.onRework}
         onPickRevision={actions.onPickRevision}
@@ -345,7 +336,6 @@ function FreeThenDefine(): ReactNode {
           >
             <SpecPanel
               spec={created}
-              onGoToQuestion={fn()}
               onMarkReady={fn()}
               onRework={fn()}
               onPickRevision={fn()}
@@ -408,7 +398,7 @@ type Story = StoryObj<typeof meta>
  * The screens first, each named after the state it shows and each left as it opens: its play
  * asserts and changes nothing, so the screen the gate looks at is the screen as drawn. A Session
  * opens its panel folded; a screen that shows the panel's own state opens it unfolded. The paths
- * through them — a link followed, a Spec marked ready, reworked, taken over, a question answered
+ * through them — a Spec marked ready, reworked, taken over, a question answered
  * in the chat — are stories of their own, named after what they do, and
  * start from the folded panel a Session opens on: the hand unfolds it first.
  */
@@ -470,16 +460,18 @@ export const MidPlanMarkReadyRefused: Story = {
   },
 }
 
-/** A question answered in the chat: the register records it. */
+/**
+ * A question answered on its card in the chat: the register records it. The register offers no
+ * way to the chat (issue #181): the card is where one answers.
+ */
 export const MidPlanQuestionAnswered: Story = {
   play: async ({ canvasElement }) => {
     await unfold(canvasElement)
     const canvas = within(canvasElement)
-    await userEvent.click(canvas.getByRole('button', { name: /^Answer in the chat: Credit/ }))
-    const recommended = canvas.getByRole('button', { name: /recommended/ })
-    await expect(recommended).toHaveFocus()
-    await userEvent.keyboard('{Enter}')
-    await expect(canvas.queryByRole('button', { name: /^Answer in the chat/ })).toBeNull()
+    const register = within(canvas.getByRole('list', { name: 'Questions' }))
+    await expect(register.queryByRole('button')).toBeNull()
+    const card = within(canvas.getByRole('group', { name: /^Question: Credit notes/ }))
+    await userEvent.click(card.getByRole('button', { name: /recommended/ }))
     await expect(canvas.getByRole('heading', { name: /^Questions · 0 open/ })).toBeVisible()
   },
 }
@@ -657,4 +649,55 @@ export const StaleAfterRework: Story = {
     await expect(canvas.getAllByText('to review')[0]).toBeVisible()
     await expect(canvas.queryByRole('button', { name: /things before ready/ })).toBeNull()
   },
+}
+
+/**
+ * How far the window scrolls sideways: what its content is wider than it by, in pixels. The
+ * window is the scroller the row is laid in, as the content area of the application is one.
+ */
+function sideways(canvasElement: HTMLElement): number {
+  const window = canvasElement.querySelector<HTMLElement>('[data-window]')!
+  return window.scrollWidth - window.clientWidth
+}
+
+/**
+ * The row never scrolls sideways (issue #181): folded, while the panel is open, and folded again.
+ * Each state is read once the swap has landed, the small frame gone or the panel stowed.
+ */
+async function neverSideways(canvasElement: HTMLElement): Promise<void> {
+  const canvas = within(canvasElement)
+  const dock = canvas.getByRole('region', { name: 'Spec ATL-7' })
+  const frame = dock.querySelector<HTMLElement>('[data-spec-frame]')!
+  const panel = dock.querySelector<HTMLElement>('[data-spec-panel]')!
+  await expect(sideways(canvasElement)).toBe(0)
+  await unfold(canvasElement)
+  await waitFor(() => expect(getComputedStyle(frame).filter).toBe('opacity(0)'))
+  await expect(sideways(canvasElement)).toBe(0)
+  await userEvent.click(canvas.getByRole('button', { name: 'Fold the Spec' }))
+  await waitFor(() => expect(panel).toHaveAttribute('data-stowed'))
+  await expect(sideways(canvasElement)).toBe(0)
+}
+
+/** A narrow window: the Spec folded, open and folded again, and the row never scrolls sideways. */
+export const NarrowWindow: Story = {
+  decorators: [
+    (Story) => (
+      <div data-window className="h-screen w-full max-w-3xl overflow-y-auto">
+        <Story />
+      </div>
+    ),
+  ],
+  play: async ({ canvasElement }) => neverSideways(canvasElement),
+}
+
+/** A wide window: the Spec folded, open and folded again, and the row never scrolls sideways. */
+export const WideWindow: Story = {
+  decorators: [
+    (Story) => (
+      <div data-window className="h-screen w-screen overflow-y-auto">
+        <Story />
+      </div>
+    ),
+  ],
+  play: async ({ canvasElement }) => neverSideways(canvasElement),
 }

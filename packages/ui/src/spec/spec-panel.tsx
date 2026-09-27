@@ -20,7 +20,6 @@ import { ReworkDialog } from './rework-dialog.tsx'
 import { SpecColumn, goToPhase } from './spec-column.tsx'
 import { SpecFrame } from './spec-frame.tsx'
 import { SpecHead } from './spec-head.tsx'
-import type { SpecPartHandlers } from './spec-part.tsx'
 import { phasesOf } from './spec-phases.ts'
 import { WorkspaceActions, type WorkspaceActionsProps } from './workspace-actions.tsx'
 
@@ -60,12 +59,22 @@ import { WorkspaceActions, type WorkspaceActionsProps } from './workspace-action
  * reader reads it and answers, and edits nothing (issue #135).
  */
 
-/** The Spec in the Session's row: its slot, and what is laid over it at the window's edge. */
-const DOCK = 'relative flex h-full min-h-0 shrink-0 py-3 pr-3'
+/**
+ * The Spec in the Session's row: its slot, and what is laid over it at the window's edge. It clips
+ * sideways (issue #181): the small frame leaves by sliding out past the window's edge, and a frame
+ * laid out there made the row scroll sideways for as long as the panel was open. A clip and not
+ * `hidden`, so the dock never becomes a scroller a focus could move.
+ */
+const DOCK = 'relative flex h-full min-h-0 shrink-0 overflow-x-clip py-3 pr-3'
 
-/** The panel's clip, at the window's edge: what the panel slides in and out of. */
+/**
+ * The panel's clip: what the panel slides in and out of. It reaches across the margin the dock
+ * keeps at the content's edge and cuts there, where the small frame is cut (issue #181): the
+ * panel is laid in its content box, in from that edge by the margin, and comes in and goes out by
+ * the edge itself rather than out of nothing inside the margin.
+ */
 const CLIP =
-  'pointer-events-none absolute inset-y-3 right-3 w-spec-panel overflow-hidden rounded-xl'
+  'pointer-events-none absolute inset-y-3 right-0 box-content w-spec-panel overflow-hidden pr-3'
 
 /** The open panel: a frame the whole height of the row, its rim around the head, body and foot. */
 const PANEL =
@@ -75,11 +84,19 @@ const PANEL =
 const STOWED =
   'spec-panel-in pointer-events-auto invisible flex size-full flex-col rounded-xl border border-border bg-surface-rim p-1.5'
 
-/** The small frame's place: on the window's edge, centred on its height, over the panel. */
-const FRAME = 'pointer-events-none absolute inset-y-3 right-3 z-1 flex items-center'
+/**
+ * The small frame's place: on the window's edge, at the top of the row, over the panel (issue
+ * #181). Its top and right edges are the open panel's, so its unfold chevron stands where the
+ * head's fold chevron does.
+ */
+const FRAME = 'pointer-events-none absolute inset-y-3 right-3 z-1 flex items-start'
 
-/** The head on the rim, above the body. */
-const HEAD = 'flex shrink-0 flex-col gap-1 px-2.5 pt-1 pb-2.5'
+/**
+ * The head on the rim, above the body. Its end is nearer the rim than its start: the fold chevron
+ * at that end stands as far in from the panel's edge as the small frame's unfold chevron does from
+ * the frame's (issue #181).
+ */
+const HEAD = 'flex shrink-0 flex-col gap-1 pt-1 pr-1.5 pb-2.5 pl-2.5'
 
 const NOW = 'text-sm text-muted-foreground'
 
@@ -93,7 +110,7 @@ const REFUSED = 'min-w-0 flex-1 text-sm text-destructive-muted-foreground'
 /** The footer on the rim, under the body, its actions at its end. */
 const FOOT = 'flex items-center justify-end gap-3 px-1 pt-1.5'
 
-export interface SpecPanelProps extends SpecPartHandlers {
+export interface SpecPanelProps {
   spec: SpecView
   /** Present when this Session reads a draft another Session writes. */
   reader?: ReaderView | undefined
@@ -142,7 +159,6 @@ export function SpecPanel({
   onPickRevision,
   onTakeOver,
   build,
-  ...handlers
 }: SpecPanelProps): ReactNode {
   const startsFolded = arrives ? false : defaultFolded
   const [folded, setFolded] = useState(startsFolded)
@@ -351,13 +367,7 @@ export function SpecPanel({
                   onTakeOver={onTakeOver}
                 />
               )}
-              <SpecColumn
-                spec={spec}
-                groups={groups}
-                column={column}
-                still={still}
-                onGoToQuestion={handlers.onGoToQuestion}
-              />
+              <SpecColumn spec={spec} groups={groups} column={column} still={still} />
             </div>
             <SpecFoot content={foot} />
           </div>

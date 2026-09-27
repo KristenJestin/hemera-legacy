@@ -2,6 +2,8 @@ import type { Meta, StoryObj } from '@storybook/react-vite'
 import { useEffect, useState } from 'react'
 import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
 
+import { arrived } from '../../.storybook/reveal.ts'
+
 import { Button } from '../components/button/button.tsx'
 import {
   CreateWorkspaceDialog,
@@ -757,6 +759,8 @@ async function theFolderIsChosenForThisWorkspaceAlone({ args }: Context) {
   })
   await expect(inside.getByRole('button', { name: 'Create' })).toBeDisabled()
   await userEvent.type(folder, '/srv/trees')
+  // The Workspace's folder, which the empty field had taken away, comes back in (issue #183).
+  await arrived(inside.getByText('/srv/trees/login-form'))
   await userEvent.click(inside.getByRole('button', { name: 'Create' }))
   await waitFor(() => {
     expect(args.onCreate).toHaveBeenCalledWith({
@@ -786,10 +790,15 @@ async function aTemporaryDefaultFolderIsSaidSo() {
   const folder = inside.getByRole('textbox', { name: 'Workspaces folder' })
   await userEvent.clear(folder)
   await userEvent.type(folder, '/srv/trees')
-  await expect(inside.queryByText(/This folder is temporary/)).toBeNull()
+  // It folds away rather than vanishing (issue #183), and is gone once it has.
+  await waitFor(() => {
+    expect(inside.queryByText(/This folder is temporary/)).toBeNull()
+  })
   await userEvent.clear(folder)
   await userEvent.type(folder, '/tmp/hemera-trial/workspaces/atlas')
   await expect(inside.getByText(/This folder is temporary/)).toBeVisible()
+  // Back on the default, it comes in again with the dialog growing around it.
+  await arrived(inside.getByText(/This folder is temporary/))
 }
 
 /** The Project's folder of Workspaces is under the system's temporary directory. */

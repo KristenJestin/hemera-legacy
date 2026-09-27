@@ -12,7 +12,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
 
-import { DELIVERY_MARKER } from '@hemera/core'
+import { DELIVERY_MARKER, QUESTION_RULE } from '@hemera/core'
 import { fakeAgent } from '#engine/agents/fake.ts'
 import { SPEC_REQUEST, SPEC_REQUEST_URI, requestedSpec } from '#engine/agents/spec-request.ts'
 import { listenToAgents, say } from '#renderer/agent-store.ts'
@@ -94,6 +94,28 @@ describe('A Session started with New Spec defines its Spec from the first turn',
     expect(await say(made?.id ?? '', 'The HT first')).toBeNull()
     expect(agent.answers.blocks.at(-1)).toEqual([{ type: 'text', text: 'The HT first' }])
     expect(await opened.bridge.invoke('specs.list', { projectId: project.id })).toHaveLength(1)
+  })
+
+  test('the first turn of a New Spec Session says every question goes through the question card', async () => {
+    const agent = fakeAgent({ steps: [{ does: 'says', text: 'Which type is it?' }] })
+    opened = await openWindow(dataFolder, agent)
+    install(opened.bridge)
+    stops = [listenToAgents()]
+    const project = await opened.bridge.invoke('projects.create', {
+      name: 'Atlas',
+      tone: 'primary',
+      mainPath: main,
+    })
+    await openSessions(project.id)
+    const made = await startSession(project.id, 'claude', null)
+    expect(await say(made?.id ?? '', 'A simple HTML menu to test with', 'spec')).toBeNull()
+
+    // Everything the agent read before its first answer: the mission brief handed over, then the
+    // request in front of the user's words. Both carry the rule, word for word.
+    const first = agent.answers.blocks.slice(0, 2).map((blocks) => JSON.stringify(blocks))
+    expect(first).toHaveLength(2)
+    for (const text of first) expect(text).toContain(JSON.stringify(QUESTION_RULE).slice(1, -1))
+    expect(SPEC_REQUEST).toContain(QUESTION_RULE)
   })
 
   test('the title is the first line of the request, cut on a word when it is long', () => {

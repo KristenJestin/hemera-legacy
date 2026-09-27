@@ -79,9 +79,6 @@ const ASK = yours(
   'Accountants need a month of invoices as one CSV they can import into their ledger, from the billing page.',
 )
 
-const PLAN_BRIEF =
-  '**Plan** · analyse the code and fix the technical approach of `ATL-7`, its risks and how it is verified. Shape is finished; one blocking question is open.\n\nSince the last turn you edited **Scope** (v4).'
-
 /** What each screen has in its thread, the questions asked there, and its Spec. */
 interface Screen {
   title: string
@@ -99,7 +96,6 @@ const SCREENS = {
     asks: ['q-credit-notes'],
     thread: [
       ASK,
-      hemera('brief', 'What the agent was told · Plan', '10:44', PLAN_BRIEF),
       agents(
         'answer',
         'Shape is finished: the problem, the outcome, the scope and two stories are in the Spec. I am writing the plan: the export can reuse the invoice query of `export.service.ts` and stream its rows.\n\nOne question blocks the plan:',
@@ -116,12 +112,6 @@ const SCREENS = {
         '09:12',
         'Multi-currency invoices are off by a cent. Accounting saw it on the September close.',
       ),
-      hemera(
-        'brief',
-        'What the agent was told · Shape',
-        '09:12',
-        '**Shape** · frame the need of `ATL-12`.',
-      ),
       agents(
         'answer',
         'I reproduced it on the demo data and wrote the steps under Reproduction. You changed the amounts of step 1; I keep yours.\n\nOne question before the plan:',
@@ -133,12 +123,6 @@ const SCREENS = {
     spec: GATE_FULL,
     thread: [
       ASK,
-      hemera(
-        'brief',
-        'What the agent was told · Decompose',
-        '11:20',
-        '**Decompose** · slice `ATL-7`.',
-      ),
       agents(
         'answer',
         'Decompose is finished: four tasks, each one a slice that can be verified alone, the last one yours: checking the file imports into the ledger.\n\nI attest the contract is complete and a build can run it without inventing a decision. Marking it ready is yours.',
@@ -151,12 +135,6 @@ const SCREENS = {
     asks: ['q-credit-notes'],
     thread: [
       ASK,
-      hemera(
-        'brief',
-        'What the agent was told · Decompose',
-        '11:20',
-        '**Decompose** · slice `ATL-7`.',
-      ),
       agents(
         'answer',
         'Decompose is finished and I attest the contract. One question is still yours before it can be marked ready:',
@@ -419,15 +397,14 @@ function phaseHeading(canvasElement: HTMLElement, name: RegExp): HTMLElement {
 /**
  * Screen 1 · a feature being planned, as the Session opens it: the chat has the width, the Spec
  * a small frame at its edge — the glyph of each phase, tinted by how far along it is, the Plan one
- * breathing while the agent writes the plan, and no readiness. The thread says what the agent was handed in one folded
- * Hemera line, and asks the blocking question as a block.
+ * breathing while the agent writes the plan, and no readiness. The thread draws nothing of what
+ * the agent was handed, which the Session details list (issue #205), and asks the blocking
+ * question as a block.
  */
 export const MidPlan: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    await expect(
-      canvas.getByRole('button', { name: /What the agent was told · Plan/ }),
-    ).toBeVisible()
+    await expect(canvas.queryByText(/What the agent was told/)).toBeNull()
     const frame = canvas.getByRole('navigation', { name: 'Phases of ATL-7' })
     await expect(within(frame).queryByRole('img', { name: /^Readiness/ })).toBeNull()
     const plan = within(frame).getByRole('button', {
@@ -444,16 +421,19 @@ export const MidPlan: Story = {
 }
 
 /**
- * Unfolded, then `Mark ready` pressed too early: refused with what is left, said beside it;
- * the tasks, not written yet, in the column under Decompose.
+ * Unfolded before it can be marked ready (issue #205): no `Mark ready`, and one quiet line of what
+ * is left, the whole list in its tooltip; the tasks, not written yet, in the column under
+ * Decompose.
  */
-export const MidPlanMarkReadyRefused: Story = {
+export const MidPlanNotReadyYet: Story = {
   play: async ({ canvasElement }) => {
     await unfold(canvasElement)
     const canvas = within(canvasElement)
     await expect(canvas.queryByText(/^Plan ·/)).toBeNull()
-    await userEvent.click(canvas.getByRole('button', { name: 'Mark ready' }))
-    await expect(canvas.getByRole('alert')).toHaveTextContent(/Still to do: .*the tasks/)
+    await expect(canvas.queryByRole('button', { name: 'Mark ready' })).toBeNull()
+    const left = canvas.getByText('4 things left before ready')
+    await expect(left.getAttribute('title')).toMatch(/the tasks/)
+    await expect(canvas.queryByRole('alert')).toBeNull()
     const column = canvas.getByRole('region', { name: 'Contents of ATL-7' })
     await expect(within(column).getByRole('heading', { name: /^Tasks · 0/ })).toBeVisible()
     await expect(canvas.getByText(/Tasks are written in Decompose/)).toBeVisible()
@@ -534,16 +514,20 @@ export const GateFullMarkedReady: Story = {
 }
 
 /**
- * The last blocking question: `Mark ready` pressed while it is open is refused and names it;
- * answered in the chat, the same press marks the Spec ready.
+ * The last blocking question: while it is open, `Mark ready` is not offered and the footer says
+ * the one thing left (issue #205); answered in the chat, `Mark ready` arrives, and marks the Spec
+ * ready.
  */
 export const LastQuestionAnswered: Story = {
   args: { screen: 'lastQuestion' },
   play: async ({ canvasElement }) => {
     await unfold(canvasElement)
     const canvas = within(canvasElement)
-    await userEvent.click(canvas.getByRole('button', { name: 'Mark ready' }))
-    await expect(canvas.getByRole('alert')).toHaveTextContent(/the credit-note question/)
+    await expect(canvas.queryByRole('button', { name: 'Mark ready' })).toBeNull()
+    await expect(canvas.getByText('1 thing left before ready')).toHaveAttribute(
+      'title',
+      'Still to do:\nthe credit-note question',
+    )
     await userEvent.click(canvas.getByRole('button', { name: /Other/ }))
     await userEvent.type(
       await canvas.findByRole('textbox', { name: 'Other' }),

@@ -636,6 +636,112 @@ export const TurnsRoundMidWay: Story = {
   },
 }
 
+/** Where the panel and what it slides against stand on one frame, in pixels. */
+interface Edges {
+  /** Whether the panel is stowed: folded and at rest, not drawn. */
+  stowed: boolean
+  /** The panel's leading edge, the one that comes in first. */
+  lead: number
+  /** The edge the panel is cut at: its clip's trailing edge. */
+  cut: number
+  /** The edge of the content the Spec stands at: its dock's trailing edge. */
+  edge: number
+  /** How far `Mark ready` stands from the panel's leading edge. */
+  markReady: number
+  /** How far `Mark ready` is drawn from where it is laid out. */
+  carried: number[]
+}
+
+/** The edges, frame after frame, from the frame before an action until nothing has moved for 20. */
+async function edgesOf(canvasElement: HTMLElement, action: () => Promise<void>): Promise<Edges[]> {
+  const read = (): Edges => {
+    const panel = panelOf(canvasElement)
+    const box = panel.getBoundingClientRect()
+    // Read whether it is drawn or not: stowed, the panel names nothing, and it is its one button.
+    const button = footOf(canvasElement, 'ready')!.querySelector('button')!
+    return {
+      stowed: isStowed(canvasElement),
+      lead: box.left,
+      cut: panel.parentElement!.getBoundingClientRect().right,
+      edge: dockOf(canvasElement).getBoundingClientRect().right,
+      markReady: button.getBoundingClientRect().left - box.left,
+      carried: translationOf(button),
+    }
+  }
+  const frames = [read()]
+  const sampled = new Promise<Edges[]>((resolve) => {
+    let still = 0
+    // Counted from the first frame the panel moved on: opening, it waits a beat before it does.
+    let started = false
+    const sample = (): void => {
+      const now = read()
+      started ||= now.lead !== frames[0]!.lead
+      still = started && now.lead === frames.at(-1)!.lead ? still + 1 : 0
+      frames.push(now)
+      if (still < 20) requestAnimationFrame(sample)
+      else resolve(frames)
+    }
+    requestAnimationFrame(sample)
+  })
+  await action()
+  return sampled
+}
+
+/**
+ * The panel comes in and goes out by the content's edge, as the small frame does (issue #181).
+ *
+ * The small frame slides out past the edge of the content, and the panel used to slide in from
+ * inside the margin the Spec keeps at that edge: it was cut twelve pixels short of the edge, so
+ * its leading edge appeared out of nothing inside the page rather than coming in from beyond it,
+ * and left the same way. It is cut at the edge itself now, on every frame, and starts and ends
+ * the slide entirely past it. `Mark ready` travels with it and is never carried on its own: it
+ * stands where the footer puts it, on every frame and once the panel is in place (issue #183).
+ */
+export const SlidesFromTheEdge: Story = {
+  args: { defaultFolded: true },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const opening = await edgesOf(canvasElement, () =>
+      userEvent.click(canvas.getByRole('button', { name: 'Unfold the Spec' })),
+    )
+    const closing = await edgesOf(canvasElement, () =>
+      userEvent.click(canvas.getByRole('button', { name: 'Fold the Spec' })),
+    )
+    await waitFor(() => expect(isStowed(canvasElement)).toBe(true))
+    const drawn = [...opening, ...closing].filter((frame) => !frame.stowed)
+    await expect(drawn.length).toBeGreaterThan(0)
+    // Cut at the edge of the content on every frame, never short of it.
+    await expect(
+      drawn.filter((frame) => Math.abs(frame.cut - frame.edge) > 0.5),
+      'the panel is cut inside the margin at the edge',
+    ).toEqual([])
+    // Where the slide starts and where it ends is the panel folded: laid past the edge, whole,
+    // before the opening and once the closing is over — read at rest rather than on whichever
+    // frame a busy machine drew last. Cut in the margin, it stood the margin short of the edge.
+    for (const [rest, said] of [
+      [opening[0]!, 'the panel came in from inside the page'],
+      [closing.at(-1)!, 'the panel went out inside the page'],
+    ] as const) {
+      // oxlint-disable-next-line no-await-in-loop -- the two ends are read one after the other
+      await expect(rest.lead, said).toBeGreaterThanOrEqual(rest.edge - 0.5)
+    }
+    // In place, it stands where the small frame stood: in from the edge by the same margin.
+    const open = opening.at(-1)!
+    const box = panelOf(canvasElement).getBoundingClientRect()
+    await expect(open.edge - (open.lead + box.width)).toBeCloseTo(12, 0)
+    // `Mark ready` moves with the panel, and nothing carries it on its own.
+    const place = open.markReady
+    await expect(
+      drawn.filter(
+        (frame) =>
+          Math.abs(frame.markReady - place) > 0.5 ||
+          frame.carried.some((axis) => Math.abs(axis) > 0.01),
+      ),
+      '`Mark ready` moved on its own',
+    ).toEqual([])
+  },
+}
+
 /**
  * Where a control stands on the screen, to the pixel: its centre, which the hover's growth under
  * the pointer that just pressed there leaves where it is.

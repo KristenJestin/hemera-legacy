@@ -13,6 +13,7 @@
     "package": "node tools/package-desktop.ts",
     "report": "node tools/environment-report.ts --write",
     "storybook": "pnpm --filter @hemera/ui storybook",
+    "face-lab": "pnpm --filter @hemera/face-lab lab",
     "check": "pnpm typecheck && pnpm lint && pnpm fmt:check && pnpm test"
   },
   "devDependencies": {

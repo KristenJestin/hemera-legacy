@@ -38,7 +38,6 @@ import { AgentRuntime, type AgentRuntimeError } from './agents/runtime.ts'
 import { Agents, availabilityOf, type AgentUpdateRefusedError } from './agents/service.ts'
 import { type BareModeNotQualifiedError, refusedUnlessBare } from './agents/bare.ts'
 import { ADAPTERS, Discovery } from './agents/discovery.ts'
-import { requestedSpec } from './agents/spec-request.ts'
 import { runAtOpen } from './commands/at-open.ts'
 import {
   type NothingToRunError,
@@ -327,15 +326,9 @@ export function answer(
       return yield* runtime.setOption(sessionId, optionId, value)
     }
     if (decision.name === 'agents.prompt') {
+      // New Spec creates no Spec (#198): its request rides this turn, and the Spec is made from
+      // the agent's proposal once the user accepts it, or is the existing one they continue.
       const { sessionId, text, intent } = decision.argument
-      // New Spec: the Spec is created before the prompt goes out, so the agent starts `define`,
-      // with the Spec tools and the mission brief, and the window opens the panel before it
-      // answers (#179). A Session that already defines one is sent the message as it is.
-      if (intent === 'spec' && (yield* sessions.one(sessionId)).session.mission === 'free') {
-        yield* (yield* Specs).create({ sessionId, ...requestedSpec(text) })
-        // An agent already running holds the tools of a free Session: it is started again.
-        yield* runtime.releaseWhenIdle(sessionId)
-      }
       // What the page is waiting for is why the turn ended; everything else about it reached the
       // window as it happened, on the engine's own channel (design D5-12).
       const report = yield* runtime.prompt(sessionId, text, intent)
@@ -525,6 +518,14 @@ export function answer(
         `Hemera told the agent you declined the ${declined.type} Spec “${declined.title}”.`,
       )
       return
+    }
+    if (decision.name === 'specs.acceptExisting') {
+      const { sessionId, proposalId } = decision.argument
+      const joined = yield* specs.acceptExisting(sessionId, proposalId)
+      // As a proposal accepted: the agent was granted the tools of a free Session, and is started
+      // again with those of a define one, and handed the mission brief in a turn of its own.
+      yield* runtime.briefWhenIdle(joined.session.id)
+      return joined
     }
     if (decision.name === 'specs.openSession') return yield* specs.openSession(decision.argument)
     if (decision.name === 'specs.writeSection') {

@@ -48,6 +48,9 @@ export interface SpecToolsNeeds {
 /** The phase a `phase_done` names, which its schema requires it to send. */
 const PHASE_NAMED = z.object({ phase: z.enum(PHASE_IDS) })
 
+/** The Spec an `existing` proposal points to, by the key its schema requires it to send. */
+const SPEC_POINTED = z.object({ spec: z.string() })
+
 /** The Spec a `spec` proposal names, which its schema requires it to send. */
 const SPEC_PROPOSED = z.object({ title: z.string(), type: z.enum(SPEC_TYPES) })
 
@@ -300,6 +303,61 @@ export function specTools({ specs, sessions, held, inThread }: SpecToolsNeeds) {
       )
     })
 
+  /**
+   * The existing Spec a `free` Session's agent points to (issue #198): what New Spec asks for
+   * when the Project already has one. The entry the human continues or not, and nothing else —
+   * the Session turns `define` on it only when they continue it.
+   */
+  const proposeExisting = (
+    session: Session,
+    call: Extract<SpecCall, { tool: 'spec_propose' }>['arguments'],
+  ) =>
+    Effect.gen(function* () {
+      if (session.mission !== 'free') {
+        return refused(
+          `the Session "${session.title}" is ${session.mission}: only a free Session points to a Spec`,
+        )
+      }
+      const { spec: key } = SPEC_POINTED.parse(call)
+      const listed = yield* specs.list(session.projectId).pipe(Effect.result)
+      if (Result.isFailure(listed)) {
+        return {
+          ok: false,
+          summary: 'the Specs could not be read',
+          text: listed.failure.message,
+          paths: [],
+        }
+      }
+      const found = listed.success.find((one) => one.key.toLowerCase() === key.toLowerCase())
+      if (found === undefined) {
+        return refused(
+          `this Project has no Spec ${key}`,
+          `This Project has no Spec ${key}; project_get lists its Specs by key. Nothing was proposed.`,
+        )
+      }
+      const { id: specId, key: named, title, type } = found
+      const written = yield* inThread(session.id, {
+        role: 'hemera',
+        kind: 'spec_proposal',
+        body: title,
+        payload: JSON.stringify({ title, type, specId, key: named }),
+        correlationId: `proposal:${crypto.randomUUID()}`,
+        settled: true,
+      }).pipe(Effect.result)
+      if (Result.isFailure(written)) {
+        return {
+          ok: false,
+          summary: 'the proposal could not be written',
+          text: written.failure.message,
+          paths: [],
+        }
+      }
+      return completed(
+        `pointed to ${named} "${title}"`,
+        `The user is asked in the chat whether this Session continues ${named} "${title}"; it defines that Spec once they do.`,
+      )
+    })
+
   /** One call to a Spec tool, for the Session its token was minted for. */
   return (sessionId: string, call: SpecCall): Effect.Effect<Answer> =>
     Effect.gen(function* () {
@@ -307,11 +365,14 @@ export function specTools({ specs, sessions, held, inThread }: SpecToolsNeeds) {
       if (session !== null && call.tool === 'spec_propose' && call.arguments.kind === 'spec') {
         return yield* proposeSpec(session, call.arguments)
       }
+      if (session !== null && call.tool === 'spec_propose' && call.arguments.kind === 'existing') {
+        return yield* proposeExisting(session, call.arguments)
+      }
       const specId = session?.specId ?? null
       if (specId === null) {
         return refused(
           'this Session defines no Spec',
-          `${call.tool} acts on the Spec this Session defines, and it defines none: a free Session proposes one with spec_propose and kind spec.`,
+          `${call.tool} acts on the Spec this Session defines, and it defines none: a free Session proposes one with spec_propose and kind spec, or points to one that exists with kind existing.`,
         )
       }
       switch (call.tool) {

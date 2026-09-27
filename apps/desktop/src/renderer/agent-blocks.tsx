@@ -41,6 +41,7 @@ import {
   hemeraPermissionOf,
   hemeraToolCallOf,
   reportedFailureOf,
+  stoppedTurnOf,
   hemeraToolLabelOf,
   nativeSubjectOf,
   questionOpen,
@@ -152,8 +153,6 @@ const decisionSchema = z.object({
   toolCallId: z.string(),
   optionId: z.string().nullable(),
 })
-
-const turnSchema = z.object({ stopReason: z.string() })
 
 const planSchema = z.object({ entries: z.array(planEntrySchema) })
 
@@ -533,18 +532,18 @@ export function drawEntry(entry: SessionEntry, context: AgentContext): ReactNode
   }
 
   if (entry.kind === 'turn') {
-    const read = readPayload(turnSchema, entry.payload)
     // A turn that simply ended is not news: the agent's answer above it is. What is worth a line
     // is a turn that stopped for a reason the reader has to know about (D5-13).
-    if (read === null || read.stopReason === 'end_turn') return null
+    const stopped = stoppedTurnOf(entry)
+    if (stopped === null) return null
     return (
       <StoppedTurn
-        doing={entry.body}
+        reason={stopped.reason}
         at={new Date(entry.createdAt).toLocaleTimeString('en-GB', {
           hour: '2-digit',
           minute: '2-digit',
         })}
-        byTheReader={read.stopReason === 'cancelled'}
+        byTheReader={stopped.byTheReader}
       />
     )
   }

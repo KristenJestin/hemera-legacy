@@ -28,6 +28,7 @@ import {
   plainRefusal,
   questionOpen,
   reportedFailureOf,
+  stoppedTurnOf,
   subjectOf,
 } from '#renderer/agent-tool-payloads.ts'
 
@@ -855,5 +856,28 @@ describe('What the agent reported outside the conversation is drawn as a quiet r
       JSON.stringify({ reason: 'stop_timeout' }),
     )
     expect(agentReportOf(note)).toBeNull()
+  })
+})
+
+describe('A turn that ended on its own says why in a sentence (#211)', () => {
+  const ended = (stopReason: string, body: string) =>
+    entryOf('turn', 'hemera', body, JSON.stringify({ stopReason }))
+
+  test('a failed turn reads "Stopped: the agent could not answer."', () => {
+    expect(stoppedTurnOf(ended('failed', 'The agent could not answer.'))).toEqual({
+      reason: 'the agent could not answer.',
+      byTheReader: false,
+    })
+    expect(stoppedTurnOf(ended('max_tokens', 'The agent reached its token limit.'))?.reason).toBe(
+      'the agent reached its token limit.',
+    )
+  })
+
+  test('a turn the reader stopped says so and nothing more; one that simply ended draws nothing', () => {
+    expect(stoppedTurnOf(ended('cancelled', 'The turn was stopped.'))).toEqual({
+      reason: undefined,
+      byTheReader: true,
+    })
+    expect(stoppedTurnOf(ended('end_turn', 'The agent finished its turn.'))).toBeNull()
   })
 })

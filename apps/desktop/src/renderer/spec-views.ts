@@ -45,6 +45,8 @@ export interface SpecReading {
   journal: readonly JournalEntry[]
   /** What the last "Mark ready" was refused with, which the readiness bar says. */
   readyRefused?: string | null | undefined
+  /** The part a `spec_write` of the running turn is writing now, or null (issue #185). */
+  writing?: SpecTarget | null | undefined
 }
 
 const PHASES: readonly PhaseId[] = ['shape', 'plan', 'decompose', 'prototype']
@@ -137,15 +139,22 @@ function sectionMark(
   return author
 }
 
-/** The sections, each with its mark: read, never edited by hand (issue #135). */
-export function sectionsOf(snapshot: SpecSnapshot): SectionView[] {
+/**
+ * The sections, each with its mark: read, never edited by hand (issue #135). The one a
+ * `spec_write` is writing now is marked so, whatever it held before: its text, when it has some,
+ * stays on screen until the new one replaces it (issue #185).
+ */
+export function sectionsOf(
+  snapshot: SpecSnapshot,
+  writing: SpecTarget | null = null,
+): SectionView[] {
   return snapshot.sections.map((section) => {
     const author = section.body.trim() === '' ? null : section.author
     return {
       name: section.name,
       body: section.body,
       author,
-      mark: sectionMark(snapshot, section.name, author),
+      mark: section.name === writing ? 'writing' : sectionMark(snapshot, section.name, author),
     }
   })
 }
@@ -372,7 +381,13 @@ export function plainRefusal(
 }
 
 /** The whole view of the panel. */
-export function specViewOf({ snapshot, revisions, journal, readyRefused }: SpecReading): SpecView {
+export function specViewOf({
+  snapshot,
+  revisions,
+  journal,
+  readyRefused,
+  writing = null,
+}: SpecReading): SpecView {
   const readiness = readinessOf(snapshot)
   return {
     key: snapshot.spec.key,
@@ -385,7 +400,8 @@ export function specViewOf({ snapshot, revisions, journal, readyRefused }: SpecR
     revision: snapshot.revision.number,
     revisions: revisionsOf(snapshot, revisions, journal),
     phases: phasesOf(snapshot),
-    sections: sectionsOf(snapshot),
+    // Only the current revision is written to: an older one shown is not the one being written.
+    sections: sectionsOf(snapshot, isCurrent(snapshot) ? writing : null),
     stories: storiesOf(snapshot),
     storiesMark: listMark(snapshot, snapshot.stories.length),
     tasks: tasksOf(snapshot),

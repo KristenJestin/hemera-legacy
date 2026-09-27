@@ -31,7 +31,6 @@ import { GROUNDS, type Ground, type Magnify, Stage } from './views/stage.tsx'
 
 /** The key that puts the face in each state. */
 const KEYS: Record<FaceState, string> = {
-  idle: 'i',
   thinking: 't',
   reading: 'r',
   writing: 'w',
@@ -42,7 +41,6 @@ const KEYS: Record<FaceState, string> = {
   blocked: 'b',
   done: 'd',
   error: 'e',
-  silent: 's',
   asleep: 'z',
 }
 
@@ -64,9 +62,9 @@ function askedView(): View {
   return VIEWS.find((view) => view === ASKED.get('view')) ?? 'stage'
 }
 
-/** The state the address names for the frame-by-frame view, or idle. */
+/** The state the address names for the frame-by-frame view, or asleep. */
 function askedFrom(): FaceState {
-  return FACE_STATES.find((state) => state === ASKED.get('from')) ?? 'idle'
+  return FACE_STATES.find((state) => state === ASKED.get('from')) ?? 'asleep'
 }
 
 /** The script of an interruption: from one state to another, and a third before it lands. */
@@ -92,7 +90,7 @@ function typing(target: EventTarget | null): boolean {
 
 export function Lab(): ReactNode {
   const clock = useMemo(labClock, [])
-  const [history, setHistory] = useState<readonly Played[]>([{ state: 'idle', at: 0 }])
+  const [history, setHistory] = useState<readonly Played[]>([{ state: 'asleep', at: 0 }])
   const [seed, setSeed] = useState(1)
   const [size, setSize] = useState<FaceSize>('hero')
   const [magnify, setMagnify] = useState<Magnify>(2)
@@ -120,7 +118,7 @@ export function Lab(): ReactNode {
     () => ({ seed, detail: detailOf(size), reduced, tuning }),
     [seed, size, reduced, tuning],
   )
-  const current = history.at(-1)?.state ?? 'idle'
+  const current = history.at(-1)?.state ?? 'asleep'
 
   // One loop for everything the lab draws, all of it at the lab's own time.
   const sprites = useMemo(() => {

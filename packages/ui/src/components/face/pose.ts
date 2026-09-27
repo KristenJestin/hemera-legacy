@@ -4,13 +4,12 @@ import type { Stroke } from './strokes.ts'
  * The colours the face is drawn in: roles of the theme, never colours of its own. Telling two
  * states apart never depends on them — the shape says it, the colour only says it again.
  */
-export const TONES = ['ink', 'quiet', 'busy', 'build', 'needs', 'good', 'bad'] as const
+export const TONES = ['quiet', 'busy', 'build', 'needs', 'good', 'bad'] as const
 
 export type FaceTone = (typeof TONES)[number]
 
 /** The utility each tone is drawn with, which is a role of the theme and nothing else. */
 export const TONE_CLASSES = {
-  ink: 'text-foreground',
   quiet: 'text-muted-foreground',
   busy: 'text-primary',
   build: 'text-mission-build',
@@ -22,13 +21,13 @@ export const TONE_CLASSES = {
 /**
  * Where the head is and where the eyes look, each from -1 to 1.
  *
- * `yaw` turns the head (right is positive), `pitch` nods it (down is positive), `roll` tilts it
- * (clockwise is positive); `gazeX` and `gazeY` move the eyes inside the face.
+ * `yaw` turns the head (right is positive) and `pitch` nods it (down is positive); `gazeX` and
+ * `gazeY` move the eyes inside the face. Nothing tilts: a face that turns in the plane of the
+ * screen is a drawing being rotated, and nothing of the face ever rotates.
  */
 export interface Head {
   readonly yaw: number
   readonly pitch: number
-  readonly roll: number
   readonly gazeX: number
   readonly gazeY: number
 }
@@ -55,7 +54,6 @@ export interface Beat extends Head {
 export const REST: Beat = {
   yaw: 0,
   pitch: 0,
-  roll: 0,
   gazeX: 0,
   gazeY: 0,
   left: null,
@@ -92,7 +90,6 @@ export function blend(from: Beat, to: Beat, w: number): Beat {
   return {
     yaw: at(from.yaw, to.yaw),
     pitch: at(from.pitch, to.pitch),
-    roll: at(from.roll, to.roll),
     gazeX: at(from.gazeX, to.gazeX),
     gazeY: at(from.gazeY, to.gazeY),
     left: blendPull(from.left, to.left, w),
@@ -116,10 +113,9 @@ export const AT = {
   lidRight: 22,
   yaw: 23,
   pitch: 24,
-  roll: 25,
-  gazeX: 26,
-  gazeY: 27,
-  tones: 28,
+  gazeX: 25,
+  gazeY: 26,
+  tones: 27,
 } as const
 
 export const POSE_LENGTH = AT.tones + TONES.length
@@ -182,7 +178,6 @@ export function poseOf(parts: PoseParts): number[] {
     parts.lidRight,
     head.yaw,
     head.pitch,
-    head.roll,
     head.gazeX,
     head.gazeY,
     ...TONES.map((tone) => (tone === parts.tone ? 1 : 0)),

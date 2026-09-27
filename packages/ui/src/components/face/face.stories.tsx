@@ -18,14 +18,14 @@ import { EXPRESSIONS, FACE_STATES, type FaceState } from './states.ts'
  *
  * The stories are the gate the face is validated on before it replaces any icon: every state,
  * every change between two states, a change interrupted half-way, every size, reduced motion,
- * and a seeded idle.
+ * and a seeded life.
  */
 const meta = {
   tags: ['autodocs', 'new'],
   title: 'Components/Face',
   component: Face,
   parameters: { layout: 'centered' },
-  args: { state: 'idle', size: 'lg', seed: 1 },
+  args: { state: 'thinking', size: 'lg', seed: 1 },
   argTypes: {
     state: {
       control: 'select',
@@ -190,7 +190,7 @@ function Replay({ from, to }: { from: FaceState; to: FaceState }): ReactNode {
 export const Transitions: Story = {
   parameters: { controls: { disable: true }, layout: 'padded' },
   render: () => (
-    <div className="grid grid-cols-14 gap-1 text-xs text-muted-foreground">
+    <div className="grid grid-cols-12 gap-1 text-xs text-muted-foreground">
       <span />
       {FACE_STATES.map((to) => (
         <span key={to} className="truncate text-center">
@@ -371,16 +371,16 @@ function numbersOf(face: Element): number[] {
 }
 
 /**
- * Three idle faces: the first two share a seed and live the same life, frame for frame; the third
+ * Three thinking faces: the first two share a seed and live the same life, frame for frame; the third
  * was handed another and goes its own way within seconds.
  */
-export const SeededIdle: Story = {
+export const SeededLife: Story = {
   parameters: { controls: { disable: true } },
   render: () => (
     <div className="flex gap-8">
-      <Face state="idle" size="lg" seed={7} label="Seed 7" />
-      <Face state="idle" size="lg" seed={7} label="Seed 7, again" />
-      <Face state="idle" size="lg" seed={8} label="Seed 8" />
+      <Face state="thinking" size="lg" seed={7} label="Seed 7" />
+      <Face state="thinking" size="lg" seed={7} label="Seed 7, again" />
+      <Face state="thinking" size="lg" seed={8} label="Seed 8" />
     </div>
   ),
   play: async ({ canvasElement }) => {

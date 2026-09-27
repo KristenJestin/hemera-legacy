@@ -172,9 +172,9 @@ describe('Life within a state', () => {
       { state: 'running', at: 5.5 },
       { state: 'question', at: 5.8 },
     ] as const
-    const one = told({ seed: 42, start: 'idle', changes })
-    const same = told({ seed: 42, start: 'idle', changes })
-    const other = told({ seed: 43, start: 'idle', changes })
+    const one = told({ seed: 42, start: 'asleep', changes })
+    const same = told({ seed: 42, start: 'asleep', changes })
+    const other = told({ seed: 43, start: 'asleep', changes })
     let differs = false
     for (let at = 0; at < 12; at += 0.05) {
       const drawn = drawing(one(at))
@@ -193,8 +193,8 @@ describe('Life within a state', () => {
   })
 
   test('blinks never fall into a rhythm, and keep inside the bounds of their state', () => {
-    const { blink } = EXPRESSIONS.idle
-    const frameAt = told({ seed: 5, start: 'idle' })
+    const { blink } = EXPRESSIONS.done
+    const frameAt = told({ seed: 5, start: 'done' })
     const shut: number[] = []
     let was = false
     for (let tick = 0; tick < 240 * RATE; tick += 1) {

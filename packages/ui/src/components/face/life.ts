@@ -98,7 +98,6 @@ function pull(to: Stroke, k: number): { to: Stroke; k: number } | null {
  * can only vary inside what it means — a reader can read a line lower, it cannot suddenly nod.
  */
 export type MotionKind =
-  | 'wander'
   | 'ponder'
   | 'weigh'
   | 'scan'
@@ -111,7 +110,6 @@ export type MotionKind =
   | 'glance'
   | 'settle'
   | 'shudder'
-  | 'droop'
   | 'breathe'
 
 export interface Motion {
@@ -125,31 +123,8 @@ const PAGE = [-0.3, -0.15, 0, 0.15, 0.3]
 
 export const MOTIONS: Record<MotionKind, Motion> = {
   /**
-   * Idle: a new place to look each pass, reached over part of it and then held. The stillness is
-   * the half that makes the movement read — a head that never stops is a thing being animated.
-   * The eyes get there first and the head follows them, which is how a look is made.
-   */
-  wander: {
-    period: [3.2, 5.8],
-    beat: ({ p, r, was }) => {
-      const move = between(r[2], 0.5, 0.8)
-      const head = faceArrive(p / move)
-      const eyes = faceArrive(p / (move * 0.4))
-      const x = (d: Roll): number => between(d[0], -0.8, 0.8)
-      const y = (d: Roll): number => between(d[1], -0.4, 0.4)
-      const yaw = lerp(x(was), x(r), head)
-      return beat({
-        yaw,
-        pitch: lerp(y(was), y(r), head),
-        roll: yaw * 0.1,
-        gazeX: lerp(x(was), x(r), eyes) * 0.6,
-        gazeY: lerp(y(was), y(r), eyes) * 0.5,
-      })
-    },
-  },
-  /**
-   * Thinking: the look of someone working it out — up and away, slower than idle, the head
-   * leaning the way it looks. Nothing down there is interesting yet.
+   * Thinking: the look of someone working it out — up and away, slowly, the head turning the way
+   * it looks. Nothing down there is interesting yet.
    */
   ponder: {
     period: [3.8, 6.5],
@@ -163,7 +138,6 @@ export const MOTIONS: Record<MotionKind, Motion> = {
       return beat({
         yaw,
         pitch: lerp(y(was), y(r), head),
-        roll: yaw * 0.35,
         gazeX: lerp(x(was), x(r), eyes) * 0.7,
         gazeY: lerp(y(was), y(r), eyes) * 0.9,
       })
@@ -178,7 +152,7 @@ export const MOTIONS: Record<MotionKind, Motion> = {
       const side = r[2] < 0.5 ? -1 : 1
       const jump = (from: number): number => faceArrive((p - from) / 0.05)
       const x = side * 0.7 * (jump(at) - 2 * jump(at + gap) + jump(at + 2 * gap))
-      return beat({ gazeX: x, gazeY: -0.3, yaw: x * 0.25, pitch: -0.2, roll: x * 0.12 })
+      return beat({ gazeX: x, gazeY: -0.3, yaw: x * 0.25, pitch: -0.2 })
     },
   },
   /**
@@ -261,8 +235,8 @@ export const MOTIONS: Record<MotionKind, Motion> = {
     },
   },
   /**
-   * A question: the head cocks and lifts, and one eye stands down short, held a moment. Which eye,
-   * which way, when and for how long all move; the gesture does not.
+   * A question: the head turns a little and lifts, and one eye stands down short, held a moment.
+   * Which eye, which way, when and for how long all move; the gesture does not.
    */
   ask: {
     period: [3, 5.2],
@@ -272,9 +246,8 @@ export const MOTIONS: Record<MotionKind, Motion> = {
       const side = r[3] < 0.5 ? -1 : 1
       const short = pull(EYES.cursor, k)
       return beat({
-        roll: side * 0.4 * k,
         pitch: -0.2 * k,
-        yaw: side * 0.12 * k,
+        yaw: side * 0.25 * k,
         gazeY: -0.1 * k,
         left: r[4] < 0.5 ? short : null,
         right: r[4] < 0.5 ? null : short,
@@ -398,27 +371,6 @@ export const MOTIONS: Record<MotionKind, Motion> = {
       return beat({ yaw: j * 0.35, pitch: j * 0.2 * (r[3] - 0.5), gazeX: j * 0.15 })
     },
   },
-  /**
-   * Silent for too long: it nods off — the head sinks slowly and the lids with it — and catches
-   * itself with a start. Or, some passes, it only looks about at nothing.
-   */
-  droop: {
-    period: [4, 7],
-    beat: ({ p, r }) => {
-      if (r[0] < 0.62) {
-        const sink = faceArrive((p - 0.05) / 0.6) * (1 - faceArrive((p - 0.68) / 0.05))
-        const start = bump(p, 0.68, 0.84)
-        return beat({
-          pitch: 0.35 * sink - 0.12 * start,
-          gazeY: 0.2 * sink - 0.1 * start,
-          lid: 0.55 * sink + 0.9 * bump(p, 0.74, 0.8),
-        })
-      }
-      const side = r[3] < 0.5 ? -1 : 1
-      const look = arc(p - between(r[1], 0.05, 0.15), 0.2, between(r[2], 0.2, 0.3), 0.2)
-      return beat({ gazeX: side * 0.5 * look, yaw: side * 0.25 * look })
-    },
-  },
   /** Asleep: it rises and falls, slowly. Continuous across passes; only the depth is redrawn. */
   breathe: {
     period: [4, 5.2],
@@ -450,7 +402,7 @@ export interface FlourishFrame {
  * with a longer name. The randomness is around them instead: when one plays, and which side a
  * look goes to, never how it goes.
  */
-export type FlourishName = 'lookaway' | 'hmm' | 'sigh' | 'widen' | 'plead' | 'hop' | 'yawn'
+export type FlourishName = 'hmm' | 'sigh' | 'widen' | 'plead' | 'hop' | 'yawn'
 
 export interface Flourish {
   /** How long it takes, in seconds: drawn inside these bounds each time it plays. */
@@ -464,23 +416,7 @@ export interface Flourish {
 }
 
 export const FLOURISHES: Record<FlourishName, Flourish> = {
-  /**
-   * Something moved: a quick look off to one side, a beat holding it, and back. The one gesture
-   * quicker than the eye expects, which is what makes it a reaction rather than a decision.
-   */
-  lookaway: {
-    length: [0.9, 1.4],
-    every: [8, 20],
-    mouthless: true,
-    play: (q, side) => {
-      const off = arc(q, 0.12, 0.3, 0.22)
-      return {
-        w: arc(q, 0.1, 0.55, 0.25),
-        beat: beat({ yaw: side * 0.85 * off, gazeX: side * 0.9 * off, pitch: -0.1 * off }),
-      }
-    },
-  },
-  /** Thinking harder: the head tilts further, the eyes narrow and look up, the mouth twists. */
+  /** Thinking harder: the head turns away, the eyes narrow and look up, the mouth twists. */
   hmm: {
     length: [1.2, 1.8],
     every: [7, 15],
@@ -490,9 +426,8 @@ export const FLOURISHES: Record<FlourishName, Flourish> = {
       return {
         w: arc(q, 0.15, 0.55, 0.3),
         beat: beat({
-          roll: -side * 0.4 * k,
           pitch: -0.25 * k,
-          yaw: side * 0.2 * k,
+          yaw: side * 0.35 * k,
           gazeX: side * 0.5 * k,
           gazeY: -0.55 * k,
           lid: 0.35 * k,
@@ -543,7 +478,7 @@ export const FLOURISHES: Record<FlourishName, Flourish> = {
       return { w: arc(q, 0.12, 0.55, 0.33), beat: beat({ left: open, right: open }) }
     },
   },
-  /** A permission asked again: the head tilts, drops a little, and the eyes look up at you. */
+  /** A permission asked again: the head drops a little, and the eyes look up at you. */
   plead: {
     length: [1, 1.5],
     every: [8, 16],
@@ -552,7 +487,7 @@ export const FLOURISHES: Record<FlourishName, Flourish> = {
       const k = arc(q, 0.2, 0.45, 0.35)
       return {
         w: arc(q, 0.15, 0.55, 0.3),
-        beat: beat({ roll: side * 0.3 * k, pitch: 0.2 * k, gazeY: -0.45 * k }),
+        beat: beat({ pitch: 0.2 * k, gazeY: -0.45 * k, yaw: side * 0.1 * k }),
       }
     },
   },
@@ -570,8 +505,8 @@ export const FLOURISHES: Record<FlourishName, Flourish> = {
     },
   },
   /**
-   * A yawn: the head goes back while the mouth opens, holds with a tremble, and closes on the way
-   * home. It needs a mouth: without one it is a head going back for no reason.
+   * A yawn: the head goes back while the mouth opens — wider and taller at once, never turning —
+   * holds with a tremble, and closes on the way home. It needs a mouth: without one it is a head going back for no reason.
    */
   yawn: {
     length: [2.8, 3.3],
@@ -587,8 +522,7 @@ export const FLOURISHES: Record<FlourishName, Flourish> = {
           yaw: Math.sin(q * Math.PI * 14 + 0.8) * 0.015 * peak,
           gazeY: -0.2 * open,
           lid: 0.3 * open,
-          mouth: pull(MOUTHS.open, open),
-          mouthScale: 1 + 1.1 * open,
+          mouth: pull(MOUTHS.gape, open),
         }),
       }
     },

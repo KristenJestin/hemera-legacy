@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react'
+import { type ReactNode, useState } from 'react'
 
 import { StatusDot, type StatusTone } from '../components/status-dot/status-dot.tsx'
 import { IconTool } from '../icons.ts'
@@ -18,6 +18,11 @@ import { Disclosure } from './disclosure.tsx'
  * saying where the run stands — running while one of its calls runs, failed when
  * one failed, done otherwise — so a failure folded away is still seen.
  *
+ * Folded, the line also names the run's latest action, muted and cut short on one line — `12
+ * actions · Read src/menu.html` — and follows it while the turn runs (issue #180): a count alone
+ * said nothing of what the agent was doing. Unfolded, the rows say it and the line is the count
+ * again.
+ *
  * What the group holds is counted by its caller: the design system does not read an agent's calls.
  */
 
@@ -33,8 +38,11 @@ const STATUS: Record<ActionGroupStatus, { word: string; tone: StatusTone }> = {
 /** The line that is read: the mark, the count, and where the run stands. */
 const SUMMARY = 'flex min-w-0 items-center gap-2'
 
-/** The count, which is all the line says. */
-const COUNT = 'min-w-0 truncate text-muted-foreground'
+/** The count, which is never the part cut short. */
+const COUNT = 'shrink-0 text-muted-foreground'
+
+/** The latest action, folded: muted, and the part of the line cut short when it runs out. */
+const LATEST = 'min-w-0 truncate text-muted-foreground'
 
 /** The rows it holds, unfolded: the thread's own rows, closer together than blocks of a thread. */
 const ROWS = 'flex flex-col gap-1'
@@ -44,6 +52,8 @@ export interface ActionGroupProps {
   count: number
   /** Where the run stands, as a dot at the end of the line. */
   status: ActionGroupStatus
+  /** What the latest call of the run is doing, in its own words: the folded line names it. */
+  latest?: string | undefined
   /** The rows of the calls, and the thoughts and diffs between them, in the order they came. */
   children: ReactNode
   /** Whether it starts unfolded; folded unless a caller asks. */
@@ -55,21 +65,26 @@ export interface ActionGroupProps {
 export function ActionGroup({
   count,
   status,
+  latest,
   children,
   defaultOpen = false,
   className,
 }: ActionGroupProps): ReactNode {
   const { word, tone } = STATUS[status]
+  // Followed rather than held: the disclosure keeps the fold, the line only needs to know it.
+  const [open, setOpen] = useState(defaultOpen)
   return (
     <Disclosure
       className={className}
       defaultOpen={defaultOpen}
+      onOpenChange={setOpen}
       summary={
         <span className={SUMMARY}>
           <span className="flex shrink-0 text-muted-foreground">
             <IconTool size="sm" aria-hidden="true" />
           </span>
           <span className={COUNT}>{`${String(count)} actions`}</span>
+          {!open && latest !== undefined && <span className={LATEST}>{`· ${latest}`}</span>}
           <StatusDot status={tone} size="sm" label={word} />
         </span>
       }

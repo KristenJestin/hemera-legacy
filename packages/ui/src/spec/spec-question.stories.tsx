@@ -62,7 +62,7 @@ export const NotBlocking: Story = {
 }
 
 /**
- * The recommended choice wears a small mark at its end, which takes no line of its own: the row
+ * The recommended choice wears a small mark after its label, which takes no line of its own: the row
  * is as tall as the others and its label where theirs is. The words are in its tooltip and its
  * name. Pressing it answers at once.
  */

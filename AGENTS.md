@@ -71,15 +71,18 @@ packages/ipc      @hemera/ipc      the shared channel declaration: one name per 
 packages/ui       @hemera/ui       the design system: the CSS theme, the motion preset, the
                                    icon catalogue and the components. React, Tailwind 4, Base
                                    UI and motion; nothing of Hemera, nothing of Electron.
+apps/face-lab     @hemera/face-lab a page to play with Hemera's face (#140): its states, its
+                                   changes and every number it plays by, through the face's
+                                   own door `@hemera/ui/face`. A tool; it ships nowhere.
 tools/            —                boundaries, commit-message, git-flow, environment-report,
                                    package-desktop, window-options, motion-presets.
                                    TypeScript run by Node, tested by Vitest.
 ```
 
-Dependency direction is `desktop → core`, `desktop → ipc` and `desktop → ui`. `core`, `ipc`
-and `ui` import nothing of Hemera: they are the leaves the application composes. Tabler comes
-through `packages/ui/src/icons.ts` and nowhere else. Import other packages only through their
-`exports`; never reach into another package's `src`.
+Dependency direction is `desktop → core`, `desktop → ipc`, `desktop → ui` and `face-lab → ui`.
+`core`, `ipc` and `ui` import nothing of Hemera: they are the leaves the application composes.
+Tabler comes through `packages/ui/src/icons.ts` and nowhere else. Import other packages only
+through their `exports`; never reach into another package's `src`.
 `node tools/boundaries.ts` enforces all of it and runs inside `pnpm lint`.
 
 "Workspace" means two things: a pnpm workspace (a package here) and a product Workspace
@@ -101,6 +104,7 @@ pnpm package --channel beta      # refused outside CI: prod and beta are the pip
 pnpm check                       # typecheck, lint, fmt:check and test, in that order
 
 pnpm --filter @hemera/desktop e2e  # the built application, driven by @wdio/electron-service
+pnpm face-lab                      # the face lab, served on http://localhost:6012
 ```
 
 Configuration lives in one place: `vite.config.ts` at the root holds the `lint`, `fmt` and

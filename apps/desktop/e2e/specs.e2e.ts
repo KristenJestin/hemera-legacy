@@ -321,21 +321,22 @@ describe('A question is asked and answered in the chat', () => {
     expect(panel.toLowerCase()).not.toContain('answer in the chat')
   })
 
-  it('answers it in the block, which folds to the answer, and resolves it in the register', async () => {
+  it('answers it in the block, which stays as it was asked, and resolves it in the register', async () => {
     await answerWith(ISSUE)
     await browser.pause(1200)
 
-    // The block folds to the question alone, and the answer is the reader's choice beside it,
-    // lettered as the card lettered it (issues #149 and #165).
+    // The block stays where it was asked, every choice in it, and names itself after the answer,
+    // lettered as the card lettered it; the thread draws no answer of its own (issue #199).
     const block = await region('[id^="ask-"]')
     expect(block).toContain(QUESTION)
-    expect(block).not.toContain('The payment date')
+    expect(block).toContain('The payment date')
     const chosen = await browser.execute(() =>
       [...document.querySelectorAll('[role="group"][aria-label^="You answered"]')].map(
-        (group) => group.getAttribute('aria-label') ?? '',
+        (group) =>
+          `${group.closest('[id^="ask-"]') === null ? 'thread' : 'card'}: ${group.getAttribute('aria-label') ?? ''}`,
       ),
     )
-    expect(chosen).toEqual([`You answered «${QUESTION}»: A, ${ISSUE}`])
+    expect(chosen).toEqual([`card: You answered «${QUESTION}»: A, ${ISSUE}`])
     const panel = await region(PANEL)
     expect(panel).toContain('Questions · 0 open')
     expect(panel).toContain('1 answered')

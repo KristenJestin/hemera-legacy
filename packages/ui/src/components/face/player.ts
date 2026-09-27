@@ -309,7 +309,8 @@ interface Segment {
   readonly blinks: (at: number) => Found<BlinkEvent>
   readonly passes: (at: number) => Found<PassEvent>
   readonly flourishes: (at: number) => Found<FlourishEvent>
-  readonly flourish: FlourishName | null
+  /** The flourishes this state may play, at this size and with this life. */
+  readonly repertoire: readonly FlourishName[]
   readonly run: Run | null
   /** Under reduced motion: what was showing when this state began, fading out under it. */
   readonly faded: readonly FaceLayer[]
@@ -369,6 +370,7 @@ function stillOf(expression: Expression): number[] {
     head: expression.look,
     orbit: expression === EXPRESSIONS.loading ? 1 : 0,
     spin: 0,
+    reach: 0,
     tone: expression.tone,
   })
 }
@@ -390,11 +392,9 @@ export function createFace(options: FaceOptions): FacePlayer {
     const expression = EXPRESSIONS[state]
     const { blink, aside, motion } = expression
     const borrowing = detail.asides && tuning.life.aside ? aside : null
-    const own = expression.flourish
-    const flourish =
-      own !== null && tuning.life.flourish && (detail.mouth || FLOURISHES[own].mouthless)
-        ? own
-        : null
+    const repertoire = tuning.life.flourish
+      ? expression.flourishes.filter((one) => detail.mouth || FLOURISHES[one].mouthless)
+      : []
     return {
       state,
       seed,
@@ -404,7 +404,7 @@ export function createFace(options: FaceOptions): FacePlayer {
       run,
       faded,
       name,
-      flourish,
+      repertoire,
       blinks: strandOf<BlinkEvent>(strand(seed, 1), (previous, random) => {
         const every = blink?.every ?? [4, 6]
         const start = (previous?.start ?? t0) + between(random(), every[0], every[1])
@@ -428,16 +428,12 @@ export function createFace(options: FaceOptions): FacePlayer {
         }
       }),
       flourishes: strandOf<FlourishEvent>(strand(seed, 3), (previous, random) => {
-        const piece = FLOURISHES[flourish ?? 'hmm']
+        const drawn = repertoire[Math.floor(random() * repertoire.length)] ?? 'hmm'
+        const piece = FLOURISHES[drawn]
         const wait = between(random(), piece.every[0], piece.every[1])
         const start = (previous?.end ?? t0) + (tuning.loop ? 0.7 : wait)
         const length = between(random(), piece.length[0], piece.length[1])
-        return {
-          start,
-          end: start + length,
-          name: flourish ?? 'hmm',
-          side: random() < 0.5 ? -1 : 1,
-        }
+        return { start, end: start + length, name: drawn, side: random() < 0.5 ? -1 : 1 }
       }),
     }
   }
@@ -514,12 +510,15 @@ export function createFace(options: FaceOptions): FacePlayer {
       }
     }
     let flourish: FlourishName | null = null
-    if (segment.flourish !== null) {
+    // Turns of the orbit a flourish adds, whole and not blended: they are not given back.
+    let turns = 0
+    if (segment.repertoire.length > 0) {
       const { current } = segment.flourishes(at)
       if (current !== null && at < current.end) {
         flourish = current.name
         const q = (at - current.start) / (current.end - current.start)
         const played = FLOURISHES[current.name].play(q, current.side)
+        turns += played.beat.turn
         // A flourish takes the face over rather than adding to it: two things steering one head
         // is how a sigh ends up sweeping sideways.
         gesture = blend(gesture, played.beat, played.w)
@@ -531,6 +530,11 @@ export function createFace(options: FaceOptions): FacePlayer {
       if (at < acted.start || at >= acted.end) continue
       if (acted.act.kind === 'gesture') motion = acted.act.motion
       if (acted.act.kind === 'flourish') flourish = acted.act.flourish
+    }
+    for (const acted of segment.acts) {
+      if (acted.act.kind !== 'flourish' || at < acted.start) continue
+      const q = Math.min(1, (at - acted.start) / (acted.end - acted.start))
+      turns += FLOURISHES[acted.act.flourish].play(q, acted.side).beat.turn
     }
     const blinked = blinking(segment, at)
     // Whichever closes the lids further wins, and they never add up past shut.
@@ -559,7 +563,8 @@ export function createFace(options: FaceOptions): FacePlayer {
         // Loading rides the orbit, a turn every beat of the loading indicator, on the clock
         // itself, so that two loading faces go round together as two indicators do.
         orbit: segment.state === 'loading' ? 1 : 0,
-        spin: segment.state === 'loading' ? at / timing.spin : 0,
+        spin: segment.state === 'loading' ? at / timing.spin + turns : 0,
+        reach: gesture.reach,
         tone: expression.tone,
       }),
       motion,
@@ -626,9 +631,9 @@ export function createFace(options: FaceOptions): FacePlayer {
   const orbiting = (run: Run, turn: Turn, q: number, life: Pose): number[] => {
     const booting = run.name === 'boot'
     const pose = life.slice()
-    // Out of loading, the dots keep their round shape until they are nearly home; into it, the
-    // features ball up first and are taken round afterwards.
-    const shape = booting ? faceArrive((q - 0.5) / 0.5) : faceArrive(q / 0.45)
+    // All of it at once: the dots slow down, spiral in and round out into their features in one
+    // movement, and a face balls up while it is already being taken round.
+    const shape = booting ? faceArrive((q - 0.1) / 0.85) : faceArrive(q / 0.7)
     for (const start of [AT.left, AT.right, AT.mouth]) {
       write(pose, start, toward(strokeAt(run.start, start), strokeAt(life, start), shape))
     }
@@ -637,11 +642,10 @@ export function createFace(options: FaceOptions): FacePlayer {
       pose[index] = run.start[index]! + (life[index]! - run.start[index]!) * settled
     }
     const out = run.start[AT.orbit]!
-    pose[AT.orbit] = booting
-      ? out * (1 - faceArrive((q - 0.3) / 0.7))
-      : out + (1 - out) * faceArrive((q - 0.15) / 0.6)
+    pose[AT.orbit] = booting ? out * (1 - faceArrive(q)) : out + (1 - out) * faceArrive(q)
     pose[AT.spin] = turned(turn, q)
-    const colour = booting ? faceArrive((q - 0.3) / 0.7) : faceArrive(q / 0.6)
+    pose[AT.reach] = run.start[AT.reach]! + (life[AT.reach]! - run.start[AT.reach]!) * settled
+    const colour = faceArrive(q)
     for (let index = AT.tones; index < life.length; index += 1) {
       pose[index] = run.start[index]! + (life[index]! - run.start[index]!) * colour
     }

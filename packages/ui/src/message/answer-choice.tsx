@@ -4,7 +4,7 @@ import { motion } from 'motion/react'
 import { type ReactNode, useState } from 'react'
 
 import { Badge } from '../components/badge/badge.tsx'
-import { IconCheck } from '../icons.ts'
+import { Tick } from '../components/checkbox/checkbox.tsx'
 import { arrival, useTransition } from '../motion.ts'
 import { MessageHeader, MessageRow } from './message.tsx'
 import { MessageText } from './message-text.tsx'
@@ -186,7 +186,8 @@ export function AnswerChoice({
             <span className="min-w-0 break-words">{choice.label}</span>
             {choice.recommended === true && <Badge tone="success">recommended</Badge>}
             <span className="flex text-primary">
-              <IconCheck size="sm" aria-hidden="true" />
+              {/* The choice made draws its tick as the answer arrives (issue #185). */}
+              <Tick checked arrives />
             </span>
           </li>
         ))}

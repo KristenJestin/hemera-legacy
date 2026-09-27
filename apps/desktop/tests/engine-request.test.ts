@@ -10,7 +10,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
-import { Effect, Layer } from 'effect'
+import { Duration, Effect, Fiber, Layer, Option } from 'effect'
 
 import { DEFINE_MISSION_BRIEF, DELIVERY_MARKER, contextUri, readerLine } from '@hemera/core'
 import type { EngineArguments, EngineRequestName, EngineResponse } from '@hemera/ipc'
@@ -33,6 +33,7 @@ import { type Journal, journalLayer } from '#engine/journal.ts'
 import { type Preferences, preferencesLayer } from '#engine/preferences.ts'
 import { Projects, projectsLayer } from '#engine/projects.ts'
 import { answer, decideRequest } from '#engine/request.ts'
+import { PATIENCE } from '#main/engine-conversation.ts'
 import { Sessions, sessionsLayer } from '#engine/sessions.ts'
 import { domainEventsLayer } from '#engine/domain-events.ts'
 import { NoSpecNotices } from '#engine/specs/notices.ts'
@@ -104,6 +105,8 @@ function running<A, E>(
     | Launches
   >,
   agent: FakeAgent = fakeAgent(),
+  readVersion: (command: string) => Effect.Effect<string | undefined> = () =>
+    Effect.succeed('1.0.0'),
 ) {
   // The agents are the fake ones here: a suite that asks for a turn is asking whether the message
   // reaches the runtime, and the runtime itself is proved by its own suite, on the fake provider.
@@ -111,9 +114,9 @@ function running<A, E>(
     Layer.succeed(MachineEnvironment, {
       home: '/home/ana',
       env: {},
-      locate: () => Effect.succeed('/usr/local/bin/claude'),
+      locate: (command) => Effect.succeed(`/usr/local/bin/${command}`),
       bundled: () => Effect.succeed('/opt/hemera/node_modules/adapter/dist/index.js'),
-      readVersion: () => Effect.succeed('1.0.0'),
+      readVersion,
       holds: () => Effect.succeed(true),
       read: () => Effect.succeed(undefined),
     }),
@@ -127,6 +130,7 @@ function running<A, E>(
         told.push({ projectId, workspaceId })
       },
       launched: () => undefined,
+      agents: () => undefined,
     }),
     Layer.succeed(StderrSink, { write: () => Effect.void }),
   )
@@ -391,6 +395,60 @@ function asked<K extends EngineRequestName>(name: K, argument: EngineArguments<K
     Effect.map((value) => value as EngineResponse<K>),
   )
 }
+
+describe('agents.list answers while an agent start is in flight', () => {
+  test('the list comes back well within the window’s patience, without a version to wait for', async () => {
+    // The Session's agent is held in its cold start, and every version question hangs: the
+    // machine is loaded, which is when the menu came back empty (`agents.list` timed out).
+    let release: () => void = () => undefined
+    const held = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const agent = fakeAgent({ holdsStart: async () => await held })
+    const versions: string[] = []
+    const hanging = (command: string) => {
+      versions.push(command)
+      return Effect.never
+    }
+
+    const seen = await running(
+      Effect.gen(function* () {
+        const project = yield* asked('projects.create', {
+          name: 'Atlas',
+          tone: 'primary',
+          mainPath: dataFolder,
+        })
+        const sessions = yield* Sessions
+        const session = yield* sessions.create(project.id, 'claude')
+        // The reopened Session's agent, being started and not yet answering.
+        const starting = yield* Effect.forkChild(asked('agents.options', { sessionId: session.id }))
+        yield* until(
+          Effect.sync(() => agent.starts.length),
+          (count) => count > 0,
+        )
+
+        const started = performance.now()
+        const listed = yield* asked('agents.list', {}).pipe(Effect.timeoutOption(PATIENCE))
+        const took = performance.now() - started
+
+        release()
+        yield* Fiber.join(starting)
+        return { listed, took, starts: agent.starts.length }
+      }),
+      agent,
+      hanging,
+    )
+
+    expect(Option.isSome(seen.listed)).toBe(true)
+    const agents = Option.getOrThrow(seen.listed).agents
+    expect(agents.map((one) => one.id)).toEqual(['claude', 'codex', 'opencode'])
+    expect(agents.every((one) => one.found && one.version === null)).toBe(true)
+    expect(seen.took).toBeLessThan(Duration.toMillis(PATIENCE) / 2)
+    // The start itself asked no version: a Session has no use for one.
+    expect(versions.toSorted()).toEqual(['claude', 'codex', 'opencode'])
+    expect(seen.starts).toBe(1)
+  })
+})
 
 describe('Every Workspace channel reaches its use case', () => {
   let main: string

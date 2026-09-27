@@ -80,7 +80,10 @@ export interface EngineStart {
 /** The name each change of a Session travels under, on the one channel the page listens on. */
 export const PUSHED: Record<
   Notice,
-  Exclude<EngineEventName, 'entry' | 'run' | 'spec_changed' | 'launch_changed' | 'workspace'>
+  Exclude<
+    EngineEventName,
+    'entry' | 'run' | 'spec_changed' | 'launch_changed' | 'workspace' | 'agents_changed'
+  >
 > = {
   permission_requested: 'permission',
   turn_started: 'turn_start',
@@ -136,6 +139,13 @@ function noticesTo(port: MessagePortMain, log: (line: string) => void): Layer.La
         port.postMessage({ event: 'launch.changed', specId, projectId })
       } catch (died) {
         log(`pushing a launch failed: ${named(died)}`)
+      }
+    },
+    agents: () => {
+      try {
+        port.postMessage({ event: 'agents.changed' })
+      } catch (died) {
+        log(`pushing agents.changed failed: ${named(died)}`)
       }
     },
   })
@@ -224,9 +234,9 @@ function servicesOf(
   // What the Agents section of the settings asks about: the three agents this machine has, and
   // the one thing that changes them, which is asked of a registry and of the tool that installed
   // the command (D5-18). Both of those need to know what the machine is, so they are built over
-  // it, and discovery is built a second time rather than shared: it is three `PATH` lookups with
-  // no state between them.
-  const discovery = discoveryLayer.pipe(Layer.provide(rows), Layer.provide(agents))
+  // it. Discovery is one instance, shared with the runtime below: it keeps the version each
+  // command printed, and a second instance would start every command again to learn it.
+  const discovery = discoveryLayer.pipe(Layer.provide(agents))
   const sources = Layer.mergeAll(registryLayer, updaterLayer).pipe(Layer.provide(agents))
   const listed = agentsLayer.pipe(Layer.provide(discovery), Layer.provide(sources))
   // The processes a command becomes and the processes an agent is are started by the same
@@ -263,7 +273,7 @@ function servicesOf(
   const runtime = runtimeLayer.pipe(
     // Discovery is handed up rather than hidden: the settings page asks this process what the
     // machine has, and that question is answered without starting anything.
-    Layer.provideMerge(discoveryLayer),
+    Layer.provideMerge(discovery),
     Layer.provide(rows),
     // What each Project's composer was left on: the runtime seeds the Home's choices from it
     // at start and writes them back as they are made (D5-17).

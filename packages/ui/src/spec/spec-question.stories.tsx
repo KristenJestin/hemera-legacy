@@ -1,6 +1,8 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
+import { type ReactNode, useState } from 'react'
 import { expect, fn, screen, userEvent, waitFor, within } from 'storybook/test'
 
+import { Composer } from '../composer/composer.tsx'
 import { CREDIT_NOTES } from './spec-fixtures.ts'
 import { SpecQuestion } from './spec-question.tsx'
 
@@ -175,5 +177,155 @@ export const OtherOnly: Story = {
       'A type column.{Enter}',
     )
     await expect(args.onAnswer).toHaveBeenCalledWith({ text: 'A type column.' })
+  },
+}
+
+/** The question asked in the stories, as its card names it once answered. */
+const ASKED = 'Credit notes: negative rows in the same file, or left out of the export?'
+
+/**
+ * Answered by a choice: the card stays as it was asked. The chosen row is filled and checked,
+ * the others quieted, and nothing can be pressed any more. No line says which was chosen: the
+ * card shows it, and its name says it.
+ */
+export const AnsweredByAChoice: Story = {
+  args: { question: { ...CREDIT_NOTES, answer: { optionId: 'separate' } } },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const card = canvas.getByRole('group', {
+      name: `You answered «${ASKED}»: B, A second file for credit notes`,
+    })
+    await expect(card).toBeVisible()
+    const rows = rowsOf(canvasElement)
+    await expect(rows).toHaveLength(4)
+    await expect(rows[0]).toHaveTextContent('Negative rows in the same file')
+    await expect(rows[2]).toHaveTextContent('Left out of the export')
+    await expect(rows[3]).toHaveTextContent(/^DOther$/)
+    for (const button of canvas.queryAllByRole('button')) expect(button).toBeDisabled()
+    await expect(canvas.getByRole('button', { name: /A second file/ })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    )
+    await expect(canvas.getByRole('button', { name: /Negative rows/ })).toHaveAttribute(
+      'aria-pressed',
+      'false',
+    )
+    await expect(card).not.toHaveTextContent(/Answered/)
+    await expect(canvas.queryByText(/^Blocking · /)).toBeNull()
+  },
+}
+
+/** Answered in your own words: `Other` is the row chosen, and holds the words you gave. */
+export const AnsweredInOwnWords: Story = {
+  args: {
+    question: { ...CREDIT_NOTES, answer: { text: 'Negative rows, marked by a type column.' } },
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await expect(
+      canvas.getByRole('group', {
+        name: `You answered «${ASKED}»: D, Other: Negative rows, marked by a type column.`,
+      }),
+    ).toBeVisible()
+    const rows = rowsOf(canvasElement)
+    await expect(rows).toHaveLength(4)
+    await expect(rows[3]).toHaveTextContent(/^DNegative rows, marked by a type column\.$/)
+    await expect(canvas.queryByRole('textbox')).toBeNull()
+    for (const button of canvas.queryAllByRole('button')) expect(button).toBeDisabled()
+  },
+}
+
+/** The card as the thread holds it: the answer, once given, is the question's own. */
+function Answerable(props: Parameters<typeof SpecQuestion>[0]): ReactNode {
+  const [answer, setAnswer] = useState(props.question.answer)
+  return (
+    <SpecQuestion
+      {...props}
+      question={{ ...props.question, answer }}
+      onAnswer={(given) => {
+        props.onAnswer(given)
+        setAnswer(given)
+      }}
+    />
+  )
+}
+
+/**
+ * Answering: a press answers at once, and the card does not fold or move. The rows stay where
+ * they were, the chosen one draws its check.
+ */
+export const Answering: Story = {
+  render: (args) => <Answerable {...args} />,
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement)
+    const card = canvas.getByRole('group', { name: /^Question: / })
+    const before = rowsOf(canvasElement).map((row) => row.getBoundingClientRect().top)
+    await userEvent.click(canvas.getByRole('button', { name: /A second file/ }))
+    await expect(args.onAnswer).toHaveBeenCalledWith({ optionId: 'separate' })
+    await expect(card).toHaveAccessibleName(/^You answered /)
+    await expect(rowsOf(canvasElement).map((row) => row.getBoundingClientRect().top)).toEqual(
+      before,
+    )
+    await expect(canvas.getByRole('button', { name: /A second file/ })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    )
+  },
+}
+
+/** Answering in your own words: the field gives way to the words, in the row `Other` was. */
+export const AnsweringInOwnWords: Story = {
+  render: (args) => <Answerable {...args} />,
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement)
+    await userEvent.click(canvas.getByRole('button', { name: /Other/ }))
+    await userEvent.type(
+      await canvas.findByRole('textbox', { name: 'Other' }),
+      'A type column.{Enter}',
+    )
+    await expect(args.onAnswer).toHaveBeenCalledWith({ text: 'A type column.' })
+    await waitFor(() => expect(canvas.queryByRole('textbox')).toBeNull())
+    await expect(rowsOf(canvasElement)[3]).toHaveTextContent(/^DA type column\.$/)
+  },
+}
+
+/**
+ * Answered while you watched: the card the page pinned above the composer comes back to its place
+ * in the thread answered, and its check draws itself there.
+ */
+export const AnsweredJustNow: Story = {
+  args: { question: { ...CREDIT_NOTES, answer: { optionId: 'negative' } }, arrives: true },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const chosen = canvas.getByRole('button', { name: /Negative rows/ })
+    await expect(chosen).toHaveAttribute('aria-pressed', 'true')
+    await expect(chosen.querySelector('svg path')).not.toBeNull()
+  },
+}
+
+/**
+ * Pinned: while it waits, the page draws the card above the composer (issue #130), where the
+ * agent's words going on under it cannot carry it away.
+ */
+export const Pinned: Story = {
+  render: (args) => (
+    <Composer
+      value=""
+      onValueChange={fn()}
+      files={[]}
+      onFilesChange={fn()}
+      onSearchFiles={async () => await Promise.resolve([])}
+      onSend={async () => await Promise.resolve(null)}
+      variant="inline"
+      action="Send"
+      placeholder="Say something to claude…"
+      pinned={[{ id: args.question.id, content: <SpecQuestion {...args} /> }]}
+    />
+  ),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const area = canvas.getByRole('region', { name: 'Waiting for your answer' })
+    await expect(within(area).getByRole('group', { name: /^Question: / })).toBeVisible()
+    await expect(within(area).getByText(/^Blocking · /)).toBeVisible()
   },
 }

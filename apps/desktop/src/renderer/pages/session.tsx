@@ -576,7 +576,7 @@ export function SessionPage({
         // group the reader unfolded is the same group when the next call arrives in it.
         id: `actions-${piece.items[0]?.id ?? ''}`,
         content: (
-          <ActionGroup count={piece.count} status={piece.status}>
+          <ActionGroup count={piece.count} status={piece.status} latest={piece.latest}>
             {piece.items.map((one) => (
               <Fragment key={one.id}>{one.content}</Fragment>
             ))}

@@ -5,6 +5,7 @@ import { type ReactNode, useRef } from 'react'
 import { IconCheck, IconChevronDown } from '../../icons.ts'
 import { useOverlayContainer } from '../../overlay.ts'
 import { Button } from '../button/button.tsx'
+import { Tooltip } from '../tooltip/tooltip.tsx'
 
 /**
  * The select, on Base UI (design D1-04).
@@ -73,6 +74,11 @@ export interface SelectProps<Value extends string> {
    */
   mark?: ReactNode | undefined
   disabled?: boolean | undefined
+  /**
+   * What the trigger's tooltip says: the whole of a value the trigger may cut short, when its
+   * caller bounds its width. No tooltip when left out.
+   */
+  tooltip?: string | undefined
   /** Where the select sits; never how it looks. */
   className?: string | undefined
 }
@@ -86,6 +92,7 @@ export function Select<Value extends string>({
   placeholder = 'Choose',
   mark,
   disabled,
+  tooltip,
   className,
 }: SelectProps<Value>) {
   const groups = grouped(items)
@@ -104,19 +111,25 @@ export function Select<Value extends string>({
       disabled={disabled === true}
     >
       <span ref={anchor} className={cn('inline-flex', className)}>
-        <BaseSelect.Trigger
-          aria-label={label}
-          nativeButton
-          render={<Button variant="secondary" className={TRIGGER} />}
-        >
-          <span className="flex min-w-0 items-center gap-2">
-            {mark}
-            <BaseSelect.Value placeholder={placeholder} />
-          </span>
-          <BaseSelect.Icon className={CHEVRON}>
-            <IconChevronDown size="sm" />
-          </BaseSelect.Icon>
-        </BaseSelect.Trigger>
+        {/* Always wrapped, and off when there is nothing to say: a wrapper that came and went
+            would remount the trigger under the hand. */}
+        <Tooltip label={tooltip ?? ''} disabled={tooltip === undefined}>
+          <BaseSelect.Trigger
+            aria-label={label}
+            nativeButton
+            render={<Button variant="secondary" className={TRIGGER} />}
+          >
+            <span className="flex min-w-0 items-center gap-2">
+              {mark}
+              {/* Cut short with an ellipsis when the caller bounds the width; the list keeps
+                  every name whole. */}
+              <BaseSelect.Value placeholder={placeholder} className="truncate" />
+            </span>
+            <BaseSelect.Icon className={CHEVRON}>
+              <IconChevronDown size="sm" />
+            </BaseSelect.Icon>
+          </BaseSelect.Trigger>
+        </Tooltip>
       </span>
       <BaseSelect.Portal container={container}>
         <BaseSelect.Positioner

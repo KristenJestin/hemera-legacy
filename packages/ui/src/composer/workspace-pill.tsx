@@ -17,6 +17,10 @@ import { IconGitBranch } from '../icons.ts'
  * is no longer drawn as one: a plain label with the Workspace's name, and the reason is its
  * tooltip rather than a sentence that stayed on screen for the whole Session (issue #128), and
  * part of its accessible name, which is what a screen reader says of it.
+ *
+ * A Workspace is named after its branch, and a branch name can be long: the select is bounded by
+ * a width of the theme and cuts the name short with an ellipsis, the whole name in its tooltip and
+ * its accessible name, while the list it opens shows every name whole (issue #180).
  */
 
 /** A Workspace on offer: the name it is chosen by, and where it is on disk. */
@@ -39,7 +43,7 @@ export const FIXED_REASON = 'The Workspace is fixed once the agent has started.'
 
 /** The label: the name and its branch, quiet, and reachable by the keyboard for its tooltip. */
 const LABEL =
-  'inline-flex min-w-0 items-center gap-2 rounded-md px-2 py-1 not-italic text-sm text-muted-foreground focus-ring'
+  'inline-flex min-w-0 max-w-3xs items-center gap-2 rounded-md px-2 py-1 not-italic text-sm text-muted-foreground focus-ring'
 
 export function WorkspacePill({
   workspaces,
@@ -49,7 +53,8 @@ export function WorkspacePill({
 }: WorkspacePillProps): ReactNode {
   if (fixed) {
     return (
-      <Tooltip label={FIXED_REASON}>
+      // Bounded as the select is, so the tooltip names the Workspace whole beside the reason.
+      <Tooltip label={`Workspace: ${workspace}. ${FIXED_REASON}`}>
         <i
           role="img"
           // Focusable so the keyboard reaches its tooltip as the pointer does.
@@ -66,8 +71,11 @@ export function WorkspacePill({
   }
   return (
     <Select
-      label="Workspace"
-      className="w-fit"
+      // The name the trigger may cut short is said whole, to a screen reader as to the pointer
+      // (issue #180): the width is bounded, the name is not.
+      label={`Workspace: ${workspace}`}
+      tooltip={workspace}
+      className="w-fit max-w-3xs"
       value={workspace}
       onValueChange={onWorkspaceChange}
       items={workspaces.map((one) => ({

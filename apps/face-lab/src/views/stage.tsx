@@ -36,7 +36,6 @@ export type Ground = keyof typeof GROUNDS
 
 /** A swatch of each tone, for the readout: the same roles the face is drawn in. */
 const SWATCHES = {
-  ink: 'bg-foreground',
   quiet: 'bg-muted-foreground',
   busy: 'bg-primary',
   build: 'bg-mission-build',
@@ -164,7 +163,7 @@ function useReadout(): Overlay<(frame: FaceFrame, at: number) => void> {
       />
       {row('Gesture', 'motion')}
       {row('Flourish', 'flourish')}
-      {row('Yaw · pitch · roll', 'head')}
+      {row('Yaw · pitch', 'head')}
       {row('Gaze', 'gaze')}
       {row('Lids', 'lids')}
       <div className="mt-2 flex flex-col gap-1">
@@ -200,7 +199,7 @@ function useReadout(): Overlay<(frame: FaceFrame, at: number) => void> {
     say('motion', frame.motion ?? '—')
     say('flourish', frame.flourish ?? '—')
     if (pose === undefined) return
-    say('head', [AT.yaw, AT.pitch, AT.roll].map((index) => signed(pose[index]!)).join(' '))
+    say('head', [AT.yaw, AT.pitch].map((index) => signed(pose[index]!)).join(' '))
     say('gaze', [AT.gazeX, AT.gazeY].map((index) => signed(pose[index]!)).join(' '))
     say('lids', [AT.lidLeft, AT.lidRight].map((index) => pose[index]!.toFixed(2)).join(' '))
     tonesOf(pose).forEach((weight, index) => {

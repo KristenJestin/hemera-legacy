@@ -58,7 +58,7 @@ function Cell({
 export function Matrix({ telling }: { telling: Telling }): ReactNode {
   return (
     <div className="overflow-auto">
-      <div className="grid w-fit grid-cols-14 gap-1 text-xs text-muted-foreground">
+      <div className="grid w-fit grid-cols-12 gap-1 text-xs text-muted-foreground">
         <span />
         {FACE_STATES.map((to) => (
           <span key={to} className="truncate text-center">

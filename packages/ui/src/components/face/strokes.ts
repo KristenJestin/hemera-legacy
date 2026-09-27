@@ -57,8 +57,6 @@ export const EYES = {
   wide: [0, -0.15, 0, 0, 0, 0.15, 7],
   /** Level and thin: closed. What every blink closes onto. */
   shut: [-3.8, 0, 0, 0, 3.8, 0, 2.6],
-  /** Level, short and heavy: the `-_-` of something that has heard nothing for a while. */
-  dash: [-2.8, 0, 0, 0, 2.8, 0, 3.5],
   /** Closed and curved: asleep, the lid resting rather than blinking. */
   sleep: [-3.8, -0.9, 0, 0.8, 3.8, -0.9, 2.3],
   /**
@@ -88,14 +86,17 @@ export const MOUTHS = {
   /** Wider and shallower: a grin across the face. */
   grin: [-4.6, -1, 0, 1.4, 4.6, -1, 2.3],
   /**
-   * A dot: a mouth open, round, for a yawn or a breath let out. A dot and not an arc, because a
-   * short heavy arc under two eyes is a heart.
+   * A dot: a mouth open, round, for a breath let out. A dot and not an arc, because a short heavy
+   * arc under two eyes is a heart; and a dot lying level, so a line shrinks into it without
+   * turning on the way.
    */
-  open: [0, -0.4, 0, 0, 0, 0.4, 4.6],
+  open: [-0.3, 0, 0, 0, 0.3, 0, 4.6],
+  /** The same dot, heavier: a yawn at its widest, grown in height and width together. */
+  gape: [-0.4, 0, 0, 0, 0.4, 0, 7],
   /** The smile upside down. */
   frown: [-3.2, 1.2, 0, -1.2, 3.2, 1.2, 2.3],
-  /** Shorter, and pulled to one side: working something out. */
-  hmm: [-1.6, 0.5, 0.6, 0.1, 2.6, -0.5, 2.3],
+  /** Shorter, and pushed to one side, level: working something out. */
+  hmm: [-0.6, 0.2, 1, 0.2, 2.6, 0.2, 2.3],
   /** A small line: held back, hoping. */
   small: [-1.6, 0, 0, 0, 1.6, 0, 2.3],
 } as const satisfies Record<string, Stroke>
@@ -208,7 +209,9 @@ export function closed(stroke: Stroke, lid: number): Stroke {
   if (lid <= 0) return stroke
   const k = Math.min(1, lid)
   const [x1, y1, x2, y2, x3, y3, weight] = stroke
-  const height = 1 - k
+  // A lying eye closes as a lid does. A standing one or a dot is all height, and it goes before
+  // the width follows, or the stroke would turn on its side on the way down.
+  const height = family(stroke) === 'lying' ? 1 - k : Math.max(0, 1 - k / SPREAD_FROM)
   const spread = faceArrive((k - SPREAD_FROM) / (1 - SPREAD_FROM))
   const half = Math.max(Math.abs(x3 - x1) / 2, CLOSED_HALF)
   return [

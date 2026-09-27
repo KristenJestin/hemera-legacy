@@ -27,6 +27,7 @@ import { SpecNotices } from '#engine/specs/notices.ts'
 import { SpecAnchorRefusedError } from '#engine/specs/write-right.ts'
 import { Specs } from '#engine/specs/specs.ts'
 import { SqliteClient } from '#engine/storage/database.ts'
+import { WorkspaceTakenError } from '#engine/workspaces/described.ts'
 import {
   agentOf,
   draft,
@@ -651,6 +652,41 @@ describe('The Journal shows each step', () => {
     )
     expect(decomposed).toMatchObject({ author: 'agent', sessionId: journal.session.id })
     expect(entries.every((entry) => entry.revisionId !== null)).toBe(true)
+  })
+})
+
+describe('A Spec cannot be given another Spec’s dedicated Workspace', () => {
+  test('Using a Workspace made for another Spec is refused, and the Spec keeps none', async () => {
+    const seen = await opened()(
+      Effect.gen(function* () {
+        const atlas = yield* project('HEM', 7)
+        const specs = yield* Specs
+        const sql = yield* SqliteClient
+        const first = yield* specs.create({
+          sessionId: (yield* freeSession(atlas.id)).id,
+          type: 'feature',
+          title: 'Export the Journal',
+        })
+        const second = yield* specs.create({
+          sessionId: (yield* freeSession(atlas.id)).id,
+          type: 'feature',
+          title: 'Import the Journal',
+        })
+        // The Workspace the first Spec's preparation made for it (D8-12).
+        yield* sql`INSERT INTO workspaces (id, project_id, name, path, created_at, spec_id, state)
+          VALUES ('w-export', ${atlas.id}, 'hem-7-export-the-journal', ${join(dataFolder, 'w')},
+            '2026-09-27T08:00:00.000Z', ${first.snapshot.spec.id}, 'ready')`
+        const refused = yield* Effect.flip(specs.useWorkspace(second.snapshot.spec.id, 'w-export'))
+        const [row] = yield* sql<{ workspace_id: string | null }>`
+          SELECT workspace_id FROM specs WHERE id = ${second.snapshot.spec.id}`
+        return { refused, row }
+      }),
+    )
+    expect(seen.refused).toBeInstanceOf(WorkspaceTakenError)
+    expect(seen.refused.message).toBe(
+      'the Workspace hem-7-export-the-journal was made for HEM-7: a Spec is built in a Workspace of its own',
+    )
+    expect(seen.row?.workspace_id).toBeNull()
   })
 })
 

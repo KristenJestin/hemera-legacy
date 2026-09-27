@@ -65,7 +65,7 @@ import {
   workspaces,
 } from '../storage/schema.ts'
 import { type Mutation, type StaleVersionError, mutate } from '../transaction.ts'
-import { UnknownWorkspaceError } from './described.ts'
+import { UnknownWorkspaceError, WorkspaceTakenError, takenBy } from './described.ts'
 
 /** One launch as the interface reads it: the Spec, the revision, the Workspace, the build. */
 export interface LaunchView {
@@ -107,6 +107,7 @@ export type LaunchRefusal =
   | UnknownSpecError
   | UnknownRevisionError
   | UnknownWorkspaceError
+  | WorkspaceTakenError
   | WorkspaceNotReadyError
   | EmptyTitleError
   | InvalidCursorError
@@ -1020,6 +1021,12 @@ export const launchesLayer = Layer.effect(
                 // wait for nothing, so it is refused as a Session's own check refuses it.
                 if (state === undefined || state === 'cleaned' || state === 'failed') {
                   return yield* Effect.fail(new WorkspaceNotReadyError(chosen.name, chosen.state))
+                }
+                // One Spec, one Workspace (D8-12): a Workspace made for another Spec is that
+                // Spec's build's, and the engine refuses it whatever the window offers.
+                const taken = yield* takenBy(transaction, workspaceId, specId)
+                if (taken !== null) {
+                  return yield* Effect.fail(new WorkspaceTakenError(chosen.name, taken))
                 }
                 const id = crypto.randomUUID()
                 const at = now()

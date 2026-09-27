@@ -334,6 +334,40 @@ function notYetOf(tool: string, state: string, body: string): string | null {
   return body.includes('a blocking question is open') ? 'not yet: a question is open' : 'not yet'
 }
 
+/** What a call the agent reported says of how it ended (engine, `agents/runtime.ts`). */
+const reportedCallPayloadSchema = z.object({
+  call: z.object({
+    status: z.string().nullable(),
+    content: z.array(
+      z.object({ type: z.string(), text: z.object({ text: z.string() }).optional() }),
+    ),
+    rawOutput: z.object({ text: z.string() }).nullable(),
+  }),
+})
+
+/**
+ * Why a call the agent reported did not end well, in words, and nothing for one that did or has
+ * not ended yet (issue #198).
+ *
+ * A call of Hemera's the agent could not make — the tool was not among those it listed — is never
+ * answered by Hemera, so the agent's report is all the thread holds of it: its name and a red dot
+ * said nothing of why. What the agent answered is the reason, and a call that came back with no
+ * word at all says so rather than leaving the body empty.
+ */
+export function reportedFailureOf(entry: SessionEntry): string | undefined {
+  const read = readPayload(reportedCallPayloadSchema, entry.payload)
+  if (read === null) return undefined
+  const { status, content, rawOutput } = read.call
+  if (status === 'cancelled') return 'The turn was stopped before this call answered.'
+  if (status !== 'failed') return undefined
+  const attached = content
+    .filter((block) => block.type === 'content')
+    .map((block) => block.text?.text.trim() ?? '')
+    .filter((text) => text !== '')
+  const said = rawOutput?.text.trim() || attached.join('\n\n')
+  return said === '' ? 'The agent reported this call failed and gave no reason.' : said
+}
+
 /**
  * `null` when the payload does not parse: the entry is left out rather than drawn from a guess.
  *

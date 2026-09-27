@@ -1,7 +1,9 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
 import { MotionConfig } from 'motion/react'
+import { type ReactNode, useState } from 'react'
 import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
 
+import { Button } from '../components/button/button.tsx'
 import { TooltipProvider } from '../components/tooltip/tooltip.tsx'
 import { swap } from '../motion.ts'
 import { LiveSpecPanel } from './spec-harness.tsx'
@@ -9,13 +11,16 @@ import {
   BUG,
   EMPTY,
   GATE_FULL,
+  JUST_CREATED,
   MAINTENANCE,
   MID_PLAN,
   OLDER_REVISION,
+  PROVISIONAL,
   READY,
   gate,
   phases,
 } from './spec-fixtures.ts'
+import { SpecPanel } from './spec-panel.tsx'
 import type { WorkspaceActionsProps } from './workspace-actions.tsx'
 
 /** The build of the Spec as the application hands it: nothing asked for yet, `main` to use. */
@@ -411,6 +416,82 @@ export const Arrives: Story = {
     await waitFor(() => expect(dock.getBoundingClientRect().width).toBeCloseTo(row * 0.45 + 12, 0))
     await expect(canvas.getByRole('heading', { name: 'CSV invoice export' })).toBeVisible()
     await expect(frameOf(canvasElement)).toHaveAttribute('aria-hidden', 'true')
+  },
+}
+
+/**
+ * New Spec's Spec before it exists (issue #198): the panel arrives open on a provisional Spec — no
+ * key yet, the request as its title, set apart, nothing written — and says plainly it is not
+ * created. It offers nothing to press: there is nothing to mark ready.
+ */
+export const Provisional: Story = {
+  args: { spec: PROVISIONAL, arrives: true, defaultFolded: true },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const dock = canvas.getByRole('region', { name: 'Provisional Spec' })
+    const panel = dock.querySelector<HTMLElement>('[data-spec-panel]')!
+    await waitFor(() => expect(panel).not.toHaveAttribute('data-stowed'))
+    await expect(canvas.getByText('No key yet')).toBeVisible()
+    await expect(canvas.getByText(/^Not created yet./)).toBeVisible()
+    await expect(canvas.getByRole('heading', { name: /text reading tool/ })).toBeVisible()
+    await expect(canvas.queryByRole('button', { name: 'Mark ready' })).toBeNull()
+    await expect(within(panel).getAllByText('Nothing written yet.').length).toBeGreaterThan(3)
+  },
+}
+
+/**
+ * The provisional Spec and a button standing for the proposal's `Create`, which turns it into
+ * the Spec the engine created: the same panel, handed the real Spec in place.
+ */
+function ProvisionalThenCreated(): ReactNode {
+  const [created, setCreated] = useState(false)
+  return (
+    <div className="@container flex h-screen min-h-0 bg-background text-foreground">
+      <div className="flex min-w-0 flex-1 flex-col items-start gap-3 p-6 text-sm text-muted-foreground">
+        <p>The chat of the Session, where the agent proposed the Spec.</p>
+        <Button onClick={() => setCreated(true)}>Create</Button>
+      </div>
+      <SpecPanel
+        spec={created ? { ...JUST_CREATED, focus: undefined } : PROVISIONAL}
+        arrives
+        onMarkReady={fn()}
+        onRework={fn()}
+        onPickRevision={fn()}
+        onTakeOver={fn()}
+      />
+    </div>
+  )
+}
+
+/**
+ * The provisional Spec becomes the real one in place (issue #198): created from the proposal, it
+ * takes its key, its title and its type where the provisional ones stood, in the same panel,
+ * which neither moves nor arrives a second time.
+ */
+export const ProvisionalBecomesReal: Story = {
+  render: () => <ProvisionalThenCreated />,
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const dock = canvas.getByRole('region', { name: 'Provisional Spec' })
+    const row = dock.parentElement!.getBoundingClientRect().width
+    await waitFor(() => expect(dock.getBoundingClientRect().width).toBeCloseTo(row * 0.45 + 12, 0))
+    const panel = dock.querySelector<HTMLElement>('[data-spec-panel]')!
+    const before = panel.getBoundingClientRect()
+    await userEvent.click(canvas.getByRole('button', { name: 'Create' }))
+    await expect(canvas.getByRole('region', { name: 'Spec ATL-7' })).toBe(dock)
+    await expect(canvas.getByRole('heading', { name: 'CSV invoice export' })).toBeVisible()
+    await expect(canvas.queryByText('No key yet')).toBeNull()
+    await expect(canvas.queryByText(/^Not created yet./)).toBeNull()
+    // No jump: the panel is the one that was there, where it was, frame after frame.
+    await expect(panelOf(canvasElement)).toBe(panel)
+    for (const _ of [1, 2, 3, 4, 5]) {
+      // oxlint-disable-next-line no-await-in-loop -- one frame after the other
+      await nextFrame()
+      const now = panel.getBoundingClientRect()
+      // oxlint-disable-next-line no-await-in-loop -- read on each frame as it is drawn
+      await expect([now.left, now.width]).toEqual([before.left, before.width])
+    }
+    await expect(canvas.getByRole('button', { name: 'Mark ready' })).toBeVisible()
   },
 }
 

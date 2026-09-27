@@ -26,6 +26,7 @@ import {
   nativeSubjectOf,
   plainRefusal,
   questionOpen,
+  reportedFailureOf,
   subjectOf,
 } from '#renderer/agent-tool-payloads.ts'
 
@@ -454,6 +455,56 @@ describe('A Hemera tool call is drawn once', () => {
     expect(folded.inPlaceOf.get('n1')?.id).toBe('h1')
     expect(folded.inPlaceOf.has('n2')).toBe(false)
     expect(folded.inPlaceOf.get('n3')?.id).toBe('h3')
+  })
+})
+
+describe('A failed tool call says why', () => {
+  /** A call the agent reported failed, with what it attached and what it answered. */
+  const failed = (
+    status: string,
+    content: readonly string[],
+    rawOutput: string | null,
+  ): SessionEntry =>
+    entryOf(
+      'tool_call',
+      'agent',
+      'mcp__hemera__spec_write',
+      JSON.stringify({
+        call: {
+          title: 'mcp__hemera__spec_write',
+          kind: 'other',
+          status,
+          locations: [],
+          content: content.map((text) => ({
+            type: 'content',
+            text: { text, truncated: false, length: text.length },
+          })),
+          rawInput: null,
+          rawOutput: rawOutput === null ? null : { text: rawOutput, truncated: false, length: 9 },
+        },
+      }),
+    )
+
+  test('a failed call unfolded shows the error the agent returned, in words, not only its name', () => {
+    // The trial of #198: a Spec write Hemera never answered, reported failed by the agent.
+    const said = 'MCP error -32602: Tool spec_write not found'
+    expect(reportedFailureOf(failed('failed', [said], null))).toBe(said)
+    expect(reportedFailureOf(failed('failed', [], said))).toBe(said)
+    expect(reportedFailureOf(failed('failed', ['one', 'two'], null))).toBe('one\n\ntwo')
+  })
+
+  test('a failed call that came back with nothing says so, and a stopped one says it was stopped', () => {
+    expect(reportedFailureOf(failed('failed', [], null))).toBe(
+      'The agent reported this call failed and gave no reason.',
+    )
+    expect(reportedFailureOf(failed('cancelled', [], null))).toBe(
+      'The turn was stopped before this call answered.',
+    )
+  })
+
+  test('a call that did not fail has no reason to show', () => {
+    expect(reportedFailureOf(failed('completed', ['3 lines'], null))).toBeUndefined()
+    expect(reportedFailureOf(failed('in_progress', [], null))).toBeUndefined()
   })
 })
 

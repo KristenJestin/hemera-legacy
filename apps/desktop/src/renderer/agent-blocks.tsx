@@ -41,6 +41,7 @@ import {
   elsewhereOf,
   hemeraPermissionOf,
   hemeraToolCallOf,
+  reportedFailureOf,
   hemeraToolLabelOf,
   nativeSubjectOf,
   questionOpen,
@@ -356,6 +357,8 @@ export interface SpecContext {
   asked: ReadonlySet<string> | null
   onAnswer: (questionId: string, answer: SpecAnswer) => void
   onCreate: (title: string, type: SpecType) => void
+  /** `Continue it`: this Session defines the existing Spec the agent pointed to (issue #198). */
+  onJoin: (proposalId: string) => void
   /** `Not now`: the engine keeps the proposal declined and tells the agent (issue #130). */
   onDecline: (proposalId: string) => void
 }
@@ -401,6 +404,8 @@ export function drawEntry(entry: SessionEntry, context: AgentContext): ReactNode
           subject={subjectOf(hemera, call.rawInput?.text ?? '', context.runs)}
           status={reportedStatus(call.status)}
           summary={call.title}
+          // What the agent was answered, when Hemera never was asked: the call's only reason.
+          error={reportedFailureOf(entry)}
           defaultOpen={false}
         />
       )
@@ -424,7 +429,9 @@ export function drawEntry(entry: SessionEntry, context: AgentContext): ReactNode
         }))}
         input={boundedNode(input)}
         output={boundedNode(output)}
-        error={call.status === 'failed' ? entry.body : undefined}
+        // Why it failed, in words: its output already says it where there is one, and its name
+        // said nothing (issue #198).
+        error={call.status === 'failed' && output === null ? reportedFailureOf(entry) : undefined}
       />
     )
   }
@@ -588,6 +595,8 @@ export function drawEntry(entry: SessionEntry, context: AgentContext): ReactNode
         type={proposal.type}
         state={proposal.state}
         createdKey={defined?.key}
+        existingKey={proposal.existing?.key}
+        onContinue={() => context.spec.onJoin(proposalIdOf(entry))}
         onCreate={context.spec.onCreate}
         onDecline={() => context.spec.onDecline(proposalIdOf(entry))}
       />

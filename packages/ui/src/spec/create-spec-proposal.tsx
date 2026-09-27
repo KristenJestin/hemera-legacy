@@ -16,6 +16,11 @@ import { SPEC_TYPE_ICONS } from './spec-icons.ts'
  * the Session becomes `define`, the panel opens beside the thread, and the thread stays as it is.
  *
  * Once answered, the block folds to the line that says what happened.
+ *
+ * The agent may find instead that what the user asks already has a Spec in the Project (issue
+ * #198): it points to that one, by its key, and the reader answers `Continue it` — this Session
+ * then defines that Spec, and the panel shows it — or `Not now`. Nothing is edited in that card:
+ * the Spec exists, with its own title and type.
  */
 
 const CARD = 'flex flex-col gap-2.5 rounded-lg border border-border bg-card p-3'
@@ -33,6 +38,15 @@ const TYPE_OFF = 'border-border text-muted-foreground'
 
 const FOLDED = 'text-sm text-muted-foreground'
 
+/** The Spec pointed to: its key in mono, as the panel's head says it, then its title. */
+const EXISTING = 'flex min-w-0 items-baseline gap-2'
+
+const EXISTING_KEY = 'shrink-0 font-mono text-xs text-muted-foreground'
+
+const EXISTING_TITLE = 'min-w-0 truncate text-sm font-medium'
+
+const EXISTING_TYPE = 'flex shrink-0 items-center gap-1 text-xs text-muted-foreground'
+
 const ALL_TYPES: readonly SpecType[] = ['feature', 'bug', 'maintenance']
 
 /** Where the proposal stands: waiting for the reader, or answered one way or the other. */
@@ -46,6 +60,13 @@ export interface CreateSpecProposalProps {
   state?: ProposalState | undefined
   /** The key the Spec was given, once created: `ATL-7`. */
   createdKey?: string | undefined
+  /**
+   * The key of a Spec that already exists, when the agent points to it rather than proposing a
+   * new one (issue #198): the card then offers to continue that Spec, and `onContinue` answers.
+   */
+  existingKey?: string | undefined
+  /** Makes this Session define the existing Spec: the reader's `Continue it`. */
+  onContinue?: (() => void) | undefined
   /** Creates the Spec with the title and the type as the reader left them. */
   onCreate: (title: string, type: SpecType) => void
   onDecline: () => void
@@ -56,11 +77,48 @@ export function CreateSpecProposal({
   type: understood,
   state = 'proposed',
   createdKey,
+  existingKey,
+  onContinue,
   onCreate,
   onDecline,
 }: CreateSpecProposalProps): ReactNode {
   const [title, setTitle] = useState(proposed)
   const [type, setType] = useState(understood)
+  if (existingKey !== undefined) {
+    if (state === 'created') {
+      return (
+        <p role="status" className={FOLDED}>
+          {`Continued ${existingKey} « ${proposed} » · this Session defines it now`}
+        </p>
+      )
+    }
+    if (state === 'declined') {
+      return (
+        <p className={FOLDED}>{`Not now: ${existingKey} « ${proposed} » was not continued.`}</p>
+      )
+    }
+    return (
+      <div role="group" aria-label="Continue a Spec" className={CARD}>
+        <p className={ASK}>This Spec already exists</p>
+        <p className={EXISTING}>
+          <span className={EXISTING_KEY}>{existingKey}</span>
+          <span className={EXISTING_TITLE}>{proposed}</span>
+          <span className={EXISTING_TYPE}>
+            <TypeIcon type={understood} />
+            {understood}
+          </span>
+        </p>
+        <div className="flex justify-end gap-2">
+          <Button variant="ghost" size="sm" onClick={onDecline}>
+            Not now
+          </Button>
+          <Button variant="primary" size="sm" onClick={onContinue}>
+            Continue it
+          </Button>
+        </div>
+      </div>
+    )
+  }
   if (state === 'created') {
     return (
       <p role="status" className={FOLDED}>

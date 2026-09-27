@@ -106,6 +106,7 @@ import {
   type SpecAnchorRefusedError,
   define,
   definable,
+  joinIn,
   openSessionIn,
   sessionNow,
   sessionRow,
@@ -267,6 +268,19 @@ export function declinedNotice(proposal: DeclinedProposal): string {
 const PROPOSED = z.object({ title: z.string(), type: z.enum(SPEC_TYPES) })
 
 /** The proposal an entry holds; one whose payload does not read is named by its body alone. */
+/** The Spec a proposal points to, when it points to one that exists (issue #198). */
+const POINTED = z.object({ specId: z.string() })
+
+/** The id of the existing Spec a proposal points to, or null for a Spec to create. */
+function pointedIn(payload: string): string | null {
+  try {
+    const read = POINTED.safeParse(JSON.parse(payload))
+    return read.success ? read.data.specId : null
+  } catch {
+    return null
+  }
+}
+
 function proposedIn(payload: string, body: string): DeclinedProposal {
   try {
     const read = PROPOSED.safeParse(JSON.parse(payload))
@@ -315,6 +329,12 @@ export interface SpecsService {
    * draws, and the Session stays `free`. Telling the agent is the runtime's.
    */
   readonly declineProposal: (sessionId: string, proposalId: string) => Answer<DeclinedProposal>
+  /**
+   * The agent's proposal accepted when it points to a Spec that exists (issue #198): the `free`
+   * Session it was made in turns `define` on that Spec, its writer if it has none, a reader
+   * otherwise. No Spec is created.
+   */
+  readonly acceptExisting: (sessionId: string, proposalId: string) => Answer<DefiningSession>
   /** A new `define` Session on a Spec: the writer if it has none, a reader otherwise (D7-11). */
   readonly openSession: (input: SessionOpening) => Answer<DefiningSession>
   readonly writeSection: (actor: SpecWriter, input: SectionWrite) => Answer<SpecSnapshot>
@@ -1226,6 +1246,35 @@ export const specsLayer = Layer.effect(
         ).pipe(
           Effect.tap(({ entry }) => Effect.sync(() => notices.wrote(sessionId, entry))),
           Effect.map(({ proposal }) => proposal),
+        ),
+
+      acceptExisting: (sessionId, proposalId) =>
+        defining('continuing a Spec', (transaction) =>
+          Effect.gen(function* () {
+            const found = yield* transaction
+              .select()
+              .from(sessionEntries)
+              .where(
+                and(
+                  eq(sessionEntries.sessionId, sessionId),
+                  eq(sessionEntries.kind, 'spec_proposal'),
+                  eq(sessionEntries.correlationId, `proposal:${proposalId}`),
+                ),
+              )
+              .limit(1)
+              .pipe(Effect.mapError(failed('reading the proposal')))
+            const row = found[0]
+            const specId = row === undefined ? null : pointedIn(row.payload)
+            if (row === undefined || specId === null) {
+              return yield* Effect.fail(new ProposalRefusedError({ proposalId, why: 'unknown' }))
+            }
+            if (row.state === 'declined') {
+              return yield* Effect.fail(new ProposalRefusedError({ proposalId, why: 'answered' }))
+            }
+            const snapshot = yield* readSnapshot(transaction, specId)
+            const joined = yield* joinIn(transaction, snapshot, sessionId)
+            return { specId, ...joined }
+          }),
         ),
 
       openSession: (input) =>

@@ -299,8 +299,9 @@ export const push: Transition = morph
 /**
  * The `crossfade` kind: one content giving way to another in the same place, in opacity alone.
  *
- * For a box whose frame does not move while what it holds is replaced — the tabs of the details
- * of a Session, where the dialog keeps its height and only the panel inside it changes. A slide
+ * For a box whose frame stays where it is while what it holds is replaced — the tabs of the
+ * details of a Session, where the panel inside the dialog changes and the dialog only follows its
+ * height. A slide
  * there would say the new panel came from somewhere; it did not, it was behind its tab all
  * along, and what has to be read is the same room showing something else. The stage of the Spec
  * panel is that room too: it shows one part of a Spec at a time, and a reader walking the

@@ -111,6 +111,7 @@ export type MotionKind =
   | 'settle'
   | 'shudder'
   | 'breathe'
+  | 'hold'
 
 export interface Motion {
   /** How long one pass lasts, in seconds: bounds, the pass is drawn inside them. */
@@ -122,6 +123,8 @@ export interface Motion {
 const PAGE = [-0.3, -0.15, 0, 0.15, 0.3]
 
 export const MOTIONS: Record<MotionKind, Motion> = {
+  /** Nothing: the head holds still while something else moves, the loading orbit. */
+  hold: { period: [3, 4], beat: () => beat({}) },
   /**
    * Thinking: the look of someone working it out — up and away, slowly, the head turning the way
    * it looks. Nothing down there is interesting yet.
@@ -505,8 +508,8 @@ export const FLOURISHES: Record<FlourishName, Flourish> = {
     },
   },
   /**
-   * A yawn: the head goes back while the mouth opens — wider and taller at once, never turning —
-   * holds with a tremble, and closes on the way home. It needs a mouth: without one it is a head going back for no reason.
+   * A yawn: the mouth opens — wider and taller at once, never turning — while the eyes squeeze
+   * flat and sink towards it; it holds with a tremble, and closes on the way home. It needs a mouth: without one it is a head going back for no reason.
    */
   yawn: {
     length: [2.8, 3.3],
@@ -518,10 +521,13 @@ export const FLOURISHES: Record<FlourishName, Flourish> = {
       return {
         w: arc(q, 0.25, 0.35, 0.35),
         beat: beat({
-          pitch: -0.3 * open + Math.sin(q * Math.PI * 18) * 0.03 * peak,
+          pitch: -0.08 * open + Math.sin(q * Math.PI * 18) * 0.03 * peak,
           yaw: Math.sin(q * Math.PI * 14 + 0.8) * 0.015 * peak,
-          gazeY: -0.2 * open,
+          // The eyes are squeezed flat and pulled down towards the mouth opening under them.
+          gazeY: 0.85 * open,
           lid: 0.3 * open,
+          left: pull(EYES.shut, 0.8 * open),
+          right: pull(EYES.shut, 0.8 * open),
           mouth: pull(MOUTHS.gape, open),
         }),
       }

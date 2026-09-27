@@ -38,6 +38,7 @@ export type Ground = keyof typeof GROUNDS
 
 /** A swatch of each tone, for the readout: the same roles the face is drawn in. */
 const SWATCHES = {
+  current: 'bg-current',
   quiet: 'bg-muted-foreground',
   busy: 'bg-primary',
   build: 'bg-mission-build',

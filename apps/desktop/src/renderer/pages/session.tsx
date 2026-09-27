@@ -55,13 +55,7 @@ import { whenOf } from '../journal-lines.ts'
 import { contextListsOf, detailsTabsOf, openingTabOf, panelRunsOf } from '../session-details.ts'
 import { openSessions, type OfferedWorkspace, workspaceFixedOf } from '../sessions-store.ts'
 import { selectEntry } from '../shell-store.ts'
-import {
-  type DefinedSpec,
-  answerOf,
-  answerWords,
-  questionAnchor,
-  waitsForAnswer,
-} from '../spec-entries.ts'
+import { type DefinedSpec, answerOf, answerWords, waitsForAnswer } from '../spec-entries.ts'
 import {
   answerQuestion,
   askForBuild,
@@ -229,16 +223,6 @@ function definedOf(
   const first = revisions.find((one) => one.number === 1)
   if (snapshot === null || first === undefined) return null
   return { key: snapshot.spec.key, title: first.title, type: first.type }
-}
-
-/**
- * Takes the thread to where a question of the Spec is asked, and the keyboard to its first
- * answer: the register of the panel links there, and the answer is given in the thread.
- */
-function goToQuestion(id: string): void {
-  const block = document.getElementById(questionAnchor(id))
-  block?.scrollIntoView({ block: 'center' })
-  block?.querySelector('button')?.focus()
 }
 
 /** What the last act of a thread was refused with, when the engine refused it. */
@@ -695,7 +679,6 @@ export function SessionPage({
         spec={spec}
         arrives={openedFree.current}
         reader={readerOf(defined, session.id, sessions, running)}
-        onGoToQuestion={goToQuestion}
         onMarkReady={() => void markReady(session.id)}
         onRework={(reason) => void rework(session.id, reason)}
         onPickRevision={(revision) => {

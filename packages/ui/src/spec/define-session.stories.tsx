@@ -208,13 +208,6 @@ function askId(id: string): string {
   return `ask-${id}`
 }
 
-/** Takes the thread to where a question is asked, and the keyboard to its first answer. */
-function goToQuestion(id: string): void {
-  const block = document.getElementById(askId(id))
-  block?.scrollIntoView({ block: 'center' })
-  block?.querySelector('button')?.focus()
-}
-
 /** The chat of a Session: its head, its thread and its composer. */
 function Chat({ title, thread }: { title: string; thread: ScrollerEntry[] }): ReactNode {
   const [value, setValue] = useState('')
@@ -245,7 +238,6 @@ function Chat({ title, thread }: { title: string; thread: ScrollerEntry[] }): Re
 /** The actions a story reports, for the paths that assert on them. */
 const ON = {
   onAnswer: fn(),
-  onGoToQuestion: goToQuestion,
   onMarkReady: fn(),
   onRework: fn(),
   onPickRevision: fn(),
@@ -289,7 +281,6 @@ function DefineSession({
         reader={reader}
         defaultReworkOpen={reworkOpen}
         defaultFolded={folded}
-        onGoToQuestion={actions.onGoToQuestion}
         onMarkReady={actions.onMarkReady}
         onRework={actions.onRework}
         onPickRevision={actions.onPickRevision}
@@ -345,7 +336,6 @@ function FreeThenDefine(): ReactNode {
           >
             <SpecPanel
               spec={created}
-              onGoToQuestion={fn()}
               onMarkReady={fn()}
               onRework={fn()}
               onPickRevision={fn()}
@@ -408,7 +398,7 @@ type Story = StoryObj<typeof meta>
  * The screens first, each named after the state it shows and each left as it opens: its play
  * asserts and changes nothing, so the screen the gate looks at is the screen as drawn. A Session
  * opens its panel folded; a screen that shows the panel's own state opens it unfolded. The paths
- * through them — a link followed, a Spec marked ready, reworked, taken over, a question answered
+ * through them — a Spec marked ready, reworked, taken over, a question answered
  * in the chat — are stories of their own, named after what they do, and
  * start from the folded panel a Session opens on: the hand unfolds it first.
  */
@@ -470,16 +460,18 @@ export const MidPlanMarkReadyRefused: Story = {
   },
 }
 
-/** A question answered in the chat: the register records it. */
+/**
+ * A question answered on its card in the chat: the register records it. The register offers no
+ * way to the chat (issue #181): the card is where one answers.
+ */
 export const MidPlanQuestionAnswered: Story = {
   play: async ({ canvasElement }) => {
     await unfold(canvasElement)
     const canvas = within(canvasElement)
-    await userEvent.click(canvas.getByRole('button', { name: /^Answer in the chat: Credit/ }))
-    const recommended = canvas.getByRole('button', { name: /recommended/ })
-    await expect(recommended).toHaveFocus()
-    await userEvent.keyboard('{Enter}')
-    await expect(canvas.queryByRole('button', { name: /^Answer in the chat/ })).toBeNull()
+    const register = within(canvas.getByRole('list', { name: 'Questions' }))
+    await expect(register.queryByRole('button')).toBeNull()
+    const card = within(canvas.getByRole('group', { name: /^Question: Credit notes/ }))
+    await userEvent.click(card.getByRole('button', { name: /recommended/ }))
     await expect(canvas.getByRole('heading', { name: /^Questions · 0 open/ })).toBeVisible()
   },
 }

@@ -24,7 +24,6 @@ import type { WorkspaceActionsProps } from './workspace-actions.tsx'
 
 export interface SpecActions {
   onAnswer: (id: string, answer: SpecAnswer) => void
-  onGoToQuestion: (id: string) => void
   onMarkReady: () => void
   onRework: (reason: string) => void
   onPickRevision: (revision: number) => void
@@ -76,7 +75,6 @@ export function useLiveSpec(
         }
       })
     },
-    onGoToQuestion: on.onGoToQuestion,
     onMarkReady: () => {
       on.onMarkReady()
       setSpec((now) => {
@@ -216,7 +214,6 @@ export function LiveSpecPanel({
         defaultFolded={defaultFolded}
         onFoldChange={onFoldChange}
         arrives={arrives}
-        onGoToQuestion={actions.onGoToQuestion}
         onMarkReady={actions.onMarkReady}
         onRework={onRework}
         onPickRevision={actions.onPickRevision}

@@ -138,7 +138,6 @@ const meta = {
     defaultFolded: false,
     onFoldChange: fn(),
     onAnswer: fn(),
-    onGoToQuestion: fn(),
     onMarkReady: fn(),
     onRework: fn(),
     onPickRevision: fn(),
@@ -734,12 +733,17 @@ export const MarkReadyRefused: Story = {
   },
 }
 
-/** An open question of the register takes the thread to where it is asked. */
-export const QuestionLinked: Story = {
-  play: async ({ canvasElement, args }) => {
-    const canvas = within(canvasElement)
-    await userEvent.click(canvas.getByRole('button', { name: /^Answer in the chat: Credit notes/ }))
-    await expect(args.onGoToQuestion).toHaveBeenCalledWith('q-credit-notes')
+/**
+ * An open question in the register: said, with its chips, and nothing to press — it is answered on
+ * its card in the chat (issue #181).
+ */
+export const QuestionOpen: Story = {
+  play: async ({ canvasElement }) => {
+    const register = within(within(canvasElement).getByRole('list', { name: 'Questions' }))
+    await expect(register.getByText(/^Credit notes/)).toBeVisible()
+    await expect(register.getByText('blocking')).toBeVisible()
+    await expect(register.queryByRole('button')).toBeNull()
+    await expect(register.queryByText(/answer in the chat/i)).toBeNull()
   },
 }
 

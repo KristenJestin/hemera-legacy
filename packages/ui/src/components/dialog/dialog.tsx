@@ -15,10 +15,15 @@ import { Button, IconButton } from '../button/button.tsx'
  * outside both close it, because a dialog that can only be dismissed one way is a trap.
  *
  * It rises into place while the page behind it goes soft, and sinks back the same way. The
- * blur is a filter and the rise is a transform, so the compositor carries both on its own.
+ * rise is a transform and the veil only fades: its blur is there from the first frame to the
+ * last, and it is its opacity that comes and goes (issue #183). A blur that grew from nothing
+ * was worked out again over the whole page on every frame of the fade, which dropped frames and
+ * drew the page's own layers — the composer, a button of the Spec panel — outside the veil for
+ * a frame before they sank under it: the page behind a dialog seemed to move when nothing in it
+ * had.
  */
 const BACKDROP =
-  'fixed inset-0 bg-overlay backdrop-blur-xs backdrop-motion data-starting-style:opacity-0 data-starting-style:backdrop-blur-none data-ending-style:opacity-0 data-ending-style:backdrop-blur-none'
+  'fixed inset-0 bg-overlay backdrop-blur-xs backdrop-motion data-starting-style:opacity-0 data-ending-style:opacity-0'
 
 const POPUP =
   'fixed inset-0 m-auto flex w-full flex-col gap-4 rounded-xl border border-border bg-card p-4 text-card-foreground shadow-lg outline-none translate-y-0 scale-100 popup-motion data-starting-style:translate-y-4 data-starting-style:scale-95 data-starting-style:opacity-0 data-ending-style:translate-y-4 data-ending-style:scale-95 data-ending-style:opacity-0'

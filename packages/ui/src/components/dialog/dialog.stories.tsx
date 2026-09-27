@@ -271,3 +271,61 @@ export const LongBody: Story = {
     })
   },
 }
+
+/**
+ * The page behind a dialog does not move while it opens or while it closes (issue #183).
+ *
+ * The veil fades and does nothing else: its blur is the same on the first frame of the opening
+ * and on the last frame of the closing as it is once the dialog is open, so the page under it is
+ * never blurred again frame after frame. Whatever stands behind it — a button carrying `layout`,
+ * a line of text — is where it was, before, during and after.
+ */
+export const ThePageBehindStaysStill: Story = {
+  name: 'The page behind stays still',
+  parameters: { controls: { disable: true } },
+  render: (args) => (
+    <div className="flex flex-col items-start gap-4">
+      <p className="text-sm">A line of the page behind.</p>
+      <Button variant="primary">Mark ready</Button>
+      <Dialog {...args} trigger="Details" />
+    </div>
+  ),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const behind = [
+      canvas.getByText('A line of the page behind.'),
+      canvas.getByRole('button', { name: 'Mark ready' }),
+    ]
+    const where = () => behind.map((element) => element.getBoundingClientRect().toJSON())
+    const before = where()
+
+    await userEvent.click(canvas.getByRole('button', { name: 'Details' }))
+    const dialog = await waitFor(() => within(document.body).getByRole('dialog'))
+    await waitFor(() => {
+      expect(getComputedStyle(dialog).opacity).toBe('1')
+    })
+    expect(where()).toEqual(before)
+
+    // The veil's blur is the same whichever end of its fade it is at: only its opacity moves. The
+    // two ends are read with the veil's transition held, so what is read is where each end is
+    // and not a frame of the way there.
+    const veil = [...document.body.querySelectorAll<HTMLElement>('*')].find(
+      (element) => getComputedStyle(element).backdropFilter !== 'none',
+    )!
+    const open = getComputedStyle(veil).backdropFilter
+    veil.style.transitionProperty = 'none'
+    for (const edge of ['data-starting-style', 'data-ending-style']) {
+      veil.setAttribute(edge, '')
+      expect(getComputedStyle(veil).backdropFilter).toBe(open)
+      expect(getComputedStyle(veil).opacity).toBe('0')
+      veil.removeAttribute(edge)
+    }
+    veil.style.removeProperty('transition-property')
+
+    await userEvent.keyboard('{Escape}')
+    await waitFor(() => {
+      expect(within(document.body).queryByRole('dialog')).toBeNull()
+    })
+    expect(where()).toEqual(before)
+  },
+}

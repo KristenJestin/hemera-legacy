@@ -1,23 +1,25 @@
 import {
   AT,
-  DETAILS,
   EXPRESSIONS,
+  type FaceAct,
   type FaceFrame,
   FaceFigure,
   type FacePainter,
   type FaceSize,
+  type FaceState,
   SIZE_CLASSES,
   TONES,
   VIEW,
   drawnOf,
   tonesOf,
 } from '@hemera/ui/face'
+import { Button } from '@hemera/ui'
 import { cn } from 'cn'
 import { type ReactNode, useLayoutEffect, useMemo, useRef } from 'react'
 
 import { signed } from '../controls.tsx'
 import { useSprite } from '../sprites.tsx'
-import { type Played, type Telling, lengthOf, playerOver, replay } from '../story.ts'
+import { type Played, type Telling, detailFor, lengthOf, playerOver, replay } from '../story.ts'
 
 /** How much bigger than itself the face on the stage is drawn, to be looked at closely. */
 export const MAGNIFY = { 1: 'scale-100', 2: 'scale-200', 3: 'scale-300', 4: 'scale-400' } as const
@@ -54,6 +56,43 @@ export interface StageProps {
   readonly magnify: Magnify
   readonly ground: Ground
   readonly guides: boolean
+  /** The state the face is in, whose own animations can be played on demand. */
+  readonly state: FaceState
+  readonly onAct: (act: FaceAct) => void
+}
+
+/** What a state plays, each of which can be asked for now: its blink, its gestures, its flourish. */
+function actsOf(state: FaceState): { readonly label: string; readonly act: FaceAct }[] {
+  const { blink, motion, aside, flourish } = EXPRESSIONS[state]
+  return [
+    ...(blink === null ? [] : [{ label: 'Blink', act: { kind: 'blink' } as const }]),
+    { label: `Gesture · ${motion}`, act: { kind: 'gesture', motion } as const },
+    ...(aside === null
+      ? []
+      : [
+          {
+            label: `Borrowed · ${aside.motion}`,
+            act: { kind: 'gesture', motion: aside.motion } as const,
+          },
+        ]),
+    ...(flourish === null
+      ? []
+      : [{ label: `Flourish · ${flourish}`, act: { kind: 'flourish', flourish } as const }]),
+  ]
+}
+
+/** The animations of the state the face is in, each played on demand. */
+function Acts({ state, onAct }: { state: FaceState; onAct: (act: FaceAct) => void }): ReactNode {
+  return (
+    <div className="flex flex-col gap-1">
+      <span className="text-xs text-muted-foreground">Play now</span>
+      {actsOf(state).map((one) => (
+        <Button key={one.label} size="sm" onClick={() => onAct(one.act)}>
+          {one.label}
+        </Button>
+      ))}
+    </div>
+  )
 }
 
 /** Something drawn beside the face, and what paints it on every frame. */
@@ -107,7 +146,7 @@ function useGuides(): Overlay<(frame: FaceFrame, telling: Telling) => void> {
   const paint = (frame: FaceFrame, telling: Telling): void => {
     const layer = frame.layers.at(-1)
     if (layer === undefined) return
-    const drawn = drawnOf(layer.pose, DETAILS[telling.detail], telling.tuning.gain)
+    const drawn = drawnOf(layer.pose, detailFor(telling), telling.tuning.gain)
     const strokes = [drawn.left, drawn.right, drawn.mouth]
     strokes.forEach((stroke, index) => {
       for (let point = 0; point < 3; point += 1) {
@@ -148,7 +187,7 @@ function useReadout(): Overlay<(frame: FaceFrame, at: number) => void> {
     </div>
   )
   const view = (
-    <div className="flex w-sidebar shrink-0 flex-col gap-1 text-xs">
+    <div className="flex flex-col gap-1 text-xs">
       {row('Time', 'time')}
       {row('State', 'state')}
       {row('Change', 'change')}
@@ -218,7 +257,7 @@ export function Still({ frame, telling }: { frame: FaceFrame; telling: Telling }
   }, [frame])
   return (
     <span className="size-12 shrink-0">
-      <FaceFigure detail={DETAILS[telling.detail]} gain={telling.tuning.gain} painter={painter} />
+      <FaceFigure detail={detailFor(telling)} gain={telling.tuning.gain} painter={painter} />
     </span>
   )
 }
@@ -229,10 +268,11 @@ export function Still({ frame, telling }: { frame: FaceFrame; telling: Telling }
  */
 function Strip({ history, telling }: { history: readonly Played[]; telling: Telling }): ReactNode {
   const cuts = useMemo(() => {
-    const last = history.length - 1
+    const changes = history.filter((played) => played.act === undefined)
+    const last = changes.length - 1
     if (last < 1) return []
-    const from = history[last - 1]!
-    const to = history[last]!
+    const from = changes[last - 1]!
+    const to = changes[last]!
     const player = replay(history, telling)
     const length = lengthOf(from.state, to.state, telling.tuning)
     const start = to.at - 0.1
@@ -256,7 +296,10 @@ function Strip({ history, telling }: { history: readonly Played[]; telling: Tell
           <div key={cut.at} className="flex flex-col items-center gap-1">
             <Still frame={cut.frame} telling={telling} />
             <span className="font-mono text-xs text-muted-foreground">
-              {Math.round((cut.at - (history.at(-1)?.at ?? 0)) * 1000)}
+              {Math.round(
+                (cut.at - (history.filter((played) => played.act === undefined).at(-1)?.at ?? 0)) *
+                  1000,
+              )}
             </span>
           </div>
         ))}
@@ -269,7 +312,16 @@ function Strip({ history, telling }: { history: readonly Played[]; telling: Tell
 }
 
 /** The face on its own, big, with what it is doing beside it and its last change under it. */
-export function Stage({ history, telling, size, magnify, ground, guides }: StageProps): ReactNode {
+export function Stage({
+  history,
+  telling,
+  size,
+  magnify,
+  ground,
+  guides,
+  state,
+  onAct,
+}: StageProps): ReactNode {
   const painter = useRef<FacePainter | null>(null)
   const lines = useGuides()
   const readout = useReadout()
@@ -292,7 +344,7 @@ export function Stage({ history, telling, size, magnify, ground, guides }: Stage
           <div className={MAGNIFY[magnify]}>
             <span className={cn('relative block', SIZE_CLASSES[size])}>
               <FaceFigure
-                detail={DETAILS[telling.detail]}
+                detail={detailFor(telling)}
                 gain={telling.tuning.gain}
                 painter={painter}
               />
@@ -300,7 +352,10 @@ export function Stage({ history, telling, size, magnify, ground, guides }: Stage
             </span>
           </div>
         </div>
-        {readout.view}
+        <div className="flex w-sidebar shrink-0 flex-col gap-6">
+          <Acts state={state} onAct={onAct} />
+          {readout.view}
+        </div>
       </div>
       <Strip history={history} telling={telling} />
     </div>

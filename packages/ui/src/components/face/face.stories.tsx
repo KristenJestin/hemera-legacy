@@ -42,6 +42,11 @@ const meta = {
       control: 'number',
       description: 'The same seed and the same changes tell the same story.',
     },
+    mouth: {
+      control: 'boolean',
+      description: 'Whether the mouth is drawn; it is, at every size, unless turned off.',
+      table: { defaultValue: { summary: 'true' } },
+    },
     label: {
       control: 'text',
       description: "What the face says in words; the state's own words when left out.",
@@ -94,7 +99,7 @@ function sampled<T>(count: number, read: () => T): Promise<T[]> {
 /** One face, in whichever state, size and seed you ask for, changed live from the controls. */
 export const Playground: Story = {}
 
-/** Every size, from an icon button to the hero of a page: small, it simplifies. */
+/** Every size, from an icon button to the hero of a page, and an icon without its mouth. */
 export const Variants: Story = {
   parameters: { controls: { disable: true } },
   render: () => (
@@ -105,16 +110,22 @@ export const Variants: Story = {
           {size}
         </span>
       ))}
+      <span className="flex flex-col items-center gap-2 text-xs text-muted-foreground">
+        <Face state="done" size="icon" seed={3} mouth={false} label="Done, no mouth" />
+        no mouth
+      </span>
     </div>
   ),
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     const icon = canvas.getByRole('img', { name: 'Done, icon' })
     const hero = canvas.getByRole('img', { name: 'Done, hero' })
-    // Small, the face draws no mouth at all rather than a mouth too small to read.
+    const bare = canvas.getByRole('img', { name: 'Done, no mouth' })
+    // The mouth is drawn at every size, down to an icon, and left out only when asked.
     await waitFor(() => {
-      expect(icon.querySelector('[data-face-part="0-mouth"]')).toHaveAttribute('display', 'none')
+      expect(icon.querySelector('[data-face-part="0-mouth"]')).not.toHaveAttribute('display')
       expect(hero.querySelector('[data-face-part="0-mouth"]')).not.toHaveAttribute('display')
+      expect(bare.querySelector('[data-face-part="0-mouth"]')).toHaveAttribute('display', 'none')
     })
     const widths = FACE_SIZES.map(
       (size) => canvas.getByRole('img', { name: `Done, ${size}` }).getBoundingClientRect().width,

@@ -290,13 +290,58 @@ describe('Transitions', () => {
   })
 })
 
+describe('Animations played on demand', () => {
+  test('a blink asked for closes the eyes at once, whatever the dice said', () => {
+    const player = createFace({
+      state: 'thinking',
+      at: 0,
+      seed: 3,
+      detail: DETAILS.full,
+      reduced: false,
+      tuning: TUNING,
+    })
+    player.play({ kind: 'blink' }, 0.5)
+    const shut = player.frame(0.5 + face.blink.down).layers[0]!.pose[AT.lidLeft]!
+    expect(shut).toBeGreaterThan(0.95)
+  })
+
+  test('a flourish asked for plays now, and is said to be playing', () => {
+    const player = createFace({
+      state: 'asleep',
+      at: 0,
+      seed: 3,
+      detail: DETAILS.full,
+      reduced: false,
+      tuning: TUNING,
+    })
+    player.play({ kind: 'flourish', flourish: 'yawn' }, 0.5)
+    const during = drawnOf(player.frame(1.8).layers[0]!.pose, DETAILS.full).mouth!
+    const before = drawnOf(player.frame(0.4).layers[0]!.pose, DETAILS.full).mouth!
+    expect(during.width).toBeGreaterThan(before.width + 1)
+  })
+})
+
+describe('Falling asleep', () => {
+  test.each(FACE_STATES.filter((state) => state !== 'asleep'))(
+    '%s falls asleep without a yawn: the mouth never opens on the way',
+    (from) => {
+      const frameAt = told({ seed: 6, start: from, changes: [{ state: 'asleep', at: 1 }] })
+      const length = face.change.drift
+      for (let at = 1; at < 1 + length; at += 1 / 60) {
+        const mouth = drawnOf(frameAt(at).layers[0]!.pose, DETAILS.full).mouth!
+        expect(mouth.width).toBeLessThan(3.5)
+      }
+    },
+  )
+})
+
 describe('Sizes', () => {
-  test('an icon simplifies: no mouth, and heavier strokes than the full face', () => {
+  test('an icon draws heavier strokes than the full face, and its mouth unless left out', () => {
     const pose = told({ seed: 1, start: 'done', reduced: true })(0).layers[0]!.pose
     const icon = drawnOf(pose, DETAILS.icon)
     const full = drawnOf(pose, DETAILS.full)
-    expect(icon.mouth).toBeNull()
-    expect(full.mouth).not.toBeNull()
+    expect(icon.mouth).not.toBeNull()
+    expect(drawnOf(pose, { ...DETAILS.icon, mouth: false }).mouth).toBeNull()
     expect(icon.left.width).toBeGreaterThan(full.left.width)
   })
 

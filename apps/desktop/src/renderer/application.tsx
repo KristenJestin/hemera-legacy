@@ -95,13 +95,16 @@ import {
   removeCommand,
   saveCommand,
   readRuns,
+  readSessionServices,
   runCommand,
   stopRun,
+  stopSessionService,
   subscribeToTools,
   toolsSnapshot,
 } from './tools-store.ts'
 import { lineOf, linesOf, whenOf } from './journal-lines.ts'
 import { repositoryLinesOf } from './project-lines.ts'
+import { servicesWorkspaceOf } from './session-details.ts'
 import {
   addRecipeStep,
   cleanUp,
@@ -464,6 +467,11 @@ export function Application() {
   const openId = open?.id ?? null
   const provider = open?.provider ?? null
   const openSpecId = open?.specId ?? null
+  const openProjectId = open?.projectId ?? null
+  // The Workspace whose services the open Session's Commands tab lists: its own, `main`'s as
+  // `main`'s (#217).
+  const openServices =
+    open === null ? null : servicesWorkspaceOf(open.workspaceId, sessions.workspaces)
 
   // Everything the window shows about the data folder, asked for once it is open.
   useEffect(() => {
@@ -659,6 +667,15 @@ export function Application() {
     if (openId === null) return
     void readRuns(openId)
   }, [openId])
+
+  // And what its Commands tab lists beside them (#217): the Project's catalogue, which says of a
+  // service whether it runs through Portless, and the services of its Workspace, which the store
+  // reads again whenever a run moves.
+  useEffect(() => {
+    if (openId === null || openProjectId === null) return
+    void readCatalogue(openProjectId)
+    void readSessionServices(openId, { projectId: openProjectId, workspaceId: openServices })
+  }, [openId, openProjectId, openServices])
 
   // The catalogue of the Project whose settings are open, read when they are opened: the agent
   // may have been told of a command the page has not heard of, and the list is the engine's.
@@ -1339,6 +1356,10 @@ export function Application() {
             const known = tools.contexts.get(open.id)?.commands.some((one) => one.name === line)
             void runCommand(open.id, known === true ? { name: line } : { line })
           }}
+          onRunCatalogued={(name) => void runCommand(open.id, { name })}
+          catalogue={tools.catalogues.get(open.projectId) ?? []}
+          services={tools.services.get(open.id) ?? []}
+          onStopService={(runId) => void stopSessionService(open.id, runId)}
           workspaces={offeredWorkspacesOf(sessions.workspaces, open.workspaceId)}
           onChooseWorkspace={(workspaceId) => void chooseWorkspace(open, workspaceId)}
           onAcceptProposal={async (proposalId) => await acceptProposal(open.id, proposalId)}

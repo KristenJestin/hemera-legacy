@@ -480,6 +480,26 @@ export const DetailsWithinReach: Story = {
   },
 }
 
+/**
+ * The Session's commands are one press away too (#217): the catalogue it can run and what runs,
+ * the Commands tab of its details opened directly, beside the details themselves.
+ */
+export const CommandsWithinReach: Story = {
+  parameters: { controls: { disable: true } },
+  args: { onOpenDetails: fn(), onOpenCommands: fn() },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement)
+    const commands = canvas.getByRole('button', { name: 'Commands' })
+    const details = canvas.getByRole('button', { name: 'Session details' })
+    expect(
+      commands.compareDocumentPosition(details) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy()
+    await userEvent.click(commands)
+    expect(args.onOpenCommands).toHaveBeenCalledTimes(1)
+    expect(args.onOpenDetails).not.toHaveBeenCalled()
+  },
+}
+
 /** What a thread says before anything is written in it. */
 export const NothingWrittenYet: Story = {
   parameters: { controls: { disable: true } },

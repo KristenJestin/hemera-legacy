@@ -19,15 +19,18 @@ import type { CommandRun, ContextView, Provided } from '@hemera/ipc'
 import { fakeAgent } from '#engine/agents/fake.ts'
 import { listenToAgents, say } from '#renderer/agent-store.ts'
 import {
+  catalogueLinesOf,
   contextListsOf,
   detailsTabsOf,
   openingTabOf,
   panelRunsOf,
+  servicesWorkspaceOf,
 } from '#renderer/session-details.ts'
 import { contextOf, listenToTools, readContext, runCommand, runsOf } from '#renderer/tools-store.ts'
 
 import { withQualifiedOpenCode } from './unqualified.ts'
 import { type OpenWindow, install, openWindow } from './window.ts'
+import { workspace as aWorkspace } from './workspace-views.ts'
 
 /** A run as the engine pushes one. */
 function aRun(id: string, cwd: string, state: CommandRun['state'], commandId: string | null) {
@@ -497,5 +500,26 @@ describe('A one-off command shows and is not promoted', () => {
     expect(runsOf(session.id).map((one) => [one.commandId, one.line])).toEqual([[null, line]])
     expect(panelRunsOf(runsOf(session.id), workspace)[0]?.oneOff).toBe(true)
     expect(contextOf(session.id)?.commands).toEqual([])
+  })
+})
+
+describe('A configured command can be found and run', () => {
+  test('the Commands tab lists the catalogue as the Context view answered it, once it did', () => {
+    expect(catalogueLinesOf(null)).toBeUndefined()
+    expect(
+      catalogueLinesOf({
+        provided: [],
+        tools: [],
+        commands: [{ name: 'test', line: 'bun run test' }],
+      }),
+    ).toEqual([{ name: 'test', line: 'bun run test' }])
+  })
+
+  test("the services listed are the Session's Workspace's, main's asked for as main's", () => {
+    const main = aWorkspace('main-row', { main: true })
+    const login = aWorkspace('login-form')
+    expect(servicesWorkspaceOf(null, [main, login])).toBeNull()
+    expect(servicesWorkspaceOf('main-row', [main, login])).toBeNull()
+    expect(servicesWorkspaceOf('login-form', [main, login])).toBe('login-form')
   })
 })

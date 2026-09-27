@@ -1,0 +1,643 @@
+import { face, faceArrive, faceCarry } from '../../motion.ts'
+import {
+  CHOREOGRAPHIES,
+  type ChangeName,
+  LIDDED,
+  type Windows,
+  blinkOf,
+  changeBetween,
+  changePace,
+} from './changes.ts'
+import {
+  FLOURISHES,
+  type FlourishName,
+  MIDDLE,
+  MOTIONS,
+  type MotionKind,
+  type Pass,
+  type Roll,
+  between,
+  dice,
+  strand,
+} from './life.ts'
+import {
+  AT,
+  type Beat,
+  CHANNELS,
+  type Channel,
+  type Pose,
+  type Pull,
+  REST,
+  blend,
+  poseOf,
+  strokeAt,
+} from './pose.ts'
+import { EXPRESSIONS, type Expression, type FaceState } from './states.ts'
+import { type Stroke, meet, scaled, toward } from './strokes.ts'
+
+/**
+ * The face's player: what the face is at any instant, told from the state it started in, the
+ * changes it was given and the seed it was handed.
+ *
+ * Nothing here keeps a clock. A frame is asked for at a time, and what comes back is the same for
+ * the same seed, the same changes and the same time — which is what makes a story deterministic,
+ * a lab able to slow it down or scrub back through it, and every transition testable one frame
+ * at a time.
+ */
+
+/** The beats the player plays by: the motion preset's `face` kind, unless a lab tries others. */
+export interface FaceTiming {
+  readonly blink: {
+    readonly down: number
+    readonly up: number
+    readonly gap: number
+    readonly hold: number
+  }
+  readonly shape: number
+  readonly handover: number
+  readonly change: Readonly<Record<ChangeName, number>>
+  readonly fade: number
+}
+
+/** The parts of the face's life, each of which a lab can leave out to judge the others alone. */
+export interface FaceLife {
+  readonly blink: boolean
+  readonly motion: boolean
+  readonly aside: boolean
+  readonly flourish: boolean
+}
+
+/** What the face plays by. The application never touches it; the lab exists to. */
+export interface FaceTuning {
+  readonly timing: FaceTiming
+  /** How far every gesture travels, on top of what the size already asks for. */
+  readonly gain: number
+  /**
+   * How much of its speed the face keeps when a change takes it over, 0 to 1: at 0 it stops dead
+   * on the frame the change arrives, at 1 it finishes the move it was in before turning.
+   */
+  readonly carry: number
+  /** Multiplies the length of every change of state. */
+  readonly pace: number
+  readonly life: FaceLife
+  /** Plays the state's flourish back to back, so it can be judged without waiting for it. */
+  readonly loop: boolean
+}
+
+export const TUNING: FaceTuning = {
+  timing: face,
+  gain: 1,
+  carry: 0.6,
+  pace: 1,
+  life: { blink: true, motion: true, aside: true, flourish: true },
+  loop: false,
+}
+
+/**
+ * How much of the face a size can hold. Small, the face simplifies rather than blurs: no mouth,
+ * features drawn larger in their box and in heavier strokes, gestures that travel further so they
+ * still read, and no borrowed gestures.
+ */
+export interface FaceDetail {
+  readonly mouth: boolean
+  /** How much larger the features are drawn in their box. */
+  readonly scale: number
+  readonly weight: number
+  readonly gain: number
+  readonly asides: boolean
+}
+
+export const DETAILS = {
+  icon: { mouth: false, scale: 1.15, weight: 1.3, gain: 1.45, asides: false },
+  small: { mouth: false, scale: 1.08, weight: 1.18, gain: 1.25, asides: true },
+  full: { mouth: true, scale: 1, weight: 1, gain: 1, asides: true },
+} as const satisfies Record<string, FaceDetail>
+
+export type DetailName = keyof typeof DETAILS
+
+/** One drawing of the face, and how much of it shows. */
+export interface FaceLayer {
+  readonly pose: Pose
+  readonly opacity: number
+}
+
+/** What the face is at one instant, and what it is doing, for whoever draws it or studies it. */
+export interface FaceFrame {
+  /**
+   * What to draw, bottom first: one face while it moves, or the still faces a cross-fade is
+   * passing between when the reader asked for less movement.
+   */
+  readonly layers: readonly FaceLayer[]
+  readonly state: FaceState
+  readonly change: { readonly name: ChangeName; readonly progress: number } | null
+  readonly motion: MotionKind | null
+  readonly flourish: FlourishName | null
+  /** Nothing will move before the next change: a reader asking for less movement, settled. */
+  readonly still: boolean
+}
+
+export interface FaceOptions {
+  readonly state: FaceState
+  /** When the face starts, in seconds, on whatever clock its frames will be asked on. */
+  readonly at: number
+  readonly seed: number
+  readonly detail: FaceDetail
+  /** Still expressions and a soft cross-fade between them, and nothing else. */
+  readonly reduced: boolean
+  readonly tuning: FaceTuning
+}
+
+export interface FacePlayer {
+  readonly state: () => FaceState
+  /** Goes into `state` at `at`, from wherever the face is then. The same state is no change. */
+  readonly change: (state: FaceState, at: number) => void
+  readonly frame: (at: number) => FaceFrame
+}
+
+/** A moment of a story, and the moment it ends. */
+interface Timed {
+  readonly start: number
+  readonly end: number
+}
+
+interface Found<T> {
+  readonly current: T | null
+  readonly previous: T | null
+}
+
+/** How many events of a strand are kept; asked for an older moment, the strand is told again. */
+const KEPT = 16
+
+/**
+ * Events drawn one after another from a seed. Only the last few are kept, and a moment older
+ * than those is answered by telling the strand again from its start, which gives the very same
+ * events: that is what lets a face live for hours without keeping hours of blinks.
+ */
+function strandOf<T extends Timed>(
+  seed: number,
+  next: (previous: T | null, random: () => number) => T,
+): (at: number) => Found<T> {
+  let random = dice(seed)
+  let kept: T[] = []
+  let dropped = false
+  return (at) => {
+    if (dropped && kept.length > 1 && at < kept[1]!.start) {
+      random = dice(seed)
+      kept = []
+      dropped = false
+    }
+    while (kept.length === 0 || kept.at(-1)!.start <= at) {
+      kept.push(next(kept.at(-1) ?? null, random))
+      if (kept.length > KEPT) {
+        kept.shift()
+        dropped = true
+      }
+    }
+    for (let index = kept.length - 1; index >= 0; index -= 1) {
+      if (kept[index]!.start <= at) {
+        return { current: kept[index]!, previous: kept[index - 1] ?? null }
+      }
+    }
+    return { current: null, previous: null }
+  }
+}
+
+interface BlinkEvent extends Timed {
+  readonly twice: boolean
+}
+
+interface PassEvent extends Timed {
+  readonly kind: MotionKind
+  readonly r: Roll
+  readonly was: Roll
+  readonly n: number
+}
+
+interface FlourishEvent extends Timed {
+  readonly name: FlourishName
+  readonly side: number
+}
+
+/** A blink closing over `down`, staying shut for `hold` and opening over `up`, `τ` seconds in. */
+function pulse(timing: FaceTiming, τ: number, hold: number): number {
+  const { down, up } = timing.blink
+  if (τ <= 0) return 0
+  if (τ < down) return faceArrive(τ / down)
+  if (τ < down + hold) return 1
+  if (τ < down + hold + up) return 1 - faceArrive((τ - down - hold) / up)
+  return 0
+}
+
+/** A blink a change comes with: where it starts and how long it stays shut, in seconds. */
+interface ChangeBlink {
+  readonly start: number
+  readonly hold: number
+}
+
+/** The blink a change is carried across, and the windows it leaves the change's parts. */
+interface Carried {
+  readonly blink: ChangeBlink | null
+  readonly windows: Windows
+}
+
+/** A change under way: where it took the face from, and how it goes. */
+interface Run {
+  readonly name: ChangeName
+  readonly length: number
+  readonly windows: Windows
+  readonly side: number
+  readonly chance: number
+  readonly from: FaceState
+  /** Where every number of the face was when the change came, and how fast it was going. */
+  readonly start: Pose
+  readonly speed: Pose
+  /** Where the life of the new state had the face at that same moment. */
+  readonly landing: Pose
+  readonly blink: ChangeBlink | null
+}
+
+interface Segment {
+  readonly state: FaceState
+  readonly expression: Expression
+  readonly t0: number
+  readonly blinks: (at: number) => Found<BlinkEvent>
+  readonly passes: (at: number) => Found<PassEvent>
+  readonly flourishes: (at: number) => Found<FlourishEvent>
+  readonly flourish: FlourishName | null
+  readonly run: Run | null
+  /** Under reduced motion: what was showing when this state began, fading out under it. */
+  readonly faded: readonly FaceLayer[]
+  /** What the change into this state is called, for whoever studies the face. */
+  readonly name: ChangeName | null
+}
+
+/** How the face's life reads at one instant. */
+interface Life {
+  readonly pose: number[]
+  readonly motion: MotionKind | null
+  readonly flourish: FlourishName | null
+}
+
+/** How far back a speed is read from, in seconds: a quarter of a frame at sixty. */
+const STEP = 1 / 240
+
+/** How many states are kept: enough to read the speed of the last one when the next comes. */
+const KEPT_SEGMENTS = 4
+
+/** How many faces a cross-fade shows at most; the faintest goes first. */
+const LAYERS = 3
+
+const CHANNEL_NAMES: readonly Channel[] = ['shape', 'mouth', 'lid', 'head', 'gaze', 'tone']
+
+/** Writes a stroke into a pose at `start`. */
+function write(pose: number[], start: number, stroke: Stroke): void {
+  for (let index = 0; index < 7; index += 1) pose[start + index] = stroke[index]!
+}
+
+/** Plays a beat on a pose: the head moves by it, lids close to it, features pull towards it. */
+function play(pose: number[], said: Beat): void {
+  pose[AT.yaw] = pose[AT.yaw]! + said.yaw
+  pose[AT.pitch] = pose[AT.pitch]! + said.pitch
+  pose[AT.roll] = pose[AT.roll]! + said.roll
+  pose[AT.gazeX] = pose[AT.gazeX]! + said.gazeX
+  pose[AT.gazeY] = pose[AT.gazeY]! + said.gazeY
+  pose[AT.lidLeft] = Math.max(pose[AT.lidLeft]!, said.lid)
+  pose[AT.lidRight] = Math.max(pose[AT.lidRight]!, said.lid)
+  const pulled = (start: number, pull: Pull | null): void => {
+    if (pull !== null) write(pose, start, toward(strokeAt(pose, start), pull.to, pull.k))
+  }
+  pulled(AT.left, said.left)
+  pulled(AT.right, said.right)
+  pulled(AT.mouth, said.mouth)
+  if (said.mouthScale !== 1)
+    write(pose, AT.mouth, scaled(strokeAt(pose, AT.mouth), said.mouthScale))
+}
+
+/** A state's expression held still: what reduced motion shows, and all it shows. */
+function stillOf(expression: Expression): number[] {
+  return poseOf({
+    left: expression.eyes[0],
+    right: expression.eyes[1],
+    mouth: expression.mouth,
+    lidLeft: expression.lid,
+    lidRight: expression.lid,
+    head: expression.look,
+    tone: expression.tone,
+  })
+}
+
+export function createFace(options: FaceOptions): FacePlayer {
+  const { detail, reduced, tuning } = options
+  const { timing } = tuning
+  const segments: Segment[] = []
+
+  /** A state begun at `t0`, its three strands drawn from its own seed. */
+  const begin = (
+    state: FaceState,
+    t0: number,
+    seed: number,
+    run: Run | null,
+    faded: readonly FaceLayer[],
+    name: ChangeName | null,
+  ): Segment => {
+    const expression = EXPRESSIONS[state]
+    const { blink, aside, motion } = expression
+    const borrowing = detail.asides && tuning.life.aside ? aside : null
+    const own = expression.flourish
+    const flourish =
+      own !== null && tuning.life.flourish && (detail.mouth || FLOURISHES[own].mouthless)
+        ? own
+        : null
+    return {
+      state,
+      expression,
+      t0,
+      run,
+      faded,
+      name,
+      flourish,
+      blinks: strandOf<BlinkEvent>(strand(seed, 1), (previous, random) => {
+        const every = blink?.every ?? [4, 6]
+        const start = (previous?.start ?? t0) + between(random(), every[0], every[1])
+        const twice = random() < (blink?.double ?? 0)
+        const { down, up, gap } = timing.blink
+        return { start, end: start + (down + up) * (twice ? 2 : 1) + (twice ? gap : 0), twice }
+      }),
+      passes: strandOf<PassEvent>(strand(seed, 2), (previous, random) => {
+        const borrowed = random() < (borrowing?.chance ?? 0)
+        const kind = borrowed && borrowing !== null ? borrowing.motion : motion
+        const [low, high] = MOTIONS[kind].period
+        const start = previous?.end ?? t0
+        const r: Roll = [random(), random(), random(), random(), random(), random()]
+        return {
+          start,
+          end: start + between(random(), low, high),
+          kind,
+          r,
+          was: previous !== null && previous.kind === kind ? previous.r : MIDDLE,
+          n: previous === null ? 0 : previous.n + 1,
+        }
+      }),
+      flourishes: strandOf<FlourishEvent>(strand(seed, 3), (previous, random) => {
+        const piece = FLOURISHES[flourish ?? 'lookaway']
+        const wait = between(random(), piece.every[0], piece.every[1])
+        const start = (previous?.end ?? t0) + (tuning.loop ? 0.7 : wait)
+        const length = between(random(), piece.length[0], piece.length[1])
+        return {
+          start,
+          end: start + length,
+          name: flourish ?? 'lookaway',
+          side: random() < 0.5 ? -1 : 1,
+        }
+      }),
+    }
+  }
+
+  /** How shut the lids are from blinking alone at `at`. */
+  const blinking = (segment: Segment, at: number): number => {
+    if (segment.expression.blink === null || !tuning.life.blink) return 0
+    const { current } = segment.blinks(at)
+    if (current === null) return 0
+    const { down, up, gap } = timing.blink
+    const τ = at - current.start
+    const second = current.twice ? pulse(timing, τ - down - up - gap, 0) : 0
+    return Math.max(pulse(timing, τ, 0), second)
+  }
+
+  /** A pass of a gesture, `p` of the way through, as the gesture reads it. */
+  const passOf = (event: PassEvent, p: number, t: number, expression: Expression): Pass => ({
+    p,
+    t,
+    r: event.r,
+    was: event.was,
+    n: event.n,
+    eyes: expression.eyes,
+    rise: Math.min(0.2, timing.shape / (event.end - event.start)),
+  })
+
+  /** The life of a state at `at`: its gesture, its flourish, its blinks, on its expression. */
+  const lifeAt = (segment: Segment, at: number): Life => {
+    const { expression } = segment
+    let gesture: Beat = REST
+    let motion: MotionKind | null = null
+    if (tuning.life.motion) {
+      const { current, previous } = segment.passes(at)
+      if (current !== null) {
+        motion = current.kind
+        const p = Math.min(1, (at - current.start) / (current.end - current.start))
+        gesture = MOTIONS[current.kind].beat(passOf(current, p, at, expression))
+        // A new gesture takes the head over from where the last one left it, never from where
+        // its own first frame happens to be.
+        const since = at - current.start
+        if (previous !== null && previous.kind !== current.kind && since < timing.handover) {
+          const left = MOTIONS[previous.kind].beat(passOf(previous, 1, current.start, expression))
+          gesture = blend(left, gesture, faceArrive(since / timing.handover))
+        }
+      }
+    }
+    let flourish: FlourishName | null = null
+    if (segment.flourish !== null) {
+      const { current } = segment.flourishes(at)
+      if (current !== null && at < current.end) {
+        flourish = current.name
+        const q = (at - current.start) / (current.end - current.start)
+        const played = FLOURISHES[current.name].play(q, current.side)
+        // A flourish takes the face over rather than adding to it: two things steering one head
+        // is how a sigh ends up sweeping sideways.
+        gesture = blend(gesture, played.beat, played.w)
+      }
+    }
+    const blinked = blinking(segment, at)
+    // Whichever closes the lids further wins, and they never add up past shut.
+    const lid = Math.min(1, Math.max(0, expression.lid + gesture.lid, blinked))
+    // A closed eye cannot hold a squint: a blink takes the pull on the eye away with it.
+    const eye = (stroke: Stroke, pull: Pull | null): Stroke =>
+      pull === null ? stroke : toward(stroke, pull.to, pull.k * (1 - blinked))
+    const mouth =
+      gesture.mouth === null
+        ? expression.mouth
+        : toward(expression.mouth, gesture.mouth.to, gesture.mouth.k)
+    const { look } = expression
+    return {
+      pose: poseOf({
+        left: eye(expression.eyes[0], gesture.left),
+        right: eye(expression.eyes[1], gesture.right),
+        mouth: scaled(mouth, gesture.mouthScale),
+        lidLeft: lid,
+        lidRight: lid,
+        head: {
+          yaw: look.yaw + gesture.yaw,
+          pitch: look.pitch + gesture.pitch,
+          roll: look.roll + gesture.roll,
+          gazeX: look.gazeX + gesture.gazeX,
+          gazeY: look.gazeY + gesture.gazeY,
+        },
+        tone: expression.tone,
+      }),
+      motion,
+      flourish,
+    }
+  }
+
+  /**
+   * The face at `at` inside one state: its life, and — while the change into it lasts — the
+   * journey from wherever the change found the face, each part on its own window, with what the
+   * change says on the way played on top.
+   */
+  const poseAt = (segment: Segment, at: number): Life => {
+    const life = lifeAt(segment, at)
+    const { run } = segment
+    if (run === null) return life
+    const q = (at - segment.t0) / run.length
+    if (q >= 1) return life
+    const pose = life.pose.slice()
+    const carried = tuning.carry * run.length * faceCarry(q)
+    for (const channel of CHANNEL_NAMES) {
+      const [from, to] = run.windows[channel]
+      const k = to > from ? faceArrive((q - from) / (to - from)) : q >= from ? 1 : 0
+      // The colour is a share of each tone and has no speed worth keeping: it only travels.
+      const speed = channel === 'tone' ? 0 : carried
+      const [first, last] = CHANNELS[channel]
+      for (let index = first; index < last; index += 1) {
+        const offset = (run.start[index]! - run.landing[index]!) * (1 - k)
+        pose[index] = life.pose[index]! + offset + run.speed[index]! * speed
+      }
+    }
+    play(
+      pose,
+      CHOREOGRAPHIES[run.name].beat({
+        q,
+        side: run.side,
+        chance: run.chance,
+        from: run.from,
+        to: segment.state,
+      }),
+    )
+    if (run.blink !== null) {
+      const shut = pulse(timing, at - segment.t0 - run.blink.start, run.blink.hold)
+      pose[AT.lidLeft] = Math.max(pose[AT.lidLeft]!, shut)
+      pose[AT.lidRight] = Math.max(pose[AT.lidRight]!, shut)
+    }
+    pose[AT.lidLeft] = Math.min(1, Math.max(0, pose[AT.lidLeft]!))
+    pose[AT.lidRight] = Math.min(1, Math.max(0, pose[AT.lidRight]!))
+    return { ...life, pose }
+  }
+
+  /** The state the face was in at `at`: the last one begun by then. */
+  const segmentAt = (at: number): Segment => {
+    for (let index = segments.length - 1; index > 0; index -= 1) {
+      if (segments[index]!.t0 <= at) return segments[index]!
+    }
+    return segments[0]!
+  }
+
+  const frame = (at: number): FaceFrame => {
+    const segment = segmentAt(at)
+    const { run } = segment
+    if (reduced) {
+      const k = segment.faded.length === 0 ? 1 : faceArrive((at - segment.t0) / timing.fade)
+      const layers = [
+        ...segment.faded.map((layer) => ({ pose: layer.pose, opacity: layer.opacity * (1 - k) })),
+        { pose: stillOf(segment.expression), opacity: k },
+      ]
+        .filter((layer) => layer.opacity > 0.004)
+        .slice(-LAYERS)
+      return {
+        layers,
+        state: segment.state,
+        change: k < 1 && segment.name !== null ? { name: segment.name, progress: k } : null,
+        motion: null,
+        flourish: null,
+        still: k >= 1,
+      }
+    }
+    const life = poseAt(segment, at)
+    const progress = run === null ? 1 : (at - segment.t0) / run.length
+    return {
+      layers: [{ pose: life.pose, opacity: 1 }],
+      state: segment.state,
+      change: run !== null && progress < 1 ? { name: run.name, progress } : null,
+      motion: life.motion,
+      flourish: life.flourish,
+      still: false,
+    }
+  }
+
+  /**
+   * The blink a change is carried across, if it needs one: an eye that goes from one family of
+   * shapes to another — a cursor laid down, a chevron balled up into a dot — would turn on its
+   * side or into a heart on the way, so it changes behind a closed lid instead, the way an animator
+   * cuts on a blink. A change with a blink of its own blinks where it says.
+   */
+  const blinkFor = (
+    name: ChangeName,
+    length: number,
+    start: Pose,
+    to: Expression,
+    chance: number,
+  ): Carried => {
+    const { windows } = CHOREOGRAPHIES[name]
+    const { down, up, hold } = timing.blink
+    const crossing =
+      !LIDDED.includes(name) &&
+      (!meet(strokeAt(start, AT.left), to.eyes[0]) || !meet(strokeAt(start, AT.right), to.eyes[1]))
+    if (crossing) {
+      const at = Math.max(0, Math.min(windows.shape[0] * length - down, length - down - hold - up))
+      const shut: readonly [number, number] = [(at + down) / length, (at + down + hold) / length]
+      return { blink: { start: at, hold }, windows: { ...windows, shape: shut } }
+    }
+    const own = blinkOf(name, chance)
+    if (own === null) return { blink: null, windows }
+    return { blink: { start: Math.min(own * length, length - down - up), hold: 0 }, windows }
+  }
+
+  const change = (state: FaceState, at: number): void => {
+    const last = segments.at(-1)!
+    if (state === last.state) return
+    const seed = strand(options.seed, segments.length + 1)
+    const name = changeBetween(last.state, state)
+    if (reduced) {
+      const showing = frame(at).layers
+      segments.push(begin(state, at, seed, null, showing, name))
+    } else {
+      const start = poseAt(segmentAt(at), at).pose
+      // Before the face began there is nothing to have been moving from.
+      const before =
+        at - STEP < segments[0]!.t0 ? start : poseAt(segmentAt(at - STEP), at - STEP).pose
+      const speed = start.map((value, index) => (value - before[index]!) / STEP)
+      const random = dice(strand(seed, 4))
+      const side = random() < 0.5 ? -1 : 1
+      const chance = random()
+      const { down, up, hold } = timing.blink
+      // A change shorter than a blink cannot be carried across one: it is given the room to.
+      const length = Math.max(
+        timing.change[name] * tuning.pace * changePace(name, state),
+        down + hold + up + STEP,
+      )
+      const { blink, windows } = blinkFor(name, length, start, EXPRESSIONS[state], chance)
+      const draft = begin(state, at, seed, null, [], name)
+      const run: Run = {
+        name,
+        length,
+        windows,
+        side,
+        chance,
+        from: last.state,
+        start,
+        speed,
+        landing: lifeAt(draft, at).pose,
+        blink,
+      }
+      segments.push({ ...draft, run })
+    }
+    if (segments.length > KEPT_SEGMENTS) segments.shift()
+  }
+
+  segments.push(begin(options.state, options.at, strand(options.seed, 0), null, [], null))
+
+  return {
+    state: () => segments.at(-1)!.state,
+    change,
+    frame,
+  }
+}

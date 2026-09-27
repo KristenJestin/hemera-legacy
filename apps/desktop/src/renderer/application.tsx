@@ -35,6 +35,7 @@ import {
   PROJECT_SETTINGS_ENTRY,
   ProjectDialog,
   Shell,
+  StartScreen,
   type ArchivedProject,
   type CommandGroup,
   type HomeSession,
@@ -915,6 +916,11 @@ export function Application() {
       }),
     [active, projects, sessions.sessions, open, putAway, goTo, preference, newSession, archive],
   )
+
+  // The start screen `index.html` drew on the first frame stays until the Projects are known:
+  // drawn before, the shell would open on the first launch's page and swap it a moment later for
+  // the Project the window was left on (issue #185).
+  if (!held.loaded) return <StartScreen />
 
   return (
     <Shell

@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react'
 
+import { Loading } from '../components/loading/loading.tsx'
 import { AgentText } from '../message/agent-text.tsx'
 import { SECTION_TITLES, type SectionView } from './model.ts'
 import { PartHead } from './part-head.tsx'
@@ -17,6 +18,10 @@ const NOTE = 'mt-1 text-xs text-muted-foreground'
 
 const WARN = 'text-warning-muted-foreground'
 
+const EMPTY = 'text-sm text-muted-foreground'
+
+const WRITING = 'flex items-center gap-1.5'
+
 export interface SectionPartProps {
   section: SectionView
 }
@@ -26,7 +31,15 @@ export function SectionPart({ section }: SectionPartProps): ReactNode {
     <div className="flex flex-col gap-1.5">
       <PartHead title={SECTION_TITLES[section.name]} mark={section.mark} facts={factsOf(section)} />
       {section.body === '' ? (
-        <p className="text-sm text-muted-foreground">Nothing written yet.</p>
+        // Being written, it says so in the place of the empty line at once, and goes back to it
+        // if the write fails; the text that arrives replaces both (issue #185).
+        section.mark === 'writing' ? (
+          <p className={EMPTY}>
+            <Writing words="Writing…" />
+          </p>
+        ) : (
+          <p className={EMPTY}>Nothing written yet.</p>
+        )
       ) : (
         <AgentText text={section.body} />
       )}
@@ -42,7 +55,8 @@ export function SectionPart({ section }: SectionPartProps): ReactNode {
  */
 function factsOf(section: SectionView): ReactNode[] {
   const yours: ReactNode[] = section.author === 'human' ? ['you'] : []
-  if (section.author === null) return section.mark === 'writing' ? ['writing…'] : []
+  // A section with nothing in it says it is being written in its body, not twice.
+  if (section.author === null) return []
   if (section.copiedFrom !== undefined) {
     return [
       ...yours,
@@ -51,6 +65,19 @@ function factsOf(section: SectionView): ReactNode[] {
       </span>,
     ]
   }
-  if (section.mark === 'writing') return [...yours, 'writing…']
+  if (section.mark === 'writing') return [...yours, <Writing key="writing" words="writing…" />]
   return yours
+}
+
+/**
+ * The design system's loader and the word, which is how a section says the agent is writing it.
+ * The heading already says it to a screen reader, so the word is for the eye alone.
+ */
+function Writing({ words }: { words: string }): ReactNode {
+  return (
+    <span className={WRITING}>
+      <Loading size="sm" label="Writing" />
+      <span aria-hidden="true">{words}</span>
+    </span>
+  )
 }

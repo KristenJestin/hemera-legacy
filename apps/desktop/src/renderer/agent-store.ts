@@ -11,10 +11,10 @@ import type {
   StopReason,
 } from '@hemera/ipc'
 import { TOOL_LABELS, hemeraToolNamed } from '@hemera/core'
-import type { ActivityState } from '@hemera/ui'
+import type { ActivityState, SpecTarget } from '@hemera/ui'
 
 import { effortStage, effortToLand, modelStage } from './agent-options.ts'
-import { commandRunOf } from './agent-tool-payloads.ts'
+import { commandRunOf, specWriteOf } from './agent-tool-payloads.ts'
 
 /**
  * What the agents of this window are doing (design D5-12, D5-13, D5-17).
@@ -306,6 +306,21 @@ export function activityOf(
   }
 
   return { state: 'thinking', thought }
+}
+
+/**
+ * The part of the Spec the running turn is writing now: the target of a `spec_write` call it has
+ * not finished, or null (issue #185). Read off the thread like the row's "Writing the Spec", and
+ * over the same entries: a call a dead turn left `in_progress` is not a write that is happening.
+ */
+export function specWritingOf(entries: readonly SessionEntry[]): SpecTarget | null {
+  const running = entries.slice(Math.max(lastSaid(entries), lastEnd(entries)) + 1)
+  for (const entry of [...running].reverse()) {
+    if (!UNFINISHED.includes(entry.state ?? '')) continue
+    const target = specWriteOf(entry)
+    if (target !== null) return target
+  }
+  return null
 }
 
 /**

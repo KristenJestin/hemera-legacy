@@ -276,12 +276,12 @@ writes at start-up.
   a surface's first story is `Complete`, everything in place, because it is what the UI gate
   looks at. The skill in `.agents/skills/storybook` says how to write a story; this list says
   where it shows and what it is called, and it wins when the two differ.
-- Storybook badges: a story file the lot **created** wears the `new` tag, one whose component the
-  lot **changed** wears `updated`. The badge belongs to the lot that touches the design system
-  and not to the component: the first thing such a lot does is take the previous lot's badges
-  off, so what the sidebar shows is always what is being reviewed — and a branch that changes
-  nothing of `packages/ui` carries no badge change at all. `pnpm test` refuses a badge the branch
-  did not earn, and a tag nothing reads.
+- Storybook badges: a story file the branch **created** shows `new`, one whose own file or
+  component the branch **changed** shows `updated`. Git decides when Storybook indexes the
+  stories (`packages/ui/.storybook/badges.ts`), comparing with `origin/dev`, or with the ref
+  `HEMERA_STORYBOOK_BASE` names; without that base (a shallow clone, no remote) no badge shows.
+  A story file never writes a badge itself: its only tag is `autodocs`, and `pnpm test`
+  refuses any other.
 
 The design system itself — tokens, Base UI, Tailwind 4, Storybook, the component catalogue —
 is lot 1. Lot 0 ships an empty window and one witness panel.

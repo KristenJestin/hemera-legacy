@@ -434,21 +434,21 @@ export const FLOURISHES: Record<FlourishName, Flourish> = {
    */
   rush: {
     length: [1.4, 2],
-    every: [3, 7],
+    every: [2, 4],
     mouthless: true,
     play: (q) => ({ w: 0, beat: beat({ turn: (2 / 3) * faceArrive(q) }) }),
   },
   /** Loading, drawn in: the dots close in on the middle, and go back out. */
   huddle: {
     length: [1.2, 1.8],
-    every: [3, 7],
+    every: [2, 4],
     mouthless: true,
     play: (q) => ({ w: arc(q, 0.3, 0.35, 0.35), beat: beat({ reach: -0.3 }) }),
   },
   /** Loading, let out: the dots spread wider, and come back in. */
   spread: {
     length: [1.2, 1.8],
-    every: [3, 7],
+    every: [2, 4],
     mouthless: true,
     play: (q) => ({ w: arc(q, 0.3, 0.35, 0.35), beat: beat({ reach: 0.35 }) }),
   },

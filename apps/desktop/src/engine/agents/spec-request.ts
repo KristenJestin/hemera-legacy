@@ -1,15 +1,16 @@
 /**
- * The Home's `New Spec` (issues #128, #179): a Session that defines a Spec from its first turn.
+ * The Home's `New Spec` (issues #128, #179, #198): a Session whose first turn is about a Spec.
  *
- * Hemera creates the draft Spec itself from the request, before the prompt goes out: its title is
- * the request's first line and its type `feature` until the user confirms it, and the Session is
- * `define`, its writer (D7-07). Asking the agent to propose one left it free to explore and ask
- * in plain text first (#179); a Spec the engine creates cannot be skipped. The agent starts with
- * the define tools and the mission brief, and this request rides the same turn as a provision
- * behind Hemera's marker (D6-08), never as words of the user's.
+ * No Spec is created for it (#198): one created before the agent spoke could be a second Spec for
+ * something the Project already has, made without the user knowing. The window shows a provisional
+ * Spec, saved nowhere, and the agent's first job is to check the Project's Specs, then either
+ * propose a new one with a proper title and type or point to the one that exists. The user's
+ * answer to that card is what makes a Spec this Session defines, and the agent is started again
+ * with the define tools then. This request rides the first turn as a provision behind Hemera's
+ * marker (D6-08), never as words of the user's.
  */
 
-import { QUESTION_RULE, type SpecType, contextUri } from '@hemera/core'
+import { QUESTION_RULE, contextUri } from '@hemera/core'
 import type { PromptIntent } from '@hemera/ipc'
 
 import type { Provision } from './client.ts'
@@ -17,34 +18,16 @@ import type { Provision } from './client.ts'
 /** Where the brief is named, among what Hemera provides. */
 export const SPEC_REQUEST_URI = contextUri('spec-request')
 
-/** The type a Spec New Spec creates starts with, until the user confirms one. */
-export const REQUESTED_TYPE: SpecType = 'feature'
-
-/** How long the title taken from the request may be, cut on a word. */
-const TITLE_CHARACTERS = 80
-
 /** What the agent is asked, in the words it reads before the user's message. */
 export const SPEC_REQUEST = `# Mission: the Spec of a New Spec
 
-The user started this Session from Hemera's "New Spec": they want the message below to become a Spec. Hemera already created it as a draft, and this Session defines it: its title is the message's first line and its type \`${REQUESTED_TYPE}\` until the user confirms one.
+The user started this Session from Hemera's "New Spec": they want the message below to become a Spec. No Spec exists for it yet: the user sees a provisional one, which nothing saves until they accept your proposal.
 
-- Settle the type first: ask the user, as a question card, whether it is a \`feature\`, a \`bug\` or a \`maintenance\`, with your recommendation. Read what you need to recommend one, and nothing more before asking.
-- Once answered, write the type with \`spec_write\` and \`type\`, and give the Spec a short title with \`spec_write\` and \`title\`.
-- Then work on the phase in focus, as your mission brief says. Do not change any code.
+- First, check the Project's Specs: \`project_get\` lists them, with their key, type, status and title.
+- If one of them already covers what the user asks, point to it with \`spec_propose\` with kind \`existing\` and its key: the user continues it, or not.
+- Otherwise, propose the new Spec with \`spec_propose\` with kind \`spec\`, a short title and its type, \`feature\`, \`bug\` or \`maintenance\`. Read what you need to choose them, and nothing more before proposing.
+- The proposal is your first question to the user: it is asked through its own card, never in the reply. Once they accept it, this Session defines the Spec and you are handed its mission brief. Do not change any code.
 - ${QUESTION_RULE}`
-
-/** The Spec a New Spec request creates: the first line of the request as its title. */
-export function requestedSpec(text: string) {
-  const line = text
-    .split('\n')
-    .map((one) => one.replace(/\s+/g, ' ').trim())
-    .find((one) => one.length > 0)
-  const title = line ?? 'New Spec'
-  if (title.length <= TITLE_CHARACTERS) return { title, type: REQUESTED_TYPE }
-  const cut = title.slice(0, TITLE_CHARACTERS)
-  const space = cut.lastIndexOf(' ')
-  return { title: `${space > 0 ? cut.slice(0, space) : cut}…`, type: REQUESTED_TYPE }
-}
 
 /** What a prompt sent with this intent carries in front of the user's text, if anything. */
 export function provisionsOf(intent: PromptIntent | undefined): readonly Provision[] {

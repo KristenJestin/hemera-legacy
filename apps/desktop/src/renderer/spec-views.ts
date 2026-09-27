@@ -422,6 +422,38 @@ export function specViewOf({
 }
 
 /**
+ * New Spec's Spec before it exists (issue #198): the panel draws it with no key, the request as
+ * its title, nothing written and no phase begun. Nothing of it is saved: the Spec the agent
+ * proposes, or the one it points to, takes its place once the user answers the card.
+ */
+export function provisionalViewOf(title: string): SpecView {
+  return {
+    key: '',
+    title,
+    type: 'feature',
+    status: 'draft',
+    revision: 1,
+    revisions: [],
+    phases: PHASES.map((name) => ({
+      name,
+      state: name === 'prototype' ? 'unavailable' : 'pending',
+    })),
+    sections: [],
+    stories: [],
+    storiesMark: 'empty',
+    tasks: [],
+    tasksMark: 'empty',
+    questions: [],
+    questionsMark: 'empty',
+    readiness: {
+      checks: GATE_ORDER.map((check) => ({ check, passed: false })),
+      todo: [],
+    },
+    provisional: true,
+  }
+}
+
+/**
  * The launch of the Spec's build as the panel's head reads it (D8-13): where it stands, the step
  * its Workspace is preparing while it waits, and — refused — the engine's own words for it, which
  * are the only thing that says what to do about it. `null` while no launch has been asked for.

@@ -105,7 +105,11 @@ export const TUNING: FaceTuning = {
  */
 export interface FaceDetail {
   readonly mouth: boolean
-  /** How much larger the features are drawn in their box. */
+  /**
+   * How much larger the features are drawn in their box. Small, past it: the box is what the
+   * layout sees, so a face in a line of text leaves the line as tall as it was, and reads all
+   * the same.
+   */
   readonly scale: number
   readonly weight: number
   readonly gain: number
@@ -113,8 +117,8 @@ export interface FaceDetail {
 }
 
 export const DETAILS = {
-  icon: { mouth: true, scale: 1.15, weight: 1.3, gain: 1.45, asides: false },
-  small: { mouth: true, scale: 1.08, weight: 1.18, gain: 1.25, asides: true },
+  icon: { mouth: true, scale: 1.6, weight: 1.05, gain: 1.2, asides: false },
+  small: { mouth: true, scale: 1.3, weight: 1.05, gain: 1.15, asides: true },
   full: { mouth: true, scale: 1, weight: 1, gain: 1, asides: true },
 } as const satisfies Record<string, FaceDetail>
 

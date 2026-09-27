@@ -15,16 +15,20 @@ import { hemeraToolNamed } from '@hemera/core'
 import type { SessionEntry } from '@hemera/ipc'
 
 import {
+  agentReportOf,
   commandProposalOf,
   commandRunOf,
   contextDeliveryOf,
   elsewhereOf,
+  failureNoteOf,
   foldedCallsOf,
   hemeraPermissionOf,
   hemeraToolCallOf,
   nativeSubjectOf,
   plainRefusal,
   questionOpen,
+  reportedFailureOf,
+  stoppedTurnOf,
   subjectOf,
 } from '#renderer/agent-tool-payloads.ts'
 
@@ -96,6 +100,55 @@ describe('A read inside the Workspace goes through on its own', () => {
   test('a hemera_tool_call entry whose payload does not parse is left out', () => {
     const entry = entryOf('hemera_tool_call', 'agent', 'Read a file', '{"tool":"fs_read"}')
     expect(hemeraToolCallOf(entry)).toBeNull()
+  })
+
+  /** A `spec_propose` of a phase, answered by the engine with `reason`. */
+  function proposedPhase(reason: string, state = 'refused') {
+    return entryOf(
+      'hemera_tool_call',
+      'agent',
+      reason,
+      JSON.stringify({
+        tool: 'spec_propose',
+        state,
+        caller: 'a1b2c3d4e5f6',
+        paths: [],
+        arguments: JSON.stringify({ kind: 'phase', phase: 'shape' }),
+      }),
+    )
+  }
+
+  test('a phase proposed while a question is open is a quiet folded row', () => {
+    const drawn = hemeraToolCallOf(
+      proposedPhase(
+        'The shape phase cannot finish: a blocking question is open: Which date decides the month?.',
+      ),
+    )
+    expect(drawn?.status).toBe('deferred')
+    expect(drawn?.note).toBe('not yet: a question is open')
+    expect(drawn?.defaultOpen).toBe(false)
+    expect(drawn?.subject).toEqual({ text: 'shape' })
+    // The whole reason is still there, in the body the reader may unfold.
+    expect(drawn?.error).toMatch(/Which date decides the month/)
+  })
+
+  test('a phase proposed before its other checks pass is a quiet "not yet" as well', () => {
+    const drawn = hemeraToolCallOf(
+      proposedPhase('The plan phase cannot finish: the contract has no task.'),
+    )
+    expect(drawn?.status).toBe('deferred')
+    expect(drawn?.note).toBe('not yet')
+  })
+
+  test('any other refusal of a proposal stays a refusal, open on its reason', () => {
+    const drawn = hemeraToolCallOf(
+      proposedPhase(
+        'The shape phase is finished: only an open or stale phase is declared finished.',
+      ),
+    )
+    expect(drawn?.status).toBe('refused')
+    expect(drawn?.note).toBeUndefined()
+    expect(drawn?.defaultOpen).toBe(true)
   })
 })
 
@@ -180,6 +233,100 @@ describe('A delivery shows in the timeline', () => {
     )
     const drawn = contextDeliveryOf(entry)
     expect(drawn?.body).toBe(`Hemera gave the agent AGENTS.md. (${'a'.repeat(12)})`)
+  })
+
+  test('an answer handed over draws no Hemera line: it is the user’s message already', () => {
+    const handed = entryOf(
+      'context_delivery',
+      'hemera',
+      'Hemera handed the agent the answer to “Which date decides the month?”.',
+      JSON.stringify({
+        kind: 'answer',
+        fingerprint: 'b'.repeat(64),
+        deliveredAt: '2026-09-26T10:00:00.000Z',
+        reached: 'delivery_prompt',
+      }),
+    )
+    expect(contextDeliveryOf(handed)).toBe(null)
+    // One that could not be handed over yet is news, and is still said.
+    const waiting = { ...handed, state: 'failed' }
+    expect(contextDeliveryOf(waiting)?.waiting).toBe(true)
+  })
+})
+
+describe("Hemera's internal notes are said in words (#211)", () => {
+  const notHanded = (kind: string, body: string) => ({
+    ...entryOf(
+      'context_delivery',
+      'hemera',
+      body,
+      JSON.stringify({ kind, fingerprint: '29f890c77bc6'.padEnd(64, '0'), deliveredAt: null }),
+    ),
+    state: 'failed',
+  })
+
+  test('a delivery not handed over yet is a quiet row in words, with no id', () => {
+    const answer = contextDeliveryOf(
+      notHanded(
+        'answer',
+        'Not handed over, waiting for the next safe point: the answer to “Which format?”.',
+      ),
+    )
+    expect(answer).toEqual({
+      id: 'entry-1',
+      body: 'The answer will be handed over when the agent is ready.',
+      waiting: true,
+    })
+    const said = [
+      ['edit', 'Your edits will be handed over when the agent is ready.'],
+      ['internal', 'The result of a sub-agent will be handed over when the agent is ready.'],
+      [
+        'instructions',
+        'The new instructions of the Workspace will be handed over when the agent is ready.',
+      ],
+      ['notice', 'What Hemera had to tell the agent will be handed over when it is ready.'],
+    ]
+    for (const [kind, words] of said) {
+      const drawn = contextDeliveryOf(notHanded(kind ?? '', 'Not handed over, waiting: x.'))
+      expect(drawn?.body).toBe(words)
+      expect(drawn?.body).not.toContain('29f890c77bc6')
+    }
+    // One that was handed over is not waiting on anything.
+    const handed = { ...notHanded('edit', 'Your edits to scope went to the agent.'), state: null }
+    expect(contextDeliveryOf(handed)?.waiting).toBe(false)
+  })
+
+  test('an error of a delivery is an error row in words, with a Retry; the raw error is not its title', () => {
+    const failed = entryOf(
+      'note',
+      'hemera',
+      'no session has been opened',
+      JSON.stringify({ reason: 'delivery_failed' }),
+    )
+    expect(failureNoteOf(failed)).toEqual({
+      title: 'Hemera could not hand this over to the agent',
+      detail: 'no session has been opened',
+      retry: true,
+    })
+    const refused = entryOf(
+      'note',
+      'hemera',
+      'Internal error: rate limit reached',
+      JSON.stringify({ reason: 'prompt_failed' }),
+    )
+    expect(failureNoteOf(refused)).toEqual({
+      title: 'The agent answered with an error',
+      detail: 'Internal error: rate limit reached',
+      retry: false,
+    })
+    // A note of Hemera's own that is not an error is left to the line it always was.
+    const rebuilt = entryOf(
+      'note',
+      'hemera',
+      'The agent lost this Session, so what was said before was rebuilt for it.',
+      JSON.stringify({ reason: 'gone', context: '' }),
+    )
+    expect(failureNoteOf(rebuilt)).toBeNull()
   })
 })
 
@@ -386,6 +533,56 @@ describe('A Hemera tool call is drawn once', () => {
     expect(folded.inPlaceOf.get('n1')?.id).toBe('h1')
     expect(folded.inPlaceOf.has('n2')).toBe(false)
     expect(folded.inPlaceOf.get('n3')?.id).toBe('h3')
+  })
+})
+
+describe('A failed tool call says why', () => {
+  /** A call the agent reported failed, with what it attached and what it answered. */
+  const failed = (
+    status: string,
+    content: readonly string[],
+    rawOutput: string | null,
+  ): SessionEntry =>
+    entryOf(
+      'tool_call',
+      'agent',
+      'mcp__hemera__spec_write',
+      JSON.stringify({
+        call: {
+          title: 'mcp__hemera__spec_write',
+          kind: 'other',
+          status,
+          locations: [],
+          content: content.map((text) => ({
+            type: 'content',
+            text: { text, truncated: false, length: text.length },
+          })),
+          rawInput: null,
+          rawOutput: rawOutput === null ? null : { text: rawOutput, truncated: false, length: 9 },
+        },
+      }),
+    )
+
+  test('a failed call unfolded shows the error the agent returned, in words, not only its name', () => {
+    // The trial of #198: a Spec write Hemera never answered, reported failed by the agent.
+    const said = 'MCP error -32602: Tool spec_write not found'
+    expect(reportedFailureOf(failed('failed', [said], null))).toBe(said)
+    expect(reportedFailureOf(failed('failed', [], said))).toBe(said)
+    expect(reportedFailureOf(failed('failed', ['one', 'two'], null))).toBe('one\n\ntwo')
+  })
+
+  test('a failed call that came back with nothing says so, and a stopped one says it was stopped', () => {
+    expect(reportedFailureOf(failed('failed', [], null))).toBe(
+      'The agent reported this call failed and gave no reason.',
+    )
+    expect(reportedFailureOf(failed('cancelled', [], null))).toBe(
+      'The turn was stopped before this call answered.',
+    )
+  })
+
+  test('a call that did not fail has no reason to show', () => {
+    expect(reportedFailureOf(failed('completed', ['3 lines'], null))).toBeUndefined()
+    expect(reportedFailureOf(failed('in_progress', [], null))).toBeUndefined()
   })
 })
 
@@ -601,5 +798,86 @@ describe('A Session read back draws a decided question as decided', () => {
     expect(questionOpen(asked('cancelled'))).toBe(false)
     // Only a question nobody has answered yet is waiting for the reader.
     expect(questionOpen(asked('pending'))).toBe(true)
+  })
+})
+
+describe('What the agent reported outside the conversation is drawn as a quiet row (#131)', () => {
+  test('a line of its standard error is drawn with the line, word for word', () => {
+    const note = entryOf(
+      'note',
+      'hemera',
+      'The agent reported an error',
+      JSON.stringify({ reason: 'agent_stderr', line: 'ERROR status=429 Too Many Requests' }),
+    )
+    expect(agentReportOf(note)).toEqual({
+      title: 'The agent reported an error',
+      detail: 'ERROR status=429 Too Many Requests',
+    })
+  })
+
+  test('a request nobody can see is drawn with its method', () => {
+    const note = entryOf(
+      'note',
+      'hemera',
+      'The agent is waiting for an answer Hemera cannot show',
+      JSON.stringify({ reason: 'unanswered_request', method: 'elicitation/create' }),
+    )
+    expect(agentReportOf(note)?.detail).toBe('elicitation/create')
+  })
+
+  test('a request answered since is drawn as answered, with its method (#170)', () => {
+    const note = entryOf(
+      'note',
+      'hemera',
+      'Hemera answered what the agent was waiting for',
+      JSON.stringify({ reason: 'answered_request', method: 'elicitation/create' }),
+    )
+    expect(agentReportOf(note)).toEqual({
+      title: 'Hemera answered what the agent was waiting for',
+      detail: 'elicitation/create',
+    })
+  })
+
+  test('a refused request is drawn with its method and what it was answered', () => {
+    const note = entryOf(
+      'note',
+      'hemera',
+      'The agent asked for something Hemera cannot answer',
+      JSON.stringify({ reason: 'refused_request', method: '_x/y', line: 'Method not found' }),
+    )
+    expect(agentReportOf(note)?.detail).toBe('_x/y: Method not found')
+  })
+
+  test("a note of Hemera's own is no report, and keeps the line it always had", () => {
+    const note = entryOf(
+      'note',
+      'hemera',
+      'The agent stopped running.',
+      JSON.stringify({ reason: 'stop_timeout' }),
+    )
+    expect(agentReportOf(note)).toBeNull()
+  })
+})
+
+describe('A turn that ended on its own says why in a sentence (#211)', () => {
+  const ended = (stopReason: string, body: string) =>
+    entryOf('turn', 'hemera', body, JSON.stringify({ stopReason }))
+
+  test('a failed turn reads "Stopped: the agent could not answer."', () => {
+    expect(stoppedTurnOf(ended('failed', 'The agent could not answer.'))).toEqual({
+      reason: 'the agent could not answer.',
+      byTheReader: false,
+    })
+    expect(stoppedTurnOf(ended('max_tokens', 'The agent reached its token limit.'))?.reason).toBe(
+      'the agent reached its token limit.',
+    )
+  })
+
+  test('a turn the reader stopped says so and nothing more; one that simply ended draws nothing', () => {
+    expect(stoppedTurnOf(ended('cancelled', 'The turn was stopped.'))).toEqual({
+      reason: undefined,
+      byTheReader: true,
+    })
+    expect(stoppedTurnOf(ended('end_turn', 'The agent finished its turn.'))).toBeNull()
   })
 })

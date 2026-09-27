@@ -79,6 +79,8 @@ export type PlanRepository = z.infer<typeof planRepositorySchema>
 export const workspacePlanSchema = z.object({
   name: z.string(),
   root: z.string(),
+  // Whether that folder is under the system's temporary directory, which a restart may empty (#136).
+  temporary: z.boolean(),
   path: z.string(),
   branchPrefix: z.string(),
   repositories: z.readonly(z.array(z.string())),

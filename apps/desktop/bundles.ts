@@ -9,12 +9,15 @@
  * per agent and outliving none of them (D5-21).
  */
 
+import { readFileSync } from 'node:fs'
+import { createRequire } from 'node:module'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
+import { startStyleIn } from '@hemera/ui/start-style'
 import tailwindcss from '@tailwindcss/vite'
 import react from '@vitejs/plugin-react'
-import type { InlineConfig } from 'vite-plus'
+import type { InlineConfig, Plugin } from 'vite-plus'
 
 const application = dirname(fileURLToPath(import.meta.url))
 
@@ -106,6 +109,27 @@ export const preloadBundle: InlineConfig = {
   },
 }
 
+/**
+ * The start screen's rules, written into the page's head (issue #185).
+ *
+ * `index.html` draws the start screen, but in development the theme only arrives through a
+ * script once every module has been fetched, and the loader stays invisible until then. The rules
+ * it needs go inline, read from the theme's file as it stands on disk, so the loader is on the
+ * first frame from the development server and from the built page alike.
+ */
+export const startScreenStyle: Plugin = {
+  name: 'hemera:start-screen-style',
+  transformIndexHtml: () => [
+    {
+      tag: 'style',
+      children: startStyleIn(
+        readFileSync(createRequire(import.meta.url).resolve('@hemera/ui/theme.css'), 'utf8'),
+      ),
+      injectTo: 'head',
+    },
+  ],
+}
+
 export const rendererBundle: InlineConfig = {
   root: resolve(application, 'src/renderer'),
   configFile: false,
@@ -114,7 +138,7 @@ export const rendererBundle: InlineConfig = {
   // `@vitejs/plugin-react` is typed against the `vite` package. Vite+ ships that same Vite
   // under its own name, so the plugin runs as it always did and only the nominal type differs.
   // SAFETY: same Vite, two package names; the plugins' nominal type is the only difference.
-  plugins: [react(), tailwindcss()] as NonNullable<InlineConfig['plugins']>,
+  plugins: [react(), tailwindcss(), startScreenStyle] as NonNullable<InlineConfig['plugins']>,
   build: {
     outDir: resolve(OUTPUT, 'renderer'),
     emptyOutDir: true,

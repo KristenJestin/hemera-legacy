@@ -26,6 +26,7 @@ import type {
 } from '@hemera/ipc'
 
 import { agentDirectoriesLayer } from '#engine/agents/bare.ts'
+import { acpTracesLayer } from '#engine/agents/trace.ts'
 import { discoveryLayer } from '#engine/agents/discovery.ts'
 import type { FakeAgent } from '#engine/agents/fake.ts'
 import { heldWordsLayer } from '#engine/agents/held.ts'
@@ -37,6 +38,7 @@ import { StderrSink, hostProcessesLayer } from '#engine/agents/supervisor.ts'
 import { proposalsLayer } from '#engine/commands/proposals.ts'
 import { commandsLayer } from '#engine/commands/service.ts'
 import { contextLayer } from '#engine/context/service.ts'
+import { domainEventsLayer } from '#engine/domain-events.ts'
 import { type EngineServices, PUSHED, named } from '#engine/index.ts'
 import { journalLayer } from '#engine/journal.ts'
 import { openProfile } from '#engine/migrate.ts'
@@ -132,6 +134,7 @@ async function openOver(
     ran: (sessionId, run) => push({ event: 'run', sessionId, run }),
     workspace: (projectId, workspaceId) => push({ event: 'workspace', projectId, workspaceId }),
     launched: (specId, projectId) => push({ event: 'launch.changed', specId, projectId }),
+    agents: () => push({ event: 'agents.changed' }),
   })
   // Nothing here asks a registry or updates an agent: the Agents section's own suites do.
   const listed = Layer.succeed(Agents, {
@@ -162,7 +165,7 @@ async function openOver(
         preferencesLayer,
         listed,
         engineStatusLayer({ directory: dataFolder, channel: 'dev', version: VERSION }),
-      ).pipe(Layer.provideMerge(database)),
+      ).pipe(Layer.provideMerge(Layer.mergeAll(database, domainEventsLayer))),
     ),
     Layer.provideMerge(discoveryLayer.pipe(Layer.provide(over))),
     Layer.provideMerge(
@@ -175,6 +178,7 @@ async function openOver(
     Layer.provide(poolLayer.pipe(Layer.provide(clockLayer))),
     Layer.provideMerge(heldWordsLayer),
     Layer.provide(agentDirectoriesLayer(dataFolder)),
+    Layer.provide(acpTracesLayer(dataFolder)),
   )
 
   // The launches, which start the builds a ready Workspace was waited for (D8-13).

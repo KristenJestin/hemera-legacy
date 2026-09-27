@@ -184,6 +184,7 @@ export {
   type JournalProps,
 } from './journal/journal.tsx'
 export { Gutter, type GutterProps } from './shell/gutter.tsx'
+export { StartScreen } from './shell/start-screen.tsx'
 export {
   HOME_ENTRY,
   JOURNAL_ENTRY,
@@ -279,6 +280,12 @@ export {
 } from './activity/tool-call-card.tsx'
 export { TerminalOutput, type TerminalOutputProps } from './activity/terminal-output.tsx'
 export { DiffBlock, type DiffBlockProps } from './activity/diff-block.tsx'
+/** The calls of a turn between two things the agent said, folded into one row (issue #149). */
+export {
+  ActionGroup,
+  type ActionGroupProps,
+  type ActionGroupStatus,
+} from './activity/action-group.tsx'
 /** The tools Hemera lends the agent (HEM-18): the call it made, and the command it ran. A call
  * to one of Hemera's own tools is not the agent's business alone, so it says whose it is. */
 export {
@@ -329,6 +336,7 @@ export {
   ModeSelector,
   UsageMeter,
   type AgentChoice,
+  type AgentListing,
   type AgentModelMenuProps,
   type BlockedBannerProps,
   type EffortChoice,
@@ -383,8 +391,17 @@ export {
   type BareModeStateProps,
 } from './session/bare-mode-state.tsx'
 export { StoppedTurn, type StoppedTurnProps } from './session/stopped-turn.tsx'
+export { AgentReport, type AgentReportProps } from './session/agent-report.tsx'
 /** What the turn is doing right now, at the end of the thread while it runs. */
-export { ActivityRow, type ActivityRowProps, type ActivityState } from './session/activity-row.tsx'
+export {
+  ActivityRow,
+  QUIET_AFTER_MS,
+  STUCK_AFTER_MS,
+  type ActivityRowProps,
+  type ActivityState,
+} from './session/activity-row.tsx'
+/** The row above the box: what the turn is doing, and what it has spent. */
+export { TurnLine, type TurnLineProps } from './session/turn-line.tsx'
 export {
   ResumeFallbackBanner,
   type ResumeFallbackBannerProps,
@@ -427,51 +444,20 @@ export {
   type WorkspaceRepositoriesProps,
 } from './workspace/workspace-repositories.tsx'
 /**
- * The panel a Session's mission opens beside the chat, and the rail it is fed with: the fold, the
- * width that pushes the chat, the band; groups of items that say what needs attention. The Spec
- * panel stands in it; a `build` panel is the next.
+ * The Spec panel of a `define` Session (lot 19, issue #164): folded to a small frame of its three
+ * phases at the window's edge, and open one frame — the head, the Spec as one column under the
+ * headings of its phases, and one footer — the two trading places by a swap; the pieces a Session
+ * reading or reworking a Spec adds to it; and the three blocks of the thread — the thin Hemera line
+ * of what the agent was handed, a question of the Spec asked in the chat, and the agent proposing a
+ * Spec in a `free` Session. View types only: the domain arrives with phase 1.
  */
-export { MissionPanel, type MissionPanelProps } from './session/mission-panel.tsx'
-export {
-  MissionRail,
-  type MissionRailGroup,
-  type MissionRailItem,
-  type MissionRailProps,
-  type RailAttention,
-  type RailChoice,
-  type RailIcon,
-} from './session/mission-rail.tsx'
-
-/**
- * The Spec panel of a `define` Session (lot 19, brief revision 4): folded to a band beside the
- * chat, and unfolded a head over the rail — the readiness at its foot — and the stage that shows
- * one part, or one phase; the pieces a Session reading or reworking a Spec adds to it; and the
- * three blocks of the thread — the thin Hemera line of what the agent was handed, a question of
- * the Spec asked in the chat, and the agent proposing a Spec in a `free` Session. View types
- * only: the domain arrives with phase 1.
- */
-export {
-  SpecPanel,
-  SpecPart,
-  SpecStage,
-  type SpecPanelProps,
-  type SpecPartHandlers,
-  type SpecPartProps,
-  type SpecStageProps,
-} from './spec/spec-panel.tsx'
-export {
-  SpecRail,
-  type RailGroup,
-  type RailRow,
-  type SpecRailProps,
-  type StageChoice,
-} from './spec/spec-rail.tsx'
+export { SpecPanel, type SpecPanelProps } from './spec/spec-panel.tsx'
+export { SpecPart, type SpecPartProps } from './spec/spec-part.tsx'
 export { SpecHead, type SpecHeadProps } from './spec/spec-head.tsx'
 export { SectionPart, type SectionPartProps } from './spec/section-part.tsx'
 export { StoriesPart, type StoriesPartProps } from './spec/stories-part.tsx'
 export { TasksPart, type TasksPartProps } from './spec/tasks-part.tsx'
 export { QuestionsPart, type QuestionsPartProps } from './spec/questions-part.tsx'
-export { ConflictBanner, type ConflictBannerProps } from './spec/conflict-banner.tsx'
 export { ReaderBar, type ReaderBarProps } from './spec/reader-bar.tsx'
 export { ReworkDialog, type ReworkDialogProps } from './spec/rework-dialog.tsx'
 export { MissionBrief, type MissionBriefProps } from './spec/mission-brief.tsx'
@@ -484,7 +470,6 @@ export {
 } from './spec/create-spec-proposal.tsx'
 export type {
   Author,
-  ConflictView,
   Executor,
   GateCheck,
   GateCheckView,
@@ -508,6 +493,7 @@ export type {
   SpecTarget,
   SpecType,
   SpecView,
+  SpecWorkspace,
   StoryView,
   TaskView,
 } from './spec/model.ts'

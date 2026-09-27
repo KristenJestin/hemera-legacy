@@ -3,7 +3,9 @@ import { cn } from 'cn'
 import { useState } from 'react'
 import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
 
+import { expectNeverBuried, watchThereAndBack } from '../../.storybook/sliding-mark.ts'
 import { TooltipProvider } from '../components/tooltip/tooltip.tsx'
+import { SidebarMark } from '../shell/sidebar-mark.tsx'
 import {
   ArchivedSessions,
   SessionEmpty,
@@ -80,15 +82,13 @@ const SESSIONS = [
 ]
 
 const meta = {
-  tags: ['autodocs'],
+  tags: ['autodocs', 'updated'],
   title: 'Surfaces/Session',
   component: SessionHeader,
   render: (args) => <Harness {...args} />,
   parameters: { layout: 'padded' },
   args: {
     title: 'CSV invoice export',
-    projectName: 'Atlas',
-    meta: 'created 3 days ago · 5 messages',
     editing: false,
     archiveDisabled: false,
     onRename: fn(),
@@ -98,11 +98,6 @@ const meta = {
   },
   argTypes: {
     title: { control: 'text', description: 'What the Session is called.' },
-    projectName: { control: 'text', description: 'The Project it belongs to.' },
-    meta: {
-      control: 'text',
-      description: "The rest of the head's line, already written for the platform.",
-    },
     editing: { control: 'boolean', description: 'Whether the title is being typed right now.' },
     archiveDisabled: {
       control: 'boolean',
@@ -125,15 +120,17 @@ type Story = StoryObj<typeof meta>
 /**
  * A Session with a name, a Project, and the menu that holds what can be done to it.
  *
- * The head is one line (review of #40, defect 4): the title, the Project it lives in, and the
- * `…` at the end of the same line. The title is itself the control that opens the field, because
+ * The head is one line (review of #40, defect 4): the title and the `…` at the end of the same
+ * line. Not even the Project's name (issue #159): the tab above says it, and the mission shows in
+ * the panel beside the thread. The title is itself the control that opens the field, because
  * the hand that wants the name changed is already on the words.
  */
 export const Named: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     expect(canvas.getByRole('heading', { level: 1 })).toHaveTextContent('CSV invoice export')
-    expect(canvas.getByText('Atlas · created 3 days ago · 5 messages')).toBeInTheDocument()
+    // Nothing beside the title: the Project is the tab's to say.
+    expect(canvas.queryByText('Atlas')).toBeNull()
     expect(canvas.getByRole('button', { name: 'CSV invoice export' })).toBeInTheDocument()
     expect(canvas.getByRole('button', { name: 'Commands for CSV invoice export' })).toBeEnabled()
     // Nothing is being typed, so there is no field: the title is a heading until it is not.
@@ -152,17 +149,10 @@ export const ReadAndTyped: Story = {
   parameters: { layout: 'padded', controls: { disable: true } },
   render: () => (
     <div className="flex w-full flex-col gap-8">
+      <Harness title="CSV invoice export" onRename={fn()} onArchive={fn()} />
       <Harness
         title="CSV invoice export"
-        projectName="Atlas"
-        meta="created 3 days ago · 5 messages"
-        onRename={fn()}
-        onArchive={fn()}
-      />
-      <Harness
-        title="CSV invoice export"
-        projectName="Atlas"
-        meta="created 3 days ago · 5 messages"
+
         editing
         onRename={fn()}
         onArchive={fn()}
@@ -211,8 +201,7 @@ export const NewNamedAndArchived: Story = {
       <div className="flex flex-col gap-6">
         <Harness
           title="Untitled"
-          projectName="Atlas"
-          meta="just now"
+
           editing
           archiveDisabled
           onRename={fn()}
@@ -220,13 +209,7 @@ export const NewNamedAndArchived: Story = {
         />
         <SessionEmpty />
       </div>
-      <Harness
-        title="CSV invoice export"
-        projectName="Atlas"
-        meta="created 3 days ago · 5 messages"
-        onRename={fn()}
-        onArchive={fn()}
-      />
+      <Harness title="CSV invoice export" onRename={fn()} onArchive={fn()} />
       <ArchivedSessions sessions={ARCHIVED_SESSIONS} onRestore={RESTORED} />
     </div>
   ),
@@ -394,7 +377,7 @@ export const LeavingTheField: Story = {
  */
 export const NewAndEmpty: Story = {
   parameters: { layout: 'fullscreen', controls: { disable: true } },
-  args: { title: 'Untitled', meta: 'just now', editing: true, archiveDisabled: true },
+  args: { title: 'Untitled', editing: true, archiveDisabled: true },
   render: (args) => (
     <div className="mx-auto flex w-full max-w-3xl flex-col gap-6 px-6 py-10">
       <Harness {...args} />
@@ -563,31 +546,40 @@ function Panel({
   active = 'csv',
   onRename,
   onArchive,
+  onChoose,
 }: {
   collapsed?: boolean
   active?: string
   onRename?: (id: string) => void
   onArchive?: (id: string) => void
+  /** Told which row was pressed, for a panel that moves its mark to it. */
+  onChoose?: (id: string) => void
 }) {
   return (
     <TooltipProvider>
       <div
         className={cn(
-          'flex flex-col gap-1 bg-sidebar p-2',
+          'relative isolate flex flex-col gap-1 bg-sidebar p-2',
           collapsed ? 'w-sidebar-rail' : 'w-sidebar',
         )}
       >
         {SESSIONS.map((session) => (
           <SidebarSessionEntry
             key={session.id}
+            id={session.id}
             title={session.title}
             active={session.id === active}
             collapsed={collapsed}
-            onSelect={SELECTED}
+            onSelect={() => {
+              SELECTED()
+              onChoose?.(session.id)
+            }}
             onRename={onRename === undefined ? undefined : () => onRename(session.id)}
             onArchive={onArchive === undefined ? undefined : () => onArchive(session.id)}
           />
         ))}
+        {/* The mark is the panel's, as in the sidebar: drawn once, after every row. */}
+        <SidebarMark target={active} />
       </div>
     </TooltipProvider>
   )
@@ -657,5 +649,33 @@ export const TheRowCommands: Story = {
     await userEvent.hover(row)
     await userEvent.click(canvas.getByRole('button', { name: 'Archive Full-text search' }))
     expect(ARCHIVED_A_SESSION).toHaveBeenCalledWith('search')
+  },
+}
+
+/** The panel holding which row is looked at, so that its mark has somewhere to go. */
+function Choosing() {
+  const [active, setActive] = useState('csv')
+  return <Panel active={active} onChoose={setActive} />
+}
+
+/**
+ * The panel's mark crossing its Sessions, down to the last and back up to the first: on every
+ * frame of the way it is drawn over the row it crosses and never under it (issue #127).
+ */
+export const MarkCrossing: Story = {
+  parameters: { layout: 'padded', controls: { disable: true } },
+  render: () => <Choosing />,
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const watched = await watchThereAndBack(
+      canvasElement,
+      () => userEvent.click(canvas.getByRole('button', { name: 'Migrate to Drizzle 1.0' })),
+      () => userEvent.click(canvas.getByRole('button', { name: 'CSV invoice export' })),
+    )
+    expect(canvas.getByRole('button', { name: 'CSV invoice export' })).toHaveAttribute(
+      'aria-current',
+      'true',
+    )
+    expectNeverBuried(watched)
   },
 }

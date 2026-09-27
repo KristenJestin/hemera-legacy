@@ -40,6 +40,11 @@ export interface Brief {
   phase: PhaseId | null
   /** What it was composed for, which the next brief is measured against (`briefKey`). */
   key: string
+  /**
+   * The human edits and answers written into it, recorded beside it once the agent took it: the
+   * Context tab lists them as it lists those handed over between two briefs.
+   */
+  carried: Pick<SpecDelivery, 'edits' | 'answers'>
 }
 
 /**
@@ -137,20 +142,20 @@ function composed(sessionId: string, holdsNone: boolean) {
       const writerOther = writer === sessionId ? null : writer
       const key = briefKey(phase, snapshot.revision.number, writerOther !== null)
 
+      const told: Pick<SpecDelivery, 'edits' | 'answers'> = {
+        edits:
+          humanEdits.length === 0
+            ? null
+            : { text: editsText(humanEdits), sections: humanEdits.map((one) => one.name) },
+        answers:
+          answers.length === 0
+            ? null
+            : { text: answersText(answers), questions: answers.map((one) => one.body) },
+      }
+
       if (!holdsNone && last[0]?.path === key) {
         if (humanEdits.length === 0 && answers.length === 0) return null
-        const between: SpecDelivery = {
-          brief: null,
-          edits:
-            humanEdits.length === 0
-              ? null
-              : { text: editsText(humanEdits), sections: humanEdits.map((one) => one.name) },
-          answers:
-            answers.length === 0
-              ? null
-              : { text: answersText(answers), questions: answers.map((one) => one.body) },
-          composedAt,
-        }
+        const between: SpecDelivery = { brief: null, ...told, composedAt }
         return between
       }
 
@@ -161,6 +166,7 @@ function composed(sessionId: string, holdsNone: boolean) {
           block: composeBrief({ snapshot, focus: phase, humanEdits, answers, readsFrom }),
           phase,
           key,
+          carried: told,
         },
         edits: null,
         answers: null,
@@ -173,7 +179,9 @@ function composed(sessionId: string, holdsNone: boolean) {
 
 /**
  * The agent took the delivery: what it listed is not listed again, and a brief's key is what the
- * next is measured against (Decided 17). One row per kind it carried, in the same transaction.
+ * next is measured against (Decided 17). Its rows are written in the same transaction, each with
+ * what the Context tab names it by (#74): the brief with its key, the edits with the sections they
+ * touched, and one row per question answered, with the question.
  */
 export function briefed(sessionId: string, delivery: SpecDelivery) {
   return mutate('marking the brief', (transaction) =>
@@ -187,9 +195,14 @@ export function briefed(sessionId: string, delivery: SpecDelivery) {
       if (delivery.brief !== null) {
         given.push({ kind: 'brief', path: delivery.brief.key, text: delivery.brief.block })
       }
-      if (delivery.edits !== null) given.push({ kind: 'edit', path: '', text: delivery.edits.text })
-      if (delivery.answers !== null) {
-        given.push({ kind: 'answer', path: '', text: delivery.answers.text })
+      // What a brief carried is listed as what went between two briefs is.
+      const edits = delivery.edits ?? delivery.brief?.carried.edits ?? null
+      const answers = delivery.answers ?? delivery.brief?.carried.answers ?? null
+      if (edits !== null) {
+        given.push({ kind: 'edit', path: edits.sections.join(','), text: edits.text })
+      }
+      for (const question of answers?.questions ?? []) {
+        given.push({ kind: 'answer', path: question, text: answers?.text ?? '' })
       }
       const deliveredAt = now()
       yield* transaction

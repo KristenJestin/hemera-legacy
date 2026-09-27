@@ -49,6 +49,7 @@ describe('The agent channels are declared once', () => {
     expect(relayed.toSorted()).toEqual([
       'agents.check',
       'agents.decide',
+      'agents.handOver',
       'agents.list',
       'agents.offer',
       'agents.offerSet',
@@ -341,9 +342,10 @@ describe('No tool is replayed on resume', () => {
 })
 
 describe('Text arrives as a stream', () => {
-  test('the ten things the engine pushes are the ones declared', () => {
+  test('the eleven things the engine pushes are the ones declared', () => {
     expect(Object.keys(ENGINE_EVENTS).toSorted()).toEqual([
       'agent',
+      'agents_changed',
       'delivery',
       'entry',
       'launch_changed',

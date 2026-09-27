@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
-import { expect, userEvent, within } from 'storybook/test'
+import { expect, fn, userEvent, within } from 'storybook/test'
 
 import { emulateReducedMotion } from '../../.storybook/reduced-motion.ts'
 import { ActivityRow } from './activity-row.tsx'
@@ -17,7 +17,7 @@ const THOUGHT = `The join on invoice_lines is the cost, not the formatting. Stre
 it on its own, so the query goes first and the loop after.`
 
 const meta = {
-  tags: ['autodocs'],
+  tags: ['autodocs', 'updated'],
   title: 'Blocks/Session/ActivityRow',
   component: ActivityRow,
   parameters: { layout: 'padded' },
@@ -31,6 +31,11 @@ const meta = {
     detail: {
       control: 'text',
       description: 'What it is doing it to: the title of the tool call. Only `running` has one.',
+    },
+    doing: {
+      control: 'text',
+      description:
+        'What is being done, as a whole phrase, read in place of `Running` and its detail.',
     },
     thought: { control: 'text', description: 'The thought arriving now, which the chevron opens.' },
     elapsedMs: {
@@ -65,6 +70,20 @@ export const Running: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     await expect(canvas.getByText('Running cat recap.md')).toBeVisible()
+  },
+}
+
+/**
+ * One of Hemera's own tools running says what it is doing in a phrase of its own, "Writing the
+ * Spec", rather than "Running Write Spec" (issue #170).
+ */
+export const RunningHemeraTool: Story = {
+  args: { state: 'running', doing: 'Writing the Spec' },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await expect(canvas.getByText('Writing the Spec')).toBeVisible()
+    await expect(canvas.getByRole('status', { name: 'Writing the Spec' })).toBeInTheDocument()
+    await expect(canvas.queryByText(/Running/)).toBeNull()
   },
 }
 
@@ -142,6 +161,64 @@ export const WithAThought: Story = {
     await expect(canvas.getByText(/The join on invoice_lines is the cost/)).toBeVisible()
     await userEvent.click(row)
     await expect(row).toHaveAttribute('aria-expanded', 'false')
+  },
+}
+
+/**
+ * Quiet: the turn has heard nothing from its agent for half a minute, and the line says for how
+ * long (issue #131). Nothing is offered yet: an agent thinking hard is quiet for that long too.
+ */
+export const Quiet: Story = {
+  args: { state: 'thinking', quietMs: 47_000, onStop: fn(), onOpenTrace: fn() },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await expect(canvas.getByText('Thinking… · 45 s, no answer yet')).toBeVisible()
+    await expect(canvas.queryByRole('button', { name: 'Stop' })).toBeNull()
+  },
+}
+
+/**
+ * Stuck: two minutes of nothing, and the line offers what can be done about it — stop the turn,
+ * or open the trace of what the agent and Hemera said to find out why nothing comes.
+ */
+export const Stuck: Story = {
+  args: {
+    state: 'running',
+    detail: 'fs_read src/app.ts',
+    quietMs: 150_000,
+    onStop: fn(),
+    onOpenTrace: fn(),
+  },
+  play: async ({ args, canvasElement }) => {
+    const canvas = within(canvasElement)
+    await expect(
+      canvas.getByText('Running fs_read src/app.ts · 2 min, no answer yet'),
+    ).toBeVisible()
+    await userEvent.click(canvas.getByRole('button', { name: 'Stop' }))
+    await expect(args.onStop).toHaveBeenCalledOnce()
+    await userEvent.click(canvas.getByRole('button', { name: 'Open the trace' }))
+    await expect(args.onOpenTrace).toHaveBeenCalledOnce()
+  },
+}
+
+/** A Session with no trace offers Stop alone: there is nothing to open. */
+export const StuckWithoutATrace: Story = {
+  args: { state: 'thinking', quietMs: 600_000, onStop: fn() },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await expect(canvas.getByText('Thinking… · 10 min, no answer yet')).toBeVisible()
+    await expect(canvas.getByRole('button', { name: 'Stop' })).toBeVisible()
+    await expect(canvas.queryByRole('button', { name: 'Open the trace' })).toBeNull()
+  },
+}
+
+/** Waiting on the reader is not the agent being silent, however long it lasts. */
+export const WaitingIsNotQuiet: Story = {
+  args: { state: 'waiting', quietMs: 600_000, onStop: fn(), onOpenTrace: fn() },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await expect(canvas.getByText('Waiting for your permission')).toBeVisible()
+    await expect(canvas.queryByRole('button', { name: 'Stop' })).toBeNull()
   },
 }
 

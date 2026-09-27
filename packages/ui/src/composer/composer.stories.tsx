@@ -6,6 +6,8 @@ import { onOneLine } from '../../.storybook/one-line.ts'
 import { emulateReducedMotion } from '../../.storybook/reduced-motion.ts'
 import { AgentModelMenu, type ModelChoice, type OfferedAgent } from './agent-model-menu.tsx'
 import { CreateSpecProposal } from '../spec/create-spec-proposal.tsx'
+import { CREDIT_NOTES } from '../spec/spec-fixtures.ts'
+import { SpecQuestion } from '../spec/spec-question.tsx'
 import { BlockedBanner } from './blocked-banner.tsx'
 import { Composer, type ComposerProps } from './composer.tsx'
 
@@ -184,7 +186,7 @@ const meta = {
     onSearchFiles: fn(async (query: string) => await Promise.resolve(lookUp(query))),
     onSend: fn(async (): Promise<string | null> => await Promise.resolve(null)),
     agentMenu: <Menu start="opencode" />,
-    spec: true,
+    onSpec: fn(async (): Promise<string | null> => await Promise.resolve(null)),
   },
   argTypes: {
     value: { control: 'text', description: 'What is written; the page holds it.' },
@@ -223,10 +225,10 @@ const meta = {
       description:
         'The agent, its model, its effort and its mode, at the end of the box’s own row.',
     },
-    spec: {
-      control: 'boolean',
-      description: 'Whether the foot offers a Spec: the Home does, a Session does not.',
-      table: { defaultValue: { summary: 'false' } },
+    onSpec: {
+      action: 'spec asked',
+      description:
+        'Starts a Session that writes a Spec from the sentence: the Home hands it over, a Session does not.',
     },
     sendDisabledReason: {
       control: 'text',
@@ -262,7 +264,7 @@ export const Empty: Story = {
     expect(canvas.queryByText('Choose an agent first')).toBeNull()
     expect(canvas.getByRole('button', { name: /New Spec/ })).toBeDisabled()
     // The Workspace is a real choice, drawn as one.
-    expect(canvas.getByRole('combobox', { name: 'Workspace' })).toHaveTextContent('main')
+    expect(canvas.getByRole('combobox', { name: /^Workspace:/ })).toHaveTextContent('main')
     // Nothing is attached, so the header is not there at all.
     expect(canvas.queryByText('Attached')).toBeNull()
 
@@ -275,7 +277,7 @@ export const Empty: Story = {
     expect(canvas.queryByRole('combobox', { name: 'Mode' })).toBeNull()
 
     // The foot below it: the Workspace, and the two buttons at the other end. One line.
-    const pill = canvas.getByRole('combobox', { name: 'Workspace' })
+    const pill = canvas.getByRole('combobox', { name: /^Workspace:/ })
     expect(onOneLine(pill, send), 'the foot of the composer wrapped').toBe(true)
     // And the foot is below the box, not beside it.
     expect(menu.getBoundingClientRect().bottom).toBeLessThanOrEqual(
@@ -408,6 +410,59 @@ export const Pinned: Story = {
     // Above the box, in reading order as on screen.
     expect(card.compareDocumentPosition(box) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     expect(canvas.getByRole('button', { name: 'Create' })).toBeEnabled()
+  },
+}
+
+/** Three blocking questions of the Spec, each asked with its options, all waiting at once. */
+const THREE_QUESTIONS = [
+  CREDIT_NOTES,
+  {
+    ...CREDIT_NOTES,
+    id: 'q-which-date',
+    body: 'Which date decides the month: the issue date or the payment date?',
+    options: [
+      { id: 'issue', label: 'The issue date', recommended: true },
+      { id: 'payment', label: 'The payment date' },
+    ],
+  },
+  {
+    ...CREDIT_NOTES,
+    id: 'q-currency',
+    body: 'Which currency are the totals written in: the invoice’s own, or the Project’s?',
+    options: [
+      { id: 'invoice', label: 'The invoice’s own currency', recommended: true },
+      { id: 'project', label: 'The Project’s currency' },
+    ],
+  },
+]
+
+/**
+ * Three blocking questions pinned at once: the room they take is bounded and scrolls of its own,
+ * so the thread above keeps its room however many wait, and the box stays in reach under them.
+ */
+export const ThreePinnedQuestions: Story = {
+  args: {
+    variant: 'inline',
+    action: 'Send',
+    placeholder: 'Say something to claude…',
+    pinned: THREE_QUESTIONS.map((question) => ({
+      id: question.id,
+      content: <SpecQuestion question={question} onAnswer={fn()} />,
+    })),
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const area = canvas.getByRole('region', { name: 'Waiting for your answer' })
+    await expect(within(area).getAllByRole('group', { name: /^Question:/ })).toHaveLength(3)
+    // Bounded: it scrolls rather than grow, and takes less than half the window.
+    await waitFor(() => {
+      expect(area.scrollHeight).toBeGreaterThan(area.clientHeight)
+    })
+    expect(area.getBoundingClientRect().height).toBeLessThan(window.innerHeight / 2)
+    // The last question is reached by scrolling the area, and the box stays under it.
+    const box = canvas.getByRole('textbox', { name: 'Say something to claude…' })
+    expect(area.compareDocumentPosition(box) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    await expect(box).toBeVisible()
   },
 }
 
@@ -815,6 +870,56 @@ export const WriteRefused: Story = {
     await waitFor(() => {
       expect(canvas.getByRole('button', { name: /Start chat/ })).toHaveStyle({ opacity: '1' })
     })
+  },
+}
+
+/**
+ * `New Spec` starts the Session with the intent of writing a Spec (issue #128).
+ *
+ * The same sentence as `Start chat`, through the page's other door: off while the box is empty,
+ * alive once something is written, and what it wrote leaves the box as a send's does. What it
+ * does is said on the control, in plain words.
+ */
+export const NewSpec: Story = {
+  play: async ({ canvasElement, args }) => {
+    args.onSend.mockClear()
+    const canvas = within(canvasElement)
+    const box = canvas.getByRole('textbox')
+    const spec = canvas.getByRole('button', { name: /New Spec/ })
+    // "New Spec is off while there is nothing to write a Spec from"
+    expect(spec).toBeDisabled()
+    expect(spec).toHaveAttribute('title', 'Start a Session that writes a Spec from this')
+
+    await userEvent.type(box, 'Export the invoices with HT and TTC')
+    // "New Spec is on once something is written, like Start chat"
+    await waitFor(() => {
+      expect(spec).toBeEnabled()
+    })
+    await userEvent.click(spec)
+
+    await waitFor(() => {
+      expect(args.onSpec).toHaveBeenCalledWith('Export the invoices with HT and TTC')
+    })
+    expect(args.onSend).not.toHaveBeenCalled()
+    await waitFor(() => {
+      expect(box.textContent).toBe('')
+    })
+  },
+}
+
+/**
+ * The page asks for the caret, and the box takes it (issue #128): the sidebar's `+` goes to the
+ * Home and the next key typed is already in the composer.
+ */
+export const TakesTheFocus: Story = {
+  args: { takeFocus: true, onFocusTaken: fn() },
+  play: async ({ canvasElement, args }) => {
+    const box = within(canvasElement).getByRole('textbox')
+    await waitFor(() => {
+      expect(document.activeElement).toBe(box)
+    })
+    // Said back once, so the page lets go of the request and the next one is a new one.
+    expect(args.onFocusTaken).toHaveBeenCalledTimes(1)
   },
 }
 

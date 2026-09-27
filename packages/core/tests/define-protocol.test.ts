@@ -105,4 +105,24 @@ describe('The phase briefs', () => {
     expect(PHASE_BRIEFS.shape).toContain('a single question at a time')
     expect(DEFINE_MISSION_BRIEF).toContain('You never freeze the Spec')
   })
+
+  test('a feature is told it needs a story with a criterion; a bug or a maintenance is not', () => {
+    expect(DEFINE_MISSION_BRIEF).toContain(
+      'A `feature` holds at least one user story, each with at least one acceptance criterion',
+    )
+    expect(DEFINE_MISSION_BRIEF).toContain('A `bug` or a `maintenance` may hold no story')
+    expect(PHASE_BRIEFS.decompose).toContain('a feature has at least one story')
+  })
+
+  test('shape asks each question through the question tool', () => {
+    expect(PHASE_BRIEFS.shape).toContain('Each question is a call to `spec_write` with `question`')
+  })
+
+  test('the user reads the Spec and answers through the question card, and edits nothing', () => {
+    expect(DEFINE_MISSION_BRIEF).toContain(
+      'The user reads the Spec beside the chat and edits none of it',
+    )
+    expect(DEFINE_MISSION_BRIEF).toContain('answers your questions through the question card')
+    expect(DEFINE_MISSION_BRIEF).not.toContain('reads and edits the Spec')
+  })
 })

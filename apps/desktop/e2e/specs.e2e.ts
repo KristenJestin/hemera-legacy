@@ -1,22 +1,19 @@
 /**
  * A Spec written beside the chat of a `define` Session (designs D7-01, D7-03, D7-07, D7-09,
- * D7-11, D7-12, D7-14).
+ * D7-11, D7-14; issue #135).
  *
  * One journey, in the order a hand makes it, on one data folder: a `free` Session whose agent
  * proposes a Spec through `spec_propose`, the proposal accepted, the brief handed over before the
- * next turn, a human edit handed over as it is saved, a question asked and answered in the chat, a
- * conflict applied, and a second Session that reads the draft and takes it over. The restart is
+ * next turn, the Spec read in the panel with nothing to edit, a question asked and answered in the
+ * chat, and a second Session that reads the draft and takes it over. The restart is
  * `specs.reopened.e2e.ts`, which starts a second instance on the folder this one wrote
- * (`wdio.conf.ts`, `CONTINUED`), finds the draft, its phases and the text left in a buffer, and
- * takes the Spec to `ready`.
+ * (`wdio.conf.ts`, `CONTINUED`), finds the draft and its phases, and takes the Spec to `ready`.
  *
  * Two acts are not a hand's, and say so where they are made:
  *
- * - Some of the agent's writes. The fake agent follows a script fixed when its turn starts, so it
- *   cannot write on a version it reads during the turn: what it would write under the human's
- *   open editor, and the question, go through the window's own bridge, as the human actor the
- *   renderer always is, which moves the section's version all the same. What it writes on its
- *   own, through `spec_write`, is `specs.reopened.e2e.ts`'s.
+ * - Some of the agent's writes. The fake agent follows a script fixed when its turn starts and
+ *   writes neither `Problem` nor `Scope`: those, and the question, go through the window's own
+ *   bridge. What it writes on its own, through `spec_write`, is `specs.reopened.e2e.ts`'s.
  * - The second Session. Nothing in the window lists Specs yet: it is opened on the Spec through
  *   `specs.openSession`, the call such a list would make.
  *
@@ -29,17 +26,15 @@ import { fakeWorkspace } from './agent/install.ts'
 import { AGENT, ANSWERS, MODELS, PROPOSAL, PROPOSE } from './agent/script.ts'
 import {
   addProject,
+  answerWith,
   awaits,
   control,
-  leave,
   press,
   pressIn,
   region,
   showPart,
   shows,
   sidebar,
-  textOf,
-  typeIn,
   unfoldSpec,
   write,
 } from './hand.ts'
@@ -59,25 +54,13 @@ const KEY = 'ATL-1'
 /** What is said once the Session defines the Spec, which is the turn the brief rides. */
 const DEFINING = 'Let us shape the export fix.'
 
-/** What the human writes in `Problem`. */
+/** What `Problem` and `Scope` are written with, through the bridge. */
 const PROBLEM = 'The CSV export leaves the invoice date column empty.'
-
-/** The line the thread says once the human's edit of `Problem` was handed to the agent. */
-const EDIT_HANDED = 'Your edits to problem went to the agent.'
+const SCOPE = 'The invoice and credit note CSV exports.'
 
 /** The question asked in the chat, and the option it is answered with. */
 const QUESTION = 'Which date decides the month of an invoice?'
 const ISSUE = 'The issue date'
-
-/** `Scope` as the agent rewrites it while the human has it open, twice. */
-const THEIRS = 'Only the invoice CSV export.'
-const THEIRS_AGAIN = 'The invoice CSV export, in every currency.'
-
-/** The human's `Scope`, refused on the older version and applied on the current one. */
-const MINE = 'The invoice and credit note CSV exports.'
-
-/** The text left in a buffer when the application is closed. */
-const KEPT = 'Every CSV export of the billing module.'
 
 /** The title a Session opened on a Spec starts with. */
 const OPENED = 'New session'
@@ -118,28 +101,48 @@ async function sectionOf(specId: string, name: 'problem' | 'scope') {
   )
 }
 
-/**
- * Writes `Scope` as the agent would, through the window's bridge, on the version it is at: what
- * lands under a human editor that was opened on the version before.
- */
-async function rewriteScope(specId: string, sessionId: string, body: string): Promise<void> {
-  const { version } = await sectionOf(specId, 'scope')
+/** Writes a section through the window's bridge, on the version it is at. */
+async function writeThrough(
+  specId: string,
+  sessionId: string,
+  name: 'problem' | 'scope',
+  body: string,
+): Promise<void> {
+  const { version } = await sectionOf(specId, name)
   await browser.execute(
-    async (spec: string, session: string, text: string, base: number) => {
+    async (
+      spec: string,
+      session: string,
+      section: 'problem' | 'scope',
+      text: string,
+      base: number,
+    ) => {
       await window.hemera.invoke('specs.writeSection', {
         specId: spec,
         sessionId: session,
-        name: 'scope',
+        name: section,
         body: text,
         baseVersion: base,
       })
     },
     specId,
     sessionId,
+    name,
     body,
     version,
   )
   await browser.pause(1200)
+}
+
+/** How many editable fields the panel holds. */
+async function fieldsIn(scope: string): Promise<number> {
+  return await browser.execute(
+    (selector: string) =>
+      document
+        .querySelector(selector)
+        ?.querySelectorAll('textarea, input, [contenteditable="true"]').length ?? 0,
+    scope,
+  )
 }
 
 /** How many times the thread says this. */
@@ -188,65 +191,113 @@ describe('A free Session’s agent proposes a Spec, and Create makes the Session
     const panel = await region(PANEL)
     expect(panel).toContain(KEY)
     expect(panel).toContain(PROPOSAL.title)
-    expect(panel).toContain('draft')
-    expect(panel).toContain('Shape · the agent is writing the problem')
-    // The head says what the Session is for, its agent, and the Spec it defines.
-    expect(await shows(`DEFINE · opencode`)).toBe(true)
-    expect(await shows(`· ${KEY}`)).toBe(true)
+    // The status is an icon named by its word, not a word on the line (issue #159).
+    expect(
+      await browser.execute(
+        (scope: string) =>
+          document.querySelector(`${scope} [role="img"][aria-label="Draft"]`) !== null,
+        PANEL,
+      ),
+    ).toBe(true)
+    // No sentence of the phase under the head: the rail says where each part stands (#150).
+    expect(panel).not.toContain('Shape ·')
+    // The head names the Project alone (issue #149): the mission is the panel beside the chat,
+    // and the agent is the composer's.
+    expect(await shows(`DEFINE · opencode`)).toBe(false)
     expect(await region(THREAD)).toContain(ANSWERS[0])
     const { specId } = await sessionOf(ASKED)
     expect(specId).not.toBeNull()
   })
 })
 
-describe('The brief is part of the turn, never a human message', () => {
-  it('folds a mission brief titled with the phase in focus above the answer', async () => {
-    await write(DEFINING)
-    await press('Send')
-    await awaits('What the agent was told · Shape')
-    await awaits(ANSWERS[1])
+/** How far the page scrolls sideways, in pixels: what its content is wider than it by. */
+async function sideways(): Promise<number> {
+  return await browser.execute(() => {
+    const page = document.querySelector('main')
+    return page === null ? -1 : page.scrollWidth - page.clientWidth
+  })
+}
 
-    // The sentence was written once, as the user's; the brief is Hemera's, and folded.
-    expect(await timesInThread(DEFINING)).toBe(1)
-    expect(await region(THREAD)).not.toContain('# The Spec')
+/** Presses the fold or the unfold of the Spec, and waits for the swap to land. */
+async function swapSpec(name: 'Fold the Spec' | 'Unfold the Spec'): Promise<void> {
+  await browser.execute(
+    (scope: string, label: string) => {
+      const button = document.querySelector(scope)?.querySelector(`button[aria-label="${label}"]`)
+      if (button instanceof HTMLButtonElement) button.click()
+    },
+    PANEL,
+    name,
+  )
+  await browser.pause(1200)
+}
+
+/** Sizes the window, then says how far the page scrolls sideways with the Spec open and folded. */
+async function sidewaysAt(width: number): Promise<string[]> {
+  await browser.electron.execute((electron, wide: number) => {
+    electron.BrowserWindow.getAllWindows()[0]?.setSize(wide, 800)
+  }, width)
+  await browser.pause(600)
+  const open = await sideways()
+  await swapSpec('Fold the Spec')
+  const folded = await sideways()
+  await swapSpec('Unfold the Spec')
+  return [`${width} open: ${open}`, `${width} folded: ${folded}`]
+}
+
+describe('The Session row never scrolls sideways', () => {
+  it('fits the chat and the Spec in the window, open and folded, narrow and wide', async () => {
+    const before = await browser.electron.execute(
+      (electron) => electron.BrowserWindow.getAllWindows()[0]?.getSize() ?? [1280, 800],
+    )
+    const narrow = await sidewaysAt(900)
+    const wide = await sidewaysAt(1600)
+    await browser.electron.execute((electron, size: number[]) => {
+      electron.BrowserWindow.getAllWindows()[0]?.setSize(size[0] ?? 1280, size[1] ?? 800)
+    }, before)
+    expect([...narrow, ...wide]).toEqual([
+      '900 open: 0',
+      '900 folded: 0',
+      '1600 open: 0',
+      '1600 folded: 0',
+    ])
   })
 })
 
-describe('A human edit is recorded and reaches the agent', () => {
-  it('writes Problem from the panel with human provenance', async () => {
-    await typeIn('Problem', PROBLEM)
-    await leave('Problem')
-
-    const { specId } = await sessionOf(ASKED)
-    const problem = await sectionOf(specId ?? '', 'problem')
-    expect(problem).toEqual({ body: PROBLEM, version: 2, author: 'human' })
-    expect(await textOf('Problem')).toBe(PROBLEM)
-    // The sentence moves on to the next section left to write.
-    expect(await region(PANEL)).toContain('Shape · the agent is writing the expected outcome')
-  })
-
-  it('lists the edit in the brief of the next turn', async () => {
-    // No turn runs, so the edit is handed over at once, as a delivery of its own: a line of
-    // Hemera's in the thread, never a message of the user's.
-    await awaits(EDIT_HANDED)
-    await write('Is the problem clear now?')
+describe('The brief is part of the turn, never a human message', () => {
+  it('hands the mission brief with the turn, and draws no row of it in the thread', async () => {
+    await write(DEFINING)
     await press('Send')
-    await browser.waitUntil(async () => (await timesInThread(ANSWERS[1])) === 2, {
-      timeout: 20_000,
-      interval: 200,
-      timeoutMsg: 'the turn after the edit never answered',
-    })
-    await browser.pause(1500)
+    await awaits(ANSWERS[1])
 
-    // The brief is one per phase: `shape` is still the focus, so no second brief came, and the
-    // edit went over once.
-    expect(await timesInThread('What the agent was told · Shape')).toBe(1)
-    expect(await timesInThread(EDIT_HANDED)).toBe(1)
+    // The sentence was written once, as the user's; the brief is Hemera's, kept in the thread's
+    // entries for the Context tab, and drawn nowhere in the thread (issue #205).
+    expect(await timesInThread(DEFINING)).toBe(1)
+    expect(await region(THREAD)).not.toContain('What the agent was told')
+    expect(await region(THREAD)).not.toContain('# The Spec')
+    const { id } = await sessionOf(ASKED)
+    const briefs = await browser.execute(async (sessionId: string) => {
+      const read = await window.hemera.invoke('sessions.read', { sessionId })
+      return read.entries.filter((entry) => entry.kind === 'mission_brief').length
+    }, id)
+    expect(briefs).toBeGreaterThan(0)
+  })
+})
+
+describe('The Spec is read, never edited by hand', () => {
+  it('draws what is written as text, and offers nothing to type in', async () => {
+    const { id, specId } = await sessionOf(ASKED)
+    await writeThrough(specId ?? '', id, 'problem', PROBLEM)
+    await writeThrough(specId ?? '', id, 'scope', SCOPE)
+    await showPart(KEY, 'Problem')
+
+    expect(await region(PANEL)).toContain(PROBLEM)
+    expect(await fieldsIn(PANEL)).toBe(0)
+    expect(await control(`Preview Problem as Markdown`)).toBeNull()
   })
 })
 
 describe('A question is asked and answered in the chat', () => {
-  it('asks it as a block of the thread, and the register links to it', async () => {
+  it('asks it as a block of the thread, and the register records it with no link', async () => {
     const { id, specId } = await sessionOf(ASKED)
     await browser.execute(
       async (spec: string, session: string, body: string, issue: string) => {
@@ -273,24 +324,26 @@ describe('A question is asked and answered in the chat', () => {
 
     const panel = await region(PANEL)
     expect(panel).toContain('Questions · 1 open')
-    expect(panel).toContain('Shape · waiting for your answer')
-
-    await pressIn(PANEL, 'Answer in the chat')
-    await browser.pause(500)
-    // The thread is taken to the question, and the keyboard to its first answer.
-    const focused = await browser.execute(
-      () => document.activeElement?.closest('[id^="ask-"]')?.textContent ?? '',
-    )
-    expect(focused).toContain(QUESTION)
+    // The card in the thread is where it is answered: the register offers no way there (#181).
+    expect(panel.toLowerCase()).not.toContain('answer in the chat')
   })
 
-  it('answers it in the block, which folds to the answer, and resolves it in the register', async () => {
-    await pressIn('[id^="ask-"]', ISSUE)
+  it('answers it in the block, which stays as it was asked, and resolves it in the register', async () => {
+    await answerWith(ISSUE)
     await browser.pause(1200)
 
+    // The block stays where it was asked, every choice in it, and names itself after the answer,
+    // lettered as the card lettered it; the thread draws no answer of its own (issue #199).
     const block = await region('[id^="ask-"]')
-    expect(block).toContain(ISSUE)
-    expect(block).not.toContain('The payment date')
+    expect(block).toContain(QUESTION)
+    expect(block).toContain('The payment date')
+    const chosen = await browser.execute(() =>
+      [...document.querySelectorAll('[role="group"][aria-label^="You answered"]')].map(
+        (group) =>
+          `${group.closest('[id^="ask-"]') === null ? 'thread' : 'card'}: ${group.getAttribute('aria-label') ?? ''}`,
+      ),
+    )
+    expect(chosen).toEqual([`card: You answered «${QUESTION}»: A, ${ISSUE}`])
     const panel = await region(PANEL)
     expect(panel).toContain('Questions · 0 open')
     expect(panel).toContain('1 answered')
@@ -303,39 +356,6 @@ describe('A question is asked and answered in the chat', () => {
         .map((entry) => `${entry.role}: ${entry.body}`)
     }, id)
     expect(answers).toEqual([`user: ${ISSUE}`])
-  })
-})
-
-describe('A conflict keeps the human’s text', () => {
-  it('refuses a save on a section written since it was opened, and keeps the text', async () => {
-    const { id, specId } = await sessionOf(ASKED)
-    await showPart(KEY, 'Scope')
-    await typeIn('Scope', MINE)
-    await rewriteScope(specId ?? '', id, THEIRS)
-    await leave('Scope')
-
-    const scope = await sectionOf(specId ?? '', 'scope')
-    expect(scope.body).toBe(THEIRS)
-    expect(await region(PANEL)).toContain(
-      'The agent changed this part while you were writing yours.',
-    )
-    expect(await textOf('Scope, your text')).toBe(MINE)
-
-    await pressIn(PANEL, 'Compare')
-    expect(await region(PANEL)).toContain(THEIRS)
-  })
-
-  it('applies the kept text on the current version, and the banner goes', async () => {
-    await pressIn(PANEL, 'Keep mine')
-    await browser.pause(1200)
-
-    const { specId } = await sessionOf(ASKED)
-    const scope = await sectionOf(specId ?? '', 'scope')
-    expect(scope).toEqual({ body: MINE, version: 3, author: 'human' })
-    expect(await region(PANEL)).not.toContain(
-      'The agent changed this part while you were writing yours.',
-    )
-    expect(await textOf('Scope')).toBe(MINE)
   })
 })
 
@@ -362,7 +382,6 @@ describe('A second Session reads but does not write', () => {
     })
     expect(await region(READER_BAR)).toContain(`« ${ASKED} »`)
     expect(await region(PANEL)).toContain(PROBLEM)
-    expect(await shows(`DEFINE · opencode`)).toBe(true)
   })
 
   it('takes the write right over, and the first Session reads from then on', async () => {
@@ -378,8 +397,7 @@ describe('A second Session reads but does not write', () => {
     expect(writer).toBe(id)
 
     // The first Session, revisited, is the reader now. Its agent's writes are refused by the
-    // engine (`writable`, tested there): the renderer writes as the human only, whose edits
-    // pass from any Session's panel (D7-11).
+    // engine (`writable`, tested there).
     await press(ASKED)
     await browser.waitUntil(async () => (await region(PANEL)) !== '', {
       timeout: 10_000,
@@ -394,25 +412,18 @@ describe('A second Session reads but does not write', () => {
   })
 })
 
-describe('Mark ready is offered only once the checks pass', () => {
-  it('names what is left and offers no Mark ready', async () => {
-    const panel = await region(PANEL)
-    expect(panel).toContain('before ready')
+describe('Mark ready waits until the Spec can be marked ready', () => {
+  it('is not offered on a draft that still lacks something, whose footer says nothing', async () => {
+    // A press could only be refused (issues #205, #209): the footer says nothing instead.
+    expect(await region(PANEL)).not.toContain('checks met')
     expect(await control('Mark ready')).toBeNull()
-  })
-})
-
-describe('A conflict keeps the human’s text across a relaunch', () => {
-  it('keeps a text refused on its way, for the next start to find', async () => {
-    const { id, specId } = await sessionOf(OPENED)
-    await showPart(KEY, 'Scope')
-    await typeIn('Scope', KEPT)
-    await rewriteScope(specId ?? '', id, THEIRS_AGAIN)
-    await leave('Scope')
-
-    expect(await region(PANEL)).toContain(
-      'The agent changed this part while you were writing yours.',
-    )
-    expect(await textOf('Scope, your text')).toBe(KEPT)
+    expect(await region(PANEL)).not.toMatch(/left before ready/)
+    expect(await region(PANEL)).not.toContain('is not ready yet')
+    const { specId } = await sessionOf(ASKED)
+    const status = await browser.execute(async (spec: string) => {
+      const read = await window.hemera.invoke('specs.read', { specId: spec })
+      return read.spec.status
+    }, specId ?? '')
+    expect(status).toBe('draft')
   })
 })

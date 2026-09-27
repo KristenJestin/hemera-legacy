@@ -43,6 +43,7 @@ import { Journal, journalLayer } from '#engine/journal.ts'
 import { openProfile } from '#engine/migrate.ts'
 import { Projects, projectsLayer } from '#engine/projects.ts'
 import { Sessions, sessionsLayer } from '#engine/sessions.ts'
+import { domainEventsLayer } from '#engine/domain-events.ts'
 import { NoSpecNotices } from '#engine/specs/notices.ts'
 import { specsLayer } from '#engine/specs/specs.ts'
 import { databaseLayer } from '#engine/storage/database.ts'
@@ -147,7 +148,11 @@ function engine(human: Human) {
         projectsLayer,
         sessionsLayer,
         specsLayer.pipe(Layer.provide(NoSpecNotices)),
-      ).pipe(Layer.provideMerge(databaseLayer(join(folder, 'hemera.sqlite')))),
+      ).pipe(
+        Layer.provideMerge(
+          Layer.mergeAll(databaseLayer(join(folder, 'hemera.sqlite')), domainEventsLayer),
+        ),
+      ),
     ),
     Layer.provide(processes),
     Layer.provide(heldWordsLayer),
@@ -595,6 +600,7 @@ describe('the commands of a Project', () => {
             scope: 'workspace',
             portless: false,
             portlessName: null,
+            runAtOpen: false,
             folderBase: null,
             folder: null,
           },
@@ -948,6 +954,7 @@ describe('A catalogue command inside the root runs on its own', () => {
             scope: 'workspace',
             portless: false,
             portlessName: null,
+            runAtOpen: false,
             folderBase: null,
             folder: null,
           },
@@ -986,6 +993,7 @@ describe("A catalogue command's folder is the Project's", () => {
             scope: 'workspace',
             portless: false,
             portlessName: null,
+            runAtOpen: false,
             folderBase: null,
             folder: null,
           },
@@ -1079,6 +1087,7 @@ describe('A short command answers with its output; a long one is left running', 
               scope: 'workspace',
               portless: false,
               portlessName: null,
+              runAtOpen: false,
             },
             false,
           )

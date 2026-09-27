@@ -36,7 +36,7 @@ import type { ModelChoice } from './agent-model-menu-shared.tsx'
  * of it, and what is left under it is the panel's own surface.
  */
 const meta = {
-  tags: ['autodocs'],
+  tags: ['autodocs', 'updated'],
   title: 'Blocks/Composer/AgentModelMenu',
   component: AgentModelMenu,
   render: (args) => <Controlled {...args} render={(props) => <AgentModelMenu {...props} />} />,
@@ -185,6 +185,46 @@ export const AgentNotAvailableHere: Story = {
     await waitFor(() => {
       expect(screen.getByRole('listbox', { name: 'Agents' })).toBeVisible()
     })
+  },
+}
+
+/**
+ * The machine has not said yet which agents it has: the room of the list says it is looking, with
+ * the indicator in the middle of it, and never shows an empty list in its place — an empty menu
+ * read as a machine with no agent at all. The box is the panel's own, the same as once they are
+ * listed.
+ */
+export const LookingForAgents: Story = {
+  args: { agents: [], listing: 'looking' },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await userEvent.click(canvas.getByRole('button', { name: 'Choose an agent' }))
+
+    const looking = await screen.findByRole('status', { name: 'Looking for agents…' })
+    // Waited out rather than read at once: the panel comes down from its trigger in opacity.
+    await waitFor(() => {
+      expect(looking).toBeVisible()
+    })
+    await expect(screen.queryByRole('listbox', { name: 'Agents' })).toBeNull()
+  },
+}
+
+/**
+ * The machine could not be asked which agents it has, even after the window asked again: the
+ * room of the list says so in words, and offers to ask once more.
+ */
+export const AgentsUnlisted: Story = {
+  args: { agents: [], listing: 'failed', onRetryAgents: fn() },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement)
+    await userEvent.click(canvas.getByRole('button', { name: 'Choose an agent' }))
+
+    const said = await screen.findByRole('alert')
+    await expect(said).toHaveTextContent('Hemera could not list the agents on this machine.')
+    await expect(screen.queryByRole('listbox', { name: 'Agents' })).toBeNull()
+
+    await userEvent.click(within(said).getByRole('button', { name: 'Retry' }))
+    await expect(args.onRetryAgents).toHaveBeenCalledOnce()
   },
 }
 
@@ -547,6 +587,32 @@ export const Modes: Story = {
      * ever sees, and a story failing on an animation rather than on what it shows. So nothing is
      * left moving, the popup transition and the rail travel alike.
      */
+    await waitForAnimations()
+  },
+}
+
+/**
+ * **An agent with no mode**: OpenCode, which Hemera runs bare with an agent of its own and its
+ * `build` and `plan` disabled (issue #128).
+ *
+ * The engine offers no mode for it, so there is no MODE section in the panel and the trigger
+ * names the model and the effort only: Hemera's own agent is never shown as if it were a feature.
+ */
+export const NoMode: Story = {
+  args: { agent: 'opencode', model: 'opencode-zen-kimi-k2-thinking', effort: 'low' },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const trigger = canvas.getByRole('button', { name: /Kimi K2 Thinking · Low/ })
+    // The summary ends on the effort: no mode is named, `hemera` or any other.
+    await expect(trigger.textContent?.split(' · ')).toHaveLength(2)
+    await userEvent.click(trigger)
+    await screen.findByRole('listbox', { name: 'Models of this agent' })
+    // The effort still stands in its column; nothing is under it.
+    await waitFor(() => {
+      expect(screen.getByRole('slider', { name: 'Effort' })).toBeVisible()
+    })
+    await expect(screen.queryByRole('listbox', { name: 'Mode' })).toBeNull()
+    await expect(screen.queryByText('Mode')).toBeNull()
     await waitForAnimations()
   },
 }

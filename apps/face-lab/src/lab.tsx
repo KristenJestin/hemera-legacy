@@ -475,6 +475,15 @@ export function Lab(): ReactNode {
               description="Plays the state's flourish back to back, to judge it."
             />
             <Range
+              label="Wait between two flourishes"
+              value={tuning.rest}
+              min={0.1}
+              max={3}
+              step={0.05}
+              format={(value) => `${value.toFixed(2)}×`}
+              onChange={(rest) => setTuning((was) => ({ ...was, rest }))}
+            />
+            <Range
               label="Gain"
               value={tuning.gain}
               min={0.25}

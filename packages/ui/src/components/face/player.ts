@@ -2,7 +2,6 @@ import { face, faceArrive, faceCarry } from '../../motion.ts'
 import {
   CHOREOGRAPHIES,
   type ChangeName,
-  LIDDED,
   type Windows,
   blinkOf,
   changeBetween,
@@ -94,9 +93,9 @@ export const TUNING: FaceTuning = {
 }
 
 /**
- * How much of the face a size can hold. Small, the face simplifies rather than blurs: no mouth,
- * features drawn larger in their box and in heavier strokes, gestures that travel further so they
- * still read, and no borrowed gestures.
+ * How much of the face a size can hold. Small, the face simplifies rather than blurs: features
+ * drawn larger in their box and in heavier strokes, gestures that travel further so they still
+ * read; and at the size of an icon, no mouth and no borrowed gestures.
  */
 export interface FaceDetail {
   readonly mouth: boolean
@@ -109,7 +108,7 @@ export interface FaceDetail {
 
 export const DETAILS = {
   icon: { mouth: false, scale: 1.15, weight: 1.3, gain: 1.45, asides: false },
-  small: { mouth: false, scale: 1.08, weight: 1.18, gain: 1.25, asides: true },
+  small: { mouth: true, scale: 1.08, weight: 1.18, gain: 1.25, asides: true },
   full: { mouth: true, scale: 1, weight: 1, gain: 1, asides: true },
 } as const satisfies Record<string, FaceDetail>
 
@@ -298,7 +297,6 @@ function write(pose: number[], start: number, stroke: Stroke): void {
 function play(pose: number[], said: Beat): void {
   pose[AT.yaw] = pose[AT.yaw]! + said.yaw
   pose[AT.pitch] = pose[AT.pitch]! + said.pitch
-  pose[AT.roll] = pose[AT.roll]! + said.roll
   pose[AT.gazeX] = pose[AT.gazeX]! + said.gazeX
   pose[AT.gazeY] = pose[AT.gazeY]! + said.gazeY
   pose[AT.lidLeft] = Math.max(pose[AT.lidLeft]!, said.lid)
@@ -379,14 +377,14 @@ export function createFace(options: FaceOptions): FacePlayer {
         }
       }),
       flourishes: strandOf<FlourishEvent>(strand(seed, 3), (previous, random) => {
-        const piece = FLOURISHES[flourish ?? 'lookaway']
+        const piece = FLOURISHES[flourish ?? 'hmm']
         const wait = between(random(), piece.every[0], piece.every[1])
         const start = (previous?.end ?? t0) + (tuning.loop ? 0.7 : wait)
         const length = between(random(), piece.length[0], piece.length[1])
         return {
           start,
           end: start + length,
-          name: flourish ?? 'lookaway',
+          name: flourish ?? 'hmm',
           side: random() < 0.5 ? -1 : 1,
         }
       }),
@@ -468,7 +466,6 @@ export function createFace(options: FaceOptions): FacePlayer {
         head: {
           yaw: look.yaw + gesture.yaw,
           pitch: look.pitch + gesture.pitch,
-          roll: look.roll + gesture.roll,
           gazeX: look.gazeX + gesture.gazeX,
           gazeY: look.gazeY + gesture.gazeY,
         },
@@ -495,8 +492,9 @@ export function createFace(options: FaceOptions): FacePlayer {
     for (const channel of CHANNEL_NAMES) {
       const [from, to] = run.windows[channel]
       const k = to > from ? faceArrive((q - from) / (to - from)) : q >= from ? 1 : 0
-      // The colour is a share of each tone and has no speed worth keeping: it only travels.
-      const speed = channel === 'tone' ? 0 : carried
+      // Only the head and the eyes' direction keep their speed: a shape or a colour taken over
+      // half-way only travels on, or a startled eye snapping shut would fling its next shape away.
+      const speed = channel === 'head' || channel === 'gaze' ? carried : 0
       const [first, last] = CHANNELS[channel]
       for (let index = first; index < last; index += 1) {
         const offset = (run.start[index]! - run.landing[index]!) * (1 - k)
@@ -579,11 +577,15 @@ export function createFace(options: FaceOptions): FacePlayer {
     const { windows } = CHOREOGRAPHIES[name]
     const { down, up, hold } = timing.blink
     const crossing =
-      !LIDDED.includes(name) &&
-      (!meet(strokeAt(start, AT.left), to.eyes[0]) || !meet(strokeAt(start, AT.right), to.eyes[1]))
+      !meet(strokeAt(start, AT.left), to.eyes[0]) || !meet(strokeAt(start, AT.right), to.eyes[1])
     if (crossing) {
       const at = Math.max(0, Math.min(windows.shape[0] * length - down, length - down - hold - up))
-      const shut: readonly [number, number] = [(at + down) / length, (at + down + hold) / length]
+      // The shape changes while the lid is mostly down, not only in the instant it is shut: a
+      // closed eye keeps its own width, and a width changed in sixty milliseconds is a jump.
+      const shut: readonly [number, number] = [
+        (at + down * 0.5) / length,
+        (at + down + hold + up * 0.5) / length,
+      ]
       return { blink: { start: at, hold }, windows: { ...windows, shape: shut } }
     }
     const own = blinkOf(name, chance)

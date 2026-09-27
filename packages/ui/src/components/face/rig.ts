@@ -26,10 +26,9 @@ const CHIN = 7
 /** Half the angle between the eyes seen from above, and between eyes and mouth from the side. */
 const EYE_ANGLE = 0.55
 const ELEVATION = 0.5
-/** How far a whole turn, nod and tilt take the head, in radians. */
+/** How far a whole turn and nod take the head, in radians. */
 const MAX_YAW = 0.5
 const MAX_PITCH = 0.85
-const MAX_ROLL = 0.35
 /** How much a nod opens the eyes out and flattens the mouth. */
 const PITCH_DEPTH = 0.2
 /** How far the eyes travel inside the face when they look away. */
@@ -68,7 +67,6 @@ export function drawnOf(pose: Pose, detail: FaceDetail, gain = 1): Drawn {
   const g = detail.gain * gain
   const yaw = held(pose[AT.yaw]! * g) * MAX_YAW
   const tilt = held(pose[AT.pitch]! * g)
-  const roll = held(pose[AT.roll]! * g) * MAX_ROLL
   const gazeX = held(pose[AT.gazeX]! * g)
   const gazeY = held(pose[AT.gazeY]! * g)
 
@@ -87,16 +85,11 @@ export function drawnOf(pose: Pose, detail: FaceDetail, gain = 1): Drawn {
     squash: Math.max(LEAST, Math.cos(rest + yaw) / Math.cos(rest)),
   })
 
-  const cos = Math.cos(roll)
-  const sin = Math.sin(roll)
-  // Tilted about the pivot, and drawn larger about the middle of the square for a small size.
-  const turned = (x: number, y: number): [number, number] => {
-    const dx = x - CENTER
-    const dy = y - pivotY
-    const tx = CENTER + dx * cos - dy * sin
-    const ty = pivotY + dx * sin + dy * cos
-    return [CENTER + (tx - CENTER) * detail.scale, CENTER + (ty - CENTER) * detail.scale]
-  }
+  // Drawn larger about the middle of the square for a small size.
+  const turned = (x: number, y: number): [number, number] => [
+    CENTER + (x - CENTER) * detail.scale,
+    CENTER + (y - CENTER) * detail.scale,
+  ]
 
   const lay = (
     stroke: Stroke,

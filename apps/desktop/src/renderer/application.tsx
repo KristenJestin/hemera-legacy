@@ -182,6 +182,7 @@ import {
   subscribeToProjects,
   updateRepository,
 } from './projects-store.ts'
+import { patiently } from './patiently.ts'
 import {
   keepActiveProject,
   persistWidthOnRelease,
@@ -464,20 +465,28 @@ export function Application() {
   useEffect(() => {
     void loadProjects()
     void loadUnseen()
-    // Where the window was looking last. Read once, and read before anything can decide which
-    // Session to open: the Session an opening lands on is this answer's and no one else's.
-    void window.hemera
-      .invoke('preferences.read', {})
+    // Where the window was looking last. Read before anything can decide which Session to open:
+    // the Session an opening lands on is this answer's and no one else's. Asked again when it
+    // fails, and given up on as a window that remembers nothing: a `remembered` left null is a
+    // window that never opens a Session at all.
+    void patiently(async () => await window.hemera.invoke('preferences.read', {}))
+      .catch((failed: Error) => {
+        unanswered('preferences.read')(failed)
+        return null
+      })
       .then((worn) => {
+        if (worn === null) {
+          setRemembered({})
+          setComposers({})
+          return
+        }
         setRemembered(worn.activeSessions)
         // Nothing where an older data folder, or an engine that predates the preference, answers
         // without it: what a window does then is open on no choice at all, not fall over.
         setComposers(worn.composers ?? {})
         setAcpTrace(worn.acpTrace)
       })
-      .catch(unanswered('preferences.read'))
-    void window.hemera
-      .invoke('engine.status', {})
+    void patiently(async () => await window.hemera.invoke('engine.status', {}))
       .then((status) => {
         setFacts(factsOf(status))
         setSubtitle(`Hemera ${status.version} · channel ${status.channel}`)
@@ -1331,6 +1340,10 @@ export function Application() {
         sessions={recent}
         entries={linesOf(journal.entries).slice(0, ACTIVITY)}
         agents={agents.agents.map(offeredOf)}
+        // Whether that list is known yet: the menu says it is looking, or that it could not be
+        // read and offers to read it again, rather than drawing an empty list (never "no agent").
+        agentsListing={agents.listing}
+        onRetryAgents={() => void loadAgents()}
         // What this Project's composer was left on, which is what the Home opens on.
         choice={composers[active.id] ?? null}
         offeringOf={(chosen) => offeringOf(active.id, providerOf(chosen))}

@@ -852,6 +852,29 @@ describe('Cleanup removes the worktrees and keeps the branches', () => {
   })
 })
 
+describe('A cleaned-up Workspace frees its Spec', () => {
+  it('sets the Workspace of its Spec to none, in the cleanup itself', async () => {
+    const seen = await workspaceEngine(folder)(
+      Effect.gen(function* () {
+        const workspaces = yield* Workspaces
+        const sql = yield* SqliteClient
+        const project = yield* atlas(main, [API, FRONT])
+        const workspace = yield* prepared(project.id)
+        // The Spec the Workspace was made for, set on it as a launch sets it (D8-12).
+        yield* sql`UPDATE specs SET workspace_id = ${workspace.id} WHERE id = 'HEM-7'`
+        const cleaned = yield* workspaces.cleanup(workspace.id)
+        const [spec] = yield* sql<{ workspace_id: string | null }>`
+          SELECT workspace_id FROM specs WHERE id = 'HEM-7'`
+        return { cleaned, spec }
+      }),
+    )
+
+    expect(seen.cleaned.state).toBe('cleaned')
+    // Its Spec is set on no Workspace any more: the panel offers it a new one.
+    expect(seen.spec?.workspace_id).toBeNull()
+  })
+})
+
 describe('Cleanup is refused while a service runs or Git refuses', () => {
   it('names the running service, then Git’s own message, and removes nothing', async () => {
     const front = join(main, 'sources', 'front')

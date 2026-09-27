@@ -266,6 +266,14 @@ export interface LaunchWorkspace {
   name: string
 }
 
+/**
+ * The Workspace a Spec is set on, and where it stands (D8-12): being prepared, ready, failed —
+ * resumed rather than started in — or cleaned up, which leaves the Spec with none.
+ */
+export interface SpecWorkspace extends LaunchWorkspace {
+  state: 'preparing' | 'ready' | 'failed' | 'cleaned'
+}
+
 /** What a launch says of itself, and the one thing it offers from where it stands (D8-13). */
 export type LaunchView =
   | {

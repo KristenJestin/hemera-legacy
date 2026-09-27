@@ -626,7 +626,7 @@ export const Complete: Story = {
     await expect(onOneLine(at, menu), 'the agent menu left the box’s own row').toBe(true)
     await expect(canvas.queryByRole('combobox', { name: 'Mode' })).toBeNull()
     await expect(canvas.queryByRole('button', { name: /New Spec/ })).toBeNull()
-    const pill = canvas.getByRole('combobox', { name: 'Workspace' })
+    const pill = canvas.getByRole('combobox', { name: /^Workspace:/ })
     await expect(onOneLine(pill, stops[2]!), 'the foot of the composer wrapped').toBe(true)
 
     /*

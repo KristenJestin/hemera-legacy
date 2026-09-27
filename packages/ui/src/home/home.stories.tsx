@@ -230,7 +230,7 @@ export const Variants: Story = {
     const at = canvas.getByRole('button', { name: 'Mention a file of the Project' })
     expect(onOneLine(at, menu), 'the agent menu left the box’s own row').toBe(true)
     expect(
-      onOneLine(canvas.getByRole('combobox', { name: 'Workspace' }), send),
+      onOneLine(canvas.getByRole('combobox', { name: /^Workspace:/ }), send),
       'the foot of the composer wrapped',
     ).toBe(true)
 

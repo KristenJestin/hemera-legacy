@@ -1,4 +1,4 @@
-import { face, faceArrive, faceCarry, faceCoast } from '../../motion.ts'
+import { face, faceArrive, faceArriveSpan, faceCarry, faceCoast } from '../../motion.ts'
 import {
   CHOREOGRAPHIES,
   type ChangeName,
@@ -10,6 +10,7 @@ import {
 import {
   FLOURISHES,
   type FlourishName,
+  LOADING,
   MIDDLE,
   MOTIONS,
   type MotionKind,
@@ -228,9 +229,32 @@ interface PassEvent extends Timed {
   readonly n: number
 }
 
+/** A stretch of the loading at one width, eased into from the width before it. */
+interface Drift extends Timed {
+  readonly from: number
+  readonly to: number
+}
+
+/** A stretch of the loading at one speed, eased into, and how far round it had gone by then. */
+interface Pace extends Timed {
+  readonly from: number
+  readonly to: number
+  readonly spun: number
+}
+
 interface FlourishEvent extends Timed {
   readonly name: FlourishName
   readonly side: number
+}
+
+/**
+ * The turns a stretch of the loading has covered from its start to `at`: its old pace, plus what
+ * the ease into its new pace added on top — the area under the eased speed, not a straight line.
+ */
+function pacedOn(pace: Pace, at: number, turn: number): number {
+  const τ = Math.max(0, at - pace.start)
+  const eased = LOADING.paceEase * faceArriveSpan(τ / LOADING.paceEase)
+  return (pace.from * τ + (pace.to - pace.from) * eased) / turn
 }
 
 /** A blink closing over `down`, staying shut for `hold` and opening over `up`, `τ` seconds in. */
@@ -312,6 +336,9 @@ interface Segment {
   readonly blinks: (at: number) => Found<BlinkEvent>
   readonly passes: (at: number) => Found<PassEvent>
   readonly flourishes: (at: number) => Found<FlourishEvent>
+  /** The loading's two clocks: how wide its dots sit, and how fast they go. */
+  readonly reaches: (at: number) => Found<Drift>
+  readonly paces: (at: number) => Found<Pace>
   /** The flourishes this state may play, at this size and with this life. */
   readonly repertoire: readonly FlourishName[]
   readonly run: Run | null
@@ -382,6 +409,7 @@ export function createFace(options: FaceOptions): FacePlayer {
   const { detail, reduced, tuning } = options
   const { timing } = tuning
   const segments: Segment[] = []
+  const paced = (pace: Pace, at: number): number => pacedOn(pace, at, timing.spin)
 
   /** A state begun at `t0`, its three strands drawn from its own seed. */
   const begin = (
@@ -431,6 +459,22 @@ export function createFace(options: FaceOptions): FacePlayer {
           n: previous === null ? 0 : previous.n + 1,
         }
       }),
+      // The loading's first stretch is its plain width and beat, and lasts past the change into
+      // it, so that a change landing on the loading lands where the loading's own clock has it.
+      reaches: strandOf<Drift>(strand(seed, 5), (previous, random) => {
+        const start = previous?.end ?? t0
+        const hold = between(random(), ...LOADING.reachHold) + (previous === null ? settling : 0)
+        const to = previous === null ? 0 : LOADING.reaches[Math.floor(random() * 3)]!
+        return { start, end: start + hold, from: previous?.to ?? 0, to }
+      }),
+      paces: strandOf<Pace>(strand(seed, 6), (previous, random) => {
+        const start = previous?.end ?? t0
+        const hold = between(random(), ...LOADING.paceHold) + (previous === null ? settling : 0)
+        const to = previous === null ? 1 : LOADING.paces[Math.floor(random() * 2)]!
+        const spun =
+          previous === null ? t0 / timing.spin : previous.spun + paced(previous, previous.end)
+        return { start, end: start + hold, from: previous?.to ?? 1, to, spun }
+      }),
       flourishes: strandOf<FlourishEvent>(strand(seed, 3), (previous, random) => {
         const drawn = repertoire[Math.floor(random() * repertoire.length)] ?? 'hmm'
         const piece = FLOURISHES[drawn]
@@ -442,6 +486,23 @@ export function createFace(options: FaceOptions): FacePlayer {
         return { start, end: start + length, name: drawn, side: random() < 0.5 ? -1 : 1 }
       }),
     }
+  }
+
+  /** How wide the loading's dots sit at `at`, eased from one width to the next. */
+  const reachAt = (segment: Segment, at: number): number => {
+    const { current } = segment.reaches(at)
+    if (current === null) return 0
+    return (
+      current.from +
+      (current.to - current.from) * faceArrive((at - current.start) / LOADING.reachEase)
+    )
+  }
+
+  /** How far round the loading has gone at `at`, its speed eased from one pace to the next. */
+  const spinAt = (segment: Segment, at: number): number => {
+    const { current } = segment.paces(at)
+    if (current === null) return at / timing.spin
+    return current.spun + paced(current, at)
   }
 
   /** How shut the lids are from blinking alone at `at`. */
@@ -569,8 +630,8 @@ export function createFace(options: FaceOptions): FacePlayer {
         // Loading rides the orbit, a turn every beat of the loading indicator, on the clock
         // itself, so that two loading faces go round together as two indicators do.
         orbit: segment.state === 'loading' ? 1 : 0,
-        spin: segment.state === 'loading' ? at / timing.spin + turns : 0,
-        reach: gesture.reach,
+        spin: segment.state === 'loading' ? spinAt(segment, at) + turns : 0,
+        reach: (segment.state === 'loading' ? reachAt(segment, at) : 0) + gesture.reach,
         tone: expression.tone,
       }),
       motion,

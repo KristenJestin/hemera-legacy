@@ -80,7 +80,8 @@ function look(said: Partial<Head>): Head {
 export const EXPRESSIONS: Record<FaceState, Expression> = {
   /**
    * Loading: no face yet, three dots going round in whatever colour the face sits in — the
-   * loading indicator itself, until the face it becomes is known.
+   * loading indicator itself, until the face it becomes is known. How wide they sit and how fast
+   * they go are two clocks of their own, which the player keeps.
    */
   loading: {
     label: 'Loading',
@@ -91,7 +92,7 @@ export const EXPRESSIONS: Record<FaceState, Expression> = {
     blink: null,
     motion: 'hold',
     aside: null,
-    flourishes: ['rush', 'huddle', 'spread'],
+    flourishes: [],
     tone: 'current',
   },
   /** Working something out: heavy-lidded, looking up and away. */

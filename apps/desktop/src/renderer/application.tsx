@@ -45,6 +45,7 @@ import {
   type ProjectSettingsDraft,
   type RepositoryLine,
   type ShellProject,
+  type ShellSession,
 } from '@hemera/ui'
 import {
   IconArchive,
@@ -77,6 +78,7 @@ import {
   optionsOf,
   readOptions,
   say,
+  sessionFaceOf,
   setOffered,
   stopTurn,
   subscribeToAgent,
@@ -426,11 +428,21 @@ export function Application() {
 
   const active = projects.find((project) => project.id === shell.activeProjectId) ?? null
 
-  /** What the sidebar lists, which is the Sessions of the Project in front and nothing else. */
+  /**
+   * What the sidebar lists, which is the Sessions of the Project in front and nothing else, each
+   * with the face its agent wears (issue #140).
+   */
   const shellSessions = useMemo(
-    (): { id: string; title: string }[] =>
-      sessions.sessions.map((one) => ({ id: one.id, title: one.title })),
-    [sessions.sessions],
+    (): ShellSession[] =>
+      sessions.sessions.map((one) => {
+        const agent = agents.sessions.get(one.id)
+        return {
+          id: one.id,
+          title: one.title,
+          agent: agent === undefined ? 'asleep' : sessionFaceOf(agent),
+        }
+      }),
+    [sessions.sessions, agents.sessions],
   )
 
   /** The last Sessions of the Project, as the Home's frame says them. */

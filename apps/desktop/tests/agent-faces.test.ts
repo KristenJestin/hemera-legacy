@@ -1,5 +1,6 @@
 /**
- * Which face an agent's work wears (issue #140), in the row above the box.
+ * Which face an agent's work wears (issue #140): in the row above the box, and on its Session in
+ * the sidebar.
  *
  * Read off the thread the way the row reads what the turn is doing, so the entries here are the
  * ones the engine writes: a tool call of the agent's with the kind ACP gave it, a call of one of
@@ -10,7 +11,7 @@ import { describe, expect, test } from 'vite-plus/test'
 
 import type { SessionEntry } from '@hemera/ipc'
 import { callFaceOf } from '#renderer/agent-face.ts'
-import { activityOf } from '#renderer/agent-store.ts'
+import { type AgentSessionState, activityOf, sessionFaceOf } from '#renderer/agent-store.ts'
 
 /** One entry of a thread, as the engine pushes it. */
 function entry(
@@ -44,6 +45,11 @@ function call(kind: string | null, title = 'a call'): SessionEntry {
     state: 'in_progress',
     payload: JSON.stringify({ call: { title, kind } }),
   })
+}
+
+/** A Session as the store holds it, running or not, with what was pushed of it. */
+function agent(entries: SessionEntry[], running: boolean): AgentSessionState {
+  return { entries, running, stopReason: null, latest: null, heardAt: null }
 }
 
 /** A question of the Spec asked in the thread, and its answer. */
@@ -102,5 +108,31 @@ describe('The row above the box wears the face of the work, not only of the stat
     // A question of an earlier turn is not what this one ended on.
     const again = entry('e5', 'message', 'Go on', { role: 'user' })
     expect(activityOf([question('q0'), again, TURN]).state).toBe('done')
+  })
+})
+
+describe('A Session in the sidebar wears what its agent is doing', () => {
+  test('at work while its turn runs, asking while it waits on a permission', () => {
+    expect(sessionFaceOf(agent([SAID], true))).toBe('thinking')
+    expect(sessionFaceOf(agent([SAID, call('edit')], true))).toBe('writing')
+    expect(sessionFaceOf(agent([SAID, call('execute')], true))).toBe('running')
+    const asked = entry('e3', 'permission_request', 'git push')
+    expect(sessionFaceOf(agent([SAID, call('execute'), asked], true))).toBe('permission')
+    const writing = entry('e4', 'message', 'The export')
+    expect(sessionFaceOf({ ...agent([SAID, writing], true), latest: 'e4' })).toBe('writing')
+  })
+
+  test('a turn just asked for, while the thread still ends on the last one, is thinking', () => {
+    expect(sessionFaceOf(agent([SAID, TURN], true))).toBe('thinking')
+  })
+
+  test('at rest once the turn is over, unless it left a question or a failure', () => {
+    expect(sessionFaceOf(agent([], false))).toBe('asleep')
+    expect(sessionFaceOf(agent([SAID, TURN], false))).toBe('asleep')
+    const stopped = { ...TURN, state: 'cancelled' }
+    expect(sessionFaceOf(agent([SAID, stopped], false))).toBe('asleep')
+    const failed = { ...TURN, state: 'failed' }
+    expect(sessionFaceOf(agent([SAID, failed], false))).toBe('error')
+    expect(sessionFaceOf(agent([SAID, question('q1'), TURN], false))).toBe('question')
   })
 })

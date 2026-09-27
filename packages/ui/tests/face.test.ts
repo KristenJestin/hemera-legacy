@@ -353,43 +353,31 @@ describe('Loading', () => {
   const spread = (pose: readonly number[]): number => {
     const drawn = drawnOf(pose, DETAILS.full)
     const strokes = [drawn.left, drawn.right, drawn.mouth!]
-    return (
-      strokes.reduce(
-        (sum, stroke) => sum + Math.hypot(stroke.points[2] - 16, stroke.points[3] - 16),
-        0,
-      ) / 3
-    )
+    const far = (stroke: { points: readonly number[] }): number =>
+      Math.hypot(stroke.points[2]! - 16, stroke.points[3]! - 16)
+    return strokes.reduce((sum, stroke) => sum + far(stroke), 0) / 3
   }
-  const loading = () =>
-    createFace({
-      state: 'loading',
-      at: 0,
-      seed: 3,
-      detail: DETAILS.full,
-      reduced: false,
-      tuning: { ...TUNING, life: { ...TUNING.life, flourish: false } },
-    })
 
-  test('the dots huddle in towards the middle, and spread out wider', () => {
-    const huddled = loading()
-    const spreading = loading()
-    const resting = spread(loading().frame(1).layers[0]!.pose)
-    huddled.play({ kind: 'flourish', flourish: 'huddle' }, 0.5)
-    spreading.play({ kind: 'flourish', flourish: 'spread' }, 0.5)
-    expect(spread(huddled.frame(1.2).layers[0]!.pose)).toBeLessThan(resting - 2)
-    expect(spread(spreading.frame(1.2).layers[0]!.pose)).toBeGreaterThan(resting + 1)
+  test('the dots sit as they are, spread out and drawn in, in turn and without a pause', () => {
+    const frameAt = told({ seed: 12, start: 'loading' })
+    const widths = new Set<number>()
+    for (let at = 0; at < 60; at += 0.05) {
+      widths.add(Math.round(spread(frameAt(at).layers[0]!.pose)))
+    }
+    // Drawn in, as they are and spread out: three widths at least, and every one between.
+    expect(Math.max(...widths) - Math.min(...widths)).toBeGreaterThanOrEqual(4)
   })
 
-  test('the dots rush ahead of their own beat, by whole thirds of a turn', () => {
-    const rushing = loading()
-    rushing.play({ kind: 'flourish', flourish: 'rush' }, 0.5)
-    const ahead =
-      rushing.frame(3).layers[0]!.pose[AT.spin]! - loading().frame(3).layers[0]!.pose[AT.spin]!
-    expect(ahead * 3 - Math.round(ahead * 3)).toBeCloseTo(0, 9)
-    expect(ahead).toBeGreaterThan(0)
-    const mid =
-      rushing.frame(1.2).layers[0]!.pose[AT.spin]! - loading().frame(1.2).layers[0]!.pose[AT.spin]!
-    expect(mid).toBeGreaterThan(0.1)
+  test('the dots go at their beat and twice as fast, whatever their width', () => {
+    const frameAt = told({ seed: 12, start: 'loading' })
+    const speeds: number[] = []
+    for (let at = 5; at < 60; at += 0.25) {
+      const pose = (when: number): readonly number[] => frameAt(when).layers[0]!.pose
+      speeds.push((pose(at + 0.01)[AT.spin]! - pose(at)[AT.spin]!) / 0.01)
+    }
+    const beat = 1 / face.spin
+    expect(Math.min(...speeds)).toBeCloseTo(beat, 2)
+    expect(Math.max(...speeds)).toBeCloseTo(2 * beat, 2)
   })
 })
 

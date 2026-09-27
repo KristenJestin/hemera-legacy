@@ -481,6 +481,8 @@ describe('Catalogue, coquille et surfaces, et rien d’autre', () => {
       'HemeraToolCall',
       'CommandRun',
       'CommandProposal',
+      // #218: a change to the Project's setup the agent proposes, one card per change.
+      'SetupProposal',
       'CommandsPanel',
       'ContextView',
       'BareModeState',

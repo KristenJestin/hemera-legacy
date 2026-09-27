@@ -37,7 +37,7 @@ import {
   isTemporary,
 } from '#engine/workspaces/workspaces.ts'
 
-import { git } from './repositories.ts'
+import { git, repository as repositoryAt } from './repositories.ts'
 import { aSessionOf, atlas, atlasMain, saved, workspaceEngine } from './workspace-engine.ts'
 
 let folder: string
@@ -568,6 +568,90 @@ describe('A location without a repository gets no worktree', () => {
     expect(existsSync(join(seen.workspace.path, 'sources', 'front', '.git'))).toBe(true)
     expect(existsSync(join(seen.workspace.path, 'docs'))).toBe(false)
     expect(existsSync(join(main, 'docs', '.git'))).toBe(false)
+  })
+})
+
+describe('A Project with no declared repository', () => {
+  it('A Project with no repository makes the Workspace the worktree of main', async () => {
+    // `main` is itself the repository, and the Project declares none: the root is its only
+    // location (D8-04), and the Workspace is a worktree of `main` on the Spec's branch.
+    const root = join(folder, 'single')
+    repositoryAt(root)
+    writeFileSync(join(root, 'README.md'), 'single\n')
+    git(root, 'add', 'README.md')
+    git(root, 'commit', '-q', '-m', 'readme')
+
+    const seen = await workspaceEngine(folder)(
+      Effect.gen(function* () {
+        const workspaces = yield* Workspaces
+        const project = yield* atlas(root, [])
+        const plan = yield* workspaces.plan(project.id, 'HEM-7', 'login-form')
+        const workspace = yield* prepared(project.id)
+        return { plan, workspace, steps: yield* stepsOf(workspace.id) }
+      }),
+    )
+
+    expect(seen.plan.repositories).toEqual(['.'])
+    expect(seen.steps).toEqual([{ kind: 'worktree', target: '.', state: 'done', message: null }])
+    expect(seen.workspace.state).toBe('ready')
+    expect(seen.workspace.repositories.map((one) => one.relativePath)).toEqual(['.'])
+    // The Workspace's folder is the worktree itself, on the branch named after the Spec.
+    expect(existsSync(join(seen.workspace.path, '.git'))).toBe(true)
+    // With the line ends the machine's Git gives it (CRLF under Windows' `core.autocrlf`).
+    const readme = readFileSync(join(seen.workspace.path, 'README.md'), 'utf8')
+    expect(readme.replaceAll('\r\n', '\n')).toBe('single\n')
+    expect(git(seen.workspace.path, 'rev-parse', '--abbrev-ref', 'HEAD')).toBe(
+      'atlas/HEM-7-login-form',
+    )
+    expect(git(root, 'worktree', 'list')).toContain('login-form')
+  })
+
+  it('A main without Git is prepared by its copy steps alone, never overwriting', async () => {
+    // A plain folder as `main`, declaring no repository: nothing to make a worktree of, and the
+    // copy steps of the recipe are what the Workspace is made of (D8-05).
+    const plain = join(folder, 'plain')
+    mkdirSync(join(plain, 'config'), { recursive: true })
+    writeFileSync(join(plain, '.env'), 'PORT=from-main\n')
+    writeFileSync(join(plain, 'config', 'app.json'), '{"from":"main"}\n')
+
+    const seen = await workspaceEngine(folder)(
+      Effect.gen(function* () {
+        const recipe = yield* Recipe
+        const preparation = yield* Preparation
+        const project = yield* atlas(plain, [])
+        for (const path of ['.env', 'config']) {
+          yield* recipe.add(project.id, {
+            kind: 'copy',
+            base: null,
+            path,
+            commandId: null,
+            line: null,
+            lineWindows: null,
+            lineLinux: null,
+          })
+        }
+        const workspace = yield* created(project.id)
+        // A file already in the Workspace's folder is the user's: the copy keeps it.
+        mkdirSync(workspace.path, { recursive: true })
+        writeFileSync(join(workspace.path, '.env'), 'PORT=mine\n')
+        const ready = yield* preparation.prepare(workspace.id)
+        return { ready, steps: yield* stepsOf(workspace.id) }
+      }),
+    )
+
+    expect(seen.steps).toEqual([
+      { kind: 'worktree', target: '.', state: 'skipped', message: '. holds no repository in main' },
+      { kind: 'copy', target: './.env', state: 'done', message: '.env: kept as it was' },
+      { kind: 'copy', target: './config', state: 'done', message: null },
+    ])
+    expect(seen.ready.state).toBe('ready')
+    expect(readFileSync(join(seen.ready.path, '.env'), 'utf8')).toBe('PORT=mine\n')
+    expect(readFileSync(join(seen.ready.path, 'config', 'app.json'), 'utf8')).toBe(
+      '{"from":"main"}\n',
+    )
+    // Nothing made `main` a repository, and main's own files are untouched.
+    expect(existsSync(join(plain, '.git'))).toBe(false)
+    expect(readFileSync(join(plain, '.env'), 'utf8')).toBe('PORT=from-main\n')
   })
 })
 

@@ -1,6 +1,8 @@
 import {
   DETAILS,
   type DetailName,
+  type FaceAct,
+  type FaceDetail,
   type FacePlayer,
   type FaceState,
   type FaceTuning,
@@ -12,6 +14,8 @@ import {
 export interface Played {
   readonly state: FaceState
   readonly at: number
+  /** Something the face was asked to do then, in the state it was in; no change of state. */
+  readonly act?: FaceAct
 }
 
 /** Everything a story is told with, beside the story itself. */
@@ -20,6 +24,13 @@ export interface Telling {
   readonly detail: DetailName
   readonly reduced: boolean
   readonly tuning: FaceTuning
+  /** Whether the mouth is drawn. */
+  readonly mouth: boolean
+}
+
+/** What a story's face can hold, its mouth as the lab says. */
+export function detailFor(telling: Telling): FaceDetail {
+  return { ...DETAILS[telling.detail], mouth: telling.mouth }
 }
 
 /**
@@ -35,11 +46,14 @@ export function replay(history: readonly Played[], telling: Telling): FacePlayer
     state: first?.state ?? 'asleep',
     at: first?.at ?? 0,
     seed: telling.seed,
-    detail: DETAILS[telling.detail],
+    detail: detailFor(telling),
     reduced: telling.reduced,
     tuning: telling.tuning,
   })
-  for (const change of rest) player.change(change.state, change.at)
+  for (const told of rest) {
+    if (told.act === undefined) player.change(told.state, told.at)
+    else player.play(told.act, told.at)
+  }
   return player
 }
 

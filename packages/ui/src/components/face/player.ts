@@ -95,7 +95,8 @@ export const TUNING: FaceTuning = {
 /**
  * How much of the face a size can hold. Small, the face simplifies rather than blurs: features
  * drawn larger in their box and in heavier strokes, gestures that travel further so they still
- * read; and at the size of an icon, no mouth and no borrowed gestures.
+ * read; and at the size of an icon, no borrowed gestures. The mouth is drawn at every size unless
+ * the caller leaves it out.
  */
 export interface FaceDetail {
   readonly mouth: boolean
@@ -107,7 +108,7 @@ export interface FaceDetail {
 }
 
 export const DETAILS = {
-  icon: { mouth: false, scale: 1.15, weight: 1.3, gain: 1.45, asides: false },
+  icon: { mouth: true, scale: 1.15, weight: 1.3, gain: 1.45, asides: false },
   small: { mouth: true, scale: 1.08, weight: 1.18, gain: 1.25, asides: true },
   full: { mouth: true, scale: 1, weight: 1, gain: 1, asides: true },
 } as const satisfies Record<string, FaceDetail>
@@ -146,8 +147,19 @@ export interface FaceOptions {
   readonly tuning: FaceTuning
 }
 
+/**
+ * Something the face is asked to do now rather than when its dice say: a blink, one pass of a
+ * gesture, a flourish. What a lab plays on demand; the application never asks for one.
+ */
+export type FaceAct =
+  | { readonly kind: 'blink' }
+  | { readonly kind: 'gesture'; readonly motion: MotionKind }
+  | { readonly kind: 'flourish'; readonly flourish: FlourishName }
+
 export interface FacePlayer {
   readonly state: () => FaceState
+  /** Plays `act` at `at`, on top of the life of the state the face is in then. */
+  readonly play: (act: FaceAct, at: number) => void
   /** Goes into `state` at `at`, from wherever the face is then. The same state is no change. */
   readonly change: (state: FaceState, at: number) => void
   readonly frame: (at: number) => FaceFrame
@@ -255,8 +267,18 @@ interface Run {
   readonly blink: ChangeBlink | null
 }
 
+/** An act asked for, where it starts and how long it lasts, with the dice it plays on. */
+interface Acted extends Timed {
+  readonly act: FaceAct
+  readonly r: Roll
+  readonly side: number
+}
+
 interface Segment {
   readonly state: FaceState
+  readonly seed: number
+  /** What the face was asked to do while in this state, in the order it was asked. */
+  readonly acts: Acted[]
   readonly expression: Expression
   readonly t0: number
   readonly blinks: (at: number) => Found<BlinkEvent>
@@ -348,6 +370,8 @@ export function createFace(options: FaceOptions): FacePlayer {
         : null
     return {
       state,
+      seed,
+      acts: [],
       expression,
       t0,
       run,
@@ -393,13 +417,42 @@ export function createFace(options: FaceOptions): FacePlayer {
 
   /** How shut the lids are from blinking alone at `at`. */
   const blinking = (segment: Segment, at: number): number => {
-    if (segment.expression.blink === null || !tuning.life.blink) return 0
+    if (segment.expression.blink === null || !tuning.life.blink) return asked(segment, at)
     const { current } = segment.blinks(at)
-    if (current === null) return 0
+    if (current === null) return asked(segment, at)
     const { down, up, gap } = timing.blink
     const τ = at - current.start
     const second = current.twice ? pulse(timing, τ - down - up - gap, 0) : 0
-    return Math.max(pulse(timing, τ, 0), second)
+    return Math.max(pulse(timing, τ, 0), second, asked(segment, at))
+  }
+
+  /** How shut the lids are from the blinks the face was asked for. */
+  const asked = (segment: Segment, at: number): number =>
+    segment.acts
+      .filter((acted) => acted.act.kind === 'blink')
+      .reduce((most, acted) => Math.max(most, pulse(timing, at - acted.start, 0)), 0)
+
+  /** The gestures and flourishes the face was asked for, played over what it was doing. */
+  const acting = (segment: Segment, at: number, under: Beat): Beat => {
+    let gesture = under
+    for (const acted of segment.acts) {
+      if (at < acted.start || at >= acted.end) continue
+      const q = (at - acted.start) / (acted.end - acted.start)
+      if (acted.act.kind === 'gesture') {
+        const pass: PassEvent = { ...acted, kind: acted.act.motion, was: MIDDLE, n: 0 }
+        const played = MOTIONS[acted.act.motion].beat(passOf(pass, q, at, segment.expression))
+        // Handed in and handed back, as any gesture takes the head from another.
+        const w = Math.min(
+          faceArrive((at - acted.start) / timing.handover),
+          faceArrive((acted.end - at) / timing.handover),
+        )
+        gesture = blend(gesture, played, w)
+      } else if (acted.act.kind === 'flourish') {
+        const played = FLOURISHES[acted.act.flourish].play(q, acted.side)
+        gesture = blend(gesture, played.beat, played.w)
+      }
+    }
+    return gesture
   }
 
   /** A pass of a gesture, `p` of the way through, as the gesture reads it. */
@@ -444,6 +497,13 @@ export function createFace(options: FaceOptions): FacePlayer {
         // is how a sigh ends up sweeping sideways.
         gesture = blend(gesture, played.beat, played.w)
       }
+    }
+    gesture = acting(segment, at, gesture)
+    // What was asked for is what the face is doing, and it says so.
+    for (const acted of segment.acts) {
+      if (at < acted.start || at >= acted.end) continue
+      if (acted.act.kind === 'gesture') motion = acted.act.motion
+      if (acted.act.kind === 'flourish') flourish = acted.act.flourish
     }
     const blinked = blinking(segment, at)
     // Whichever closes the lids further wins, and they never add up past shut.
@@ -637,8 +697,24 @@ export function createFace(options: FaceOptions): FacePlayer {
 
   segments.push(begin(options.state, options.at, strand(options.seed, 0), null, [], null))
 
+  const perform = (act: FaceAct, at: number): void => {
+    if (reduced) return
+    const segment = segmentAt(at)
+    const random = dice(strand(segment.seed, 10 + segment.acts.length))
+    const r: Roll = [random(), random(), random(), random(), random(), random()]
+    const { down, up } = timing.blink
+    const lasts = (): number => {
+      if (act.kind === 'blink') return down + up
+      if (act.kind === 'gesture') return between(random(), ...MOTIONS[act.motion].period)
+      return between(random(), ...FLOURISHES[act.flourish].length)
+    }
+    const span = lasts()
+    segment.acts.push({ act, r, side: random() < 0.5 ? -1 : 1, start: at, end: at + span })
+  }
+
   return {
     state: () => segments.at(-1)!.state,
+    play: perform,
     change,
     frame,
   }

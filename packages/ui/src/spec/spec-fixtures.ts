@@ -541,3 +541,17 @@ export const EMPTY: SpecView = {
   focus: undefined,
   sections: [],
 }
+
+/**
+ * New Spec's Spec before it exists (issue #198): the request as its provisional title, no key,
+ * nothing written, and no phase begun. Nothing of it is saved until the user creates it from the
+ * agent's proposal.
+ */
+export const PROVISIONAL: SpecView = {
+  ...EMPTY,
+  key: '',
+  title: 'We want a text reading tool, like a small program that reads a file aloud',
+  revisions: [],
+  phases: phases('pending', 'pending', 'pending'),
+  provisional: true,
+}

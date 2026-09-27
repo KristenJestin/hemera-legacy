@@ -104,3 +104,18 @@ export const Stuck: Story = {
     await expect(canvas.getByRole('button', { name: 'Open the trace' })).toBeVisible()
   },
 }
+
+/**
+ * At work, as the page draws a turn reading its Spec (issue #140): the face in place of the
+ * loader, wearing the work — reading — beside the words, and the meter on the same line.
+ */
+export const Working: Story = {
+  args: { activity: { state: 'running', doing: 'Reading the Spec', face: 'reading' } },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const face = canvas.getByRole('img', { name: 'Reading the Spec' })
+    await expect(face).toHaveAttribute('data-state', 'reading')
+    const meter = canvas.getByLabelText(/12,400 of 200,000 tokens used/)
+    await expect(onOneLine(face, meter), 'the meter left the activity’s line').toBe(true)
+  },
+}

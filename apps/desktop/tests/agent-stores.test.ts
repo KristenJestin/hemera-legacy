@@ -276,6 +276,7 @@ describe('La ligne au bout du fil dit ce que le tour fait', () => {
     expect(activityOf([said, thought, running])).toEqual({
       state: 'running',
       detail: 'cat recap.md',
+      face: 'running',
       thought: 'The file is probably at the root.',
     })
 
@@ -300,7 +301,11 @@ describe('La ligne au bout du fil dit ce que le tour fait', () => {
 
     // Answered, and the call it was about is what is running again.
     const decided = reported('e4', 'permission_decision', 'Allowed once', 'decided')
-    expect(activityOf([...thread, decided])).toEqual({ state: 'running', detail: 'git push' })
+    expect(activityOf([...thread, decided])).toEqual({
+      state: 'running',
+      detail: 'git push',
+      face: 'running',
+    })
   })
 
   test('the thought the row opens on is this turn’s and never the one before it', () => {
@@ -804,6 +809,7 @@ describe('The agent starts the app and the user opens it', () => {
     expect(activityOf([said, call, ended])).toEqual({
       state: 'running',
       doing: 'Running a command',
+      face: 'running',
     })
   })
 
@@ -811,7 +817,11 @@ describe('The agent starts the app and the user opens it', () => {
     const said = entry('e1', 'user', 'Write the problem')
     const call = reported('e2', 'tool_call', 'mcp__hemera__spec_write', 'in_progress')
 
-    expect(activityOf([said, call])).toEqual({ state: 'running', doing: 'Writing the Spec' })
+    expect(activityOf([said, call])).toEqual({
+      state: 'running',
+      doing: 'Writing the Spec',
+      face: 'writing',
+    })
   })
 
   test('an app left running is not what the turn is doing', () => {

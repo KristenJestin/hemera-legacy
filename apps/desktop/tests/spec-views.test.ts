@@ -23,6 +23,7 @@ import type {
 } from '@hemera/ipc'
 import {
   launchOf,
+  provisionalViewOf,
   readerOf,
   readinessOf,
   revisionsOf,
@@ -153,6 +154,34 @@ function ready(at: string, revisionId: string): JournalEntry {
     phaseId: null,
   }
 }
+
+describe('New Spec shows a provisional Spec before one exists (#198)', () => {
+  test('no key, the request as its title, nothing written, no phase begun, marked provisional', () => {
+    const view = provisionalViewOf('Read a text file aloud')
+    expect(view).toMatchObject({
+      key: '',
+      title: 'Read a text file aloud',
+      status: 'draft',
+      provisional: true,
+      revisions: [],
+      sections: [],
+      stories: [],
+      tasks: [],
+      questions: [],
+    })
+    expect(view.phases.map((phase) => phase.state)).toEqual([
+      'pending',
+      'pending',
+      'pending',
+      'unavailable',
+    ])
+    expect([view.storiesMark, view.tasksMark, view.questionsMark]).toEqual([
+      'empty',
+      'empty',
+      'empty',
+    ])
+  })
+})
 
 describe('Each section wears its mark', () => {
   test('empty, written by the agent, edited by you', () => {

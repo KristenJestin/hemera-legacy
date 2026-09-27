@@ -62,6 +62,7 @@ import {
   askForBuild,
   createSpec,
   declineSpecProposal,
+  joinSpec,
   markReady,
   retryBuild,
   rework,
@@ -71,7 +72,13 @@ import {
   subscribeToSpec,
   takeOver,
 } from '../spec-store.ts'
-import { launchOf, readerOf, specViewOf, specWorkspacesOf } from '../spec-views.ts'
+import {
+  launchOf,
+  provisionalViewOf,
+  readerOf,
+  specViewOf,
+  specWorkspacesOf,
+} from '../spec-views.ts'
 import {
   closePlanReading,
   createForSpec,
@@ -364,6 +371,8 @@ export function SessionPage({
   // keyed by the Session, so this is read once per Session opened.
   const openedFree = useRef(session.mission === 'free')
   const defined = stored.snapshot?.spec.id === session.specId ? stored.snapshot : null
+  // New Spec's provisional Spec, while this Session has no Spec of its own (issue #198).
+  const provisional = stored.provisional.get(session.id) ?? null
   const thread = together(entries, agent.entries)
   const spec =
     defined === null
@@ -529,6 +538,7 @@ export function SessionPage({
         asked,
         onAnswer: (questionId, answer) => void answerQuestion(questionId, answer),
         onCreate: (title, type) => void createSpec(session.id, type, title),
+        onJoin: (proposalId) => void joinSpec(session.id, proposalId),
         onDecline: (proposalId) => deciding(declineSpecProposal(session.id, proposalId)),
       },
     })
@@ -677,6 +687,20 @@ export function SessionPage({
    * at the window's edge, and swapped for the open panel, which pushes the chat (issue #164).
    */
   function missionPanel(): ReactNode {
+    // New Spec's Spec before it exists (issue #198): the same panel, on a provisional Spec, until
+    // the real one is read — it then takes its place in the panel already there, with no jump.
+    if (spec === null && provisional !== null) {
+      return (
+        <SpecPanel
+          spec={provisionalViewOf(provisional)}
+          arrives={openedFree.current}
+          onMarkReady={() => undefined}
+          onRework={() => undefined}
+          onPickRevision={() => undefined}
+          onTakeOver={() => undefined}
+        />
+      )
+    }
     if (session.mission !== 'define' || spec === null || defined === null) return null
     return (
       <SpecPanel

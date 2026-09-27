@@ -72,6 +72,29 @@ export const Draft: Story = {
 }
 
 /**
+ * A provisional Spec (issue #198): New Spec's request before the agent proposed it. No key yet,
+ * said quietly where the key goes; the dashed circle of a Spec that is not created; the title
+ * set apart as the request's words; and `provisional` where the type goes, since none is settled.
+ */
+export const Provisional: Story = {
+  args: {
+    provisional: true,
+    specKey: '',
+    title: 'We want a text reading tool, like a small program that reads a file aloud',
+    revisions: [],
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await expect(canvas.getByText('No key yet')).toBeVisible()
+    await expect(canvas.getByRole('img', { name: 'Not created yet' })).toBeVisible()
+    await expect(canvas.getByText('provisional')).toBeVisible()
+    await expect(canvas.queryByText('feature')).toBeNull()
+    await expect(canvas.queryByRole('img', { name: 'Draft' })).toBeNull()
+    await expect(canvas.getByRole('heading', { name: /text reading tool/ })).toHaveClass('italic')
+  },
+}
+
+/**
  * Every status as the head draws it (issue #159): an icon in its colour between the key and the
  * title, no word on the line — the word is the tooltip and the accessible name.
  */

@@ -149,6 +149,29 @@ export const Markdown: Story = {
 }
 
 /**
+ * Answered, the question still reads its Markdown, and the card's name says it in words: no star
+ * or backtick is read out.
+ */
+export const MarkdownAnswered: Story = {
+  args: {
+    question: {
+      ...CREDIT_NOTES,
+      body: 'Credit notes: **where do they go** in the `export`?',
+      answer: { optionId: 'negative' },
+    },
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await expect(canvas.getByText('where do they go').tagName).toBe('STRONG')
+    await expect(
+      canvas.getByRole('group', {
+        name: 'You answered «Credit notes: where do they go in the export?»: A, Negative rows in the same file',
+      }),
+    ).toBeVisible()
+  },
+}
+
+/**
  * Hemera labels the choices (issue #134): A, B, C in the order the agent gave them, and `Other`
  * always last, lettered after them.
  */

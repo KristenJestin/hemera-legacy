@@ -5,12 +5,15 @@ import { EYES, MOUTHS, type Stroke, mirrored } from './strokes.ts'
 /**
  * Every state an agent of Hemera can be in, and the one expression each of them wears.
  *
- * Waiting for the user is three states and not one, because it is three things to answer: a
+ * Loading is the face before it is a face: its three features are the three dots of the loading
+ * indicator, going round, and whatever comes next they spiral into. Waiting for the user is three
+ * states and not one, because it is three things to answer: a
  * question, a permission, and a blocker — which is also what a build that cannot go on is
  * waiting for, so the two share `blocked`. Nothing running is asleep: there is no face that is
  * awake and doing nothing, and no face for having heard nothing for a while either.
  */
 export const FACE_STATES = [
+  'loading',
   'thinking',
   'reading',
   'writing',
@@ -57,6 +60,9 @@ export interface Expression {
 
 const LEVEL: Head = { yaw: 0, pitch: 0, gazeX: 0, gazeY: 0 }
 
+/** A dot of the loading indicator: a stroke of no length, all cap. */
+const DOT: Stroke = [0, -0.01, 0, 0, 0, 0.01, 5.5]
+
 /** A resting head that says only what it is given. */
 function look(said: Partial<Head>): Head {
   return { ...LEVEL, ...said }
@@ -71,6 +77,22 @@ function look(said: Partial<Head>): Head {
  * when it is done, a frown when it went wrong.
  */
 export const EXPRESSIONS: Record<FaceState, Expression> = {
+  /**
+   * Loading: no face yet, three dots going round in whatever colour the face sits in — the
+   * loading indicator itself, until the face it becomes is known.
+   */
+  loading: {
+    label: 'Loading',
+    eyes: [DOT, DOT],
+    mouth: DOT,
+    lid: 0,
+    look: LEVEL,
+    blink: null,
+    motion: 'hold',
+    aside: null,
+    flourish: null,
+    tone: 'current',
+  },
   /** Working something out: heavy-lidded, looking up and away. */
   thinking: {
     label: 'Thinking',

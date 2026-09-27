@@ -32,6 +32,7 @@ import { GROUNDS, type Ground, type Magnify, Stage } from './views/stage.tsx'
 
 /** The key that puts the face in each state. */
 const KEYS: Record<FaceState, string> = {
+  loading: 'l',
   thinking: 't',
   reading: 'r',
   writing: 'w',

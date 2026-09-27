@@ -1,4 +1,4 @@
-import { face, faceArrive, faceCarry } from '../../motion.ts'
+import { face, faceArrive, faceCarry, faceCoast } from '../../motion.ts'
 import {
   CHOREOGRAPHIES,
   type ChangeName,
@@ -55,6 +55,7 @@ export interface FaceTiming {
   readonly shape: number
   readonly handover: number
   readonly change: Readonly<Record<ChangeName, number>>
+  readonly spin: number
   readonly fade: number
 }
 
@@ -265,6 +266,30 @@ interface Run {
   /** Where the life of the new state had the face at that same moment. */
   readonly landing: Pose
   readonly blink: ChangeBlink | null
+  /** Where round the loading orbit the change starts and ends, and how fast, for boot and gather. */
+  readonly turn: Turn | null
+}
+
+/**
+ * The orbit's journey through a change, in turns: where it starts and ends, and how fast it goes
+ * at either end, in turns per length of the change. A curve that leaves at the speed it had and
+ * arrives at the speed it keeps is what lets the dots go on turning through the change.
+ */
+interface Turn {
+  readonly from: number
+  readonly to: number
+  readonly leaving: number
+  readonly arriving: number
+}
+
+/** Where a turn is, `q` of the way through the change. */
+function turned(turn: Turn, q: number): number {
+  return (
+    turn.from * (1 - faceArrive(q)) +
+    turn.to * faceArrive(q) +
+    turn.leaving * faceCarry(q) -
+    turn.arriving * faceCarry(1 - q)
+  )
 }
 
 /** An act asked for, where it starts and how long it lasts, with the dice it plays on. */
@@ -308,7 +333,7 @@ const KEPT_SEGMENTS = 4
 /** How many faces a cross-fade shows at most; the faintest goes first. */
 const LAYERS = 3
 
-const CHANNEL_NAMES: readonly Channel[] = ['shape', 'mouth', 'lid', 'head', 'gaze', 'tone']
+const CHANNEL_NAMES: readonly Channel[] = ['shape', 'mouth', 'lid', 'head', 'gaze', 'orbit', 'tone']
 
 /** Writes a stroke into a pose at `start`. */
 function write(pose: number[], start: number, stroke: Stroke): void {
@@ -342,6 +367,8 @@ function stillOf(expression: Expression): number[] {
     lidLeft: expression.lid,
     lidRight: expression.lid,
     head: expression.look,
+    orbit: expression === EXPRESSIONS.loading ? 1 : 0,
+    spin: 0,
     tone: expression.tone,
   })
 }
@@ -529,6 +556,10 @@ export function createFace(options: FaceOptions): FacePlayer {
           gazeX: look.gazeX + gesture.gazeX,
           gazeY: look.gazeY + gesture.gazeY,
         },
+        // Loading rides the orbit, a turn every beat of the loading indicator, on the clock
+        // itself, so that two loading faces go round together as two indicators do.
+        orbit: segment.state === 'loading' ? 1 : 0,
+        spin: segment.state === 'loading' ? at / timing.spin : 0,
         tone: expression.tone,
       }),
       motion,
@@ -547,6 +578,7 @@ export function createFace(options: FaceOptions): FacePlayer {
     if (run === null) return life
     const q = (at - segment.t0) / run.length
     if (q >= 1) return life
+    if (run.turn !== null) return { ...life, pose: orbiting(run, run.turn, q, life.pose) }
     const pose = life.pose.slice()
     const carried = tuning.carry * run.length * faceCarry(q)
     for (const channel of CHANNEL_NAMES) {
@@ -556,7 +588,12 @@ export function createFace(options: FaceOptions): FacePlayer {
       // half-way only travels on, or a startled eye snapping shut would fling its next shape away.
       const speed = channel === 'head' || channel === 'gaze' ? carried : 0
       const [first, last] = CHANNELS[channel]
-      for (let index = first; index < last; index += 1) {
+      for (let index = Number(first); index < last; index += 1) {
+        // The orbit's turns are not a place to ease back to: they coast to a stop instead.
+        if (index === AT.spin) {
+          pose[index] = run.start[index]! + run.speed[index]! * run.length * faceCoast(q)
+          continue
+        }
         const offset = (run.start[index]! - run.landing[index]!) * (1 - k)
         pose[index] = life.pose[index]! + offset + run.speed[index]! * speed
       }
@@ -579,6 +616,91 @@ export function createFace(options: FaceOptions): FacePlayer {
     pose[AT.lidLeft] = Math.min(1, Math.max(0, pose[AT.lidLeft]!))
     pose[AT.lidRight] = Math.min(1, Math.max(0, pose[AT.lidRight]!))
     return { ...life, pose }
+  }
+
+  /**
+   * A face coming out of loading, or going into it: the features ride the orbit on its own
+   * curve — on turning at the speed they had, or wound up to the speed the loading keeps — while
+   * they leave it for their places or come out onto it, and change shape on the way.
+   */
+  const orbiting = (run: Run, turn: Turn, q: number, life: Pose): number[] => {
+    const booting = run.name === 'boot'
+    const pose = life.slice()
+    // Out of loading, the dots keep their round shape until they are nearly home; into it, the
+    // features ball up first and are taken round afterwards.
+    const shape = booting ? faceArrive((q - 0.5) / 0.5) : faceArrive(q / 0.45)
+    for (const start of [AT.left, AT.right, AT.mouth]) {
+      write(pose, start, toward(strokeAt(run.start, start), strokeAt(life, start), shape))
+    }
+    const settled = faceArrive(q)
+    for (let index = AT.lidLeft; index < AT.orbit; index += 1) {
+      pose[index] = run.start[index]! + (life[index]! - run.start[index]!) * settled
+    }
+    const out = run.start[AT.orbit]!
+    pose[AT.orbit] = booting
+      ? out * (1 - faceArrive((q - 0.3) / 0.7))
+      : out + (1 - out) * faceArrive((q - 0.15) / 0.6)
+    pose[AT.spin] = turned(turn, q)
+    const colour = booting ? faceArrive((q - 0.3) / 0.7) : faceArrive(q / 0.6)
+    for (let index = AT.tones; index < life.length; index += 1) {
+      pose[index] = run.start[index]! + (life[index]! - run.start[index]!) * colour
+    }
+    return pose
+  }
+
+  /**
+   * Where the orbit goes through a change out of loading or into it.
+   *
+   * Out of it, the dots slow to a stop exactly where each one's feature is, going on the way they
+   * were going. The three dots are alike, so which one becomes which feature is chosen here, a
+   * third of a turn at a time: the one that will end at the bottom becomes the mouth. Into it,
+   * the features are wound up from rest to the speed the loading turns at, arriving where the
+   * loading's own clock has them.
+   */
+  const turnFor = (
+    name: ChangeName,
+    start: Pose,
+    speed: Pose,
+    at: number,
+    length: number,
+  ): Turn | null => {
+    const full = length / timing.spin
+    // How fast the orbit was already turning, in turns per length of this change.
+    const going = (speed[AT.spin] ?? 0) * length
+    if (name === 'gather') {
+      const due = (at + length) / timing.spin
+      // A face at rest starts with each feature's place on the orbit where the feature is, so each
+      // leaves for the part of the orbit beside it and none crosses the middle; one already on its
+      // way round starts from where it is. Either ends where the loading's clock has the dots, to a
+      // third of a turn — three alike dots, which one is which no longer shows.
+      const resting = start[AT.orbit]! < 0.01
+      const from = resting ? Math.round(due - full / 2) : start[AT.spin]!
+      const least = resting ? full / 3 + 0.02 : 0.1
+      let to = due + Math.ceil((from + least - due) * 3) / 3
+      for (let more = 1; more <= 3; more += 1) {
+        const candidate = to + more / 3
+        if (Math.abs(candidate - from - full / 2) < Math.abs(to - from - full / 2)) to = candidate
+      }
+      return { from, to, leaving: resting ? 0 : going, arriving: full }
+    }
+    if (name !== 'boot') return null
+    const from = start[AT.spin]!
+    // A third of a turn at a time only while the three dots are three alike dots on the orbit.
+    const alike = start[AT.orbit]! > 0.99
+    const step = alike ? 1 / 3 : 1
+    // Slowing to a stop covers half the turns full speed would; never less than a third of full
+    // speed's, or the curve would turn back on itself before it stops.
+    const least = full / 3 + 0.02
+    const first = Math.ceil((from + least) / step) * step - from
+    let travel = first
+    for (let more = 1; more <= 3; more += 1) {
+      const candidate = first + more * step
+      if (Math.abs(candidate - full / 2) < Math.abs(travel - full / 2)) travel = candidate
+    }
+    const end = from + travel
+    // The whole turns the relabelled dots still owe, so each ends on its own feature's place.
+    const owed = alike ? ((-Math.round(end * 3) % 3) + 3) % 3 : 0
+    return { from: from + owed / 3, to: end + owed / 3, leaving: going, arriving: 0 }
   }
 
   /** The state the face was in at `at`: the last one begun by then. */
@@ -636,6 +758,8 @@ export function createFace(options: FaceOptions): FacePlayer {
   ): Carried => {
     const { windows } = CHOREOGRAPHIES[name]
     const { down, up, hold } = timing.blink
+    // In and out of loading the shapes change on the orbit, where nothing needs to be hidden.
+    if (name === 'boot' || name === 'gather') return { blink: null, windows }
     const crossing =
       !meet(strokeAt(start, AT.left), to.eyes[0]) || !meet(strokeAt(start, AT.right), to.eyes[1])
     if (crossing) {
@@ -689,6 +813,7 @@ export function createFace(options: FaceOptions): FacePlayer {
         speed,
         landing: lifeAt(draft, at).pose,
         blink,
+        turn: turnFor(name, start, speed, at, length),
       }
       segments.push({ ...draft, run })
     }

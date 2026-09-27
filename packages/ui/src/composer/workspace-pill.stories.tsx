@@ -52,8 +52,8 @@ const SEVERAL = [
 export const Single: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    await expect(canvas.getByLabelText('Workspace')).toHaveTextContent('main')
-    await expect(canvas.getByLabelText('Workspace')).toBeEnabled()
+    await expect(canvas.getByLabelText(/^Workspace:/)).toHaveTextContent('main')
+    await expect(canvas.getByLabelText(/^Workspace:/)).toBeEnabled()
   },
 }
 
@@ -63,7 +63,7 @@ export const Several: Story = {
   play: async ({ canvasElement, args }) => {
     args.onWorkspaceChange.mockClear()
     const canvas = within(canvasElement)
-    await userEvent.click(canvas.getByLabelText('Workspace'))
+    await userEvent.click(canvas.getByLabelText(/^Workspace:/))
     const list = await waitFor(() => within(document.body).getByRole('listbox'))
     await expect(
       within(list)
@@ -117,7 +117,7 @@ export const Fixed: Story = {
 export const Keyboard: Story = {
   args: { workspaces: SEVERAL },
   play: async ({ canvasElement }) => {
-    const pill = within(canvasElement).getByLabelText('Workspace')
+    const pill = within(canvasElement).getByLabelText(/^Workspace:/)
     await userEvent.tab()
     await expect(document.activeElement).toBe(pill)
     await userEvent.keyboard('{Enter}')
@@ -130,6 +130,50 @@ export const Keyboard: Story = {
     })
     await waitFor(() => {
       expect(document.activeElement).toBe(pill)
+    })
+  },
+}
+
+/** A Workspace named after a long branch, as the recette of 27 September 2026 met one. */
+const LONG = 'atoms-progress-bar-des-atomes-restent-allumes-au-debut-fin-l'
+
+/**
+ * A long name does not stretch the select across the composer (issue #180): the select stops at a
+ * width of the theme and cuts the name short with an ellipsis, the whole name in its tooltip and
+ * its accessible name, and the list it opens shows every name whole.
+ */
+export const LongName: Story = {
+  args: {
+    workspaces: [{ name: 'main', path: '/home/someone/Projects/atlas' }, { name: LONG }],
+    workspace: LONG,
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const pill = canvas.getByRole('combobox', { name: `Workspace: ${LONG}` })
+    // Bounded by the theme's width, whatever the name.
+    const bound = Number.parseFloat(
+      getComputedStyle(document.documentElement).getPropertyValue('--container-3xs'),
+    )
+    const rem = Number.parseFloat(getComputedStyle(document.documentElement).fontSize)
+    await expect(pill.getBoundingClientRect().width).toBeLessThanOrEqual(bound * rem + 1)
+    // The name is cut short on one line, with an ellipsis.
+    const value = within(pill).getByText(LONG)
+    await expect(value.scrollWidth).toBeGreaterThan(value.clientWidth)
+    await expect(getComputedStyle(value).textOverflow).toBe('ellipsis')
+    // The whole name is its tooltip, reached by the keyboard as by the pointer.
+    await userEvent.tab()
+    await expect(document.activeElement).toBe(pill)
+    await waitFor(() => {
+      expect(within(document.body).getByRole('tooltip')).toHaveTextContent(LONG)
+    })
+    // The list keeps the whole name.
+    await userEvent.keyboard('{Enter}')
+    const list = await waitFor(() => within(document.body).getByRole('listbox'))
+    const option = within(list).getByRole('option', { name: LONG })
+    await expect(option.scrollWidth).toBeLessThanOrEqual(option.clientWidth)
+    await userEvent.keyboard('{Escape}')
+    await waitFor(() => {
+      expect(within(document.body).queryByRole('listbox')).toBeNull()
     })
   },
 }

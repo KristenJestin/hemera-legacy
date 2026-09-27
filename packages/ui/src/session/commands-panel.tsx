@@ -3,7 +3,11 @@ import { type ReactNode, useState } from 'react'
 
 import { Badge } from '../components/badge/badge.tsx'
 import { Button } from '../components/button/button.tsx'
+import { CardRow } from '../components/card/card.tsx'
 import { Input } from '../components/field/field.tsx'
+import { IconPlayerPlay, IconPlayerStop } from '../icons.ts'
+import { ServiceList } from '../workspace/service-list.tsx'
+import type { ServiceLine } from '../workspace/services-model.ts'
 import { CommandRun, type CommandRunProps } from '../activity/command-run.tsx'
 
 /**
@@ -31,6 +35,13 @@ export type CommandPanelRun = Omit<
   id: string
 }
 
+/** A command of the Project's catalogue, as the panel offers it: run by its name. */
+export interface CatalogueCommandLine {
+  readonly name: string
+  /** What it runs, shown under its name. */
+  readonly line: string
+}
+
 export interface CommandsPanelProps {
   /** The runs of this Session, the oldest first, as the engine keeps them. */
   runs: readonly CommandPanelRun[]
@@ -40,6 +51,20 @@ export interface CommandsPanelProps {
   onOpenUrl?: ((url: string) => void) | undefined
   /** Runs a line that is not in the catalogue, inside the Workspace root. */
   onRun?: ((line: string) => void) | undefined
+  /**
+   * The Project's catalogue, each command a row with its Run (#217): what a reader came to run,
+   * found here rather than typed by name on the line. Absent, no catalogue is listed.
+   */
+  catalogue?: readonly CatalogueCommandLine[] | undefined
+  /** Runs a command of the catalogue by its name. */
+  onRunCommand?: ((name: string) => void) | undefined
+  /**
+   * The services of the Session's Workspace, whoever started them, with their state and address
+   * (#217). Absent, no services are listed.
+   */
+  services?: readonly ServiceLine[] | undefined
+  /** Stops one of those services, and only that instance. */
+  onStopService?: ((id: string) => void) | undefined
   /** Where the panel sits; never how it looks. */
   className?: string | undefined
 }
@@ -58,11 +83,21 @@ const NOTHING = 'text-sm text-muted-foreground'
 /** The line a reader types a command on, and what it is worth knowing before they do. */
 const ONCE = 'text-xs text-muted-foreground'
 
+const COMMAND_TEXT = 'flex min-w-0 flex-1 flex-col gap-0.5'
+
+const COMMAND_NAME = 'min-w-0 truncate text-sm text-foreground'
+
+const COMMAND_LINE = 'min-w-0 truncate font-mono text-xs text-muted-foreground'
+
 export function CommandsPanel({
   runs,
   onStop,
   onOpenUrl,
   onRun,
+  catalogue,
+  onRunCommand,
+  services,
+  onStopService,
   className,
 }: CommandsPanelProps): ReactNode {
   const [line, setLine] = useState('')
@@ -76,19 +111,50 @@ export function CommandsPanel({
           {running > 0 ? `${running} running` : `${runs.length}`}
         </Badge>
       </div>
-      {runs.length === 0 ? (
-        <p className={NOTHING}>No command has run in this Session.</p>
+      {catalogue === undefined ? null : catalogue.length === 0 ? (
+        <p className={NOTHING}>No command in the catalogue. Add one in the Project's settings.</p>
       ) : (
-        <ul className={LIST}>
-          {runs.map((run) => (
-            <li key={run.id}>
-              <CommandRun
-                {...run}
-                onOpenUrl={onOpenUrl}
-                onStop={onStop === undefined ? undefined : () => onStop(run.id)}
-              />
-            </li>
-          ))}
+        <ul className={LIST} aria-label="Catalogue">
+          {catalogue.map((command) => {
+            // A command of the catalogue running in this Session offers Stop in place of Run: a
+            // second instance is not what a reader pressing its row again is asking for.
+            const live = runs.findLast(
+              (run) => run.name === command.name && run.state === 'running',
+            )
+            return (
+              <li key={command.name}>
+                <CardRow>
+                  <span className={COMMAND_TEXT}>
+                    <span className={COMMAND_NAME}>{command.name}</span>
+                    <span className={COMMAND_LINE}>{command.line}</span>
+                  </span>
+                  {live === undefined ? (
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      aria-label={`Run ${command.name}`}
+                      disabled={onRunCommand === undefined}
+                      onClick={() => onRunCommand?.(command.name)}
+                    >
+                      <IconPlayerPlay size="sm" />
+                      Run
+                    </Button>
+                  ) : (
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      aria-label={`Stop ${command.name}`}
+                      disabled={onStop === undefined}
+                      onClick={() => onStop?.(live.id)}
+                    >
+                      <IconPlayerStop size="sm" />
+                      Stop
+                    </Button>
+                  )}
+                </CardRow>
+              </li>
+            )
+          })}
         </ul>
       )}
       <Input
@@ -114,6 +180,24 @@ export function CommandsPanel({
       <p className={ONCE}>
         A one-off line runs inside the Workspace root and does not enter the catalogue.
       </p>
+      {runs.length === 0 ? (
+        <p className={NOTHING}>No command has run in this Session.</p>
+      ) : (
+        <ul className={LIST}>
+          {runs.map((run) => (
+            <li key={run.id}>
+              <CommandRun
+                {...run}
+                onOpenUrl={onOpenUrl}
+                onStop={onStop === undefined ? undefined : () => onStop(run.id)}
+              />
+            </li>
+          ))}
+        </ul>
+      )}
+      {services === undefined ? null : (
+        <ServiceList services={services} onStop={onStopService} onOpenUrl={onOpenUrl} />
+      )}
     </section>
   )
 }

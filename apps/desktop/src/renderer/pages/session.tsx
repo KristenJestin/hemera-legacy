@@ -2,6 +2,7 @@ import { Fragment, useEffect, useRef, useState, useSyncExternalStore } from 'rea
 import type { ReactNode } from 'react'
 
 import type {
+  Command,
   CommandRun,
   ConfigOption,
   ContextView as Provided,
@@ -35,6 +36,7 @@ import {
   type OfferedAgent,
   type PermissionOption,
   type ScrollerEntry,
+  type SessionDetailsTab,
   type UsageMeterProps,
 } from '@hemera/ui'
 
@@ -53,7 +55,13 @@ import { effortDefaultOf, effortStage, modeStage, modelStage } from '../agent-op
 import { drawEntry, planOf, touchedOf, usageOf, waitingOf } from '../agent-blocks.tsx'
 import { elsewhereOf, foldedCallsOf } from '../agent-tool-payloads.ts'
 import { whenOf } from '../journal-lines.ts'
-import { contextListsOf, detailsTabsOf, openingTabOf, panelRunsOf } from '../session-details.ts'
+import {
+  catalogueLinesOf,
+  contextListsOf,
+  detailsTabsOf,
+  openingTabOf,
+  panelRunsOf,
+} from '../session-details.ts'
 import { openSessions, type OfferedWorkspace, workspaceFixedOf } from '../sessions-store.ts'
 import { selectEntry } from '../shell-store.ts'
 import { type DefinedSpec, questionMarkOf, waitsForAnswer } from '../spec-entries.ts'
@@ -89,7 +97,7 @@ import {
   planForSpec,
   readPlanRepositories,
 } from '../workspaces-store.ts'
-import { planLinesOf, worktreesOf } from '../workspace-details.ts'
+import { planLinesOf, serviceLinesOf, worktreesOf } from '../workspace-details.ts'
 
 /**
  * The page of a Session: what it is called, what was said in it, and the way to say more
@@ -299,6 +307,14 @@ export interface SessionPageProps {
   root: string | null
   /** Runs a line from the Commands panel: a command of the catalogue by name, or a one-off. */
   onRunCommand: (line: string) => void
+  /** Runs a command of the catalogue by its name, from its row in the Commands panel (#217). */
+  onRunCatalogued: (name: string) => void
+  /** The Project's catalogue, which says of a service whether it runs through Portless. */
+  catalogue: readonly Command[]
+  /** The services of the Session's Workspace, whoever started them (#217). */
+  services: readonly CommandRun[]
+  /** Stops one of those services, that instance alone. */
+  onStopService: (runId: string) => void
   /** What this Session was provided, may consult, and keeps to its agent; null until read. */
   context: Provided | null
   /** The Workspaces the pill lists: `ready`, `main` first, and the Session's own (D8-08). */
@@ -343,6 +359,10 @@ export function SessionPage({
   onHandOver,
   root,
   onRunCommand,
+  onRunCatalogued,
+  catalogue,
+  services,
+  onStopService,
   context,
   workspaces,
   onChooseWorkspace,
@@ -358,6 +378,11 @@ export function SessionPage({
   const [attempted, setAttempted] = useState<string | null>(null)
   /** Whether the reader has the Session details open: only the head's button opens them. */
   const [detailsOpen, setDetailsOpen] = useState(false)
+  /**
+   * The tab the details were asked to open on, when the head's Commands asked for one (#217);
+   * null when they open on the tab that has something, which is what the details button does.
+   */
+  const [askedTab, setAskedTab] = useState<SessionDetailsTab | null>(null)
   // Whether the details have a trace to offer, asked each time they open (#131).
   const traced = useTrace(session.id, detailsOpen)
   /**
@@ -768,7 +793,19 @@ export function SessionPage({
             // regret: the archive is where threads go.
             archiveDisabled={thread.length === 0}
             // The one way to the Session details: nothing the agent does opens them.
-            onOpenDetails={() => setDetailsOpen(true)}
+            onOpenDetails={() => {
+              setAskedTab(null)
+              setDetailsOpen(true)
+            }}
+            // The catalogue, what runs and the services, one press away (#217).
+            onOpenCommands={
+              session.provider === null
+                ? undefined
+                : () => {
+                    setAskedTab('commands')
+                    setDetailsOpen(true)
+                  }
+            }
           />
         </div>
         {/*
@@ -921,6 +958,12 @@ export function SessionPage({
               onStop={onStopRun}
               onOpenUrl={onOpenUrl}
               onRun={onRunCommand}
+              // The catalogue as rows, each with its Run, and the Workspace's services with their
+              // state and address: what a reader came to run, found rather than typed (#217).
+              catalogue={catalogueLinesOf(context)}
+              onRunCommand={onRunCatalogued}
+              services={serviceLinesOf(services, catalogue)}
+              onStopService={onStopService}
             />
           )
         }
@@ -934,7 +977,7 @@ export function SessionPage({
         // The tab it opens on follows what is happening: a command running opens on Commands,
         // then the tab that has something, and the Context when no tab has anything (D6-12). It
         // is read when the dialog opens, so an open dialog never changes tab under the reader.
-        defaultTab={openingTabOf(commandRuns, tabs)}
+        defaultTab={askedTab ?? openingTabOf(commandRuns, tabs)}
       />
       {/*
         The panel of the Session's mission, beside the chat: the working surface the thread gave

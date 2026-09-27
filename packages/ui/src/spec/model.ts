@@ -266,6 +266,14 @@ export interface LaunchWorkspace {
   name: string
 }
 
+/**
+ * The Workspace a Spec is set on, and where it stands (D8-12): being prepared, ready, failed —
+ * resumed rather than started in — or cleaned up, which leaves the Spec with none.
+ */
+export interface SpecWorkspace extends LaunchWorkspace {
+  state: 'preparing' | 'ready' | 'failed' | 'cleaned'
+}
+
 /** What a launch says of itself, and the one thing it offers from where it stands (D8-13). */
 export type LaunchView =
   | {
@@ -279,8 +287,24 @@ export type LaunchView =
       state: 'failed'
       /** What the start was refused with, in the engine's own words. */
       cause: string
+      /**
+       * What failed (D8-13): the agent of the Session the launch made, which `Retry` starts again
+       * on that Session; the preparation of its Workspace; or the start, refused before any
+       * Session was made. The last two have nothing to start again: a new build is asked for.
+       */
+      stage: 'agent' | 'preparation' | 'start'
     }
-  | { state: 'cancelled' }
+  | {
+      state: 'cancelled'
+      /** What took it back: a Rework of the Spec, or the cleanup that removed its Workspace. */
+      reason: 'rework' | 'removed'
+      /**
+       * Whether a build can be asked for again from here: the Spec is ready — on the revision a
+       * Rework made, for a launch a Rework took back — and the actions of a Spec with no launch
+       * are offered under the reason.
+       */
+      again: boolean
+    }
 
 /** How each section is named in the document. */
 export const SECTION_TITLES: Record<SectionName, string> = {

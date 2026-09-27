@@ -493,6 +493,7 @@ export type {
   SpecTarget,
   SpecType,
   SpecView,
+  SpecWorkspace,
   StoryView,
   TaskView,
 } from './spec/model.ts'

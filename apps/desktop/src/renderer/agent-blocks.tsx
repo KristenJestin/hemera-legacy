@@ -41,6 +41,7 @@ import {
   elsewhereOf,
   hemeraPermissionOf,
   hemeraToolCallOf,
+  reportedFailureOf,
   hemeraToolLabelOf,
   nativeSubjectOf,
   questionOpen,
@@ -401,6 +402,8 @@ export function drawEntry(entry: SessionEntry, context: AgentContext): ReactNode
           subject={subjectOf(hemera, call.rawInput?.text ?? '', context.runs)}
           status={reportedStatus(call.status)}
           summary={call.title}
+          // What the agent was answered, when Hemera never was asked: the call's only reason.
+          error={reportedFailureOf(entry)}
           defaultOpen={false}
         />
       )
@@ -424,7 +427,9 @@ export function drawEntry(entry: SessionEntry, context: AgentContext): ReactNode
         }))}
         input={boundedNode(input)}
         output={boundedNode(output)}
-        error={call.status === 'failed' ? entry.body : undefined}
+        // Why it failed, in words: its output already says it where there is one, and its name
+        // said nothing (issue #198).
+        error={call.status === 'failed' && output === null ? reportedFailureOf(entry) : undefined}
       />
     )
   }

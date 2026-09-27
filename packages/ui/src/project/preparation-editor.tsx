@@ -19,6 +19,7 @@ import {
   IconPlus,
   IconX,
 } from '../icons.ts'
+import { Reveal } from '../reveal.tsx'
 
 /**
  * The preparation of a Project: the ordered recipe every dedicated Workspace replays once its
@@ -483,8 +484,8 @@ export function PreparationEditor({
                   { value: OWN, label: 'A line of its own' },
                 ]}
               />
-              {own && (
-                <>
+              <Reveal shown={own} gap="4">
+                <div className={FORM}>
                   <p className={NOTE}>
                     A line of its own stays with this step: it is never written in the catalogue,
                     and no agent ever sees it.
@@ -545,8 +546,8 @@ export function PreparationEditor({
                       onList={onList}
                     />
                   </div>
-                </>
-              )}
+                </div>
+              </Reveal>
             </>
           ) : (
             <div className={WHERE}>

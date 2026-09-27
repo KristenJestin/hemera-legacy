@@ -457,7 +457,7 @@ export {
  * Spec in a `free` Session. View types only: the domain arrives with phase 1.
  */
 export { SpecPanel, type SpecPanelProps } from './spec/spec-panel.tsx'
-export { SpecPart, type SpecPartHandlers, type SpecPartProps } from './spec/spec-part.tsx'
+export { SpecPart, type SpecPartProps } from './spec/spec-part.tsx'
 export { SpecHead, type SpecHeadProps } from './spec/spec-head.tsx'
 export { SectionPart, type SectionPartProps } from './spec/section-part.tsx'
 export { StoriesPart, type StoriesPartProps } from './spec/stories-part.tsx'

@@ -606,6 +606,7 @@ describe('Every Workspace channel reaches its use case', () => {
     expect(seen.status).toEqual([
       {
         relativePath: './sources/api',
+        step: null,
         git: expect.objectContaining({ ok: true, branch: 'atlas/HEM-7-login-form' }),
       },
     ])

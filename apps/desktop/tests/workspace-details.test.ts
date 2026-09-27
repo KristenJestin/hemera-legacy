@@ -54,6 +54,20 @@ describe('The cards say the engine views in their own words', () => {
     expect(read[1]?.git).toEqual({ ok: false, error: 'fatal: not a git repository' })
   })
 
+  // Scenario "A repository not prepared yet waits for its worktree" (#217).
+  test('a repository whose worktree is not made says its step, and no Git', () => {
+    const waiting: RepositoryState[] = [
+      { relativePath: 'sources/api', step: 'running', git: null },
+      { relativePath: 'sources/front', step: 'pending', git: null },
+    ]
+    expect(workspaceCardOf(LOGIN_FORM, waiting).repositories).toEqual([
+      { path: 'sources/api', git: null, step: 'running' },
+      { path: 'sources/front', git: null, step: 'pending' },
+    ])
+    // Nothing Git answered, so a row sums nothing up either.
+    expect(summaryOf(waiting)).toBeUndefined()
+  })
+
   test('a cleaned-up Workspace lists no repository and says when it was cleaned up', () => {
     const cleaned = workspace('onboarding', {
       state: 'cleaned',
@@ -254,10 +268,12 @@ describe("main's row says what Git says of its folder", () => {
   test('no change is "clean", and a repository Git refused gives way to the next one', () => {
     const refused: RepositoryState = {
       relativePath: 'sources/front',
+      step: null,
       git: { ok: false, error: 'fatal: not a git repository' },
     }
     const clean: RepositoryState = {
       relativePath: 'sources/web',
+      step: null,
       git: {
         ok: true,
         branch: 'main',

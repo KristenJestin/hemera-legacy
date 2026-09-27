@@ -38,6 +38,17 @@ const READING_BAR = 'block h-3 w-24 rounded-sm bg-muted motion-safe:animate-brea
 const GIT_ERROR =
   'min-w-0 font-mono text-xs break-words whitespace-pre-wrap text-destructive-muted-foreground'
 
+/**
+ * What a row says while its worktree step is not done (#217): the step's state, quietly, in place
+ * of a Git read of a folder not made yet. A failed step's own words are the preparation's to say.
+ */
+const WORKTREE_STEP: Record<NonNullable<WorkspaceRepositoryLine['step']>, string> = {
+  pending: 'Waiting for its worktree',
+  running: 'Making its worktree…',
+  failed: 'Its worktree was not made',
+  skipped: 'No worktree: no repository in main',
+}
+
 export interface WorkspaceRepositoriesProps {
   /** The Workspace's name, which names the list to whatever reads the page. */
   name: string
@@ -76,7 +87,11 @@ export function WorkspaceRepositories({
                 </span>
                 <span className={LINE}>
                   <span className={REPOSITORY}>{repository.path}</span>
-                  <GitLine git={repository.git} />
+                  {repository.step === undefined ? (
+                    <GitLine git={repository.git} />
+                  ) : (
+                    <span className={GIT}>{WORKTREE_STEP[repository.step]}</span>
+                  )}
                 </span>
               </CardRow>
             </li>

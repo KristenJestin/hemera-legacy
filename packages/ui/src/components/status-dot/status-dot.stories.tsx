@@ -169,26 +169,21 @@ export const ReducedMotion: Story = {
   parameters: { controls: { disable: true } },
   render: () => <StatusDot status="running" label="Running" />,
   play: async ({ canvasElement }) => {
-    const restore = await emulateReducedMotion()
-    if (restore === null) return
-    try {
-      const dot = within(canvasElement).getByRole('img', { name: 'Running' })
+    if (!(await emulateReducedMotion())) return
+    const dot = within(canvasElement).getByRole('img', { name: 'Running' })
+    await waitFor(() => {
+      expect(getComputedStyle(dot).animationName).toBe('none')
+    })
+    expect(getComputedStyle(dot).opacity).toBe('1')
+    // And no ring either: one repeating for ever with no time to travel in would be a ring
+    // parked at full size, which is worse than none. The stylesheet is what takes it out —
+    // the same media query that takes the breath out — so it is read as not drawn rather
+    // than as not there.
+    const ring = dot.previousElementSibling
+    if (ring !== null) {
       await waitFor(() => {
-        expect(getComputedStyle(dot).animationName).toBe('none')
+        expect(ring).not.toBeVisible()
       })
-      expect(getComputedStyle(dot).opacity).toBe('1')
-      // And no ring either: one repeating for ever with no time to travel in would be a ring
-      // parked at full size, which is worse than none. The stylesheet is what takes it out —
-      // the same media query that takes the breath out — so it is read as not drawn rather
-      // than as not there.
-      const ring = dot.previousElementSibling
-      if (ring !== null) {
-        await waitFor(() => {
-          expect(ring).not.toBeVisible()
-        })
-      }
-    } finally {
-      await restore()
     }
   },
 }

@@ -246,18 +246,13 @@ export const Motion: Story = {
 export const ReducedMotion: Story = {
   render: () => <Pressable />,
   play: async ({ canvasElement }) => {
-    const restore = await emulateReducedMotion()
-    if (restore === null) return
-    try {
-      const canvas = within(canvasElement)
-      await userEvent.click(canvas.getByRole('button', { name: /move the panel/i }))
-      const panel = canvas.getByTestId('panel')
-      // No travel to catch: the panel is where it belongs, and the journey took no time.
-      await waitFor(() => {
-        expect(getComputedStyle(panel).transform).toBe('none')
-      })
-    } finally {
-      await restore()
-    }
+    if (!(await emulateReducedMotion())) return
+    const canvas = within(canvasElement)
+    await userEvent.click(canvas.getByRole('button', { name: /move the panel/i }))
+    const panel = canvas.getByTestId('panel')
+    // No travel to catch: the panel is where it belongs, and the journey took no time.
+    await waitFor(() => {
+      expect(getComputedStyle(panel).transform).toBe('none')
+    })
   },
 }

@@ -70,6 +70,7 @@ import {
   checkAgents,
   chooseOption,
   decide,
+  handOver,
   listenToAgents,
   loadAgents,
   offerAgent,
@@ -1329,6 +1330,7 @@ export function Application() {
             window.open(url, '_blank', 'noopener')
           }}
           onStopRun={(runId) => void stopRun(open.id, runId)}
+          onHandOver={() => void handOver(open.id)}
           root={root}
           context={tools.contexts.get(open.id) ?? null}
           // A line that names a command of the catalogue runs that command, in its folder; any

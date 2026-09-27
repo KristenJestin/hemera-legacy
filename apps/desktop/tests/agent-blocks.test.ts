@@ -20,6 +20,7 @@ import {
   commandRunOf,
   contextDeliveryOf,
   elsewhereOf,
+  failureNoteOf,
   foldedCallsOf,
   hemeraPermissionOf,
   hemeraToolCallOf,
@@ -27,6 +28,7 @@ import {
   plainRefusal,
   questionOpen,
   reportedFailureOf,
+  stoppedTurnOf,
   subjectOf,
 } from '#renderer/agent-tool-payloads.ts'
 
@@ -248,7 +250,83 @@ describe('A delivery shows in the timeline', () => {
     expect(contextDeliveryOf(handed)).toBe(null)
     // One that could not be handed over yet is news, and is still said.
     const waiting = { ...handed, state: 'failed' }
-    expect(contextDeliveryOf(waiting)?.body).toMatch(/^Hemera handed/)
+    expect(contextDeliveryOf(waiting)?.waiting).toBe(true)
+  })
+})
+
+describe("Hemera's internal notes are said in words (#211)", () => {
+  const notHanded = (kind: string, body: string) => ({
+    ...entryOf(
+      'context_delivery',
+      'hemera',
+      body,
+      JSON.stringify({ kind, fingerprint: '29f890c77bc6'.padEnd(64, '0'), deliveredAt: null }),
+    ),
+    state: 'failed',
+  })
+
+  test('a delivery not handed over yet is a quiet row in words, with no id', () => {
+    const answer = contextDeliveryOf(
+      notHanded(
+        'answer',
+        'Not handed over, waiting for the next safe point: the answer to “Which format?”.',
+      ),
+    )
+    expect(answer).toEqual({
+      id: 'entry-1',
+      body: 'The answer will be handed over when the agent is ready.',
+      waiting: true,
+    })
+    const said = [
+      ['edit', 'Your edits will be handed over when the agent is ready.'],
+      ['internal', 'The result of a sub-agent will be handed over when the agent is ready.'],
+      [
+        'instructions',
+        'The new instructions of the Workspace will be handed over when the agent is ready.',
+      ],
+      ['notice', 'What Hemera had to tell the agent will be handed over when it is ready.'],
+    ]
+    for (const [kind, words] of said) {
+      const drawn = contextDeliveryOf(notHanded(kind ?? '', 'Not handed over, waiting: x.'))
+      expect(drawn?.body).toBe(words)
+      expect(drawn?.body).not.toContain('29f890c77bc6')
+    }
+    // One that was handed over is not waiting on anything.
+    const handed = { ...notHanded('edit', 'Your edits to scope went to the agent.'), state: null }
+    expect(contextDeliveryOf(handed)?.waiting).toBe(false)
+  })
+
+  test('an error of a delivery is an error row in words, with a Retry; the raw error is not its title', () => {
+    const failed = entryOf(
+      'note',
+      'hemera',
+      'no session has been opened',
+      JSON.stringify({ reason: 'delivery_failed' }),
+    )
+    expect(failureNoteOf(failed)).toEqual({
+      title: 'Hemera could not hand this over to the agent',
+      detail: 'no session has been opened',
+      retry: true,
+    })
+    const refused = entryOf(
+      'note',
+      'hemera',
+      'Internal error: rate limit reached',
+      JSON.stringify({ reason: 'prompt_failed' }),
+    )
+    expect(failureNoteOf(refused)).toEqual({
+      title: 'The agent answered with an error',
+      detail: 'Internal error: rate limit reached',
+      retry: false,
+    })
+    // A note of Hemera's own that is not an error is left to the line it always was.
+    const rebuilt = entryOf(
+      'note',
+      'hemera',
+      'The agent lost this Session, so what was said before was rebuilt for it.',
+      JSON.stringify({ reason: 'gone', context: '' }),
+    )
+    expect(failureNoteOf(rebuilt)).toBeNull()
   })
 })
 
@@ -778,5 +856,28 @@ describe('What the agent reported outside the conversation is drawn as a quiet r
       JSON.stringify({ reason: 'stop_timeout' }),
     )
     expect(agentReportOf(note)).toBeNull()
+  })
+})
+
+describe('A turn that ended on its own says why in a sentence (#211)', () => {
+  const ended = (stopReason: string, body: string) =>
+    entryOf('turn', 'hemera', body, JSON.stringify({ stopReason }))
+
+  test('a failed turn reads "Stopped: the agent could not answer."', () => {
+    expect(stoppedTurnOf(ended('failed', 'The agent could not answer.'))).toEqual({
+      reason: 'the agent could not answer.',
+      byTheReader: false,
+    })
+    expect(stoppedTurnOf(ended('max_tokens', 'The agent reached its token limit.'))?.reason).toBe(
+      'the agent reached its token limit.',
+    )
+  })
+
+  test('a turn the reader stopped says so and nothing more; one that simply ended draws nothing', () => {
+    expect(stoppedTurnOf(ended('cancelled', 'The turn was stopped.'))).toEqual({
+      reason: undefined,
+      byTheReader: true,
+    })
+    expect(stoppedTurnOf(ended('end_turn', 'The agent finished its turn.'))).toBeNull()
   })
 })

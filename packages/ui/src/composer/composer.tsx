@@ -4,7 +4,7 @@ import { type ReactNode, useEffect, useId, useRef, useState } from 'react'
 import { IconButton } from '../components/button/button.tsx'
 import { Frame, FrameFooter } from '../components/frame/frame.tsx'
 import { IconAt, IconPaperclip } from '../icons.ts'
-import { collapse, expand, morph, useTransition } from '../motion.ts'
+import { CROSSFADE, crossfade, useTransition } from '../motion.ts'
 import { ComposerActions } from './composer-actions.tsx'
 import { ComposerAttachments } from './composer-attachments.tsx'
 import { ComposerBox, type ComposerBoxHandle } from './composer-box.tsx'
@@ -141,8 +141,9 @@ export interface ComposerProps {
    * What waits for the reader's answer, pinned above the box for as long as it waits (issue
    * #130): a proposal of the agent, a question it asked. The thread scrolls on under the agent's
    * words and would carry them out of sight; here they stay in reach, and once answered the page
-   * draws them back in the thread. Each grows into its room on `morph`, and leaves it at once: it
-   * leaves because the page draws it back in the thread in that same frame (issue #209).
+   * draws them back in the thread. Each takes its room at once and fades in on `crossfade`, and
+   * leaves at once: it leaves because the page draws it back in the thread in that same frame
+   * (issue #209).
    */
   pinned?: readonly Pinned[] | undefined
 }
@@ -178,7 +179,7 @@ export function Composer({
   blocked,
   pinned = [],
 }: ComposerProps): ReactNode {
-  const growing = useTransition(morph)
+  const fading = useTransition(crossfade)
   const box = useRef<ComposerBoxHandle>(null)
 
   // The caret, where the page asked for it: once per request, after the box is on screen.
@@ -372,7 +373,11 @@ export function Composer({
           A card leaves with no exit (issue #209): what takes it away is its answer, and the page
           draws it back in the thread in the same frame. Folding here while the thread had already
           grown by it gave the thread its whole height and its room only frame by frame, so a
-          thread following its end jumped down by the card, then slid back as the fold ended. */}
+          thread following its end jumped down by the card, then slid back as the fold ended.
+
+          It arrives the same way, at its whole height, and only fades in. Grown on `morph`, it
+          took the thread's room a few pixels a frame, and a thread following its end was dragged
+          up with it for the whole spring while the card unrolled under it. */}
       <section
         aria-label="Waiting for your answer"
         className="scroll-quiet flex max-h-pinned shrink-0 flex-col gap-2 overflow-y-auto empty:hidden"
@@ -381,10 +386,10 @@ export function Composer({
           {pinned.map((one) => (
             <motion.div
               key={one.id}
-              className="shrink-0 overflow-hidden"
-              initial={collapse}
-              animate={expand}
-              transition={growing}
+              className="shrink-0"
+              initial={CROSSFADE.from}
+              animate={CROSSFADE.to}
+              transition={fading}
             >
               {one.content}
             </motion.div>

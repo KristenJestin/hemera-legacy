@@ -34,8 +34,9 @@ function call(kind: string | null, status = 'completed', title = 'Read a file'):
   return JSON.stringify({ call: { title, kind, status, locations: [], content: [] } })
 }
 
-const READ: Grouping = { kind: 'read', status: 'completed' }
-const RUN: Grouping = { kind: 'execute', status: 'completed' }
+const READ: Grouping = { kind: 'read', status: 'completed', label: 'Read a file' }
+const RUN: Grouping = { kind: 'execute', status: 'completed', label: 'pnpm test' }
+const HEMERA: Grouping = { kind: 'hemera', status: 'completed', label: 'Write the Spec' }
 
 describe('Tool calls between two agent texts are one folded group', () => {
   test('every run of two calls or more between two texts is one group, whatever the tools', () => {
@@ -43,7 +44,7 @@ describe('Tool calls between two agent texts are one folded group', () => {
       { item: 'text-1', grouping: null },
       { item: 'read-1', grouping: READ },
       { item: 'read-2', grouping: READ },
-      { item: 'hemera', grouping: { kind: 'hemera', status: 'completed' } },
+      { item: 'hemera', grouping: HEMERA },
       { item: 'run', grouping: RUN },
       { item: 'text-2', grouping: null },
     ])
@@ -54,6 +55,7 @@ describe('Tool calls between two agent texts are one folded group', () => {
         items: ['read-1', 'read-2', 'hemera', 'run'],
         count: 4,
         status: 'completed',
+        latest: 'pnpm test',
       },
       { kind: 'one', item: 'text-2' },
     ])
@@ -71,6 +73,7 @@ describe('Tool calls between two agent texts are one folded group', () => {
         items: ['read-1', 'thought', 'read-2'],
         count: 2,
         status: 'completed',
+        latest: 'Read a file',
       },
     ])
   })
@@ -102,40 +105,59 @@ describe('Tool calls between two agent texts are one folded group', () => {
   test('the group runs while a call runs, and says a failure while folded', () => {
     const running = groupActions([
       { item: 'a', grouping: READ },
-      { item: 'b', grouping: { kind: 'execute', status: 'in_progress' } },
+      { item: 'b', grouping: { ...RUN, status: 'in_progress' } },
     ])
     expect(running[0]).toMatchObject({ kind: 'group', status: 'in_progress' })
     const failed = groupActions([
-      { item: 'a', grouping: { kind: 'execute', status: 'failed' } },
+      { item: 'a', grouping: { ...RUN, status: 'failed' } },
       { item: 'b', grouping: READ },
     ])
     expect(failed[0]).toMatchObject({ kind: 'group', status: 'failed' })
   })
 
-  test('a group says only its count, never the kinds it holds (issue #159)', () => {
+  test('a group says its count and its latest action, never the kinds it holds (issue #159)', () => {
     const [group] = groupActions([
-      { item: 'a', grouping: { kind: 'hemera', status: 'completed' } },
+      { item: 'a', grouping: HEMERA },
       { item: 'b', grouping: READ },
     ])
-    expect(Object.keys(group ?? {}).sort()).toEqual(['count', 'items', 'kind', 'status'])
+    expect(Object.keys(group ?? {}).sort()).toEqual(['count', 'items', 'kind', 'latest', 'status'])
+  })
+
+  test('a folded group names its latest action, and follows it as calls arrive (issue #180)', () => {
+    const blocks = [
+      { item: 'text', grouping: null },
+      { item: 'read-1', grouping: { ...READ, label: 'Read src/menu.html' } },
+      { item: 'read-2', grouping: { ...READ, label: 'Read src/menu.css', status: 'in_progress' } },
+    ] satisfies { item: string; grouping: Grouping }[]
+    expect(groupActions(blocks)[1]).toMatchObject({ count: 2, latest: 'Read src/menu.css' })
+    const grown = groupActions([
+      ...blocks,
+      { item: 'thought', grouping: 'companion' },
+      { item: 'run', grouping: { ...RUN, label: 'pnpm test menu', status: 'in_progress' } },
+      { item: 'diff', grouping: 'companion' },
+    ])
+    // A companion after the last call is not an action: the line names the call before it.
+    expect(grown[1]).toMatchObject({ count: 3, latest: 'pnpm test menu' })
   })
 })
 
 describe('What an entry is to a run of calls', () => {
   test('an agent call is counted by its kind, and an unknown kind as another call', () => {
     expect(groupingOf(entryOf('tool_call', call('read')))).toEqual(READ)
-    expect(groupingOf(entryOf('tool_call', call('execute', 'in_progress')))).toEqual({
+    expect(groupingOf(entryOf('tool_call', call('execute', 'in_progress', 'pnpm test')))).toEqual({
       kind: 'execute',
       status: 'in_progress',
+      label: 'pnpm test',
     })
     expect(groupingOf(entryOf('tool_call', call('telepathy')))).toEqual({
       kind: 'other',
       status: 'completed',
+      label: 'Read a file',
     })
   })
 
   test('a call to one of Hemera’s tools is counted as Hemera’s, reported or answered', () => {
-    expect(groupingOf(entryOf('tool_call', call(null, 'pending', 'spec_write')))).toEqual({
+    expect(groupingOf(entryOf('tool_call', call(null, 'pending', 'spec_write')))).toMatchObject({
       kind: 'hemera',
       status: 'in_progress',
     })
@@ -149,7 +171,46 @@ describe('What an entry is to a run of calls', () => {
         arguments: '{}',
       }),
     )
-    expect(groupingOf(answered)).toEqual({ kind: 'hemera', status: 'failed' })
+    expect(groupingOf(answered)).toMatchObject({ kind: 'hemera', status: 'failed' })
+  })
+
+  test('a call is named as its row names it: the agent’s title, or Hemera’s label and subject', () => {
+    expect(
+      groupingOf(entryOf('tool_call', call('read', 'completed', 'Read src/menu.html'))),
+    ).toEqual({ kind: 'read', status: 'completed', label: 'Read src/menu.html' })
+    const reported = JSON.stringify({
+      call: {
+        title: 'fs_read',
+        kind: null,
+        status: 'in_progress',
+        rawInput: { text: JSON.stringify({ path: 'src/menu.html' }) },
+      },
+    })
+    expect(groupingOf(entryOf('tool_call', reported))).toMatchObject({
+      label: 'Read file src/menu.html',
+    })
+    const answered = entryOf(
+      'hemera_tool_call',
+      JSON.stringify({
+        tool: 'fs_read',
+        state: 'completed',
+        caller: 'agent',
+        paths: [],
+        arguments: JSON.stringify({ path: 'src/menu.html' }),
+      }),
+    )
+    expect(groupingOf(answered)).toMatchObject({ label: 'Read file src/menu.html' })
+    const bare = entryOf(
+      'hemera_tool_call',
+      JSON.stringify({
+        tool: 'commands_list',
+        state: 'completed',
+        caller: 'agent',
+        paths: [],
+        arguments: '{}',
+      }),
+    )
+    expect(groupingOf(bare)).toMatchObject({ label: 'List commands' })
   })
 
   test('a thought and a diff go with the calls; the agent’s text and the rest end the run', () => {

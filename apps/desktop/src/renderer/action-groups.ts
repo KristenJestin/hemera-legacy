@@ -3,7 +3,7 @@ import type { SessionEntry } from '@hemera/ipc'
 import type { ToolKind } from '@hemera/ui'
 import { z } from 'zod'
 
-import { hemeraToolCallOf } from './agent-tool-payloads.ts'
+import { hemeraToolCallOf, hemeraToolLabelOf, subjectOf } from './agent-tool-payloads.ts'
 
 /**
  * The tool calls of a turn, folded into one group between two things the agent said (recette of
@@ -21,6 +21,10 @@ import { hemeraToolCallOf } from './agent-tool-payloads.ts'
  * agent's text, the user's message, a question, a permission, a run, a proposal, Hemera's own
  * line — ends the run, and a run of a single call stays the row it is.
  *
+ * Folded, the group also names its latest call, in the words that call's own row says it — the
+ * agent's title, or Hemera's label and what it is about (issue #180) — so the line says what the
+ * agent is doing while the turn runs, and follows it as calls arrive.
+ *
  * Pure and free of what `@hemera/ui` runs when it loads, so it is tested on Node; the page draws
  * the group.
  */
@@ -35,6 +39,8 @@ export type ActionStatus = 'in_progress' | 'failed' | 'completed'
 export interface Action {
   kind: ActionKind
   status: ActionStatus
+  /** What the call is doing, in the words its own row says it: `Read src/menu.html`. */
+  label: string
 }
 
 /**
@@ -45,7 +51,12 @@ export type Grouping = Action | 'companion' | null
 
 /** What the agent's report of a call says of it, as far as counting it goes. */
 const reportSchema = z.object({
-  call: z.object({ title: z.string(), kind: z.string().nullable(), status: z.string().nullable() }),
+  call: z.object({
+    title: z.string(),
+    kind: z.string().nullable(),
+    status: z.string().nullable(),
+    rawInput: z.object({ text: z.string() }).nullish(),
+  }),
 })
 
 const KINDS: readonly ToolKind[] = [
@@ -76,6 +87,11 @@ function statusOf(said: string | null): ActionStatus {
   return 'completed'
 }
 
+/** One of Hemera's calls named as its row names it: its label, and what it is about. */
+function hemeraLabelOf(label: string, subject: string | undefined): string {
+  return subject === undefined ? label : `${label} ${subject}`
+}
+
 /**
  * What an entry of the thread is to a run of calls, read off the entry the page draws — Hemera's
  * own answer in place of the agent's report of it, where the thread holds both.
@@ -84,14 +100,32 @@ export function groupingOf(entry: SessionEntry): Grouping {
   if (entry.kind === 'thought' || entry.kind === 'diff') return 'companion'
   if (entry.kind === 'hemera_tool_call') {
     const drawn = hemeraToolCallOf(entry)
-    return drawn === null ? null : { kind: 'hemera', status: statusOf(drawn.status) }
+    return drawn === null
+      ? null
+      : {
+          kind: 'hemera',
+          status: statusOf(drawn.status),
+          label: hemeraLabelOf(drawn.label, drawn.subject?.text),
+        }
   }
   if (entry.kind !== 'tool_call') return null
   const report = parsed(reportSchema, entry.payload)
   if (report === null) return null
-  const { title, kind, status } = report.call
-  if (hemeraToolNamed(title) !== null) return { kind: 'hemera', status: statusOf(status) }
-  return { kind: KINDS.find((one) => one === kind) ?? 'other', status: statusOf(status) }
+  const { title, kind, status, rawInput } = report.call
+  const hemera = hemeraToolNamed(title)
+  if (hemera !== null) {
+    const subject = subjectOf(hemera, rawInput?.text ?? '')?.text
+    return {
+      kind: 'hemera',
+      status: statusOf(status),
+      label: hemeraLabelOf(hemeraToolLabelOf(hemera).label, subject),
+    }
+  }
+  return {
+    kind: KINDS.find((one) => one === kind) ?? 'other',
+    status: statusOf(status),
+    label: title,
+  }
 }
 
 /** Where a group stands: running while one of its calls runs, failed if one failed, else done. */
@@ -104,7 +138,7 @@ export function groupStatusOf(actions: readonly Action[]): ActionStatus {
 /** A piece of the thread once the runs are folded: a block as it was, or a group of them. */
 export type Piece<T> =
   | { kind: 'one'; item: T }
-  | { kind: 'group'; items: T[]; count: number; status: ActionStatus }
+  | { kind: 'group'; items: T[]; count: number; status: ActionStatus; latest: string }
 
 /**
  * The blocks of a thread with every run of two calls or more folded into one group.
@@ -132,6 +166,7 @@ export function groupActions<T>(blocks: readonly { item: T; grouping: Grouping }
         items: run.slice(first, last + 1).map((one) => one.item),
         count: actions.length,
         status: groupStatusOf(actions),
+        latest: actions.at(-1)?.label ?? '',
       })
       for (const one of run.slice(last + 1)) pieces.push({ kind: 'one', item: one.item })
     }

@@ -14,6 +14,7 @@ import { Input } from '../components/field/field.tsx'
 import { Select } from '../components/select/select.tsx'
 import { type PathEntry, PathInput, type PathListing } from '../components/suggest/path-input.tsx'
 import { underBaseSchema } from '../form/schemas.ts'
+import { Reveal } from '../reveal.tsx'
 import type { CommandLine, RepositoryLine } from './model.ts'
 import { repositoryNamesOf, slugOf } from './naming.ts'
 
@@ -67,6 +68,9 @@ const LINE_OTHERS = 'col-start-2 row-start-1 min-w-0'
 const FIELD = 'min-w-0 flex-1'
 
 const NOTE = 'text-sm text-muted-foreground'
+
+/** What Portless asks for once it is chosen, under the box that chose it. */
+const PORTLESS = 'flex flex-col gap-3 pt-3'
 
 const URL = 'font-mono text-foreground'
 
@@ -369,11 +373,11 @@ export function CommandDialog({
           checked={runAtOpen}
           onCheckedChange={setRunAtOpen}
         />
-        {serve && (
+        <Reveal shown={serve} gap="4">
           <Labelled label="Scope">
             <Select label="Scope" value={scope} onValueChange={setScope} items={SCOPE_ITEMS} />
           </Labelled>
-        )}
+        </Reveal>
         <div className={ROW}>
           <Labelled label="Runs from">
             <Select label="Runs from" value={base} onValueChange={setBase} items={baseItems} />
@@ -391,33 +395,31 @@ export function CommandDialog({
             onList={onListFolder}
           />
         </div>
-        {offersPortless && (
-          <div className="flex flex-col gap-3">
-            <Checkbox
-              label="Serve through Portless"
-              description="Hemera starts the line through portless, which gives it a stable address."
-              checked={portless}
-              onCheckedChange={setPortless}
-            />
-            {portless && (
-              <>
-                <Input
-                  label="Portless name"
-                  value={portlessName}
-                  onValueChange={setPortlessName}
-                  error={nameError}
-                />
-                {nameError === undefined && (
-                  <p className={NOTE}>
-                    Served at <span className={URL}>https://{slug}.localhost</span>, and at{' '}
-                    <span className={URL}>https://&lt;branch&gt;.{slug}.localhost</span> in a
-                    Workspace's worktree.
-                  </p>
-                )}
-              </>
-            )}
-          </div>
-        )}
+        <Reveal shown={offersPortless} gap="4">
+          <Checkbox
+            label="Serve through Portless"
+            description="Hemera starts the line through portless, which gives it a stable address."
+            checked={portless}
+            onCheckedChange={setPortless}
+          />
+          <Reveal shown={portless}>
+            <div className={PORTLESS}>
+              <Input
+                label="Portless name"
+                value={portlessName}
+                onValueChange={setPortlessName}
+                error={nameError}
+              />
+              <Reveal shown={nameError === undefined} gap="3">
+                <p className={NOTE}>
+                  Served at <span className={URL}>https://{slug}.localhost</span>, and at{' '}
+                  <span className={URL}>https://&lt;branch&gt;.{slug}.localhost</span> in a
+                  Workspace's worktree.
+                </p>
+              </Reveal>
+            </div>
+          </Reveal>
+        </Reveal>
         {refusal !== null && (
           <p role="alert" className={REFUSAL}>
             {refusal}

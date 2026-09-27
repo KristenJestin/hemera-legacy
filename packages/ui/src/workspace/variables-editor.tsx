@@ -6,6 +6,7 @@ import { Card, CardRow } from '../components/card/card.tsx'
 import { Dialog } from '../components/dialog/dialog.tsx'
 import { Input } from '../components/field/field.tsx'
 import { IconPencil, IconPlus, IconVariable, IconX } from '../icons.ts'
+import { Reveal } from '../reveal.tsx'
 import type { VariableLine } from './services-model.ts'
 
 /**
@@ -239,24 +240,27 @@ export function VariablesEditor({
               <span className={FIXED_KEY}>{editing.key}</span>
             </p>
           )}
-          {existing !== undefined && (
-            <div className={EXISTS}>
-              <p role="alert" className={REFUSAL}>
-                {existing.key} is already set for {name}.
-              </p>
-              <Button
-                variant="secondary"
-                size="sm"
-                onClick={() => {
-                  show({ mode: 'edit', key: existing.key, value: existing.value })
-                  setTurned(turned + 1)
-                }}
-              >
-                <IconPencil size="sm" aria-hidden="true" />
-                Edit {existing.key}
-              </Button>
-            </div>
-          )}
+          {/* The key is read while it is shown, and kept by the room as it folds away. */}
+          <Reveal shown={existing !== undefined} gap="4">
+            {existing !== undefined && (
+              <div className={EXISTS}>
+                <p role="alert" className={REFUSAL}>
+                  {existing.key} is already set for {name}.
+                </p>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => {
+                    show({ mode: 'edit', key: existing.key, value: existing.value })
+                    setTurned(turned + 1)
+                  }}
+                >
+                  <IconPencil size="sm" aria-hidden="true" />
+                  Edit {existing.key}
+                </Button>
+              </div>
+            )}
+          </Reveal>
           <div ref={valueField}>
             <Input
               label="Value"

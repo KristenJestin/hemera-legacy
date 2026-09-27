@@ -43,6 +43,7 @@ import {
   contextUri,
   hemeraToolNamed,
   internalText,
+  type Mission,
   type Session,
   type SessionEntryOrigin,
 } from '@hemera/core'
@@ -443,6 +444,11 @@ interface Live {
    * hand over the same address, and the grant behind it dies with this process.
    */
   readonly mcp: readonly McpServer[]
+  /**
+   * The mission the Session was on when this agent was started, which is what its token was
+   * minted with: the tools it lists are those, for as long as it runs (issue #198).
+   */
+  readonly mission: Mission
   /**
    * What the three ways into a session carry on `_meta` for this agent: its bare options, for the
    * agent that reads them there, and nothing for the two that take them from the environment.
@@ -1731,8 +1737,18 @@ export const runtimeLayer = Layer.effect(
         // composer was drawn in this run of the application (D5-17).
         yield* seed
         const held = live.get(sessionId)
-        if (held !== undefined && held.death === null) return held
-        if (held !== undefined) live.delete(sessionId)
+        if (held !== undefined && held.death === null) {
+          // An agent lists its tools once, when it opens its session, and they are the mission's
+          // it was started on. One started while the Session was `free` — the page reads what it
+          // offers while New Spec's message is on its way — holds none of the define tools once
+          // the Session defines a Spec, so it is started again before a turn is handed to it. A
+          // turn running now keeps it: the catalogue already refuses what the mission no longer
+          // offers (D7-14), and a new start waits for that turn's end (issue #198).
+          if (turns.has(sessionId)) return held
+          const now = yield* attempt('reading the Session', sessions.one(sessionId))
+          if (now.session.mission === held.mission) return held
+          yield* stopped(sessionId, held)
+        } else if (held !== undefined) live.delete(sessionId)
 
         const { session, native, choices } = yield* attempt(
           'reading the Session',
@@ -1845,6 +1861,7 @@ export const runtimeLayer = Layer.effect(
           queue,
           cwd,
           mcp,
+          mission: session.mission,
           meta: bare.meta,
           base: mode.base,
           nativeSessionId: '',
@@ -3151,6 +3168,12 @@ export const runtimeLayer = Layer.effect(
         if (turn !== undefined || starting.has(sessionId)) return
         const held = live.get(sessionId)
         if (held === undefined) return
+        yield* stopped(sessionId, held)
+      })
+
+    /** Lets go of a Session's agent now: what `release` does once nothing holds it. */
+    const stopped = (sessionId: string, held: Live) =>
+      Effect.gen(function* () {
         // The last words of a turn are written before the connection is let go: the queue ending
         // is what ends the fiber that would have written them.
         yield* flush(sessionId, held, true).pipe(Effect.ignore)

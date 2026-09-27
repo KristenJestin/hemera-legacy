@@ -13,6 +13,7 @@ import { describe, expect, test } from 'vite-plus/test'
 import type { SessionEntry } from '@hemera/ipc'
 import {
   briefOf,
+  definedAtOnceOf,
   proposalIdOf,
   proposalOf,
   questionEntryOf,
@@ -283,5 +284,32 @@ describe('A pending proposal and a pending question are pinned above the compose
   test('nothing else is pinned', () => {
     const brief = entry('mission_brief', JSON.stringify({ phase: 'shape' }))
     expect(waitsForAnswer(brief, [brief], null, null)).toBe(false)
+  })
+})
+
+describe('New Spec creates the proposed Spec at once (#205)', () => {
+  const created = entry(
+    'spec_proposal',
+    JSON.stringify({ title: 'Read aloud', type: 'feature', createdKey: 'XC-2' }),
+    'created',
+  )
+
+  test('a Spec created at once is drawn as the quiet line, and waits for nothing', () => {
+    expect(proposalOf(created, [created], null, null)).toEqual({
+      title: 'Read aloud',
+      type: 'feature',
+      state: 'created',
+      createdAtOnce: 'XC-2',
+    })
+    expect(waitsForAnswer(created, [created], null, null)).toBe(false)
+  })
+
+  test('a Session the list still says is free is read again once its Spec was created at once', () => {
+    const free = { id: 'writer', mission: 'free' as const }
+    const pushed = new Map([['writer', { entries: [created] }]])
+    expect(definedAtOnceOf([free], pushed)).toEqual(['writer'])
+    expect(definedAtOnceOf([{ ...free, mission: 'define' as const }], pushed)).toEqual([])
+    const asked = entry('spec_proposal', JSON.stringify({ title: 'Read aloud', type: 'feature' }))
+    expect(definedAtOnceOf([free], new Map([['writer', { entries: [asked] }]]))).toEqual([])
   })
 })

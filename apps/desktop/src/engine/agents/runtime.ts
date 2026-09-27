@@ -2664,6 +2664,7 @@ export const runtimeLayer = Layer.effect(
               Effect.gen(function* () {
                 turns.delete(sessionId)
                 yield* pool.busy(sessionId, false).pipe(Effect.ignore)
+                yield* briefedIfDefining(sessionId)
                 yield* releasedIfDue(sessionId)
                 notices.changed(sessionId, 'turn_ended')
               }),
@@ -2945,16 +2946,19 @@ export const runtimeLayer = Layer.effect(
         held.context = null
         held.provisions = []
 
+        // The New Spec request this turn carries is listed in the Context view. It is recorded as
+        // the turn goes out rather than once it is over: it is also what makes this a New Spec
+        // Session, whose Spec the agent proposes during this very turn (issue #205).
+        for (const request of provisionsOf(intent)) {
+          yield* attempt(
+            'recording the delivery',
+            context.handed(sessionId, 'request', request.text),
+          ).pipe(Effect.ignore)
+        }
+
         const outcome = yield* Effect.result(held.connection.prompt(sent, provisions))
         if (Result.isSuccess(outcome)) {
           const answered = outcome.success
-          // The New Spec request the agent took with this turn is listed in the Context view.
-          for (const request of provisionsOf(intent)) {
-            yield* attempt(
-              'recording the delivery',
-              context.handed(sessionId, 'request', request.text),
-            ).pipe(Effect.ignore)
-          }
           // What is in the thread is read before the window is: the announcement travels as a
           // notification of its own, and the entry is written from it once everything the agent
           // said is held rather than racing it.
@@ -3011,6 +3015,7 @@ export const runtimeLayer = Layer.effect(
           Effect.gen(function* () {
             turns.delete(sessionId)
             yield* pool.busy(sessionId, false).pipe(Effect.ignore)
+            yield* briefedIfDefining(sessionId)
             yield* releasedIfDue(sessionId)
             // The idle time is counted from the end of the turn, not from its start: a sweep
             // that ran during a long turn found it busy and struck it out of the book.
@@ -3209,6 +3214,21 @@ export const runtimeLayer = Layer.effect(
       Effect.gen(function* () {
         waking.add(sessionId)
         yield* releaseWhenIdle(sessionId)
+      })
+
+    /**
+     * Called as a turn ends: a `free` Session that turned `define` during it — New Spec's Spec,
+     * created from the agent's own proposal with no card to press (issue #205) — has its agent
+     * started again with the define tools and handed the mission brief, as a proposal the user
+     * accepted does.
+     */
+    const briefedIfDefining = (sessionId: string) =>
+      Effect.gen(function* () {
+        const held = live.get(sessionId)
+        if (held === undefined || held.death !== null || held.mission !== 'free') return
+        const now = yield* Effect.result(sessions.one(sessionId))
+        if (Result.isFailure(now) || now.success.session.mission !== 'define') return
+        yield* briefWhenIdle(sessionId)
       })
 
     const tell = (sessionId: string, text: string, said: string) =>

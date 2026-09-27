@@ -20,7 +20,6 @@ import { ReworkDialog } from './rework-dialog.tsx'
 import { SpecColumn, goToPhase } from './spec-column.tsx'
 import { SpecFrame } from './spec-frame.tsx'
 import { SpecHead } from './spec-head.tsx'
-import type { SpecPartHandlers } from './spec-part.tsx'
 import { phasesOf } from './spec-phases.ts'
 import { WorkspaceActions, type WorkspaceActionsProps } from './workspace-actions.tsx'
 
@@ -106,7 +105,7 @@ const REFUSED = 'min-w-0 flex-1 text-sm text-destructive-muted-foreground'
 /** The footer on the rim, under the body, its actions at its end. */
 const FOOT = 'flex items-center justify-end gap-3 px-1 pt-1.5'
 
-export interface SpecPanelProps extends SpecPartHandlers {
+export interface SpecPanelProps {
   spec: SpecView
   /** Present when this Session reads a draft another Session writes. */
   reader?: ReaderView | undefined
@@ -155,7 +154,6 @@ export function SpecPanel({
   onPickRevision,
   onTakeOver,
   build,
-  ...handlers
 }: SpecPanelProps): ReactNode {
   const startsFolded = arrives ? false : defaultFolded
   const [folded, setFolded] = useState(startsFolded)
@@ -364,13 +362,7 @@ export function SpecPanel({
                   onTakeOver={onTakeOver}
                 />
               )}
-              <SpecColumn
-                spec={spec}
-                groups={groups}
-                column={column}
-                still={still}
-                onGoToQuestion={handlers.onGoToQuestion}
-              />
+              <SpecColumn spec={spec} groups={groups} column={column} still={still} />
             </div>
             <SpecFoot content={foot} />
           </div>

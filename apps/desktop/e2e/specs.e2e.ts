@@ -289,7 +289,7 @@ describe('The Spec is read, never edited by hand', () => {
 })
 
 describe('A question is asked and answered in the chat', () => {
-  it('asks it as a block of the thread, and the register links to it', async () => {
+  it('asks it as a block of the thread, and the register records it with no link', async () => {
     const { id, specId } = await sessionOf(ASKED)
     await browser.execute(
       async (spec: string, session: string, body: string, issue: string) => {
@@ -316,14 +316,8 @@ describe('A question is asked and answered in the chat', () => {
 
     const panel = await region(PANEL)
     expect(panel).toContain('Questions · 1 open')
-
-    await pressIn(PANEL, 'Answer in the chat')
-    await browser.pause(500)
-    // The thread is taken to the question, and the keyboard to its first answer.
-    const focused = await browser.execute(
-      () => document.activeElement?.closest('[id^="ask-"]')?.textContent ?? '',
-    )
-    expect(focused).toContain(QUESTION)
+    // The card in the thread is where it is answered: the register offers no way there (#181).
+    expect(panel.toLowerCase()).not.toContain('answer in the chat')
   })
 
   it('answers it in the block, which folds to the answer, and resolves it in the register', async () => {

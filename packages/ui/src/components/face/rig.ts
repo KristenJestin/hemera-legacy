@@ -111,8 +111,9 @@ export function drawnOf(pose: Pose, detail: FaceDetail, gain = 1): Drawn {
   ): readonly [number, number, number, number] => {
     if (orbit <= 0) return [x, y, sx, sy]
     const angle = 2 * Math.PI * (spin + slot)
-    const ox = CENTER + Math.cos(angle) * ORBIT
-    const oy = CENTER + Math.sin(angle) * ORBIT
+    const wide = ORBIT * (1 + pose[AT.reach]!)
+    const ox = CENTER + Math.cos(angle) * wide
+    const oy = CENTER + Math.sin(angle) * wide
     const at = (a: number, b: number): number => a + (b - a) * orbit
     return [at(x, ox), at(y, oy), at(sx, 1), at(sy, 1)]
   }

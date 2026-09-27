@@ -50,6 +50,10 @@ export interface Beat extends Head {
   readonly mouth: Pull | null
   readonly lid: number
   readonly mouthScale: number
+  /** How much wider or narrower the loading orbit is drawn, -1 to 1 around its own radius. */
+  readonly reach: number
+  /** Turns of the loading orbit on top of its own beat. */
+  readonly turn: number
 }
 
 /** The face doing nothing at all. */
@@ -63,6 +67,8 @@ export const REST: Beat = {
   mouth: null,
   lid: 0,
   mouthScale: 1,
+  reach: 0,
+  turn: 0,
 }
 
 /** A beat that says only what it is given, and rests everywhere else. */
@@ -99,6 +105,8 @@ export function blend(from: Beat, to: Beat, w: number): Beat {
     mouth: blendPull(from.mouth, to.mouth, w),
     lid: at(from.lid, to.lid),
     mouthScale: at(from.mouthScale, to.mouthScale),
+    reach: at(from.reach, to.reach),
+    turn: at(from.turn, to.turn),
   }
 }
 
@@ -120,7 +128,8 @@ export const AT = {
   gazeY: 26,
   orbit: 27,
   spin: 28,
-  tones: 29,
+  reach: 29,
+  tones: 30,
 } as const
 
 export const POSE_LENGTH = AT.tones + TONES.length
@@ -174,6 +183,8 @@ export interface PoseParts {
   readonly orbit: number
   /** How far round that orbit they are, in turns. */
   readonly spin: number
+  /** How much wider or narrower than its own the orbit is. */
+  readonly reach: number
   readonly tone: FaceTone
 }
 
@@ -192,6 +203,7 @@ export function poseOf(parts: PoseParts): number[] {
     head.gazeY,
     parts.orbit,
     parts.spin,
+    parts.reach,
     ...TONES.map((tone) => (tone === parts.tone ? 1 : 0)),
   ]
 }

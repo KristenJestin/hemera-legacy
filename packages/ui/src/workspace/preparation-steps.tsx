@@ -3,6 +3,7 @@ import type { FunctionComponent, ReactNode } from 'react'
 
 import { Button } from '../components/button/button.tsx'
 import { Card } from '../components/card/card.tsx'
+import { Loading } from '../components/loading/loading.tsx'
 import {
   IconCircleCheck,
   IconCircleDashed,
@@ -10,7 +11,6 @@ import {
   IconCopy,
   IconGitFork,
   IconLink,
-  IconLoader,
   IconPlayerPlay,
   IconPlayerSkipForward,
   type IconProps,
@@ -61,10 +61,11 @@ const KIND_ICONS: Record<StepKind, FunctionComponent<IconProps>> = {
 
 const STATES: Record<
   StepState,
-  { word: string; icon: FunctionComponent<IconProps>; tone: string }
+  { word: string; icon: FunctionComponent<IconProps> | null; tone: string }
 > = {
   pending: { word: 'Pending', icon: IconCircleDashed, tone: 'text-muted-foreground' },
-  running: { word: 'Running', icon: IconLoader, tone: 'text-info-muted-foreground' },
+  // The loader of the whole application, and not an icon of its own.
+  running: { word: 'Running', icon: null, tone: 'text-info-muted-foreground' },
   done: { word: 'Done', icon: IconCircleCheck, tone: 'text-success-muted-foreground' },
   failed: { word: 'Failed', icon: IconCircleX, tone: 'text-destructive-muted-foreground' },
   skipped: { word: 'Skipped', icon: IconPlayerSkipForward, tone: 'text-muted-foreground' },
@@ -159,7 +160,13 @@ export function PreparationSteps({
                 </Button>
               )}
               <span className={cn(STATE, state.tone)}>
-                <State size="sm" aria-hidden="true" />
+                {State === null ? (
+                  <span aria-hidden="true" className="flex">
+                    <Loading size="sm" label={state.word} />
+                  </span>
+                ) : (
+                  <State size="sm" aria-hidden="true" />
+                )}
                 {state.word}
               </span>
             </li>

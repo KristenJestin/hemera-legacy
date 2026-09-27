@@ -176,6 +176,14 @@ describe('Each section wears its mark', () => {
     })
     expect(sectionsOf(stale).map((one) => one.mark)).toEqual(['stale', 'agent'])
   })
+  test('writing while a spec_write of the running turn writes it, empty or not (issue #185)', () => {
+    const marks = (writing: 'problem' | 'expected_outcome' | null) =>
+      sectionsOf(snapshot(), writing).map((one) => [one.name, one.mark, one.body !== ''])
+    expect(marks('expected_outcome')[1]).toEqual(['expected_outcome', 'writing', false])
+    expect(marks('problem')[0]).toEqual(['problem', 'writing', true])
+    // The write over, failed or not, the section wears the mark of what it holds again.
+    expect(marks(null)[1]).toEqual(['expected_outcome', 'empty', false])
+  })
 })
 
 describe('The readiness bar says what is left', () => {

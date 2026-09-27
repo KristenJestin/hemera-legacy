@@ -5,9 +5,10 @@ import { Badge } from '../components/badge/badge.tsx'
 import { Button } from '../components/button/button.tsx'
 import { Checkbox } from '../components/checkbox/checkbox.tsx'
 import { Input } from '../components/field/field.tsx'
+import { Loading } from '../components/loading/loading.tsx'
 import { Dialog } from '../components/dialog/dialog.tsx'
 import { Select, type SelectItem } from '../components/select/select.tsx'
-import { IconFolderOpen, IconLoader } from '../icons.ts'
+import { IconFolderOpen } from '../icons.ts'
 import type { PlanRepositoryLine, PlanRepositoryRead, WorkspaceDraft } from './model.ts'
 
 /**
@@ -421,7 +422,11 @@ export function CreateWorkspaceDialog({
                     that simply holds none is not the user's problem (D8-04). */}
                 {!row.read ? (
                   <span className={READING}>
-                    <IconLoader size="sm" aria-hidden="true" />
+                    {/* The loader of the whole application, and not an icon of its own: the words
+                        say it to a screen reader, so the loader is for the eye alone. */}
+                    <span aria-hidden="true" className="flex">
+                      <Loading size="sm" label="being read" />
+                    </span>
                     being read
                   </span>
                 ) : (

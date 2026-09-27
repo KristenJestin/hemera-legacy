@@ -1,5 +1,7 @@
 import type { Project, RepositoryIcon } from '@hemera/ipc'
 
+import { patiently } from './patiently.ts'
+
 /**
  * The Projects of the data folder, as the window holds them (design D4-11).
  *
@@ -64,9 +66,16 @@ function message(cause: unknown): string {
   return cause instanceof Error ? cause.message : String(cause)
 }
 
-/** Everything that is not archived, which is what the bar lists. */
+/**
+ * Everything that is not archived, which is what the bar lists.
+ *
+ * Asked again when it fails: this is the window's first question, asked while the engine may
+ * still be starting, and a list that failed then was a window with no Project in it.
+ */
 export async function loadProjects(): Promise<boolean> {
-  return await acting(async () => await window.hemera.invoke('projects.list', {}))
+  return await acting(
+    async () => await patiently(async () => await window.hemera.invoke('projects.list', {})),
+  )
 }
 
 export async function createProject(asked: {

@@ -658,3 +658,54 @@ export const StaleAfterRework: Story = {
     await expect(canvas.queryByRole('button', { name: /things before ready/ })).toBeNull()
   },
 }
+
+/**
+ * How far the window scrolls sideways: what its content is wider than it by, in pixels. The
+ * window is the scroller the row is laid in, as the content area of the application is one.
+ */
+function sideways(canvasElement: HTMLElement): number {
+  const window = canvasElement.querySelector<HTMLElement>('[data-window]')!
+  return window.scrollWidth - window.clientWidth
+}
+
+/**
+ * The row never scrolls sideways (issue #181): folded, while the panel is open, and folded again.
+ * Each state is read once the swap has landed, the small frame gone or the panel stowed.
+ */
+async function neverSideways(canvasElement: HTMLElement): Promise<void> {
+  const canvas = within(canvasElement)
+  const dock = canvas.getByRole('region', { name: 'Spec ATL-7' })
+  const frame = dock.querySelector<HTMLElement>('[data-spec-frame]')!
+  const panel = dock.querySelector<HTMLElement>('[data-spec-panel]')!
+  await expect(sideways(canvasElement)).toBe(0)
+  await unfold(canvasElement)
+  await waitFor(() => expect(getComputedStyle(frame).filter).toBe('opacity(0)'))
+  await expect(sideways(canvasElement)).toBe(0)
+  await userEvent.click(canvas.getByRole('button', { name: 'Fold the Spec' }))
+  await waitFor(() => expect(panel).toHaveAttribute('data-stowed'))
+  await expect(sideways(canvasElement)).toBe(0)
+}
+
+/** A narrow window: the Spec folded, open and folded again, and the row never scrolls sideways. */
+export const NarrowWindow: Story = {
+  decorators: [
+    (Story) => (
+      <div data-window className="h-screen w-full max-w-3xl overflow-y-auto">
+        <Story />
+      </div>
+    ),
+  ],
+  play: async ({ canvasElement }) => neverSideways(canvasElement),
+}
+
+/** A wide window: the Spec folded, open and folded again, and the row never scrolls sideways. */
+export const WideWindow: Story = {
+  decorators: [
+    (Story) => (
+      <div data-window className="h-screen w-screen overflow-y-auto">
+        <Story />
+      </div>
+    ),
+  ],
+  play: async ({ canvasElement }) => neverSideways(canvasElement),
+}

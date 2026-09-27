@@ -26,6 +26,7 @@ import { fakeWorkspace } from './agent/install.ts'
 import { AGENT, ANSWERS, MODELS, PROPOSAL, PROPOSE } from './agent/script.ts'
 import {
   addProject,
+  answerWith,
   awaits,
   control,
   press,
@@ -274,12 +275,20 @@ describe('A question is asked and answered in the chat', () => {
   })
 
   it('answers it in the block, which folds to the answer, and resolves it in the register', async () => {
-    await pressIn('[id^="ask-"]', ISSUE)
+    await answerWith(ISSUE)
     await browser.pause(1200)
 
+    // The block folds to the question alone, and the answer is the reader's choice beside it,
+    // lettered as the card lettered it (issues #149 and #165).
     const block = await region('[id^="ask-"]')
-    expect(block).toContain(ISSUE)
+    expect(block).toContain(QUESTION)
     expect(block).not.toContain('The payment date')
+    const chosen = await browser.execute(() =>
+      [...document.querySelectorAll('[role="group"][aria-label^="You answered"]')].map(
+        (group) => group.getAttribute('aria-label') ?? '',
+      ),
+    )
+    expect(chosen).toEqual([`You answered «${QUESTION}»: A, ${ISSUE}`])
     const panel = await region(PANEL)
     expect(panel).toContain('Questions · 0 open')
     expect(panel).toContain('1 answered')

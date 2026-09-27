@@ -165,8 +165,15 @@ describe('Création dans un Projet', () => {
 describe('Agent and model are shown', () => {
   it('says on the Session which agent runs it and which model it is on', async () => {
     // Two values and not one: the agent the Session was made with, which it keeps (D5-06), and
-    // the model it is on, which is one of those the agent published.
-    expect(await shows('opencode')).toBe(true)
+    // the model it is on, which is one of those the agent published. Both are the composer's
+    // since the head names the Project alone (issue #149): the box is addressed to the agent,
+    // and the menu beside it says the model.
+    const box = await browser.execute(
+      () =>
+        document.querySelector('[role="textbox"][contenteditable]')?.getAttribute('aria-label') ??
+        '',
+    )
+    expect(box).toContain('opencode')
     expect(await shows(MODELS[1].name)).toBe(true)
   })
 })

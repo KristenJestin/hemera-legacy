@@ -947,6 +947,13 @@ export const ENGINE_REQUESTS = {
     arguments: z.object({ sessionId: z.string(), proposalId: z.string() }),
     response: z.void(),
   },
+  'specs.acceptExisting': {
+    // The agent's proposal accepted when it points to a Spec that exists (issue #198): this
+    // `free` Session turns `define` on it, its writer when it has none and a reader otherwise.
+    // No Spec is created. A Session already `define` is refused.
+    arguments: z.object({ sessionId: z.string(), proposalId: z.string() }),
+    response: z.object({ session: sessionSchema, snapshot: specSnapshotSchema }),
+  },
   'specs.openSession': {
     // A new `define` Session on an existing Spec, from a list of Specs: the writer when the Spec
     // has none, a reader otherwise (D7-11). Its agent is chosen as `sessions.create` chooses it.

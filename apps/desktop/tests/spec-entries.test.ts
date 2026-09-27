@@ -281,6 +281,44 @@ describe('A free Session’s agent proposes a Spec', () => {
   })
 })
 
+describe('New Spec’s agent points to a Spec that exists (#198)', () => {
+  const pointer = entry(
+    'spec_proposal',
+    JSON.stringify({ title: 'Read text aloud', type: 'feature', specId: 'spec-4', key: 'ATL-4' }),
+    'pointer',
+  )
+  const existing = { key: 'ATL-4', title: 'Read text aloud', type: 'feature' as const }
+
+  test('it is read with the Spec it points to, waiting while the Session is free', () => {
+    expect(proposalOf(pointer, [pointer], null, null)).toEqual({
+      title: 'Read text aloud',
+      type: 'feature',
+      state: 'proposed',
+      existing: { specId: 'spec-4', key: 'ATL-4' },
+    })
+    expect(waitsForAnswer(pointer, [pointer], null, null)).toBe(true)
+  })
+
+  test('continued once the Session defines that Spec, and not otherwise', () => {
+    expect(proposalOf(pointer, [pointer], 'spec-4', existing)?.state).toBe('created')
+    expect(proposalOf(pointer, [pointer], 'spec-9', existing)?.state).toBe('declined')
+    expect(proposalOf({ ...pointer, state: 'declined' }, [pointer], null, null)?.state).toBe(
+      'declined',
+    )
+  })
+
+  test('a Spec created from a later proposal of the same title is not the one pointed to', () => {
+    const proposed = entry(
+      'spec_proposal',
+      JSON.stringify({ title: 'Read text aloud', type: 'feature' }),
+      'proposed',
+    )
+    const thread = [pointer, proposed]
+    expect(proposalOf(proposed, thread, 'spec-9', existing)?.state).toBe('created')
+    expect(proposalOf(pointer, thread, 'spec-9', existing)?.state).toBe('declined')
+  })
+})
+
 describe('A pending proposal and a pending question are pinned above the composer', () => {
   const proposal = entry(
     'spec_proposal',

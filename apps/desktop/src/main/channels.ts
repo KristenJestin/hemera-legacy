@@ -278,6 +278,7 @@ const RELAYED = [
   'specs.revisions',
   'specs.create',
   'specs.declineProposal',
+  'specs.acceptExisting',
   'specs.openSession',
   'specs.writeSection',
   'specs.writeStories',

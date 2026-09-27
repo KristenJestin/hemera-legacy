@@ -243,6 +243,12 @@ export interface SpecView {
    * frozen, and it offers no Rework — only the current revision of a Spec can be reworked.
    */
   replacedBy?: number | undefined
+  /**
+   * Whether the Spec is only provisional (issue #198): New Spec's request, shown before the agent
+   * proposed it and the user created it. It is saved nowhere and has no key yet; its title is the
+   * request's, and nothing of it is written.
+   */
+  provisional?: boolean | undefined
 }
 
 /**

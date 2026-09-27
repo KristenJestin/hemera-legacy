@@ -43,8 +43,16 @@ const answerSchema = z.object({
   text: z.string().optional(),
 })
 
-/** What the agent of a `free` Session proposed, through `spec_propose`. */
-const proposalSchema = z.object({ title: z.string(), type: specTypeSchema })
+/**
+ * What the agent of a `free` Session proposed, through `spec_propose`: a Spec to create, or one
+ * that exists, named by its id and its key (issue #198).
+ */
+const proposalSchema = z.object({
+  title: z.string(),
+  type: specTypeSchema,
+  specId: z.string().optional(),
+  key: z.string().optional(),
+})
 
 function parsed<S extends z.ZodType>(schema: S, payload: string): z.infer<S> | null {
   try {
@@ -195,6 +203,8 @@ export interface ProposalView {
   title: string
   type: SpecType
   state: ProposalState
+  /** The Spec it points to, when it is one that exists rather than one to create (#198). */
+  existing?: { specId: string; key: string } | undefined
 }
 
 /**
@@ -204,11 +214,15 @@ export interface ProposalView {
  */
 function createdFrom(thread: readonly SessionEntry[], spec: DefinedSpec): string | null {
   const proposals = thread.filter((entry) => entry.kind === 'spec_proposal')
-  const same = proposals.find((entry) => {
+  // A proposal that points to an existing Spec never created one.
+  const creating = proposals.filter(
+    (entry) => parsed(proposalSchema, entry.payload)?.specId === undefined,
+  )
+  const same = creating.find((entry) => {
     const said = parsed(proposalSchema, entry.payload)
     return said?.title === spec.title && said.type === spec.type
   })
-  return (same ?? proposals.at(-1))?.id ?? null
+  return (same ?? creating.at(-1))?.id ?? null
 }
 
 /**
@@ -227,11 +241,20 @@ export function proposalOf(
   const proposal = parsed(proposalSchema, entry.payload)
   if (proposal === null) return null
   const { title, type } = proposal
+  const existing =
+    proposal.specId === undefined || proposal.key === undefined
+      ? undefined
+      : { specId: proposal.specId, key: proposal.key }
+  const view = existing === undefined ? { title, type } : { title, type, existing }
   if (specId === null) {
-    return { title, type, state: entry.state === 'declined' ? 'declined' : 'proposed' }
+    return { ...view, state: entry.state === 'declined' ? 'declined' : 'proposed' }
+  }
+  // The Spec pointed to is continued once the Session defines it, whatever else it defines.
+  if (existing !== undefined) {
+    return { ...view, state: specId === existing.specId ? 'created' : 'declined' }
   }
   if (spec === null) return null
-  return { title, type, state: createdFrom(thread, spec) === entry.id ? 'created' : 'declined' }
+  return { ...view, state: createdFrom(thread, spec) === entry.id ? 'created' : 'declined' }
 }
 
 /** What the engine names a proposal by: its entry's correlation, without the prefix. */

@@ -145,7 +145,13 @@ import {
   subscribeToSessions,
   writeMessage,
 } from './sessions-store.ts'
-import { closeSpec, forgetSpecRefusal, listenToSpecs, openSpec } from './spec-store.ts'
+import {
+  closeSpec,
+  forgetSpecRefusal,
+  holdProvisionalSpec,
+  listenToSpecs,
+  openSpec,
+} from './spec-store.ts'
 import {
   closeJournal,
   filterJournal,
@@ -1361,8 +1367,9 @@ export function Application() {
           await openSession(made.id)
           // The turn is watched in the Session, which is where the window just went, and the Home
           // does not wait for it: a first answer can take a minute.
-          // With what it was sent for: New Spec has the engine create the Spec before the agent
-          // is asked anything, and the panel opens once the Session reads `define` (issue #179).
+          // With what it was sent for: New Spec shows a provisional Spec at once, saved nowhere,
+          // and the Spec is the one the user accepts from the agent's proposal (issue #198).
+          if (intent === 'spec') holdProvisionalSpec(made.id, text)
           void say(made.id, text, intent)
           return null
         }}

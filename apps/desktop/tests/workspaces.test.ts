@@ -1033,6 +1033,71 @@ describe('Cleanup is refused while a service runs or Git refuses', () => {
   })
 })
 
+describe('Cleanup refuses a picked folder and a cleaned Workspace', () => {
+  it('refuses a folder the user picked, says so in the Journal, and removes nothing', async () => {
+    const picked = join(folder, 'spike')
+    mkdirSync(picked, { recursive: true })
+    writeFileSync(join(picked, 'notes.md'), 'mine\n')
+
+    const seen = await workspaceEngine(folder)(
+      Effect.gen(function* () {
+        const workspaces = yield* Workspaces
+        const sql = yield* SqliteClient
+        const project = yield* atlas(main, [API, FRONT])
+        const workspace = yield* workspaces.createOnFolder(project.id, picked, 'spike')
+        const refused = yield* Effect.flip(workspaces.cleanup(workspace.id))
+        const events = yield* sql<{ type: string; payload: string }>`
+          SELECT type, payload FROM domain_events WHERE type LIKE 'workspace.clean%'`
+        return { refused, events, after: yield* workspaces.one(workspace.id) }
+      }),
+    )
+
+    const reason = 'spike is a folder of yours: Hemera cleans up only the Workspaces it made'
+    expect(seen.refused).toBeInstanceOf(CleanupRefusedError)
+    expect(seen.refused.message).toBe(reason)
+    expect(seen.events).toEqual([
+      { type: 'workspace.cleanup_refused', payload: JSON.stringify({ reason }) },
+    ])
+    // The folder is the user's, and all of it is still there.
+    expect(readFileSync(join(picked, 'notes.md'), 'utf8')).toBe('mine\n')
+    expect(seen.after.state).toBe('ready')
+    expect(seen.after.cleanedAt).toBeNull()
+  })
+
+  it('refuses a Workspace already cleaned, says so in the Journal, and changes nothing', async () => {
+    const seen = await workspaceEngine(folder)(
+      Effect.gen(function* () {
+        const workspaces = yield* Workspaces
+        const sql = yield* SqliteClient
+        const project = yield* atlas(main, [API, FRONT])
+        const workspace = yield* prepared(project.id)
+        const cleaned = yield* workspaces.cleanup(workspace.id)
+        const refused = yield* Effect.flip(workspaces.cleanup(workspace.id))
+        const events = yield* sql<{ type: string; payload: string }>`
+          SELECT type, payload FROM domain_events WHERE type LIKE 'workspace.clean%'
+          ORDER BY sequence`
+        return { cleaned, refused, events, after: yield* workspaces.one(workspace.id) }
+      }),
+    )
+
+    const reason = 'hem-7-login-form is already cleaned up'
+    expect(seen.refused).toBeInstanceOf(CleanupRefusedError)
+    expect(seen.refused.message).toBe(reason)
+    expect(seen.events).toEqual([
+      { type: 'workspace.cleaned', payload: JSON.stringify({ path: seen.cleaned.path }) },
+      { type: 'workspace.cleanup_refused', payload: JSON.stringify({ reason }) },
+    ])
+    // The second cleanup touched nothing: the row is as the first one left it, and the branches
+    // the first one kept are still there.
+    expect(seen.after).toEqual(seen.cleaned)
+    for (const repository of ['api', 'front']) {
+      expect(
+        git(join(main, 'sources', repository), 'branch', '--list', 'atlas/HEM-7-login-form'),
+      ).toContain('atlas/HEM-7-login-form')
+    }
+  })
+})
+
 describe('A Workspace with a running build Session is not cleaned up', () => {
   it('names the build, removes nothing, and lets it go once the Session is archived', async () => {
     const seen = await workspaceEngine(folder)(

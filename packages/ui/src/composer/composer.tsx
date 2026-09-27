@@ -141,7 +141,8 @@ export interface ComposerProps {
    * What waits for the reader's answer, pinned above the box for as long as it waits (issue
    * #130): a proposal of the agent, a question it asked. The thread scrolls on under the agent's
    * words and would carry them out of sight; here they stay in reach, and once answered the page
-   * draws them back in the thread. Each grows into its room and folds away on `morph`.
+   * draws them back in the thread. Each grows into its room on `morph`, and leaves it at once: it
+   * leaves because the page draws it back in the thread in that same frame (issue #209).
    */
   pinned?: readonly Pinned[] | undefined
 }
@@ -366,7 +367,12 @@ export function Composer({
   return (
     <div className="flex flex-col gap-2">
       {/* Bounded, and scrolled on its own past that: however many wait, the thread keeps its
-          room above them and the box stays in reach under them. Empty, it takes no gap. */}
+          room above them and the box stays in reach under them. Empty, it takes no gap.
+
+          A card leaves with no exit (issue #209): what takes it away is its answer, and the page
+          draws it back in the thread in the same frame. Folding here while the thread had already
+          grown by it gave the thread its whole height and its room only frame by frame, so a
+          thread following its end jumped down by the card, then slid back as the fold ended. */}
       <section
         aria-label="Waiting for your answer"
         className="scroll-quiet flex max-h-pinned shrink-0 flex-col gap-2 overflow-y-auto empty:hidden"
@@ -378,7 +384,6 @@ export function Composer({
               className="shrink-0 overflow-hidden"
               initial={collapse}
               animate={expand}
-              exit={collapse}
               transition={growing}
             >
               {one.content}

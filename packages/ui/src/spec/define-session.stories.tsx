@@ -421,9 +421,8 @@ export const MidPlan: Story = {
 }
 
 /**
- * Unfolded before it can be marked ready (issue #205): no `Mark ready`, and one quiet line of what
- * is left, the whole list in its tooltip; the tasks, not written yet, in the column under
- * Decompose.
+ * Unfolded before it can be marked ready (issues #205, #209): no `Mark ready`, and no line of
+ * what is left; the tasks, not written yet, in the column under Decompose.
  */
 export const MidPlanNotReadyYet: Story = {
   play: async ({ canvasElement }) => {
@@ -431,8 +430,7 @@ export const MidPlanNotReadyYet: Story = {
     const canvas = within(canvasElement)
     await expect(canvas.queryByText(/^Plan ·/)).toBeNull()
     await expect(canvas.queryByRole('button', { name: 'Mark ready' })).toBeNull()
-    const left = canvas.getByText('4 things left before ready')
-    await expect(left.getAttribute('title')).toMatch(/the tasks/)
+    await expect(canvas.queryByText(/left before ready/)).toBeNull()
     await expect(canvas.queryByRole('alert')).toBeNull()
     const column = canvas.getByRole('region', { name: 'Contents of ATL-7' })
     await expect(within(column).getByRole('heading', { name: /^Tasks · 0/ })).toBeVisible()
@@ -515,7 +513,7 @@ export const GateFullMarkedReady: Story = {
 
 /**
  * The last blocking question: while it is open, `Mark ready` is not offered and the footer says
- * the one thing left (issue #205); answered in the chat, `Mark ready` arrives, and marks the Spec
+ * nothing (issues #205, #209); answered in the chat, `Mark ready` arrives, and marks the Spec
  * ready.
  */
 export const LastQuestionAnswered: Story = {
@@ -524,10 +522,7 @@ export const LastQuestionAnswered: Story = {
     await unfold(canvasElement)
     const canvas = within(canvasElement)
     await expect(canvas.queryByRole('button', { name: 'Mark ready' })).toBeNull()
-    await expect(canvas.getByText('1 thing left before ready')).toHaveAttribute(
-      'title',
-      'Still to do:\nthe credit-note question',
-    )
+    await expect(canvas.queryByText(/left before ready/)).toBeNull()
     await userEvent.click(canvas.getByRole('button', { name: /Other/ }))
     await userEvent.type(
       await canvas.findByRole('textbox', { name: 'Other' }),

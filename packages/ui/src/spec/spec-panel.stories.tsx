@@ -104,6 +104,20 @@ function isStuck(canvasElement: HTMLElement, phase: string): boolean {
   return Math.abs(band.getBoundingClientRect().top - column.top) < 1
 }
 
+/**
+ * How far an element is drawn from where it is laid out, in pixels, off its computed transform:
+ * the translation of its matrix, which a scale about its centre leaves at nothing.
+ */
+function translationOf(element: HTMLElement): number[] {
+  const drawn = getComputedStyle(element).transform
+  if (drawn === 'none') return [0, 0]
+  const values = drawn
+    .slice(drawn.indexOf('(') + 1, -1)
+    .split(',')
+    .map(Number)
+  return drawn.startsWith('matrix3d') ? [values[12]!, values[13]!] : [values[4]!, values[5]!]
+}
+
 /** Resolves on the next frame, once whatever was asked has been drawn. */
 function nextFrame(): Promise<void> {
   return new Promise((resolve) => requestAnimationFrame(() => resolve()))
@@ -730,6 +744,36 @@ export const MarkReadyRefused: Story = {
     )
     await expect(canvas.getByRole('img', { name: 'Draft' })).toBeVisible()
     await expect(markReadyOf(canvasElement)).toBeVisible()
+  },
+}
+
+/**
+ * The refusal coming in beside `Mark ready` does not carry it (issue #183): the footer makes room
+ * for the words and the button is where the footer puts it. A button used to measure where it had
+ * been whenever it was drawn again and play the difference, so a sibling arriving made it jump
+ * back to its old place and slide. Pressed, it is drawn around its centre and never moved.
+ */
+export const MarkReadyStaysPut: Story = {
+  play: async ({ canvasElement }) => {
+    const button = markReadyOf(canvasElement)
+    const moves: number[][] = []
+    let watching = true
+    const watch = (): void => {
+      moves.push(translationOf(button))
+      if (watching) requestAnimationFrame(watch)
+    }
+    watch()
+    await userEvent.click(button)
+    await expect(within(footOf(canvasElement, 'ready')!).getByRole('alert')).toBeVisible()
+    for (const _ of Array.from({ length: 30 })) {
+      // oxlint-disable-next-line no-await-in-loop -- the frames are waited for one after the other
+      await nextFrame()
+    }
+    watching = false
+    await expect(
+      moves.filter(([x, y]) => Math.abs(x!) > 0.01 || Math.abs(y!) > 0.01),
+      '`Mark ready` was carried from where it had been',
+    ).toEqual([])
   },
 }
 

@@ -11,7 +11,6 @@ import {
   HemeraToolCall,
   type HemeraToolStatus,
   MessageGroup,
-  MissionBrief,
   PermissionRequest,
   SpecQuestion,
   StoppedTurn,
@@ -48,7 +47,7 @@ import {
 } from './agent-tool-payloads.ts'
 import {
   type DefinedSpec,
-  briefOf,
+  drawnInThread,
   proposalIdOf,
   proposalOf,
   questionAnchor,
@@ -547,11 +546,9 @@ export function drawEntry(entry: SessionEntry, context: AgentContext): ReactNode
     )
   }
 
-  // The brief a `define` turn rode on: Hemera's line, folded, never a message of yours (D7-09).
-  if (entry.kind === 'mission_brief') {
-    const { title, detail, brief } = briefOf(entry)
-    return <MissionBrief title={title} detail={detail} brief={brief} />
-  }
+  // The brief a `define` turn rode on is listed in the Session details' Context tab, and draws no
+  // row here (issue #205); an answer is drawn by its question's card, where it was given (#199).
+  if (!drawnInThread(entry)) return null
 
   // A question of the Spec, asked here and answered here (D7-01). Once answered it stays as it was
   // asked, the choice made marked in it (issue #199).
@@ -570,10 +567,6 @@ export function drawEntry(entry: SessionEntry, context: AgentContext): ReactNode
       </div>
     )
   }
-
-  // The answer is drawn by the question's card, where it was given (issue #199): the thread draws
-  // nothing more for it.
-  if (entry.kind === 'spec_answer') return null
 
   // The Spec the agent of a `free` Session proposed, which `Create` accepts (D7-07), or which
   // Hemera created at once in a Session New Spec started (issue #205).

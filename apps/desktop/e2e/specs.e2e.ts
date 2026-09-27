@@ -264,15 +264,22 @@ describe('The Session row never scrolls sideways', () => {
 })
 
 describe('The brief is part of the turn, never a human message', () => {
-  it('folds a mission brief titled with the phase in focus above the answer', async () => {
+  it('hands the mission brief with the turn, and draws no row of it in the thread', async () => {
     await write(DEFINING)
     await press('Send')
-    await awaits('What the agent was told · Shape')
     await awaits(ANSWERS[1])
 
-    // The sentence was written once, as the user's; the brief is Hemera's, and folded.
+    // The sentence was written once, as the user's; the brief is Hemera's, kept in the thread's
+    // entries for the Context tab, and drawn nowhere in the thread (issue #205).
     expect(await timesInThread(DEFINING)).toBe(1)
+    expect(await region(THREAD)).not.toContain('What the agent was told')
     expect(await region(THREAD)).not.toContain('# The Spec')
+    const { id } = await sessionOf(ASKED)
+    const briefs = await browser.execute(async (sessionId: string) => {
+      const read = await window.hemera.invoke('sessions.read', { sessionId })
+      return read.entries.filter((entry) => entry.kind === 'mission_brief').length
+    }, id)
+    expect(briefs).toBeGreaterThan(0)
   })
 })
 

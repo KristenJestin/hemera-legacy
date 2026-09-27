@@ -3,8 +3,16 @@ import type { ReactNode } from 'react'
 import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
 
 import type { SpecAnswer, SpecQuestionView } from '../../spec/model.ts'
+import { AnswerEcho, AnswerFolded, AnswerNote } from './picked-answers.tsx'
 import { CardFrame, CardInline, CardLettered } from './question-cards.tsx'
-import { CHOSE_MONTHLY, FILE_NAME, OWN_WORDS, SPLIT, TYPED_WORDS } from './question-fixtures.ts'
+import {
+  CHOSE_CLIENT,
+  CHOSE_MONTHLY,
+  FILE_NAME,
+  OWN_WORDS,
+  SPLIT,
+  TYPED_WORDS,
+} from './question-fixtures.ts'
 
 /**
  * The question card and a picked answer, in the app's theme (design exploration of 27 September
@@ -25,6 +33,14 @@ import { CHOSE_MONTHLY, FILE_NAME, OWN_WORDS, SPLIT, TYPED_WORDS } from './quest
  *   always open in the rim; answered, the card folds to one line.
  *
  * Every card is played by the hand: pressing a choice, or giving an answer of your own, answers.
+ *
+ * Answers · three ways a picked answer shows in the thread, each read as a choice made with a
+ * press and not as a typed message: the recommended choice, another one, and the reader's own
+ * words.
+ *
+ * - A · Folded card · the card itself folds to one line where it was asked, the row checked.
+ * - B · Quiet row · `You chose B · One CSV per month`, on the reader's side, with no surface.
+ * - C · Echo · a small frame on the reader's side echoing the card, the chosen row in its body.
  */
 
 type CardVariant = 'frame' | 'lettered' | 'inline'
@@ -308,4 +324,107 @@ export const CardCOwnAnswer: Story = {
   name: 'Card C · Inline · 7 answering in own words',
   args: { variant: 'inline' },
   play: async ({ canvasElement, args }) => answerInOwnWords(canvasElement, args.onAnswer!, null),
+}
+
+// ---------------------------------------------------------------------------------------------
+// Answers
+
+const ANSWERS = { folded: AnswerFolded, note: AnswerNote, echo: AnswerEcho }
+
+/** An answer drawn at the thread's width, on whichever side it says it belongs. */
+function answerStory(variant: keyof typeof ANSWERS, answer: SpecAnswer): Story {
+  const Drawn = ANSWERS[variant]
+  return {
+    parameters: { controls: { disable: true } },
+    render: () => (
+      <div className="flex w-full max-w-3xl flex-col">
+        <Drawn question={SPLIT} answer={answer} at="14:07" />
+      </div>
+    ),
+  }
+}
+
+/** The answer says who chose, what, and for which question, to whatever reads the page. */
+async function isPicked(canvasElement: HTMLElement, said: RegExp): Promise<void> {
+  const canvas = within(canvasElement)
+  const answer = canvas.getByRole('group', { name: /^You answered «How should the export/ })
+  await expect(answer).toBeVisible()
+  await expect(answer).toHaveAccessibleName(said)
+  // A choice made with a press, not a message: nothing of it is a bubble to edit or a control.
+  await expect(canvas.queryByRole('button')).toBeNull()
+}
+
+/** A · Folded card: the card folded to one line, the chosen row checked. */
+export const AnswerAChosen: Story = {
+  ...answerStory('folded', CHOSE_MONTHLY),
+  name: 'Answer A · Folded card · 1 chosen',
+  play: async ({ canvasElement }) => {
+    await isPicked(canvasElement, /B, One CSV per month$/)
+    await expect(within(canvasElement).getByText('You chose')).toBeVisible()
+  },
+}
+
+/** A · Folded card, a choice the agent did not recommend. */
+export const AnswerAOther: Story = {
+  ...answerStory('folded', CHOSE_CLIENT),
+  name: 'Answer A · Folded card · 2 another choice',
+  play: async ({ canvasElement }) => isPicked(canvasElement, /C, One CSV per client$/),
+}
+
+/** A · Folded card, the reader's own words in the line. */
+export const AnswerAOwn: Story = {
+  ...answerStory('folded', { text: OWN_WORDS }),
+  name: 'Answer A · Folded card · 3 own words',
+  play: async ({ canvasElement }) => isPicked(canvasElement, /in your own words: One per month/),
+}
+
+/** B · Quiet row: `You chose B · One CSV per month`, on the reader's side. */
+export const AnswerBChosen: Story = {
+  ...answerStory('note', CHOSE_MONTHLY),
+  name: 'Answer B · Quiet row · 1 chosen',
+  play: async ({ canvasElement }) => {
+    await isPicked(canvasElement, /B, One CSV per month$/)
+    await expect(within(canvasElement).getByText('B · One CSV per month')).toBeVisible()
+  },
+}
+
+/** B · Quiet row, a choice the agent did not recommend. */
+export const AnswerBOther: Story = {
+  ...answerStory('note', CHOSE_CLIENT),
+  name: 'Answer B · Quiet row · 2 another choice',
+  play: async ({ canvasElement }) => isPicked(canvasElement, /C, One CSV per client$/),
+}
+
+/** B · Quiet row, the reader's own words quoted under it. */
+export const AnswerBOwn: Story = {
+  ...answerStory('note', { text: OWN_WORDS }),
+  name: 'Answer B · Quiet row · 3 own words',
+  play: async ({ canvasElement }) => {
+    await isPicked(canvasElement, /in your own words: One per month/)
+    await expect(within(canvasElement).getByText(OWN_WORDS)).toBeVisible()
+  },
+}
+
+/** C · Echo: a small frame on the reader's side, the chosen row as the card drew it. */
+export const AnswerCChosen: Story = {
+  ...answerStory('echo', CHOSE_MONTHLY),
+  name: 'Answer C · Echo · 1 chosen',
+  play: async ({ canvasElement }) => {
+    await isPicked(canvasElement, /B, One CSV per month$/)
+    await expect(within(canvasElement).getByText('Your answer · Shape')).toBeVisible()
+  },
+}
+
+/** C · Echo, a choice the agent did not recommend. */
+export const AnswerCOther: Story = {
+  ...answerStory('echo', CHOSE_CLIENT),
+  name: 'Answer C · Echo · 2 another choice',
+  play: async ({ canvasElement }) => isPicked(canvasElement, /C, One CSV per client$/),
+}
+
+/** C · Echo, the reader's own words as its body. */
+export const AnswerCOwn: Story = {
+  ...answerStory('echo', { text: OWN_WORDS }),
+  name: 'Answer C · Echo · 3 own words',
+  play: async ({ canvasElement }) => isPicked(canvasElement, /in your own words: One per month/),
 }

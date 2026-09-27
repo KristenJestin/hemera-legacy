@@ -176,15 +176,15 @@ export const InText: Story = {
   render: () => (
     <div className="flex max-w-sm flex-col gap-3 text-sm">
       <p>
-        <Face state="writing" size="icon" seed={2} className="-my-1 mx-0.5 align-middle" /> Hemera is
-        writing the migration for the profile table, and will run the tests next.
+        <Face state="writing" size="icon" seed={2} className="-my-1 mx-0.5 align-middle" /> Hemera
+        is writing the migration for the profile table, and will run the tests next.
       </p>
       <p>Hemera is writing the migration for the profile table, and will run the tests next.</p>
       <p className="text-base">
-        <Face state="question" size="icon" seed={5} className="-my-1 mx-0.5 align-middle" /> Hemera has a
-        question before it goes on:{' '}
-        <Face state="permission" size="icon" seed={6} className="-my-1 mx-0.5 align-middle" /> may it write
-        outside the workspace?
+        <Face state="question" size="icon" seed={5} className="-my-1 mx-0.5 align-middle" /> Hemera
+        has a question before it goes on:{' '}
+        <Face state="permission" size="icon" seed={6} className="-my-1 mx-0.5 align-middle" /> may
+        it write outside the workspace?
       </p>
     </div>
   ),

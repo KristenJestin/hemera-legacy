@@ -13,6 +13,7 @@ import {
   SPLIT,
   TYPED_WORDS,
 } from './question-fixtures.ts'
+import { type AnswerVariant, type CardVariant, QuestionThread } from './question-thread.tsx'
 
 /**
  * The question card and a picked answer, in the app's theme (design exploration of 27 September
@@ -41,9 +42,10 @@ import {
  * - A · Folded card · the card itself folds to one line where it was asked, the row checked.
  * - B · Quiet row · `You chose B · One CSV per month`, on the reader's side, with no surface.
  * - C · Echo · a small frame on the reader's side echoing the card, the chosen row in its body.
+ *
+ * Thread · each card open in a thread, to be answered by the hand, and each answer where it lands
+ * once the recommended choice is pressed, the agent going on from it.
  */
-
-type CardVariant = 'frame' | 'lettered' | 'inline'
 
 const CARDS = { frame: CardFrame, lettered: CardLettered, inline: CardInline }
 
@@ -427,4 +429,91 @@ export const AnswerCOwn: Story = {
   ...answerStory('echo', { text: OWN_WORDS }),
   name: 'Answer C · Echo · 3 own words',
   play: async ({ canvasElement }) => isPicked(canvasElement, /in your own words: One per month/),
+}
+
+// ---------------------------------------------------------------------------------------------
+// In a thread
+
+/** A thread with the question card in it, and the answer where it lands once given. */
+function threadStory(card: CardVariant, answer?: AnswerVariant): Story {
+  return {
+    parameters: { controls: { disable: true } },
+    render: () => <QuestionThread card={card} answer={answer} />,
+  }
+}
+
+/** The thread, its card open and waiting on the reader. */
+async function isAsking(canvasElement: HTMLElement): Promise<void> {
+  const canvas = within(canvasElement)
+  const thread = canvas.getByRole('log', { name: 'Thread' })
+  await expect(within(thread).getByRole('region', { name: /^Question: / })).toBeVisible()
+  await expect(within(thread).getByRole('button', { name: /One CSV per month/ })).toBeVisible()
+}
+
+/** The recommended choice pressed in the thread, and the agent going on from it. */
+async function answerInThread(canvasElement: HTMLElement): Promise<void> {
+  const canvas = within(canvasElement)
+  await isAsking(canvasElement)
+  await userEvent.click(canvas.getByRole('button', { name: /One CSV per month/ }))
+  await waitFor(() => expect(canvas.getByText(/^Noted:/)).toBeVisible())
+  await waitFor(() => expect(canvas.queryByRole('button')).toBeNull())
+}
+
+/** The picked answer drawn apart: the card has given way to it. */
+async function answeredApart(canvasElement: HTMLElement): Promise<void> {
+  await answerInThread(canvasElement)
+  const canvas = within(canvasElement)
+  await waitFor(() => expect(canvas.queryByRole('region', { name: /^Question: / })).toBeNull())
+  await expect(
+    canvas.getByRole('group', { name: /^You answered «How should the export/ }),
+  ).toBeVisible()
+}
+
+/** A · Frame in a thread, open: press a choice to see it answer in place. */
+export const ThreadCardA: Story = {
+  ...threadStory('frame'),
+  name: 'Thread · 1 card A · Frame',
+  play: async ({ canvasElement }) => isAsking(canvasElement),
+}
+
+/** B · Lettered in a thread, open. */
+export const ThreadCardB: Story = {
+  ...threadStory('lettered'),
+  name: 'Thread · 2 card B · Lettered',
+  play: async ({ canvasElement }) => isAsking(canvasElement),
+}
+
+/** C · Inline in a thread, open. */
+export const ThreadCardC: Story = {
+  ...threadStory('inline'),
+  name: 'Thread · 3 card C · Inline',
+  play: async ({ canvasElement }) => isAsking(canvasElement),
+}
+
+/** A · Frame answered in the thread: the card answers in place, and the agent goes on. */
+export const ThreadCardAAnswered: Story = {
+  ...threadStory('frame'),
+  name: 'Thread · 4 card A answered in place',
+  play: async ({ canvasElement }) => answerInThread(canvasElement),
+}
+
+/** Answer A · Folded card in the thread: the card folds to its line where it was asked. */
+export const ThreadAnswerA: Story = {
+  ...threadStory('frame', 'folded'),
+  name: 'Thread · 5 answer A · Folded card',
+  play: async ({ canvasElement }) => answeredApart(canvasElement),
+}
+
+/** Answer B · Quiet row in the thread: `You chose B`, on the reader's side. */
+export const ThreadAnswerB: Story = {
+  ...threadStory('frame', 'note'),
+  name: 'Thread · 6 answer B · Quiet row',
+  play: async ({ canvasElement }) => answeredApart(canvasElement),
+}
+
+/** Answer C · Echo in the thread: a small frame on the reader's side. */
+export const ThreadAnswerC: Story = {
+  ...threadStory('frame', 'echo'),
+  name: 'Thread · 7 answer C · Echo',
+  play: async ({ canvasElement }) => answeredApart(canvasElement),
 }

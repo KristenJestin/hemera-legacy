@@ -11,10 +11,11 @@ import type {
   StopReason,
 } from '@hemera/ipc'
 import { TOOL_LABELS, hemeraToolNamed } from '@hemera/core'
-import type { ActivityState, SpecTarget } from '@hemera/ui'
+import type { ActivityState, AgentListing, SpecTarget } from '@hemera/ui'
 
 import { effortStage, effortToLand, modelStage } from './agent-options.ts'
 import { commandRunOf, specWriteOf } from './agent-tool-payloads.ts'
+import { patiently } from './patiently.ts'
 
 /**
  * What the agents of this window are doing (design D5-12, D5-13, D5-17).
@@ -129,6 +130,12 @@ export interface AgentState {
   offerings: ReadonlyMap<string, AgentOffering>
   /** What this machine has, as `agents.list` and `agents.check` answered. */
   agents: readonly AgentAvailability[]
+  /**
+   * Where that list stands: `looking` until the engine has answered it once, `failed` when it
+   * did not answer even asked again, `listed` from its first answer on. An empty `agents` is not an
+   * answer: it is what the window holds before there is one.
+   */
+  listing: AgentListing
   /** Whether that list is the one a registry answered, which is the settings' own question. */
   checked: boolean
   /** What the last act was refused with, in the engine's own words, or null. */
@@ -140,6 +147,7 @@ const EMPTY: AgentState = {
   options: new Map(),
   offerings: new Map(),
   agents: [],
+  listing: 'looking',
   checked: false,
   refusal: null,
 }
@@ -445,6 +453,11 @@ export function listenToAgents(): () => void {
       announced.delete(event.sessionId)
       changed(event.sessionId, { running: false })
     }
+    // What the machine has changed since it was listed — a version that answered late, an agent
+    // updated — and the list is read again rather than patched. Checked again once the Agents
+    // section has asked the registries: a plain list answers no published version, and reading
+    // one would take away what that section shows.
+    if (event.event === 'agents.changed') void (state.checked ? checkAgents() : loadAgents())
   })
   return () => {
     listening = false
@@ -687,13 +700,23 @@ export async function resume(sessionId: string): Promise<ResumeState | null> {
   }
 }
 
-/** What this machine has, read without leaving it: which command exists, and which version. */
+/**
+ * What this machine has, read without leaving it: which command exists, and which version.
+ *
+ * Asked again when it fails (`patiently`): the window asks it once at start, while a Session's
+ * agent may be starting beside it, and a list that failed then was a menu left empty for as long
+ * as the window stayed open. Until the first answer the list is `looking`, and a list that never
+ * answered is `failed` — for the menu to say so, and to offer this again. A list already on
+ * screen stays there when reading it again fails.
+ */
 export async function loadAgents(): Promise<void> {
+  if (state.listing === 'failed') replace({ ...state, listing: 'looking' })
   try {
-    const answered = await window.hemera.invoke('agents.list', {})
-    replace({ ...state, agents: answered.agents, refusal: null })
+    const answered = await patiently(async () => await window.hemera.invoke('agents.list', {}))
+    replace({ ...state, agents: answered.agents, listing: 'listed', refusal: null })
   } catch (cause) {
-    replace({ ...state, refusal: message(cause) })
+    const listing = state.listing === 'listed' ? 'listed' : 'failed'
+    replace({ ...state, listing, refusal: message(cause) })
   }
 }
 
@@ -704,7 +727,7 @@ export async function loadAgents(): Promise<void> {
 export async function checkAgents(): Promise<void> {
   try {
     const answered = await window.hemera.invoke('agents.check', {})
-    replace({ ...state, agents: answered.agents, checked: true, refusal: null })
+    replace({ ...state, agents: answered.agents, listing: 'listed', checked: true, refusal: null })
   } catch (cause) {
     replace({ ...state, refusal: message(cause) })
   }

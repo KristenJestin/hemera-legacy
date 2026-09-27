@@ -336,6 +336,7 @@ export {
   ModeSelector,
   UsageMeter,
   type AgentChoice,
+  type AgentListing,
   type AgentModelMenuProps,
   type BlockedBannerProps,
   type EffortChoice,

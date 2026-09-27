@@ -1052,11 +1052,17 @@ export const ENGINE_EVENTS = {
     specId: z.string(),
     projectId: z.string(),
   }),
+  /**
+   * What this machine has of the agents changed since the window last listed them: a version
+   * that answered after the list went without it, or an agent updated since. About the machine
+   * and nothing else, so it carries nothing: the window asks `agents.list` again.
+   */
+  agents_changed: z.object({ event: z.literal('agents.changed') }),
 } as const
 
 export type EngineEventName = keyof typeof ENGINE_EVENTS
 
-/** One pushed message, of whichever of the ten names it carries. */
+/** One pushed message, of whichever of the eleven names it carries. */
 export type EngineEvent = z.infer<(typeof ENGINE_EVENTS)[EngineEventName]>
 
 /**

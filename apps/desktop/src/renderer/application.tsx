@@ -100,6 +100,7 @@ import {
   subscribeToTools,
   toolsSnapshot,
 } from './tools-store.ts'
+import { acceptSetup, acceptSetupBatch, declineSetup } from './setup-store.ts'
 import { lineOf, linesOf, whenOf } from './journal-lines.ts'
 import { repositoryLinesOf } from './project-lines.ts'
 import {
@@ -1344,6 +1345,9 @@ export function Application() {
           onAcceptProposal={async (proposalId) => await acceptProposal(open.id, proposalId)}
           onDeclineProposal={async (proposalId) => await declineProposal(open.id, proposalId)}
           onAddToCatalogue={addToCatalogue}
+          onAcceptSetup={async (proposalId) => await acceptSetup(open, proposalId)}
+          onAcceptSetupBatch={async (batchId) => await acceptSetupBatch(open, batchId)}
+          onDeclineSetup={async (proposalId) => await declineSetup(open, proposalId)}
         />
       )
     }

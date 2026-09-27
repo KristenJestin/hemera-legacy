@@ -12,6 +12,7 @@ import {
   type HemeraToolStatus,
   MessageGroup,
   PermissionRequest,
+  SetupProposal,
   SpecQuestion,
   StoppedTurn,
   ThoughtBlock,
@@ -41,6 +42,8 @@ import {
   hemeraPermissionOf,
   hemeraToolCallOf,
   reportedFailureOf,
+  setupProposalOf,
+  waitingInBatch,
   stoppedTurnOf,
   hemeraToolLabelOf,
   nativeSubjectOf,
@@ -340,6 +343,12 @@ export interface AgentContext {
   onDeclineProposal: (proposalId: string) => void
   /** Keeps a one-off run in the catalogue, which is the human's to do (D8-11). */
   onAddToCatalogue: (run: Run) => void
+  /** Applies a change to the Project's setup the agent proposed: the human's click (#218). */
+  onAcceptSetup: (proposalId: string) => void
+  /** Applies every change of a batch still waiting, in the order proposed (Decided 1 of #218). */
+  onAcceptSetupBatch: (batchId: string) => void
+  /** Leaves the setup as it is, and says so on the card. */
+  onDeclineSetup: (proposalId: string) => void
   /** What the Spec entries of the thread are drawn with. */
   spec: SpecContext
 }
@@ -662,6 +671,24 @@ export function drawEntry(entry: SessionEntry, context: AgentContext): ReactNode
         {...shown}
         onAccept={() => context.onAcceptProposal(proposalId)}
         onDecline={() => context.onDeclineProposal(proposalId)}
+      />
+    )
+  }
+
+  if (entry.kind === 'setup_proposal') {
+    // A change to the Project's setup the agent proposes, applied only when a human accepts it
+    // (#218): the decision comes back as this same entry in its outcome. The last card of a batch
+    // offers Accept all while more than one of its changes waits.
+    const drawn = setupProposalOf(entry)
+    if (drawn === null) return null
+    const { proposalId, batchId, ...shown } = drawn
+    return (
+      <SetupProposal
+        {...shown}
+        waiting={waitingInBatch(context.spec.thread, entry, drawn)}
+        onAccept={() => context.onAcceptSetup(proposalId)}
+        onDecline={() => context.onDeclineSetup(proposalId)}
+        onAcceptAll={() => context.onAcceptSetupBatch(batchId)}
       />
     )
   }

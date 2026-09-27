@@ -1,5 +1,17 @@
-import { COMMAND_TYPES, TOOL_LABELS, type ToolMark, hemeraToolNamed } from '@hemera/core'
-import { type CommandRun, type SessionEntry, sectionNameSchema } from '@hemera/ipc'
+import {
+  COMMAND_TYPES,
+  TOOL_LABELS,
+  type ToolMark,
+  hemeraToolNamed,
+  setupChangeDetails,
+  setupChangeTitle,
+} from '@hemera/core'
+import {
+  type CommandRun,
+  type SessionEntry,
+  sectionNameSchema,
+  setupProposalSchema,
+} from '@hemera/ipc'
 import type {
   CommandProposalState,
   CommandState,
@@ -9,6 +21,8 @@ import type {
   PortClaim,
   PortConflict,
   Readiness,
+  SetupProposalDetail,
+  SetupProposalState,
   SpecTarget,
   ToolKind,
   ToolSubject,
@@ -542,6 +556,52 @@ export function commandProposalOf(entry: SessionEntry): CommandProposalDrawn | n
   const read = readPayload(commandProposalPayloadSchema, entry.payload)
   if (read === null) return null
   return { ...read, folder: read.folder ?? '.' }
+}
+
+/** What `SetupProposal` needs, read off a `setup_proposal` entry (#218). */
+export interface SetupProposalDrawn {
+  /** What Accept and Decline name the proposal by. */
+  readonly proposalId: string
+  /** What Accept all names the changes proposed together by. */
+  readonly batchId: string
+  readonly title: string
+  readonly details: readonly SetupProposalDetail[]
+  readonly why: string
+  readonly state: SetupProposalState
+}
+
+/**
+ * `null` when the payload does not parse: the entry is left out rather than drawn from a guess.
+ * The title and the fields are said by the domain, as the Journal says them.
+ */
+export function setupProposalOf(entry: SessionEntry): SetupProposalDrawn | null {
+  const read = readPayload(setupProposalSchema, entry.payload)
+  if (read === null) return null
+  return {
+    proposalId: read.proposalId,
+    batchId: read.batchId,
+    title: setupChangeTitle(read.change),
+    details: setupChangeDetails(read.change),
+    why: read.why,
+    state: read.state,
+  }
+}
+
+/**
+ * How many changes of a batch still wait, told to the last card of that batch in the thread and
+ * to no other: the one that offers Accept all (Decided 1 of #218). Undefined for every other card.
+ */
+export function waitingInBatch(
+  thread: readonly SessionEntry[],
+  entry: SessionEntry,
+  drawn: SetupProposalDrawn,
+): number | undefined {
+  const batch = thread
+    .filter((one) => one.kind === 'setup_proposal')
+    .map((one) => ({ one, read: setupProposalOf(one) }))
+    .filter(({ read }) => read?.batchId === drawn.batchId)
+  if (batch.at(-1)?.one.id !== entry.id) return undefined
+  return batch.filter(({ read }) => read?.state === 'pending').length
 }
 
 /**

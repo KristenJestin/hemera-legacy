@@ -311,6 +311,12 @@ export interface SessionPageProps {
   onDeclineProposal: (proposalId: string) => Promise<string | null>
   /** Keeps a one-off run in the catalogue; answers the engine's refusal, or null (D8-11). */
   onAddToCatalogue: (run: CommandRun) => Promise<string | null>
+  /** Applies a change to the Project's setup the agent proposed; answers the refusal, or null. */
+  onAcceptSetup: (proposalId: string) => Promise<string | null>
+  /** Applies every change of a batch still waiting (#218); answers the refusal, or null. */
+  onAcceptSetupBatch: (batchId: string) => Promise<string | null>
+  /** Declines a proposed change; answers the refusal, or null. */
+  onDeclineSetup: (proposalId: string) => Promise<string | null>
 }
 
 export function SessionPage({
@@ -349,6 +355,9 @@ export function SessionPage({
   onAcceptProposal,
   onDeclineProposal,
   onAddToCatalogue,
+  onAcceptSetup,
+  onAcceptSetupBatch,
+  onDeclineSetup,
 }: SessionPageProps): ReactNode {
   const [value, setValue] = useState('')
   const [files, setFiles] = useState<string[]>([])
@@ -540,6 +549,9 @@ export function SessionPage({
       onAcceptProposal: (proposalId) => deciding(onAcceptProposal(proposalId)),
       onDeclineProposal: (proposalId) => deciding(onDeclineProposal(proposalId)),
       onAddToCatalogue: (run) => deciding(onAddToCatalogue(run)),
+      onAcceptSetup: (proposalId) => deciding(onAcceptSetup(proposalId)),
+      onAcceptSetupBatch: (batchId) => deciding(onAcceptSetupBatch(batchId)),
+      onDeclineSetup: (proposalId) => deciding(onDeclineSetup(proposalId)),
       spec: {
         thread,
         specId: session.specId,

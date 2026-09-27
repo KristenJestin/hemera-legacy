@@ -48,6 +48,7 @@ import {
   projectRepositories,
   projects,
   sessions,
+  specs,
   workspaceRepositories,
   workspaceSteps,
   workspaces,
@@ -723,6 +724,13 @@ export const workspacesLayer = Layer.effect(
               // What still waited on that folder has nothing left to wait for: its launches are
               // cancelled, saying the Workspace was removed, in this very transaction (D8-13).
               const ended = yield* endWaitingLaunches(transaction, row.id, { state: 'cancelled' })
+              // The Spec it was made for is set on no Workspace any more: its panel offers a new
+              // one, never `Start the build` in a folder that is gone (D8-12).
+              yield* transaction
+                .update(specs)
+                .set({ workspaceId: null })
+                .where(eq(specs.workspaceId, row.id))
+                .pipe(Effect.mapError(failed('freeing the Spec of the Workspace')))
               return {
                 result: undefined,
                 events: [

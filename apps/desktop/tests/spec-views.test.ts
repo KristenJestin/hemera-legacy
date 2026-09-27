@@ -730,7 +730,7 @@ describe('The Workspaces a build of a Spec may be started in', () => {
 
   test('the Workspace the Spec is set on comes beside the ones a build may use', () => {
     const read = panel({
-      workspace: { id: 'w-1', name: 'csv-invoice' },
+      workspace: { id: 'w-1', name: 'csv-invoice', state: 'failed' },
       workspaces: [
         { id: 'main', name: 'main' },
         { id: 'w-1', name: 'csv-invoice' },
@@ -738,6 +738,8 @@ describe('The Workspaces a build of a Spec may be started in', () => {
     })
 
     expect(specWorkspacesOf(read).workspace?.name).toBe('csv-invoice')
+    // Where it stands is what the panel offers from: a failed one is resumed, not started in.
+    expect(specWorkspacesOf(read).workspace?.state).toBe('failed')
     expect(specWorkspacesOf(read).workspaces.map((one) => one.id)).toEqual(['main', 'w-1'])
     // A Spec set on no Workspace has none to name: absent, and not a Workspace of no name.
     expect(specWorkspacesOf(panel()).workspace).toBeUndefined()

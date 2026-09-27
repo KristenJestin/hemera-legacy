@@ -32,6 +32,7 @@ import {
   type Spec,
   type SpecSnapshot,
   WORKSPACE_STATES,
+  type WorkspaceState,
   focusOf,
   renderSpecMarkdown,
 } from '@hemera/core'
@@ -294,13 +295,21 @@ export interface LaunchWorkspaceView {
 }
 
 /**
+ * The Workspace a Spec is set on, and where it stands: a failed one is resumed and a cleaned one
+ * replaced, rather than started in (D8-12).
+ */
+export interface SpecWorkspaceView extends LaunchWorkspaceView {
+  readonly state: WorkspaceState
+}
+
+/**
  * What the panel of a Spec is drawn from (D8-12, D8-13), read whole: the launch of its build and
  * where that build stands, the Workspace the Spec is set on, the ones a build of it may be
  * started in, and the step the launch is waiting on while its Workspace is prepared.
  */
 export interface SpecLaunchesView {
   readonly launch: LaunchView | null
-  readonly workspace: LaunchWorkspaceView | null
+  readonly workspace: SpecWorkspaceView | null
   readonly workspaces: LaunchWorkspaceView[]
   /** The preparation step running while it waits, as the Workspace names it (D8-05). */
   readonly step: string | null
@@ -938,7 +947,15 @@ export const launchesLayer = Layer.effect(
                     )
             return {
               launch,
-              workspace: worked === undefined ? null : { id: worked.id, name: worked.name },
+              workspace:
+                worked === undefined
+                  ? null
+                  : {
+                      id: worked.id,
+                      name: worked.name,
+                      // The column is checked against `WORKSPACE_STATES`; this is the narrowing.
+                      state: WORKSPACE_STATES.find((known) => known === worked.state) ?? 'ready',
+                    },
               // `main` first: the Workspace every Project has, then the ones made by hand.
               workspaces: [
                 ...offered.filter((each) => each.name === MAIN_WORKSPACE),

@@ -315,6 +315,24 @@ export async function pressIn(area: string, name: string): Promise<void> {
 }
 
 /**
+ * Answers the question asked in the thread with the option that says this.
+ *
+ * Not through `pressIn`: an option is lettered by Hemera (issue #134), so what the button says
+ * starts with its letter — `AThe issue date` — and a hand reads the option, not the letter.
+ */
+export async function answerWith(option: string): Promise<void> {
+  const pressed = await browser.execute((label: string) => {
+    const options = document.querySelectorAll('[id^="ask-"] [aria-label="Answers"] button')
+    const button = [...options].find((one) => (one.textContent ?? '').includes(label))
+    if (!(button instanceof HTMLButtonElement)) return false
+    button.click()
+    return true
+  }, option)
+  expect(pressed).toBe(true)
+  await browser.pause(300)
+}
+
+/**
  * Waits for a part of a Spec to be in its panel's column: every part is laid there one after the
  * other under the heading of its phase (issue #164), so there is nothing to pick for it to be read.
  */

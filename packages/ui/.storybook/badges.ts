@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process'
-import { existsSync } from 'node:fs'
+import { existsSync, realpathSync } from 'node:fs'
 import { dirname, relative, resolve } from 'node:path'
 
 import type { Indexer } from 'storybook/internal/types'
@@ -71,9 +71,15 @@ export function compareWithBase(directory: string, base: string): Comparison | n
   }
 }
 
-/** A file as Git names it: relative to the repository's root, with forward slashes. */
+/**
+ * A file as Git names it: relative to the repository's root, with forward slashes.
+ *
+ * Both sides are resolved to the path the file system itself keeps first: Git answers with the
+ * long form of a folder, and the path Storybook hands over may be a short Windows name
+ * (`RUNNER~1`) or go through a link, which `relative` alone would read as another folder.
+ */
 function asGitPath(root: string, file: string): string {
-  return relative(root, file).replaceAll('\\', '/')
+  return relative(realpathSync.native(root), realpathSync.native(file)).replaceAll('\\', '/')
 }
 
 /**

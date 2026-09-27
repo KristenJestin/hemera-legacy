@@ -142,7 +142,7 @@ export const Started: Story = {
 export const Failed: Story = {
   args: {
     workspace: MAIN,
-    launch: { state: 'failed', cause: 'the agent SDK is not installed' },
+    launch: { state: 'failed', stage: 'agent', cause: 'the agent SDK is not installed' },
   },
   play: async ({ canvasElement, args }) => {
     const canvas = within(canvasElement)
@@ -155,13 +155,78 @@ export const Failed: Story = {
   },
 }
 
+/**
+ * Failed by the preparation of its Workspace, before any agent: there is no Session to start
+ * again, so the Workspace ready once more is started as a new build, with no `Retry`.
+ */
+export const PreparationFailed: Story = {
+  args: {
+    workspace: MAIN,
+    launch: { state: 'failed', stage: 'preparation', cause: 'fatal: invalid reference: main' },
+  },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement)
+    await expect(canvas.getByRole('alert')).toHaveTextContent(
+      'The Workspace could not be prepared: fatal: invalid reference: main',
+    )
+    await expect(canvas.queryByText(/The agent did not start/)).toBeNull()
+    await expect(canvas.queryByRole('button', { name: 'Retry' })).toBeNull()
+    await userEvent.click(canvas.getByRole('button', { name: 'Start the build' }))
+    await expect(args.onStart).toHaveBeenCalled()
+  },
+}
+
+/** Refused before any Session was made: said, and asked for again as a new build. */
+export const StartRefused: Story = {
+  args: {
+    workspace: MAIN,
+    launch: { state: 'failed', stage: 'start', cause: 'no agent has been chosen' },
+  },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement)
+    await expect(canvas.getByRole('alert')).toHaveTextContent(
+      'The build did not start: no agent has been chosen',
+    )
+    await expect(canvas.queryByRole('button', { name: 'Retry' })).toBeNull()
+    await userEvent.click(canvas.getByRole('button', { name: 'Start the build' }))
+    await expect(args.onStart).toHaveBeenCalled()
+  },
+}
+
 /** Taken back by a Rework: said, and nothing offered — the Spec is a draft again. */
 export const Cancelled: Story = {
-  args: { workspace: MAIN, launch: { state: 'cancelled' } },
+  args: { workspace: MAIN, launch: { state: 'cancelled', reason: 'rework', again: false } },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     await expect(canvas.getByText('Cancelled by the Rework')).toBeVisible()
     await expect(canvas.queryAllByRole('button')).toEqual([])
+  },
+}
+
+/**
+ * Taken back by a Rework, and the new revision made ready since: the reason is still said, and the
+ * build is asked for again by hand, from the actions of a Spec with no launch.
+ */
+export const CancelledThenReady: Story = {
+  args: { workspace: MAIN, launch: { state: 'cancelled', reason: 'rework', again: true } },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement)
+    await expect(canvas.getByText('Cancelled by the Rework')).toBeVisible()
+    await userEvent.click(canvas.getByRole('button', { name: 'Start the build' }))
+    await expect(args.onStart).toHaveBeenCalled()
+  },
+}
+
+/** Cancelled by the cleanup of its Workspace: said as that, and a new Workspace is offered. */
+export const WorkspaceRemoved: Story = {
+  args: { launch: { state: 'cancelled', reason: 'removed', again: true } },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement)
+    await expect(canvas.getByText('The Workspace was removed')).toBeVisible()
+    await expect(canvas.queryByText('Cancelled by the Rework')).toBeNull()
+    await expect(canvas.getByRole('button', { name: 'Use an existing Workspace' })).toBeVisible()
+    await userEvent.click(canvas.getByRole('button', { name: 'Prepare and start the build' }))
+    await expect(args.onPrepareAndStart).toHaveBeenCalled()
   },
 }
 

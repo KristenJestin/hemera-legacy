@@ -391,6 +391,7 @@ export function createFace(options: FaceOptions): FacePlayer {
     run: Run | null,
     faded: readonly FaceLayer[],
     name: ChangeName | null,
+    settling = 0,
   ): Segment => {
     const expression = EXPRESSIONS[state]
     const { blink, aside, motion } = expression
@@ -434,7 +435,9 @@ export function createFace(options: FaceOptions): FacePlayer {
         const drawn = repertoire[Math.floor(random() * repertoire.length)] ?? 'hmm'
         const piece = FLOURISHES[drawn]
         const wait = between(random(), piece.every[0], piece.every[1])
-        const start = (previous?.end ?? t0) + (tuning.loop ? 0.7 : wait * tuning.rest)
+        // The first one waits for the change into the state to be over: a flourish that began
+        // under a change would move what the change is still taking somewhere.
+        const start = (previous?.end ?? t0 + settling) + (tuning.loop ? 0.7 : wait * tuning.rest)
         const length = between(random(), piece.length[0], piece.length[1])
         return { start, end: start + length, name: drawn, side: random() < 0.5 ? -1 : 1 }
       }),
@@ -808,7 +811,7 @@ export function createFace(options: FaceOptions): FacePlayer {
         down + hold + up + STEP,
       )
       const { blink, windows } = blinkFor(name, length, start, EXPRESSIONS[state], chance)
-      const draft = begin(state, at, seed, null, [], name)
+      const draft = begin(state, at, seed, null, [], name, length)
       const run: Run = {
         name,
         length,

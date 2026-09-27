@@ -304,7 +304,8 @@ export function SpecPanel({
   // once the whole gate passes — the agent's attestation on the content the Spec is at now among
   // it (D7-10) — and stays quiet before (issue #150): an attestation given with a phase open or a
   // blocking question raised is a press the engine refuses.
-  const markable = spec.status === 'draft' && spec.replacedBy === undefined
+  const markable =
+    spec.status === 'draft' && spec.replacedBy === undefined && spec.provisional !== true
   const confirmed = spec.readiness.checks.every((check) => check.passed)
   const foot: FootContent | null =
     buildable && build !== undefined
@@ -323,10 +324,12 @@ export function SpecPanel({
   // The small frame leaves at once, and comes back a beat after the panel started leaving.
   const frameMoves = folded ? onTheBeat(fade) : fade
   const away = slide('stage').enter
+  // A provisional Spec has no key to be named by (issue #198).
+  const named = spec.provisional === true ? 'Provisional Spec' : `Spec ${spec.key}`
 
   return (
     <>
-      <section ref={dock} aria-label={`Spec ${spec.key}`} className={DOCK}>
+      <section ref={dock} aria-label={named} className={DOCK}>
         <div aria-hidden="true" className="spec-slot shrink-0" />
         <div className={CLIP}>
           {/* Mounted whether the Spec is folded or not, so that an unfold starts moving on the
@@ -352,7 +355,16 @@ export function SpecPanel({
                 onPickRevision={onPickRevision}
                 onRework={() => setReworking(true)}
                 onFold={() => fold(true, true)}
+                provisional={spec.provisional}
               />
+              {spec.provisional === true && (
+                // Said plainly, where the line of an older revision goes: nothing of it is saved
+                // until the user creates it from the agent's proposal (issue #198).
+                <p className={NOW}>
+                  Not created yet. The agent checks the Project's Specs first, then proposes this
+                  one or points to one that exists.
+                </p>
+              )}
               {spec.replacedBy !== undefined && (
                 // The one line under the head, and only for an older revision: where the phases
                 // stand is their headings' to say, and whether it is done the footer's (#150).
@@ -384,7 +396,7 @@ export function SpecPanel({
         >
           <div className="pointer-events-auto">
             <SpecFrame
-              specKey={spec.key}
+              specKey={spec.provisional === true ? 'the provisional Spec' : spec.key}
               groups={groups}
               writing={spec.focus}
               onUnfold={(phase) => fold(false, true, phase)}

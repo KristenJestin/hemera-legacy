@@ -2,7 +2,29 @@ import { join } from 'node:path'
 
 import { storybookTest } from '@storybook/addon-vitest/vitest-plugin'
 import { playwright } from '@vitest/browser-playwright'
-import { defineConfig } from 'vitest/config'
+import { type Plugin, defineConfig } from 'vitest/config'
+
+/**
+ * The prebundled dependencies handed to a page without their source maps.
+ *
+ * The dev server writes a module's map into the module, as base64, every time a page asks for it,
+ * and every story file is a page that asks for every dependency again: the icons alone carry a
+ * map of nine megabytes. With both themes run at once that work held the runner's one thread for
+ * up to seventeen seconds at a time, and everything a story waits on from the runner — a module,
+ * a font, the preference for less movement — waited behind it, past the time a test is given. A
+ * stack that goes through a dependency reads its bundled code instead of its sources, which is
+ * all this costs.
+ */
+const withoutDependencyMaps: Plugin = {
+  name: 'hemera:without-dependency-maps',
+  apply: 'serve',
+  transform(code, id) {
+    const { environment } = this
+    if (environment.mode !== 'dev') return null
+    if (environment.depsOptimizer?.isOptimizedDepFile(id) !== true) return null
+    return { code, map: { mappings: '' } }
+  },
+}
 
 /**
  * The catalogue run as tests in a real Chromium, once per theme (design D1-06).
@@ -19,6 +41,7 @@ export function catalogue(theme: 'light' | 'dark') {
         configDir: join(import.meta.dirname, '.storybook'),
         initialGlobals: { theme },
       }),
+      withoutDependencyMaps,
     ],
     // Declared rather than discovered: a dependency the optimizer meets for the first time
     // mid-run makes it reload the page under the tests, and a run that reloads is a run that

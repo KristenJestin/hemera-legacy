@@ -5,13 +5,7 @@ import {
   type SessionEntry,
   type SpecType,
 } from '@hemera/ipc'
-import type {
-  AnswerChoiceItem,
-  MissionBriefProps,
-  ProposalState,
-  SpecAnswer,
-  SpecQuestionView,
-} from '@hemera/ui'
+import type { MissionBriefProps, ProposalState, SpecAnswer, SpecQuestionView } from '@hemera/ui'
 import { z } from 'zod'
 
 /**
@@ -133,57 +127,20 @@ function answeredIn(questionId: string, thread: readonly SessionEntry[]): SpecAn
   return null
 }
 
-/** What an answer is drawn from: the question it answers, the choices made, the words typed. */
-export interface AnswerView {
-  question?: string | undefined
-  choices: AnswerChoiceItem[]
-  text?: string | undefined
-}
-
-/** The letter the question card gave the choice at `index`: A for the first (issue #134). */
-function letterOf(index: number): string {
-  return String.fromCodePoint(65 + index)
-}
-
 /**
- * What the reader chose, read off a `spec_answer` entry (issue #165): the question it answers and
- * the option pressed, lettered as the card lettered it, or `Other` — the card's last letter — with
- * the words typed in it. It is drawn as the choice it was, on the reader's side, rather than as a
- * message they wrote (issue #149 drew it that way) or as Hemera saying it passed it on.
- *
- * An answer is never dropped for want of its question. When the question is no longer in the
- * thread, or no longer holds the option, the answer is drawn from what the engine wrote on the
- * entry — the option's words, or `Other` and the words typed — without a question and without a
- * letter, since nothing is left to say which it was. Null only when the entry does not parse.
+ * What an answered question is marked by on the rail, as the reader's messages are (issue #149):
+ * the label of the choice made, or the words typed under `Other`. The answer is drawn by the
+ * question's own card (issue #199), so the mark is the card's; an open question marks nothing.
  */
-export function answerOf(entry: SessionEntry, thread: readonly SessionEntry[]): AnswerView | null {
-  const answer = parsed(answerSchema, entry.payload)
-  if (answer === null) return null
-  const question =
-    thread
-      .filter((asked) => asked.kind === 'spec_question')
-      .map((asked) => parsed(questionSchema, asked.payload))
-      .find((asked) => asked?.id === answer.questionId) ?? undefined
-  const body = question?.body
-  if (answer.optionId === undefined) {
-    if (answer.text === undefined) return null
-    const letter = question === undefined ? undefined : letterOf(question.options.length)
-    return { question: body, choices: [{ letter, label: 'Other' }], text: answer.text }
-  }
-  const index = question?.options.findIndex((option) => option.id === answer.optionId) ?? -1
-  const option = question?.options[index]
-  if (option === undefined) {
-    // The engine wrote the option's words on the entry; the option id is the last resort.
-    const label = entry.body === '' ? answer.optionId : entry.body
-    return { question: body, choices: [{ letter: undefined, label }] }
-  }
-  const choice = { letter: letterOf(index), label: option.label, recommended: option.recommended }
-  return { question: body, choices: [choice] }
-}
-
-/** The words an answer is marked by on the rail: what was typed, or the choices' labels. */
-export function answerWords(view: AnswerView): string {
-  return view.text ?? view.choices.map((choice) => choice.label).join(', ')
+export function questionMarkOf(
+  entry: SessionEntry,
+  thread: readonly SessionEntry[],
+  asked: ReadonlySet<string> | null,
+): string | undefined {
+  const question = questionEntryOf(entry, thread, asked)?.question
+  if (question === undefined || question.answer === null) return undefined
+  const { optionId, text } = question.answer
+  return question.options.find((option) => option.id === optionId)?.label ?? text
 }
 
 /** What the thread finds a question's block by: the page scrolls to it from the register. */

@@ -1355,7 +1355,8 @@ export function Application() {
           await openSession(made.id)
           // The turn is watched in the Session, which is where the window just went, and the Home
           // does not wait for it: a first answer can take a minute.
-          // With what it was sent for: New Spec asks the agent for a Spec proposal (issue #128).
+          // With what it was sent for: New Spec has the engine create the Spec before the agent
+          // is asked anything, and the panel opens once the Session reads `define` (issue #179).
           void say(made.id, text, intent)
           return null
         }}

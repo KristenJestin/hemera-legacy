@@ -58,6 +58,12 @@ export const Single: Story = {
     )
     await expect(within(answer).getByText('How should the export be split?')).toBeVisible()
     await expect(within(answer).getByText('You')).toBeVisible()
+    // The tick of the choice is the checkbox's own, drawn along its stroke as the answer
+    // arrives, and drawn whole once it has.
+    const tick = pill.querySelector('path')!
+    await waitFor(() =>
+      expect(Number.parseFloat(tick.getAttribute('stroke-dasharray') ?? '')).toBe(1),
+    )
   },
 }
 

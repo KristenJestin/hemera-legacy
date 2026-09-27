@@ -602,6 +602,34 @@ export function contextDeliveryOf(entry: SessionEntry): ContextDeliveryDrawn | n
   return { id: entry.id, body: `${entry.body} (${short})`, waiting: false }
 }
 
+/** What a `turn` entry carries: why it ended. */
+const turnEndPayloadSchema = z.object({ stopReason: z.string() })
+
+/** What `StoppedTurn` draws of a turn that did not simply end. */
+export interface StoppedTurnDrawn {
+  /** Why it stopped, as the end of a sentence after "Stopped: ", or nothing for a Stop pressed. */
+  reason: string | undefined
+  byTheReader: boolean
+}
+
+/**
+ * The line of a turn that stopped, or null for one that simply ended: the agent's answer above it
+ * is the news (D5-13).
+ *
+ * A turn the reader stopped says so, "Stopped by you", and nothing more. One that stopped on its
+ * own says why, in the sentence the engine wrote for it: "Stopped: the agent could not answer."
+ * (issue #211), where it read "Stopped while The agent could not answer." — the sentence is a
+ * reason, not what the turn was doing.
+ */
+export function stoppedTurnOf(entry: SessionEntry): StoppedTurnDrawn | null {
+  const read = readPayload(turnEndPayloadSchema, entry.payload)
+  if (read === null || read.stopReason === 'end_turn') return null
+  if (read.stopReason === 'cancelled') return { reason: undefined, byTheReader: true }
+  const reason =
+    entry.body === '' ? undefined : entry.body.charAt(0).toLowerCase() + entry.body.slice(1)
+  return { reason, byTheReader: false }
+}
+
 /** A failure of Hemera's or of the agent's, drawn as an error row rather than as a message. */
 const failureNotePayloadSchema = z.object({ reason: z.enum(['delivery_failed', 'prompt_failed']) })
 

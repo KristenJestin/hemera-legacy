@@ -391,6 +391,22 @@ describe('A dedicated Workspace assembles one worktree per repository', () => {
     // The dialog opens once the engine answered the plan.
     await awaits('Nothing is fetched.')
     await fill('Name', 'login-form')
+    // Create comes on once the dialog has read the name it was given, which a busy machine takes
+    // longer to do than a fixed pause: a press on it while it is still off does nothing at all.
+    await browser.waitUntil(
+      async () =>
+        await browser.execute(() => {
+          const create = [...document.querySelectorAll('[role="dialog"] button')].find((one) =>
+            (one.textContent ?? '').trim().startsWith('Create'),
+          )
+          return (
+            create instanceof HTMLButtonElement &&
+            !create.disabled &&
+            create.getAttribute('aria-disabled') !== 'true'
+          )
+        }),
+      { timeout: 10_000, interval: 100, timeoutMsg: 'Create never came on' },
+    )
     await pressIn('[role="dialog"]', 'Create')
     await awaitsIn(rowOf('login-form'), 'Ready')
     loginForm = await listed('login-form')

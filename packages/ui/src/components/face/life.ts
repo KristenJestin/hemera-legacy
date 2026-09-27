@@ -405,7 +405,16 @@ export interface FlourishFrame {
  * with a longer name. The randomness is around them instead: when one plays, and which side a
  * look goes to, never how it goes.
  */
-export type FlourishName = 'hmm' | 'sigh' | 'widen' | 'plead' | 'hop' | 'yawn'
+export type FlourishName =
+  | 'rush'
+  | 'huddle'
+  | 'spread'
+  | 'hmm'
+  | 'sigh'
+  | 'widen'
+  | 'plead'
+  | 'hop'
+  | 'yawn'
 
 export interface Flourish {
   /** How long it takes, in seconds: drawn inside these bounds each time it plays. */
@@ -419,6 +428,30 @@ export interface Flourish {
 }
 
 export const FLOURISHES: Record<FlourishName, Flourish> = {
+  /**
+   * Loading, all at once in a hurry: the dots speed up and slow back down, two thirds of a turn
+   * ahead of where they would have been — three alike dots, so ahead by thirds shows nothing.
+   */
+  rush: {
+    length: [1.4, 2],
+    every: [3, 7],
+    mouthless: true,
+    play: (q) => ({ w: 0, beat: beat({ turn: (2 / 3) * faceArrive(q) }) }),
+  },
+  /** Loading, drawn in: the dots close in on the middle, and go back out. */
+  huddle: {
+    length: [1.2, 1.8],
+    every: [3, 7],
+    mouthless: true,
+    play: (q) => ({ w: arc(q, 0.3, 0.35, 0.35), beat: beat({ reach: -0.55 }) }),
+  },
+  /** Loading, let out: the dots spread wider, and come back in. */
+  spread: {
+    length: [1.2, 1.8],
+    every: [3, 7],
+    mouthless: true,
+    play: (q) => ({ w: arc(q, 0.3, 0.35, 0.35), beat: beat({ reach: 0.35 }) }),
+  },
   /** Thinking harder: the head turns away, the eyes narrow and look up, the mouth twists. */
   hmm: {
     length: [1.2, 1.8],

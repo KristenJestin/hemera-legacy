@@ -64,7 +64,7 @@ export interface StageProps {
 
 /** What a state plays, each of which can be asked for now: its blink, its gestures, its flourish. */
 function actsOf(state: FaceState): { readonly label: string; readonly act: FaceAct }[] {
-  const { blink, motion, aside, flourish } = EXPRESSIONS[state]
+  const { blink, motion, aside, flourishes } = EXPRESSIONS[state]
   return [
     ...(blink === null ? [] : [{ label: 'Blink', act: { kind: 'blink' } as const }]),
     { label: `Gesture · ${motion}`, act: { kind: 'gesture', motion } as const },
@@ -76,9 +76,10 @@ function actsOf(state: FaceState): { readonly label: string; readonly act: FaceA
             act: { kind: 'gesture', motion: aside.motion } as const,
           },
         ]),
-    ...(flourish === null
-      ? []
-      : [{ label: `Flourish · ${flourish}`, act: { kind: 'flourish', flourish } as const }]),
+    ...flourishes.map((flourish) => ({
+      label: `Flourish · ${flourish}`,
+      act: { kind: 'flourish', flourish } as const,
+    })),
   ]
 }
 

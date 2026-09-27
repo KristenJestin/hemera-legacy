@@ -348,6 +348,51 @@ describe('Animations played on demand', () => {
   })
 })
 
+describe('Loading', () => {
+  /** How far the dots are from the middle of the square, on average. */
+  const spread = (pose: readonly number[]): number => {
+    const drawn = drawnOf(pose, DETAILS.full)
+    const strokes = [drawn.left, drawn.right, drawn.mouth!]
+    return (
+      strokes.reduce(
+        (sum, stroke) => sum + Math.hypot(stroke.points[2] - 16, stroke.points[3] - 16),
+        0,
+      ) / 3
+    )
+  }
+  const loading = () =>
+    createFace({
+      state: 'loading',
+      at: 0,
+      seed: 3,
+      detail: DETAILS.full,
+      reduced: false,
+      tuning: { ...TUNING, life: { ...TUNING.life, flourish: false } },
+    })
+
+  test('the dots huddle in towards the middle, and spread out wider', () => {
+    const huddled = loading()
+    const spreading = loading()
+    const resting = spread(loading().frame(1).layers[0]!.pose)
+    huddled.play({ kind: 'flourish', flourish: 'huddle' }, 0.5)
+    spreading.play({ kind: 'flourish', flourish: 'spread' }, 0.5)
+    expect(spread(huddled.frame(1.2).layers[0]!.pose)).toBeLessThan(resting - 2)
+    expect(spread(spreading.frame(1.2).layers[0]!.pose)).toBeGreaterThan(resting + 1)
+  })
+
+  test('the dots rush ahead of their own beat, by whole thirds of a turn', () => {
+    const rushing = loading()
+    rushing.play({ kind: 'flourish', flourish: 'rush' }, 0.5)
+    const ahead =
+      rushing.frame(3).layers[0]!.pose[AT.spin]! - loading().frame(3).layers[0]!.pose[AT.spin]!
+    expect(ahead * 3 - Math.round(ahead * 3)).toBeCloseTo(0, 9)
+    expect(ahead).toBeGreaterThan(0)
+    const mid =
+      rushing.frame(1.2).layers[0]!.pose[AT.spin]! - loading().frame(1.2).layers[0]!.pose[AT.spin]!
+    expect(mid).toBeGreaterThan(0.1)
+  })
+})
+
 describe('Falling asleep', () => {
   test.each(FACE_STATES.filter((state) => state !== 'asleep' && state !== 'loading'))(
     '%s falls asleep without a yawn: the mouth never opens on the way',

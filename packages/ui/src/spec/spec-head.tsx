@@ -31,7 +31,11 @@ import { SPEC_TYPE_ICONS } from './spec-icons.ts'
  * band beside the chat (brief revision 4).
  */
 
-const HEAD = 'flex min-h-control-sm items-center gap-2.5'
+/**
+ * As tall as its tallest control, the picker of the revisions or `Rework`, whether they are there
+ * or not: the fold chevron at its end stays at one height, the unfold chevron's (issue #181).
+ */
+const HEAD = 'flex min-h-control-md items-center gap-2.5'
 
 const KEY = 'shrink-0 font-mono text-xs text-muted-foreground'
 

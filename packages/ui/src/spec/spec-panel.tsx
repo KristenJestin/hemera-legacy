@@ -80,11 +80,19 @@ const PANEL =
 const STOWED =
   'spec-panel-in pointer-events-auto invisible flex size-full flex-col rounded-xl border border-border bg-surface-rim p-1.5'
 
-/** The small frame's place: on the window's edge, centred on its height, over the panel. */
-const FRAME = 'pointer-events-none absolute inset-y-3 right-3 z-1 flex items-center'
+/**
+ * The small frame's place: on the window's edge, at the top of the row, over the panel (issue
+ * #181). Its top and right edges are the open panel's, so its unfold chevron stands where the
+ * head's fold chevron does.
+ */
+const FRAME = 'pointer-events-none absolute inset-y-3 right-3 z-1 flex items-start'
 
-/** The head on the rim, above the body. */
-const HEAD = 'flex shrink-0 flex-col gap-1 px-2.5 pt-1 pb-2.5'
+/**
+ * The head on the rim, above the body. Its end is nearer the rim than its start: the fold chevron
+ * at that end stands as far in from the panel's edge as the small frame's unfold chevron does from
+ * the frame's (issue #181).
+ */
+const HEAD = 'flex shrink-0 flex-col gap-1 pt-1 pr-1.5 pb-2.5 pl-2.5'
 
 const NOW = 'text-sm text-muted-foreground'
 

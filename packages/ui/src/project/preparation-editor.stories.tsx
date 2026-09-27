@@ -2,6 +2,8 @@ import type { Meta, StoryObj } from '@storybook/react-vite'
 import { useState } from 'react'
 import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
 
+import { arrived } from '../../.storybook/reveal.ts'
+
 import type { PathEntry, PathListing } from '../components/suggest/path-input.tsx'
 import {
   PreparationEditor,
@@ -520,6 +522,31 @@ export const OwnLine: Story = {
     })
     await dialogGone()
     await expect(sentencesIn(canvasElement)[4]).toBe('run bun run lint')
+  },
+}
+
+/**
+ * Choosing a line of its own brings the step's own fields in with the dialog growing around them
+ * (issue #183), and choosing a command of the catalogue again folds them away.
+ */
+export const OwnLineArrives: Story = {
+  args: { steps: STEPS.slice(0, 3) },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await userEvent.click(canvas.getByRole('button', { name: 'Add step' }))
+    const shown = await dialogShown()
+    const dialog = within(shown)
+    await choose(shown, 'Step kind', /^Run a command/)
+    await expect(dialog.queryByLabelText('Lines')).toBeNull()
+    await choose(shown, 'Command', /^A line of its own/)
+    await arrived(dialog.getByLabelText('Lines'))
+    await arrived(dialog.getByRole('textbox', { name: 'Line' }))
+    await choose(shown, 'Command', /^install/)
+    await waitFor(() => {
+      expect(dialog.queryByLabelText('Lines')).toBeNull()
+    })
+    await userEvent.click(dialog.getByRole('button', { name: 'Cancel' }))
+    await dialogGone()
   },
 }
 

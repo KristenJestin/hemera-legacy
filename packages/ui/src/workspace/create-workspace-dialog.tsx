@@ -8,6 +8,7 @@ import { Input } from '../components/field/field.tsx'
 import { Dialog } from '../components/dialog/dialog.tsx'
 import { Select, type SelectItem } from '../components/select/select.tsx'
 import { IconFolderOpen, IconLoader } from '../icons.ts'
+import { Reveal } from '../reveal.tsx'
 import type { PlanRepositoryLine, PlanRepositoryRead, WorkspaceDraft } from './model.ts'
 
 /**
@@ -392,19 +393,19 @@ export function CreateWorkspaceDialog({
           }
         />
         {/* Said of the default only: a folder the user chose here is one they chose knowingly. */}
-        {temporary && folder.trim() === root && (
+        <Reveal shown={temporary && folder.trim() === root} gap="4">
           <p className={TEMPORARY}>
             This folder is temporary: it may be cleared on restart. Choose another here, or set the
             Workspaces folder in the Project settings.
           </p>
-        )}
+        </Reveal>
         {/* The folder is the Workspace's own, so it is shown once the name makes one: before
             that the line reads as the Project's folder, which is Hemera's own id for it. */}
-        {name.trim() !== '' && folder.trim() !== '' && (
+        <Reveal shown={name.trim() !== '' && folder.trim() !== ''} gap="4">
           <p className={NOTE}>
             Folder <span className={FOLDER}>{folderOf(folder.trim(), name)}</span>
           </p>
-        )}
+        </Reveal>
         <ul className={ROWS} aria-label="Repositories">
           {rows.map((row) => (
             <li key={row.path} className={ROW}>
@@ -470,11 +471,11 @@ export function CreateWorkspaceDialog({
             </li>
           ))}
         </ul>
-        {noneIncluded && (
+        <Reveal shown={noneIncluded} gap="4">
           <p role="alert" className={REFUSAL}>
             Include at least one repository.
           </p>
-        )}
+        </Reveal>
         {refusal !== null && (
           <p role="alert" className={REFUSAL}>
             {refusal}

@@ -374,6 +374,7 @@ export {
 } from './session/session-details.tsx'
 export {
   CommandsPanel,
+  type CatalogueCommandLine,
   type CommandPanelRun,
   type CommandsPanelProps,
 } from './session/commands-panel.tsx'

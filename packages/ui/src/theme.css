@@ -582,11 +582,13 @@
 }
 
 /* The open panel, drawn from the same shares as its slot: out past its clip by its whole width
-   folded, or not arrived yet, and in place open. One value moves both, so the panel and the chat
-   it pushes never fall out of step and never overlap, and a swap turned round half-way turns both
-   round together. */
+   and the margin it keeps at the content's edge folded, or not arrived yet, and in place open. One
+   value moves both, so the panel and the chat it pushes never fall out of step and never overlap,
+   and a swap turned round half-way turns both round together. The margin is the dock's `pr-3`,
+   which the clip reaches across (issue #181): the panel comes in from the content's edge, as the
+   small frame leaves by it, and not from inside the margin. */
 @utility spec-panel-in {
-  translate: calc((1 - var(--spec-open, 0) * var(--spec-in, 1)) * 100%) 0;
+  translate: calc((1 - var(--spec-open, 0) * var(--spec-in, 1)) * (100% + var(--spacing) * 3)) 0;
 }
 
 /* Where the active tab meets the sheet it opens (design D2-02).
@@ -812,8 +814,11 @@
   }
 }
 
+/* The veil behind a dialog fades, and fades only: its blur stays what it is from the first frame
+   to the last. A blur that is itself in transition is computed again over the whole window on
+   every frame, which is the frame the page behind it is seen to jump on (issue #183). */
 @utility backdrop-motion {
-  transition-property: opacity, backdrop-filter;
+  transition-property: opacity;
   transition-duration: var(--duration-base);
   transition-timing-function: var(--ease-calm);
   @media (prefers-reduced-motion: reduce) {

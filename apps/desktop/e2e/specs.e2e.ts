@@ -210,6 +210,59 @@ describe('A free Session’s agent proposes a Spec, and Create makes the Session
   })
 })
 
+/** How far the page scrolls sideways, in pixels: what its content is wider than it by. */
+async function sideways(): Promise<number> {
+  return await browser.execute(() => {
+    const page = document.querySelector('main')
+    return page === null ? -1 : page.scrollWidth - page.clientWidth
+  })
+}
+
+/** Presses the fold or the unfold of the Spec, and waits for the swap to land. */
+async function swapSpec(name: 'Fold the Spec' | 'Unfold the Spec'): Promise<void> {
+  await browser.execute(
+    (scope: string, label: string) => {
+      const button = document.querySelector(scope)?.querySelector(`button[aria-label="${label}"]`)
+      if (button instanceof HTMLButtonElement) button.click()
+    },
+    PANEL,
+    name,
+  )
+  await browser.pause(1200)
+}
+
+/** Sizes the window, then says how far the page scrolls sideways with the Spec open and folded. */
+async function sidewaysAt(width: number): Promise<string[]> {
+  await browser.electron.execute((electron, wide: number) => {
+    electron.BrowserWindow.getAllWindows()[0]?.setSize(wide, 800)
+  }, width)
+  await browser.pause(600)
+  const open = await sideways()
+  await swapSpec('Fold the Spec')
+  const folded = await sideways()
+  await swapSpec('Unfold the Spec')
+  return [`${width} open: ${open}`, `${width} folded: ${folded}`]
+}
+
+describe('The Session row never scrolls sideways', () => {
+  it('fits the chat and the Spec in the window, open and folded, narrow and wide', async () => {
+    const before = await browser.electron.execute(
+      (electron) => electron.BrowserWindow.getAllWindows()[0]?.getSize() ?? [1280, 800],
+    )
+    const narrow = await sidewaysAt(900)
+    const wide = await sidewaysAt(1600)
+    await browser.electron.execute((electron, size: number[]) => {
+      electron.BrowserWindow.getAllWindows()[0]?.setSize(size[0] ?? 1280, size[1] ?? 800)
+    }, before)
+    expect([...narrow, ...wide]).toEqual([
+      '900 open: 0',
+      '900 folded: 0',
+      '1600 open: 0',
+      '1600 folded: 0',
+    ])
+  })
+})
+
 describe('The brief is part of the turn, never a human message', () => {
   it('folds a mission brief titled with the phase in focus above the answer', async () => {
     await write(DEFINING)
@@ -237,7 +290,7 @@ describe('The Spec is read, never edited by hand', () => {
 })
 
 describe('A question is asked and answered in the chat', () => {
-  it('asks it as a block of the thread, and the register links to it', async () => {
+  it('asks it as a block of the thread, and the register records it with no link', async () => {
     const { id, specId } = await sessionOf(ASKED)
     await browser.execute(
       async (spec: string, session: string, body: string, issue: string) => {
@@ -264,14 +317,8 @@ describe('A question is asked and answered in the chat', () => {
 
     const panel = await region(PANEL)
     expect(panel).toContain('Questions · 1 open')
-
-    await pressIn(PANEL, 'Answer in the chat')
-    await browser.pause(500)
-    // The thread is taken to the question, and the keyboard to its first answer.
-    const focused = await browser.execute(
-      () => document.activeElement?.closest('[id^="ask-"]')?.textContent ?? '',
-    )
-    expect(focused).toContain(QUESTION)
+    // The card in the thread is where it is answered: the register offers no way there (#181).
+    expect(panel.toLowerCase()).not.toContain('answer in the chat')
   })
 
   it('answers it in the block, which folds to the answer, and resolves it in the register', async () => {

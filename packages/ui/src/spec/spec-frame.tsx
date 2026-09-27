@@ -8,7 +8,7 @@ import { PhaseGlyph } from './phase-glyph.tsx'
 import { PROGRESS_WORDS, type PhaseGroup, isWriting, phaseProgressOf } from './spec-phases.ts'
 
 /**
- * The Spec folded (issue #164): a small frame at the window's edge, centred on its height, that
+ * The Spec folded (issue #164): a small frame at the window's edge, at the top of the row, that
  * holds the unfold chevron on its rim and the three phases' glyphs in its body — Shape, Plan and
  * Decompose, each tinted by how far along it is. The chevron unfolds the panel; a glyph unfolds it
  * on its phase.
@@ -20,7 +20,13 @@ import { PROGRESS_WORDS, type PhaseGroup, isWriting, phaseProgressOf } from './s
 
 const RIM = 'flex w-spec-frame flex-col rounded-xl border border-border bg-surface-rim p-1.5'
 
-const TOP = 'flex shrink-0 justify-center pb-1.5'
+/**
+ * The unfold chevron, as far in from the frame's top and right edges as the fold chevron is from
+ * the open panel's: the same spot on the screen pressed twice unfolds the Spec and folds it back
+ * (issue #181). Set from the right rather than centred, as the head's end is, so the two agree to
+ * the pixel whatever the borders measure.
+ */
+const TOP = 'flex shrink-0 justify-end pt-1.5 pr-1.5 pb-1.5'
 
 const BODY = 'flex flex-col rounded-lg border border-border bg-surface-body shadow-sm'
 

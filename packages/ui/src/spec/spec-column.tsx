@@ -4,7 +4,7 @@ import { Menu } from '../components/menu/menu.tsx'
 import { IconChevronDown } from '../icons.ts'
 import { PHASE_TITLES, type PhaseName, type SpecView } from './model.ts'
 import { PhaseGlyph } from './phase-glyph.tsx'
-import { type SpecPartHandlers, SpecPart } from './spec-part.tsx'
+import { SpecPart } from './spec-part.tsx'
 import {
   PHASE_STATE_WORDS,
   type PhaseGroup,
@@ -58,7 +58,7 @@ export function goToPhase(
   scroller.scrollTo({ top: section.offsetTop, behavior: instantly ? 'instant' : 'smooth' })
 }
 
-export interface SpecColumnProps extends SpecPartHandlers {
+export interface SpecColumnProps {
   spec: SpecView
   /** The Spec's phases, and the parts each one writes. */
   groups: PhaseGroup[]
@@ -78,7 +78,6 @@ export const SpecColumn = memo(function SpecColumn({
   groups,
   column,
   still,
-  ...handlers
 }: SpecColumnProps): ReactNode {
   return (
     <div
@@ -106,7 +105,7 @@ export const SpecColumn = memo(function SpecColumn({
           <div className={PARTS}>
             {group.rows.map((row) => (
               <div key={row.target} data-part={row.target}>
-                <SpecPart spec={spec} target={row.target} {...handlers} />
+                <SpecPart spec={spec} target={row.target} />
               </div>
             ))}
           </div>

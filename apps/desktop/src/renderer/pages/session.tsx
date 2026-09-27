@@ -56,13 +56,7 @@ import { whenOf } from '../journal-lines.ts'
 import { contextListsOf, detailsTabsOf, openingTabOf, panelRunsOf } from '../session-details.ts'
 import { openSessions, type OfferedWorkspace, workspaceFixedOf } from '../sessions-store.ts'
 import { selectEntry } from '../shell-store.ts'
-import {
-  type DefinedSpec,
-  answerOf,
-  answerWords,
-  questionAnchor,
-  waitsForAnswer,
-} from '../spec-entries.ts'
+import { type DefinedSpec, answerOf, answerWords, waitsForAnswer } from '../spec-entries.ts'
 import {
   answerQuestion,
   askForBuild,
@@ -230,16 +224,6 @@ function definedOf(
   const first = revisions.find((one) => one.number === 1)
   if (snapshot === null || first === undefined) return null
   return { key: snapshot.spec.key, title: first.title, type: first.type }
-}
-
-/**
- * Takes the thread to where a question of the Spec is asked, and the keyboard to its first
- * answer: the register of the panel links there, and the answer is given in the thread.
- */
-function goToQuestion(id: string): void {
-  const block = document.getElementById(questionAnchor(id))
-  block?.scrollIntoView({ block: 'center' })
-  block?.querySelector('button')?.focus()
 }
 
 /** What the last act of a thread was refused with, when the engine refused it. */
@@ -699,7 +683,6 @@ export function SessionPage({
         spec={spec}
         arrives={openedFree.current}
         reader={readerOf(defined, session.id, sessions, running)}
-        onGoToQuestion={goToQuestion}
         onMarkReady={() => void markReady(session.id)}
         onRework={(reason) => void rework(session.id, reason)}
         onPickRevision={(revision) => {
@@ -730,10 +713,12 @@ export function SessionPage({
       width and one left edge, and nothing stands beside them but the Spec of a `define` Session —
       the Session details are a dialog the reader opens from the head (second review of #18). The
       screen runs under the frame all the same, and the page's own scroll is the thread's. The row
-      is the container the unfolded Spec panel's width is a share of.
+      is the container the unfolded Spec panel's width is a share of. The chat takes what the
+      panel leaves it and no more: never wider than that for what it holds, which would push the
+      row past the window and make it scroll sideways (issue #181).
     */
     <div className="@container flex h-full min-h-0">
-      <div className="flex min-h-0 flex-1 flex-col">
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
         <div className="mx-auto flex w-full max-w-3xl flex-col gap-4 px-6 pt-6 pb-4">
           <SessionHeader
             title={session.title}

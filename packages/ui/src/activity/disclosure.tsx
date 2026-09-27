@@ -3,7 +3,7 @@ import { AnimatePresence, motion } from 'motion/react'
 import { type ReactNode, useId, useState } from 'react'
 
 import { IconChevronDown } from '../icons.ts'
-import { arrival, collapse, expand, fold, instant, useTransition } from '../motion.ts'
+import { arrival, collapse, expand, fold, useTransition } from '../motion.ts'
 
 /**
  * What folds: a line that is read while it is closed, and what is inside once it is asked for
@@ -35,10 +35,11 @@ import { arrival, collapse, expand, fold, instant, useTransition } from '../moti
  * of that possible: a console re-reads its bottom when it is opened again, which is where a
  * live console belongs.
  *
- * What the fold moves is not this component's business, and is not teleported either: whatever
- * holds a column of folds — the thread, in `message/scroller` — carries the blocks under it on
- * `layout`, so the page below travels instead of arriving already somewhere else (trial of
- * 22 September 2026).
+ * What the fold moves is pushed rather than teleported: the room under the row is laid out at
+ * every height it passes through, so the blocks under it travel with it instead of arriving
+ * already somewhere else (trial of 22 September 2026). Nothing carries them on `layout`: a
+ * block carried that way replayed its old place whenever anything near it was drawn again
+ * (issue #183).
  */
 
 /**
@@ -151,10 +152,6 @@ export function Disclosure({
   // spring with no speed to carry, so a press that catches it still opening turns it round where
   // it is rather than from wherever the opening got to by the end of the frame (issue #64).
   const folding = useTransition(fold)
-  // `useTransition` hands back this very object when the system asks for less movement, and a
-  // block travelling to its new place is movement: the fold stops being a layout element at all
-  // then, rather than being one with no time to move in.
-  const still = transition === instant
   const body = useId()
   const named = useId()
   // Named only while it is there: a reference that resolves to nothing is a broken one, and the
@@ -178,17 +175,12 @@ export function Disclosure({
   )
   return (
     /*
-      The fold is a layout element, and this is what makes the page below it move rather than
-      jump: motion measures the tree the moment this re-renders — which is every time the block
-      opens or closes — and carries whatever changed place to its new one. `position`, so the
-      block's own box is never animated: what grows is the room under the row, and a box eased
-      into a new size would stretch everything drawn inside it.
+      Not a layout element (issue #183): what moves the page below is the room under the row
+      growing and folding, a frame at a time. A fold that was one replayed its old place whenever
+      it was drawn again after something above it changed size, and popped for a block that had
+      not moved on the screen.
     */
-    <motion.div
-      layout={still ? false : 'position'}
-      transition={transition}
-      className={cn('w-full', className)}
-    >
+    <div className={cn('w-full', className)}>
       {children === undefined ? (
         // Nothing to open, so nothing to press: the line is the row, drawn in the same fold a
         // block with a body wears.
@@ -248,6 +240,6 @@ export function Disclosure({
           </AnimatePresence>
         </>
       )}
-    </motion.div>
+    </div>
   )
 }

@@ -30,7 +30,7 @@ import { SPEC_PHASE_ICONS } from './spec-icons.ts'
  * field in place, the caret in it; Enter sends the words, as does the small send icon inside the
  * field, and Escape gives `Other…` back.
  *
- * The recommended choice wears a small mark at its end rather than a line under its label (issue
+ * The recommended choice wears a small mark after its label rather than a line under it (issue
  * #199): a line pushed its words down and made its row taller than the others. The words the
  * mark stands for are in its tooltip and in the row's name.
  *
@@ -66,8 +66,8 @@ const LETTER =
 const LETTER_CHOSEN =
   'flex size-5 shrink-0 items-center justify-center rounded-sm border border-primary bg-primary font-mono text-xs text-primary-foreground'
 
-/** The mark of the recommended choice, at the end of its row, in the row's own height. */
-const MARK = 'flex shrink-0 text-primary-muted-foreground'
+/** The mark of the recommended choice, right after its label, in the line's own height. */
+const MARK = 'ml-1.5 inline-flex align-middle text-primary-muted-foreground'
 
 /** Where the check of the row chosen draws itself: held on every row, so no label moves. */
 const CHECK = 'flex shrink-0 text-primary'
@@ -277,14 +277,14 @@ export function SpecQuestion({
                 <span className="min-w-0 flex-1">
                   {option.label}
                   {option.recommended === true && (
-                    <span className="sr-only">, recommended by the agent</span>
+                    <>
+                      <span className={MARK}>
+                        <IconSparkles size="sm" aria-hidden="true" />
+                      </span>
+                      <span className="sr-only">, recommended by the agent</span>
+                    </>
                   )}
                 </span>
-                {option.recommended === true && (
-                  <span className={MARK}>
-                    <IconSparkles size="sm" aria-hidden="true" />
-                  </span>
-                )}
                 <span className={CHECK}>
                   <Tick checked={chosen} arrives={drawsItsCheck} />
                 </span>

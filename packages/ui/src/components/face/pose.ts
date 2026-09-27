@@ -4,12 +4,14 @@ import type { Stroke } from './strokes.ts'
  * The colours the face is drawn in: roles of the theme, never colours of its own. Telling two
  * states apart never depends on them — the shape says it, the colour only says it again.
  */
-export const TONES = ['quiet', 'busy', 'build', 'needs', 'good', 'bad'] as const
+export const TONES = ['current', 'quiet', 'busy', 'build', 'needs', 'good', 'bad'] as const
 
 export type FaceTone = (typeof TONES)[number]
 
 /** The utility each tone is drawn with, which is a role of the theme and nothing else. */
 export const TONE_CLASSES = {
+  /** Whatever colour the face sits in, as the loading indicator it stands in for is. */
+  current: 'text-current',
   quiet: 'text-muted-foreground',
   busy: 'text-primary',
   build: 'text-mission-build',
@@ -102,7 +104,8 @@ export function blend(from: Beat, to: Beat, w: number): Beat {
 
 /**
  * A whole pose laid out as numbers, which is what a change eases, carries and interrupts: the
- * three strokes, the two lids, the head, the eyes and one weight per tone. Every number of the
+ * three strokes, the two lids, the head, the eyes, the orbit the features ride while loading and
+ * how far round it they are, and one weight per tone. Every number of the
  * face lives at one place in it, so a change from any pose to any other is the same arithmetic.
  */
 export const AT = {
@@ -115,7 +118,9 @@ export const AT = {
   pitch: 24,
   gazeX: 25,
   gazeY: 26,
-  tones: 27,
+  orbit: 27,
+  spin: 28,
+  tones: 29,
 } as const
 
 export const POSE_LENGTH = AT.tones + TONES.length
@@ -132,7 +137,8 @@ export const CHANNELS = {
   mouth: [AT.mouth, AT.lidLeft],
   lid: [AT.lidLeft, AT.yaw],
   head: [AT.yaw, AT.gazeX],
-  gaze: [AT.gazeX, AT.tones],
+  gaze: [AT.gazeX, AT.orbit],
+  orbit: [AT.orbit, AT.tones],
   tone: [AT.tones, POSE_LENGTH],
 } as const
 
@@ -164,6 +170,10 @@ export interface PoseParts {
   readonly lidLeft: number
   readonly lidRight: number
   readonly head: Head
+  /** How far the features have left their places for the loading orbit, 0 to 1. */
+  readonly orbit: number
+  /** How far round that orbit they are, in turns. */
+  readonly spin: number
   readonly tone: FaceTone
 }
 
@@ -180,6 +190,8 @@ export function poseOf(parts: PoseParts): number[] {
     head.pitch,
     head.gazeX,
     head.gazeY,
+    parts.orbit,
+    parts.spin,
     ...TONES.map((tone) => (tone === parts.tone ? 1 : 0)),
   ]
 }

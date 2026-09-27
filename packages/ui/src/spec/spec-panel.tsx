@@ -67,9 +67,14 @@ import { WorkspaceActions, type WorkspaceActionsProps } from './workspace-action
  */
 const DOCK = 'relative flex h-full min-h-0 shrink-0 overflow-x-clip py-3 pr-3'
 
-/** The panel's clip, at the window's edge: what the panel slides in and out of. */
+/**
+ * The panel's clip: what the panel slides in and out of. It reaches across the margin the dock
+ * keeps at the content's edge and cuts there, where the small frame is cut (issue #181): the
+ * panel is laid in its content box, in from that edge by the margin, and comes in and goes out by
+ * the edge itself rather than out of nothing inside the margin.
+ */
 const CLIP =
-  'pointer-events-none absolute inset-y-3 right-3 w-spec-panel overflow-hidden rounded-xl'
+  'pointer-events-none absolute inset-y-3 right-0 box-content w-spec-panel overflow-hidden pr-3'
 
 /** The open panel: a frame the whole height of the row, its rim around the head, body and foot. */
 const PANEL =

@@ -19,19 +19,13 @@ export async function emulateReducedMotion(): Promise<boolean> {
   const runner = await import('vitest/browser').catch(() => null)
   if (runner === null) return false
   const { onTestFinished } = await import('vitest')
-  const session = runner.cdp()
-  const set = async (preference: string): Promise<void> => {
-    await session.send('Emulation.setEmulatedMedia', {
-      features: [{ name: 'prefers-reduced-motion', value: preference }],
-    })
-  }
-  const asked = set('reduce')
+  const asked = runner.commands.prefersReducedMotion('reduce')
   // As soon as the preference is asked for, so that a test that runs out of time while it is on
   // its way still ends by taking it back — after it has landed, whatever became of it, so the two
   // cannot arrive the wrong way round.
   onTestFinished(async () => {
     await asked.catch(() => undefined)
-    await set('no-preference')
+    await runner.commands.prefersReducedMotion('no-preference')
     await until(() => !globalThis.matchMedia('(prefers-reduced-motion: reduce)').matches)
   })
   await asked
@@ -96,3 +90,10 @@ export function withinFrames(reached: () => boolean, frames: number): Promise<bo
  * of the journey the slowest fold of the preset takes, so a fold still travelling fails it.
  */
 export const AT_ONCE = 5
+
+declare module 'vitest/browser' {
+  interface BrowserCommands {
+    /** Declared in `vitest.shared.ts`: what the page is told the system prefers. */
+    prefersReducedMotion: (preference: 'reduce' | 'no-preference') => Promise<void>
+  }
+}

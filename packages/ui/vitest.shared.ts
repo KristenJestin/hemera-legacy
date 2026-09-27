@@ -3,6 +3,21 @@ import { join } from 'node:path'
 import { storybookTest } from '@storybook/addon-vitest/vitest-plugin'
 import { playwright } from '@vitest/browser-playwright'
 import { type Plugin, defineConfig } from 'vitest/config'
+import type { BrowserCommand } from 'vitest/node'
+
+/**
+ * Tells the page what the system prefers about movement, for `emulateReducedMotion`.
+ *
+ * Through the page Playwright already drives, rather than a DevTools session a story attaches of
+ * its own: with both themes run at once, such a session's first message was seen to go
+ * unanswered for longer than a test is given, where the page's own line answered in seconds.
+ */
+const prefersReducedMotion: BrowserCommand<[preference: 'reduce' | 'no-preference']> = async (
+  { page },
+  preference,
+) => {
+  await page.emulateMedia({ reducedMotion: preference })
+}
 
 /**
  * The prebundled dependencies handed to a page without their source maps.
@@ -75,6 +90,7 @@ export function catalogue(theme: 'light' | 'dark') {
         headless: true,
         provider: playwright(),
         instances: [{ browser: 'chromium' }],
+        commands: { prefersReducedMotion },
       },
     },
   })

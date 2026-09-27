@@ -32,7 +32,7 @@ export interface Telling {
 export function replay(history: readonly Played[], telling: Telling): FacePlayer {
   const [first, ...rest] = history
   const player = createFace({
-    state: first?.state ?? 'idle',
+    state: first?.state ?? 'asleep',
     at: first?.at ?? 0,
     seed: telling.seed,
     detail: DETAILS[telling.detail],

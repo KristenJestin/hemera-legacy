@@ -17,10 +17,9 @@ import { EYES, MOUTHS, type Stroke } from './strokes.ts'
 export type ChangeName = keyof typeof face.change
 
 /** The families of states a change is chosen by. */
-type Family = 'rest' | 'work' | 'needs' | 'done' | 'error' | 'silent' | 'asleep'
+type Family = 'work' | 'needs' | 'done' | 'error' | 'asleep'
 
 const FAMILY: Record<FaceState, Family> = {
-  idle: 'rest',
   thinking: 'work',
   reading: 'work',
   writing: 'work',
@@ -31,7 +30,6 @@ const FAMILY: Record<FaceState, Family> = {
   blocked: 'needs',
   done: 'done',
   error: 'error',
-  silent: 'silent',
   asleep: 'asleep',
 }
 
@@ -50,15 +48,9 @@ export function changeBetween(from: FaceState, to: FaceState): ChangeName {
   if (now === 'error') return 'flinch'
   if (now === 'needs') return was === 'needs' ? 'turn' : 'alert'
   if (now === 'done') return 'cheer'
-  if (now === 'silent') return 'fade'
-  if (was === 'silent') return 'perk'
   if (was === 'error') return 'recover'
-  if (now === 'work') {
-    if (was === 'work') return 'shift'
-    if (was === 'needs') return 'resume'
-    return 'focus'
-  }
-  return was === 'done' ? 'relax' : 'release'
+  if (was === 'work') return 'shift'
+  return was === 'needs' ? 'resume' : 'focus'
 }
 
 /**
@@ -138,18 +130,6 @@ export const CHOREOGRAPHIES: Record<ChangeName, Choreography> = {
     windows: windows({ gaze: [0, 0.5], shape: [0.15, 0.85], tone: [0.15, 0.85] }),
     beat: ({ q }) => beat({ pitch: 0.16 * bump(q, 0.05, 0.65), lid: 0.28 * bump(q, 0, 0.55) }),
   },
-  /** Letting go of the work: it leans back and breathes out. */
-  release: {
-    windows: windows({ shape: [0.1, 0.9], tone: [0.1, 0.9] }),
-    beat: ({ q }) => {
-      const out = bump(q, 0.15, 0.6)
-      return beat({
-        pitch: -0.14 * bump(q, 0, 0.7),
-        mouth: out <= 0 ? null : { to: MOUTHS.open, k: 0.3 * out },
-        mouthScale: 1 + 0.2 * out,
-      })
-    },
-  },
   /**
    * Something needs the reader: the head comes round to face them and lifts, and a blink settles
    * the eyes on the reader — the eyes that open are the ones that ask. The colour comes early,
@@ -164,10 +144,10 @@ export const CHOREOGRAPHIES: Record<ChangeName, Choreography> = {
     windows: windows({ shape: [0.25, 0.9], gaze: [0.2, 0.7], tone: [0.25, 0.9] }),
     beat: ({ q, from }) => beat({ pitch: (THANKS[from] ?? 0.2) * bump(q, 0.1, 0.55) }),
   },
-  /** From one need to another: the head tilts the other way to ask the new thing. */
+  /** From one need to another: the head turns away and back to ask the new thing. */
   turn: {
     windows: WHOLE,
-    beat: ({ q, side }) => beat({ roll: -side * 0.2 * bump(q, 0, 0.8) }),
+    beat: ({ q, side }) => beat({ yaw: side * 0.2 * bump(q, 0, 0.8) }),
   },
   /**
    * Done: a small hop, the eyes screwed up with pleasure on the way up — which is where they
@@ -206,24 +186,6 @@ export const CHOREOGRAPHIES: Record<ChangeName, Choreography> = {
     windows: windows({ shape: [0.3, 0.9], tone: [0.2, 0.8] }),
     beat: ({ q }) => beat({ yaw: 0.28 * shake(q, 0, 0.65) }),
   },
-  /** From done back to rest: the smile fades slowly, the head settles. */
-  relax: {
-    windows: WHOLE,
-    beat: ({ q }) => beat({ pitch: 0.1 * bump(q, 0.1, 0.9) }),
-  },
-  /** Silent for too long: the lids grow heavy, the head sinks a little, the colour drains. */
-  fade: {
-    windows: windows({ shape: [0.1, 1], tone: [0.2, 1] }),
-    beat: ({ q }) => beat({ pitch: 0.12 * bump(q, 0.3, 1) }),
-  },
-  /** Something arrives after a long silence: it perks up with a start and gets back to it. */
-  perk: {
-    windows: windows({ lid: [0, 0.2], shape: [0.2, 0.8], tone: [0, 0.5] }),
-    beat: ({ q }) => {
-      const start = spike(q, 0, 0.5)
-      return beat({ pitch: -0.22 * start, ...eyes(EYES.wide, start) })
-    },
-  },
   /** Falling asleep: a yawn, and the eyes close slowly while the head goes down. */
   drift: {
     windows: windows({ lid: [0.45, 1], shape: [0.45, 1], head: [0.3, 1], tone: [0.3, 1] }),
@@ -232,8 +194,7 @@ export const CHOREOGRAPHIES: Record<ChangeName, Choreography> = {
       return beat({
         pitch: -0.18 * yawn,
         lid: 0.3 * bump(q, 0.05, 0.4) + 0.4 * bump(q, 0.45, 1),
-        mouth: yawn <= 0 ? null : { to: MOUTHS.open, k: 0.8 * yawn },
-        mouthScale: 1 + 0.9 * yawn,
+        mouth: yawn <= 0 ? null : { to: MOUTHS.gape, k: yawn },
       })
     },
   },
@@ -259,6 +220,3 @@ export function blinkOf(name: ChangeName, chance: number): number | null {
   if (name === 'resume') return 0.6
   return null
 }
-
-/** The changes whose eyes are already closing or opening, which need no blink to cross an axis. */
-export const LIDDED: readonly ChangeName[] = ['drift', 'wake', 'fade']

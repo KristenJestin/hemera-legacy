@@ -812,8 +812,11 @@
   }
 }
 
+/* The veil behind a dialog fades, and fades only: its blur stays what it is from the first frame
+   to the last. A blur that is itself in transition is computed again over the whole window on
+   every frame, which is the frame the page behind it is seen to jump on (issue #183). */
 @utility backdrop-motion {
-  transition-property: opacity, backdrop-filter;
+  transition-property: opacity;
   transition-duration: var(--duration-base);
   transition-timing-function: var(--ease-calm);
   @media (prefers-reduced-motion: reduce) {

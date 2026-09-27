@@ -13,12 +13,18 @@ import { mkdtempSync, realpathSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
+import { Effect } from 'effect'
+import { z } from 'zod'
 
 import { DELIVERY_MARKER, QUESTION_RULE } from '@hemera/core'
+import type { SessionEntry } from '@hemera/ipc'
 import { type FakeStep, fakeAgent } from '#engine/agents/fake.ts'
 import { SPEC_REQUEST, SPEC_REQUEST_URI } from '#engine/agents/spec-request.ts'
+import { Specs } from '#engine/specs/specs.ts'
 import { listenToAgents, say } from '#renderer/agent-store.ts'
+import { proposalIdOf } from '#renderer/spec-entries.ts'
 import {
+  archiveSession,
   closeSessions,
   openSession,
   openSessions,
@@ -30,8 +36,10 @@ import {
   closeSpec,
   createSpec,
   holdProvisionalSpec,
+  joinSpec,
   provisionalSpecOf,
   provisionalTitleOf,
+  specSnapshot,
 } from '#renderer/spec-store.ts'
 
 import { type OpenWindow, install, openWindow } from './window.ts'
@@ -42,6 +50,20 @@ const uses = (call: string, sent: Record<string, string>): FakeStep => ({
   call,
   arguments: sent,
 })
+
+/** What a proposal entry carries, as `spec_propose` wrote it. */
+const PROPOSAL = z.object({
+  title: z.string(),
+  type: z.string(),
+  specId: z.string().optional(),
+  key: z.string().optional(),
+})
+
+/** The proposal a Session's thread holds, read as the card reads it. */
+function proposalIn(entries: readonly SessionEntry[]) {
+  const entry = entries.find((one) => one.kind === 'spec_proposal')
+  return entry === undefined ? null : PROPOSAL.parse(JSON.parse(entry.payload))
+}
 
 describe('New Spec shows a provisional Spec, and saves none until one is proposed and accepted', () => {
   let dataFolder: string
@@ -170,6 +192,111 @@ describe('New Spec shows a provisional Spec, and saves none until one is propose
       saved: 0,
       answered: 0,
     })
+  })
+
+  test('accepting the proposal makes the provisional Spec real, with the title and type proposed', async () => {
+    const agent = fakeAgent({
+      steps: [
+        uses('project_get', {}),
+        uses('spec_propose', {
+          kind: 'spec',
+          title: 'Read a text file aloud',
+          type: 'feature',
+          key: 'p-1',
+        }),
+      ],
+    })
+    // Accepted, the agent is started again with the tools of a define Session.
+    const next = fakeAgent({ listsTools: true })
+    const { bridge, projectId } = await atlas(agent, next)
+    const sessionId = await newSpec(projectId, 'on veut rajouter un outil de lecture de texte')
+
+    // It checked the Specs first: the Project has none.
+    expect(agent.answers.used[0]?.text).toContain('specs: none')
+    const thread = await bridge.invoke('sessions.read', { sessionId })
+    expect(proposalIn(thread.entries)).toEqual({ title: 'Read a text file aloud', type: 'feature' })
+    expect(await bridge.invoke('specs.list', { projectId })).toEqual([])
+
+    // The card's Create, as the page wires it.
+    expect(await createSpec(sessionId, 'feature', 'Read a text file aloud')).toBe(true)
+    const [spec] = await bridge.invoke('specs.list', { projectId })
+    expect(spec).toMatchObject({ title: 'Read a text file aloud', type: 'feature' })
+    const [session] = await bridge.invoke('sessions.list', { projectId })
+    expect(session).toMatchObject({ mission: 'define', specId: spec?.id })
+    // The panel holds the Spec, keyed, and nothing provisional any more.
+    expect(specSnapshot().snapshot?.spec.key).toBe(spec?.key)
+    expect(provisionalSpecOf(sessionId)).toBeNull()
+  })
+
+  test('an existing Spec can be chosen instead, and the panel shows that one', async () => {
+    // What the agent does is written once the Spec it points to exists, and its key is known.
+    const steps: FakeStep[] = []
+    const agent = fakeAgent({ listsTools: true, steps })
+    // Continued, the agent is started again with the tools of a define Session.
+    const next = fakeAgent({ listsTools: true })
+    const { bridge, running, projectId } = await atlas(agent, next)
+    // A Spec the Project already has, written by another Session.
+    const other = await startSession(projectId, 'claude', null)
+    const existing = await running(
+      Effect.gen(function* () {
+        return yield* (yield* Specs).create({
+          sessionId: other?.id ?? '',
+          type: 'feature',
+          title: 'Read text aloud',
+        })
+      }),
+    )
+    const { id: specId, key } = existing.snapshot.spec
+    steps.push(
+      uses('project_get', {}),
+      uses('spec_propose', { kind: 'existing', spec: key, key: 'p-1' }),
+    )
+
+    // The New Spec Session's agent reads the Project's Specs and points to that one.
+    const sessionId = await newSpec(projectId, 'a tool that reads a text aloud')
+    expect(agent.answers.used[0]?.text).toContain(`${key} feature draft: Read text aloud`)
+    expect(agent.answers.used[1]?.isError).toBe(false)
+    const thread = await bridge.invoke('sessions.read', { sessionId })
+    expect(proposalIn(thread.entries)).toEqual({
+      title: 'Read text aloud',
+      type: 'feature',
+      specId,
+      key,
+    })
+    expect(await bridge.invoke('specs.list', { projectId })).toHaveLength(1)
+
+    // `Continue it`: this Session defines that Spec, a reader of it, and the panel shows it.
+    const card = thread.entries.find((entry) => entry.kind === 'spec_proposal')
+    expect(await joinSpec(sessionId, proposalIdOf(card ?? thread.entries[0]!))).toBe(true)
+    const sessions = await bridge.invoke('sessions.list', { projectId })
+    expect(sessions.find((one) => one.id === sessionId)).toMatchObject({
+      mission: 'define',
+      specId,
+    })
+    expect(await bridge.invoke('specs.list', { projectId })).toEqual([
+      expect.objectContaining({ id: specId, writerSessionId: other?.id }),
+    ])
+    expect(specSnapshot().snapshot?.spec.id).toBe(specId)
+    expect(provisionalSpecOf(sessionId)).toBeNull()
+  })
+
+  test('nothing is saved when the Session is abandoned before accepting', async () => {
+    const agent = fakeAgent({
+      steps: [
+        uses('spec_propose', { kind: 'spec', title: 'Text reader', type: 'feature', key: 'p-1' }),
+      ],
+    })
+    const { bridge, projectId } = await atlas(agent)
+    const sessionId = await newSpec(projectId, 'a text reader')
+    const thread = await bridge.invoke('sessions.read', { sessionId })
+    expect(proposalIn(thread.entries)?.title).toBe('Text reader')
+
+    const session = sessionsSnapshot().sessions.find((one) => one.id === sessionId)
+    if (session === undefined) throw new Error('the Session is not listed')
+    expect(await archiveSession(session)).toBe(true)
+    expect(await bridge.invoke('specs.list', { projectId })).toEqual([])
+    const journal = await bridge.invoke('journal.read', { projectId, limit: 200 })
+    expect(journal.entries.filter((line) => line.type.startsWith('spec.'))).toEqual([])
   })
 
   test('the agent that takes the turn after the proposal is accepted lists spec_write and spec_read, and writes the title', async () => {

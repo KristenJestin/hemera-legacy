@@ -131,6 +131,8 @@ export function watching() {
       launched: () => undefined,
       // A Workspace change is about a Project: the suites about Workspaces read it of their own.
       workspace: () => undefined,
+      // A change of the machine's agents is the Agents section's own: its suites read it.
+      agents: () => undefined,
     }),
   }
 }

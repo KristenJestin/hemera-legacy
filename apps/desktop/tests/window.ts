@@ -134,6 +134,7 @@ async function openOver(
     ran: (sessionId, run) => push({ event: 'run', sessionId, run }),
     workspace: (projectId, workspaceId) => push({ event: 'workspace', projectId, workspaceId }),
     launched: (specId, projectId) => push({ event: 'launch.changed', specId, projectId }),
+    agents: () => push({ event: 'agents.changed' }),
   })
   // Nothing here asks a registry or updates an agent: the Agents section's own suites do.
   const listed = Layer.succeed(Agents, {

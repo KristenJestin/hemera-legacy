@@ -184,6 +184,7 @@ export {
   type JournalProps,
 } from './journal/journal.tsx'
 export { Gutter, type GutterProps } from './shell/gutter.tsx'
+export { StartScreen } from './shell/start-screen.tsx'
 export {
   HOME_ENTRY,
   JOURNAL_ENTRY,

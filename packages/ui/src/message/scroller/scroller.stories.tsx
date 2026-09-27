@@ -966,6 +966,54 @@ export const ACardPinnedBelow: Story = {
 }
 
 /**
+ * A thread that opens on a few of its entries, then is written around them: above, as an earlier
+ * page of it read back, and below, as what arrives next.
+ */
+function WrittenAround(): ReactNode {
+  const [whole, setWhole] = useState(false)
+  return (
+    <div className="flex h-screen flex-col gap-2 p-6">
+      <div className="min-h-0 flex-1">
+        <MessageScroller
+          label="the thread of CSV invoice export"
+          entries={whole ? THREAD : THREAD.slice(3, 6)}
+        />
+      </div>
+      <button type="button" onClick={() => setWhole(true)}>
+        Write around it
+      </button>
+    </div>
+  )
+}
+
+/**
+ * Entries written above the ones already drawn keep every mark on its own message.
+ *
+ * An entry hands the scroller its element once, when it is drawn, and never again: counted by the
+ * place it had then, the entries already there kept a place that was no longer theirs, and those
+ * written past them left places nobody filled — which the measuring then read, and threw on, at
+ * every scroll and every word of an answer.
+ */
+export const EntriesWrittenAbove: Story = {
+  render: () => <WrittenAround />,
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await userEvent.click(canvas.getByRole('button', { name: 'Write around it' }))
+    const rail = await canvas.findByRole('navigation', { name: /^Marks of/ }, { timeout: 10_000 })
+    const marks = await within(rail).findAllByRole('button')
+
+    await userEvent.click(marks[4]!)
+    await waitFor(
+      () => {
+        expect(marks[4]).toHaveAttribute('aria-current', 'true')
+      },
+      { timeout: 10_000 },
+    )
+    expect(marks.filter((mark) => mark.getAttribute('aria-current') === 'true')).toHaveLength(1)
+  },
+}
+
+/**
  * A run of calls the reader unfolded, at the live edge, which a press makes one call longer: what
  * a turn does while the agent works, one call after the other.
  */

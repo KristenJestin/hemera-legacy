@@ -5,9 +5,10 @@ import { Badge } from '../components/badge/badge.tsx'
 import { Button } from '../components/button/button.tsx'
 import { Checkbox } from '../components/checkbox/checkbox.tsx'
 import { Input } from '../components/field/field.tsx'
+import { Loading } from '../components/loading/loading.tsx'
 import { Dialog } from '../components/dialog/dialog.tsx'
 import { Select, type SelectItem } from '../components/select/select.tsx'
-import { IconFolderOpen, IconLoader } from '../icons.ts'
+import { IconFolderOpen } from '../icons.ts'
 import { Reveal } from '../reveal.tsx'
 import type { PlanRepositoryLine, PlanRepositoryRead, WorkspaceDraft } from './model.ts'
 
@@ -279,6 +280,12 @@ export function CreateWorkspaceDialog({
         const line = repositories.find((one) => one.path === row.path)
         if (line === undefined || line.read === null) return row
         filled = true
+        // A name typed while this row was being read has already made its branch: the plan's
+        // is the one of the name it was proposed with, and the row follows the name as the
+        // others did.
+        if (typed && branchOf !== undefined) {
+          return { ...row, ...answered(line.read), branch: branchOf(name.trim()) }
+        }
         return { ...row, ...answered(line.read) }
       })
       return filled ? next : current
@@ -302,11 +309,10 @@ export function CreateWorkspaceDialog({
   const reading = rows.some((row) => !row.read)
   const folderRefusal = folder.trim() === '' ? 'A Workspace needs a folder.' : undefined
   const refused =
-    nameRefusal !== undefined ||
-    folderRefusal !== undefined ||
-    reading ||
-    noneIncluded ||
-    incomplete
+    nameRefusal !== undefined || folderRefusal !== undefined || noneIncluded || incomplete
+  // Create waits for the reads, and says so with the loader in it: a button that is only disabled
+  // reads as a field left empty. Without git nothing is being read, only refused.
+  const waiting = reading && !gitMissing
 
   const change = (path: string, next: Partial<Row>) => {
     setRows(rows.map((row) => (row.path === path ? { ...row, ...next } : row)))
@@ -355,8 +361,9 @@ export function CreateWorkspaceDialog({
         <>
           <Button
             variant="primary"
-            state={creating ? 'loading' : 'idle'}
+            state={creating || waiting ? 'loading' : 'idle'}
             disabled={gitMissing || refused}
+            aria-label={waiting ? 'Create, waiting for the repositories to be read' : undefined}
             onClick={() => void create()}
           >
             Create
@@ -422,7 +429,11 @@ export function CreateWorkspaceDialog({
                     that simply holds none is not the user's problem (D8-04). */}
                 {!row.read ? (
                   <span className={READING}>
-                    <IconLoader size="sm" aria-hidden="true" />
+                    {/* The loader of the whole application, and not an icon of its own: the words
+                        say it to a screen reader, so the loader is for the eye alone. */}
+                    <span aria-hidden="true" className="flex">
+                      <Loading size="sm" label="being read" />
+                    </span>
                     being read
                   </span>
                 ) : (

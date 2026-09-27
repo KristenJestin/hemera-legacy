@@ -38,6 +38,7 @@ import { AgentRuntime, type AgentRuntimeError } from './agents/runtime.ts'
 import { Agents, availabilityOf, type AgentUpdateRefusedError } from './agents/service.ts'
 import { type BareModeNotQualifiedError, refusedUnlessBare } from './agents/bare.ts'
 import { ADAPTERS, Discovery } from './agents/discovery.ts'
+import { requestedSpec } from './agents/spec-request.ts'
 import { runAtOpen } from './commands/at-open.ts'
 import {
   type NothingToRunError,
@@ -327,6 +328,14 @@ export function answer(
     }
     if (decision.name === 'agents.prompt') {
       const { sessionId, text, intent } = decision.argument
+      // New Spec: the Spec is created before the prompt goes out, so the agent starts `define`,
+      // with the Spec tools and the mission brief, and the window opens the panel before it
+      // answers (#179). A Session that already defines one is sent the message as it is.
+      if (intent === 'spec' && (yield* sessions.one(sessionId)).session.mission === 'free') {
+        yield* (yield* Specs).create({ sessionId, ...requestedSpec(text) })
+        // An agent already running holds the tools of a free Session: it is started again.
+        yield* runtime.releaseWhenIdle(sessionId)
+      }
       // What the page is waiting for is why the turn ended; everything else about it reached the
       // window as it happened, on the engine's own channel (design D5-12).
       const report = yield* runtime.prompt(sessionId, text, intent)

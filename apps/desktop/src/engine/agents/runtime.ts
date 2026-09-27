@@ -346,8 +346,8 @@ export interface AgentRuntimeService {
   /**
    * Sends one turn and answers when the agent is done with it.
    *
-   * The intent is what the message was sent for: `spec`, the Home's New Spec, asks the agent in
-   * the same turn to propose a Spec from it (issue #128).
+   * The intent is what the message was sent for: `spec`, the Home's New Spec, hands the agent in
+   * the same turn the request of the Spec the engine created from it (issues #128, #179).
    */
   readonly prompt: (
     sessionId: string,
@@ -2923,7 +2923,7 @@ export const runtimeLayer = Layer.effect(
         // its own (D5-07).
         const sent = [held.context, text].filter((one) => one !== null).join('\n\n')
         // And what the message was sent for, when it was sent for something: the Home's New Spec
-        // asks the agent for a Spec proposal in the same turn (issue #128).
+        // hands over the request of the Spec created from it in the same turn (issue #179).
         const provisions = [...held.provisions, ...provisionsOf(intent)]
         held.context = null
         held.provisions = []

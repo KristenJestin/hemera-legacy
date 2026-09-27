@@ -384,3 +384,23 @@ export const swap = {
 export function onTheBeat(transition: Transition): Transition {
   return transition === instant ? instant : { ...transition, delay: swap.beat }
 }
+
+/**
+ * The `check` kind: a tick drawing itself when a box is checked, and undrawing when it is not
+ * (issue #185).
+ *
+ * - `draw` is what the stroke's length travels on: the theme's `base` beat, on a curve that sets
+ *   off fast and lands slowly, so the tick reads as a pen stroke rather than as a bar filling.
+ * - `press` and `pressed` are the small give of the box as it is checked: down to `CHECK_PRESS`
+ *   of itself and back, on the `fast` beat. A tween and not a spring, because it passes through
+ *   three values and a spring only goes to one.
+ *
+ * A reader asking for less movement gets the tick drawn and the box still: read both through
+ * `useTransition`, which answers `instant`.
+ */
+export const CHECK_PRESS = 0.92
+export const check = {
+  draw: { duration: durations.base, ease: [0.16, 1, 0.3, 1] },
+  press: { duration: durations.fast, ease: easing },
+  pressed: { scale: [1, CHECK_PRESS, 1] },
+} as const satisfies { draw: Transition; press: Transition; pressed: TargetAndTransition }

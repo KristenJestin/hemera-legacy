@@ -863,6 +863,18 @@
   }
 }
 
+/* What the box of a checkbox does as it is checked and unchecked: its fill and its edge fade on
+   the beat its tick draws on, so a tick undrawing is still drawn on the fill it is the colour of,
+   rather than white on white the moment the box lets go. */
+@utility check-motion {
+  transition-property: background-color, border-color;
+  transition-duration: var(--duration-base);
+  transition-timing-function: var(--ease-calm);
+  @media (prefers-reduced-motion: reduce) {
+    transition-property: none;
+  }
+}
+
 /* The two shadows a scale is built out of that are drawn inside what wears them: the groove a
    track is sunk into, and the dome that lights a thumb's core. They are utilities rather than
    steps of the shadow scale because a `shadow-*` utility named anything but a size is read as a

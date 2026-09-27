@@ -39,6 +39,7 @@ import {
   readOptions,
   say,
   setOffered,
+  specWritingOf,
 } from '#renderer/agent-store.ts'
 import {
   archiveSession,
@@ -938,5 +939,52 @@ describe('The trace of a Session is asked about by the Session, never by a path 
   test('a trace the main process cannot answer about is no trace', async () => {
     answers.set('trace.exists', new Error('no such channel'))
     expect(await hasTrace('session-1')).toBe(false)
+  })
+})
+
+describe('A section says it is being written (issue #185)', () => {
+  /** The agent's report of a `spec_write` call, with the arguments it sent. */
+  function aWrite(id: string, input: string, state: string): SessionEntry {
+    return {
+      ...reported(id, 'tool_call', 'mcp__hemera__spec_write', state),
+      payload: JSON.stringify({ call: { rawInput: { text: input } } }),
+    }
+  }
+
+  test('a spec_write in flight names the section it writes', () => {
+    const said = entry('e1', 'user', 'Write the problem')
+    const call = aWrite('e2', '{"section":"problem","body":"The export"}', 'in_progress')
+
+    expect(specWritingOf([said, call])).toBe('problem')
+  })
+
+  test('a spec_write that failed or finished writes nothing any more', () => {
+    const said = entry('e1', 'user', 'Write the problem')
+    for (const state of ['failed', 'completed']) {
+      expect(specWritingOf([said, aWrite('e2', '{"section":"problem"}', state)])).toBeNull()
+    }
+  })
+
+  test('the stories, the tasks and a question are the parts they write', () => {
+    const said = entry('e1', 'user', 'Go on')
+    expect(specWritingOf([said, aWrite('e2', '{"stories":[]}', 'pending')])).toBe('stories')
+    expect(specWritingOf([said, aWrite('e2', '{"tasks":[]}', 'pending')])).toBe('tasks')
+    expect(specWritingOf([said, aWrite('e2', '{"question":"Which?"}', 'pending')])).toBe(
+      'questions',
+    )
+  })
+
+  test('a call a dead turn left in flight is not a write that is happening', () => {
+    const call = aWrite('e2', '{"section":"problem"}', 'in_progress')
+    const later = entry('e3', 'user', 'Are you there?')
+
+    expect(specWritingOf([entry('e1', 'user', 'Write'), call, later])).toBeNull()
+  })
+
+  test('another tool in flight writes nothing of the Spec', () => {
+    const said = entry('e1', 'user', 'Read it')
+    const read = reported('e2', 'tool_call', 'mcp__hemera__spec_read', 'in_progress')
+
+    expect(specWritingOf([said, read])).toBeNull()
   })
 })

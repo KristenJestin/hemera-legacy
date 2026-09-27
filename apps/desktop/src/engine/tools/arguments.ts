@@ -147,8 +147,8 @@ export const OPTION_SENT = z.object({
 /** How long a list of the Spec tools may be, as the JSON text it is sent as. */
 const LIST_CHARACTERS = SPEC_PAGE_CHARACTERS
 
-/** What `spec_write` writes: exactly one of the four. */
-const SPEC_WRITES = ['section', 'stories', 'tasks', 'question'] as const
+/** What `spec_write` writes: exactly one of these. */
+const SPEC_WRITES = ['section', 'stories', 'tasks', 'question', 'title', 'type'] as const
 
 /** What `spec_propose` hands over. */
 export const PROPOSALS = ['phase_done', 'ready', 'spec'] as const
@@ -311,6 +311,19 @@ export const TOOL_ARGUMENTS = {
         .describe(
           'with question: the answers offered, as a JSON array of {"id", "label", "recommended"?}, your recommendation marked "recommended": true; none for an answer in the user\'s own words. Hemera labels them A, B, C… and adds an "Other" answer itself: no letter, no "other" answer and no "(recommended)" in a label',
         ),
+      title: z
+        .string()
+        .trim()
+        .min(1)
+        .max(200)
+        .optional()
+        .describe('the title the Spec takes, short, as the user would name it'),
+      type: z
+        .enum(SPEC_TYPES)
+        .optional()
+        .describe(
+          'the type the Spec takes, feature, bug or maintenance, once the user confirmed it',
+        ),
       revision: z
         .number()
         .int()
@@ -324,7 +337,7 @@ export const TOOL_ARGUMENTS = {
       if (writes.length !== 1) {
         context.addIssue({
           code: 'custom',
-          message: `send exactly one of section, stories, tasks or question, not ${writes.length === 0 ? 'none' : writes.join(' and ')}`,
+          message: `send exactly one of section, stories, tasks, question, title or type, not ${writes.length === 0 ? 'none' : writes.join(' and ')}`,
         })
       }
       if (
@@ -426,7 +439,7 @@ export const TOOL_DESCRIPTIONS: Record<ToolName, string> = {
   session_get:
     'This Session: its title, its Project, its agent, and the last entries of its thread.',
   spec_read: `Read the Spec this Session defines, rendered as Markdown: its key, type, status and revision, each section with its version as <!-- version: n -->, the stories with their criteria, the tasks, the phases and the open questions. The current revision, or an older one by number, which is read-only. One call returns at most ${SPEC_PAGE_CHARACTERS} characters and ends with the range read as JSON: offset, end, size, truncated and next.`,
-  spec_write: `Write the current draft of the Spec this Session defines, and only while this Session holds its write right. Exactly one of: a section, with its whole body and the version you read it at; every story; every task; or a question for the user. A section that changed since the version you send, a Spec that is not a draft, an older revision, and a Session that does not hold the write right are refused, and nothing is written. Send a key so that a retry after a lost answer does not write twice. ${QUESTION_RULE}`,
+  spec_write: `Write the current draft of the Spec this Session defines, and only while this Session holds its write right. Exactly one of: a section, with its whole body and the version you read it at; every story; every task; a question for the user; the title; or the type. A section that changed since the version you send, a Spec that is not a draft, an older revision, and a Session that does not hold the write right are refused, and nothing is written. Send a key so that a retry after a lost answer does not write twice. ${QUESTION_RULE}`,
   spec_propose:
     "Hand the Spec this Session defines over to Hemera's checks. phase_done declares a phase finished with a summary, the elements of the Spec that support it and the assumptions still open: Hemera runs the phase's exit checks, and either finishes it and opens the phases that wait on it, or answers what fails and changes nothing. ready attests the contract is complete and executable: the user's Mark ready is what freezes it, never this call. Both only while this Session holds the write right. spec is for a free Session, which defines no Spec yet: it proposes one, a title and a type, and the user creates it or not. Send a key so that a retry after a lost answer is answered once.",
 }

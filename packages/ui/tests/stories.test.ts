@@ -388,6 +388,8 @@ describe('Catalogue, coquille et surfaces, et rien d’autre', () => {
       'Sidebar',
       'Gutter',
       'CommandPalette',
+      // What the window shows while it starts, before its first page is ready.
+      'StartScreen',
     ]
     const surfaces = [
       'ProjectDialog',
@@ -603,7 +605,9 @@ describe('Surfaces du lot 4 montrées en Storybook', () => {
  * entry that more than one file feeds are named after the state they show.
  */
 describe('Les cinq racines du catalogue', () => {
-  const ROOTS = ['Foundations', 'Components', 'Blocks', 'Surfaces', 'Shell']
+  // `Explorations` is the sixth, last: a design question drawn in several variants, deleted once
+  // one of them is built (`AGENTS.md`).
+  const ROOTS = ['Foundations', 'Components', 'Blocks', 'Surfaces', 'Shell', 'Explorations']
 
   /**
    * The order is not the alphabet's: a reader is given the five roots in the order above, and,
@@ -625,6 +629,7 @@ describe('Les cinq racines du catalogue', () => {
       'Session',
       'Complete',
       'Shell',
+      'Explorations',
     ])
     // The alphabet, asked for rather than hoped for: Storybook keeps the index's own order for
     // every name the list above does not mention, so the method is what makes the rule true.

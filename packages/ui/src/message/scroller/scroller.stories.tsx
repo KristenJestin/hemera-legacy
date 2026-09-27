@@ -5,6 +5,7 @@ import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
 import { MotionConfig } from 'motion/react'
 
 import { AT_ONCE, movesLess, withinFrames } from '../../../.storybook/reduced-motion.ts'
+import { ActionGroup } from '../../activity/action-group.tsx'
 import { ToolCallCard } from '../../activity/tool-call-card.tsx'
 import { TooltipProvider } from '../../components/tooltip/tooltip.tsx'
 import { IconSparkles } from '../../icons.ts'
@@ -961,6 +962,100 @@ export const ACardPinnedBelow: Story = {
       ).toBeLessThanOrEqual(1)
     })
     await expect(canvas.queryByRole('button', { name: 'Latest' })).toBeNull()
+  },
+}
+
+/**
+ * A run of calls the reader unfolded, at the live edge, which a press makes one call longer: what
+ * a turn does while the agent works, one call after the other.
+ */
+function GrowingRun(): ReactNode {
+  const [calls, setCalls] = useState(6)
+  const entries: ScrollerEntry[] = [
+    ...THREAD,
+    {
+      id: 'run',
+      content: (
+        <ActionGroup count={calls} status="in_progress" defaultOpen>
+          {Array.from({ length: calls }, (_, at) => (
+            <ToolCallCard
+              key={at}
+              title={`Read src/billing/part-${String(at)}.ts`}
+              kind="read"
+              status="completed"
+              subject={{ text: `src/billing/part-${String(at)}.ts` }}
+            />
+          ))}
+        </ActionGroup>
+      ),
+    },
+    {
+      id: 'after',
+      content: <p data-testid="after-the-run">The totals are computed in the export.</p>,
+    },
+  ]
+  return (
+    <div className="flex h-screen flex-col gap-2 p-6">
+      <div className="min-h-0 flex-1">
+        <MessageScroller label="the thread of CSV invoice export" entries={entries} />
+      </div>
+      <button type="button" onClick={() => setCalls((was) => was + 1)}>
+        Call another tool
+      </button>
+    </div>
+  )
+}
+
+/** What each block of the thread is drawn with, frame after frame. */
+function transformsOver(thread: HTMLElement, frames: number): Promise<string[][]> {
+  const seen: string[][] = []
+  return new Promise((resolve) => {
+    const sample = (): void => {
+      seen.push(
+        [...thread.firstElementChild!.children].map((block) => getComputedStyle(block).transform),
+      )
+      if (seen.length < frames) requestAnimationFrame(sample)
+      else resolve(seen)
+    }
+    requestAnimationFrame(sample)
+  })
+}
+
+/**
+ * A call arriving in a run does not replay the blocks around it (issue #183).
+ *
+ * The run grows by one row, at once, and a thread following its live edge scrolls by that row:
+ * the block under the run stays where it is on the screen and the run grows upwards into what
+ * scrolled away. Every block used to be a layout element that motion carried from its old place
+ * to its new one, so the block under the run was drawn a row higher on the next frame, over the
+ * row that had just arrived, and slid back down — a pop on every call, for a block that had not
+ * moved at all. No block of the thread carries a transform, on any frame, and the one under the
+ * run ends where it was.
+ */
+export const ARunGrowingAtTheEdge: Story = {
+  render: () => <GrowingRun />,
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const thread = canvas.getByRole('log', { name: /CSV invoice export/ })
+    await waitFor(() => {
+      expect(fromTheEdge(thread)).toBeLessThanOrEqual(1)
+    })
+    const after = canvas.getByTestId('after-the-run')
+    const before = after.getBoundingClientRect().top
+
+    const watched = transformsOver(thread, 40)
+    await userEvent.click(canvas.getByRole('button', { name: 'Call another tool' }))
+    await expect(await canvas.findByText('src/billing/part-6.ts')).toBeInTheDocument()
+    const frames = await watched
+
+    await expect(
+      frames.flat().filter((transform) => transform !== 'none'),
+      'a block of the thread was carried from where it had been',
+    ).toEqual([])
+    await waitFor(() => {
+      expect(fromTheEdge(thread)).toBeLessThanOrEqual(1)
+    })
+    await expect(after.getBoundingClientRect().top).toBeCloseTo(before, 0)
   },
 }
 

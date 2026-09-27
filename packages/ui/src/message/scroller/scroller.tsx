@@ -1,5 +1,5 @@
 import { cn } from 'cn'
-import { LayoutGroup, motion } from 'motion/react'
+import { motion } from 'motion/react'
 import { type ReactNode, useCallback, useEffect, useRef, useState } from 'react'
 
 import { Button } from '../../components/button/button.tsx'
@@ -382,10 +382,10 @@ export function MessageScroller({ label, entries, className }: MessageScrollerPr
   return (
     <div className={cn(FRAME, className)}>
       {/*
-        `layoutScroll` because this is the thing that scrolls: motion measures a block against
-        the viewport, and a measurement taken in a column that has been scrolled by eight
-        hundred pixels is eight hundred pixels wrong. It is the one prop that tells it to read
-        the offset.
+        `layoutScroll` because this is the thing that scrolls: motion measures a control of the
+        thread whose width follows what it says against the viewport, and a measurement taken in
+        a column that has been scrolled by eight hundred pixels is eight hundred pixels wrong. It
+        is the one prop that tells it to read the offset.
       */}
       <motion.div
         ref={box}
@@ -398,38 +398,29 @@ export function MessageScroller({ label, entries, className }: MessageScrollerPr
       >
         <div ref={list} className={LIST}>
           {/*
-          A fold opening takes the thread below it with it, and takes it *smoothly* (trial of
-          22 September 2026). Every block is its own layout element and the group is what makes
-          them one movement: motion measures where each of them ended up and plays the
-          difference as a transform, so a tool card unfolding pushes the blocks under it
-          instead of the column being redrawn somewhere else between two frames.
-
-          `position` and not the whole box, which is what keeps a growing entry out of it: an
-          answer arriving word by word changes its own height on nearly every frame, and a
-          block whose *size* was animated would be a paragraph stretching under the eye that
-          is reading it. Where a block starts is what travels; what it holds never does.
-
-          And for a reader who asked for less movement it is not a layout element at all: a
-          journey given no time is still a journey the machinery sets up, and `false` is the
-          block simply being where it belongs.
+          No block of the thread is a layout element (issue #183). A fold opening takes the
+          thread below it with it by its own height, frame after frame — the room under its row
+          is what grows — so the blocks under it are pushed the way a page is, with nothing to
+          carry them. They used to be carried as well: every block measured where it had been and
+          played the difference as a transform whenever anything in the thread was drawn again,
+          so a call arriving in a run drew the block under it back where it had been and slid it
+          down to where it already was — at the live edge, where the thread scrolls by that same
+          height, a block that had not moved on the screen at all jumped and came back on every
+          call. A block is where it belongs, and only a change of its own size ever moves it.
           */}
-          <LayoutGroup>
-            {entries.map((entry, index) => (
-              <motion.div
-                key={entry.id}
-                layout={still ? false : 'position'}
-                transition={transition}
-                ref={(node) => {
-                  // A day registers as nothing, and so does an entry that asked for no mark: the
-                  // rail counts what it drew and only what it drew, so the walk above lands on
-                  // the same index the rail drew its marks with.
-                  anchors.current[index] = isMarked(entry) ? node : null
-                }}
-              >
-                {entry.content}
-              </motion.div>
-            ))}
-          </LayoutGroup>
+          {entries.map((entry, index) => (
+            <div
+              key={entry.id}
+              ref={(node) => {
+                // A day registers as nothing, and so does an entry that asked for no mark: the
+                // rail counts what it drew and only what it drew, so the walk above lands on the
+                // same index the rail drew its marks with.
+                anchors.current[index] = isMarked(entry) ? node : null
+              }}
+            >
+              {entry.content}
+            </div>
+          ))}
         </div>
       </motion.div>
       {!atEdge && (

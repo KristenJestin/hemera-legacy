@@ -293,6 +293,8 @@ export interface SessionPageProps {
   onOpenUrl: (url: string) => void
   /** Stops a run and everything it started. */
   onStopRun: (runId: string) => void
+  /** Hands the agent again what waits for it, after a delivery it did not take (issue #211). */
+  onHandOver: () => void
   /** The Workspace root, which is what a run's folder is said relative to; null until known. */
   root: string | null
   /** Runs a line from the Commands panel: a command of the catalogue by name, or a one-off. */
@@ -338,6 +340,7 @@ export function SessionPage({
   commandRuns,
   onOpenUrl,
   onStopRun,
+  onHandOver,
   root,
   onRunCommand,
   context,
@@ -532,6 +535,7 @@ export function SessionPage({
       workspace: workspace?.name,
       onOpenUrl,
       onStopRun,
+      onHandOver,
       reportedCall: (toolCallId) => reported.get(toolCallId),
       onAcceptProposal: (proposalId) => deciding(onAcceptProposal(proposalId)),
       onDeclineProposal: (proposalId) => deciding(onDeclineProposal(proposalId)),

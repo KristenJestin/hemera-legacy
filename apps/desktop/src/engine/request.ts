@@ -343,6 +343,8 @@ export function answer(
       const report = yield* runtime.resume(decision.argument.sessionId)
       return { state: report.state, reason: report.reason }
     }
+    if (decision.name === 'agents.handOver')
+      return yield* runtime.handOver(decision.argument.sessionId)
 
     // What the Agents section asks about the three agents of this machine, and the one thing it
     // does about the answer (design D5-18). The check is the only use case of this process that

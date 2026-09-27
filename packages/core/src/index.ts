@@ -103,6 +103,18 @@ export {
   portlessNameFor,
 } from './domain/commands.ts'
 export type { Command, CommandScope, CommandType } from './domain/commands.ts'
+export { SETUP_CHANGE_KINDS, setupChangeDetails, setupChangeTitle } from './domain/setup.ts'
+export type {
+  CommandChange,
+  RepositoryChange,
+  SetupChange,
+  SetupChangeKind,
+  SetupDetail,
+  StepChange,
+  VariableChange,
+  WorkspaceActChange,
+  WorkspaceCreateChange,
+} from './domain/setup.ts'
 export {
   AGENTS_FILE,
   CONTEXT_BASE,

@@ -307,6 +307,14 @@ export interface WorkspacesService {
   readonly cleanup: (
     id: string,
   ) => Effect.Effect<WorkspaceView, DatabaseError | UnknownWorkspaceError | CleanupRefusedError>
+  /**
+   * The reason a cleanup would be refused now, before Git is asked anything, and null when none
+   * of those checks refuses it: what an agent's proposal of a cleanup is told at once (#218).
+   * Nothing is written, and Git may still refuse the cleanup itself.
+   */
+  readonly cleanupRefusal: (
+    id: string,
+  ) => Effect.Effect<string | null, DatabaseError | UnknownWorkspaceError>
 }
 
 export class Workspaces extends Context.Service<Workspaces, WorkspacesService>()('Workspaces') {}
@@ -616,7 +624,33 @@ export const workspacesLayer = Layer.effect(
      * What a cleanup does once nothing it checks refuses it: no service running, every worktree
      * removed by Git, then the folder; the row kept `cleaned` and every branch kept (D8-14).
      */
-    const cleaned = (row: typeof workspaces.$inferSelect) =>
+    /**
+     * What refuses a cleanup of a Workspace whatever it holds: `main`, one already cleaned, and a
+     * folder the user picked (D8-14 as amended by Decided 14). Its reason, or null.
+     */
+    const unfitForCleanup = (row: typeof workspaces.$inferSelect) =>
+      Effect.gen(function* () {
+        if (row.name === MAIN_WORKSPACE) return `${MAIN_WORKSPACE} cannot be cleaned up`
+        if (row.state === 'cleaned') return `${row.name} is already cleaned up`
+        // A Workspace made on a folder of the user's has no step: that folder is theirs, and a
+        // cleanup that deleted it would delete their work (D8-02; D8-14 as amended by
+        // Decided 14).
+        const steps = yield* database
+          .select({ state: workspaceSteps.state })
+          .from(workspaceSteps)
+          .where(eq(workspaceSteps.workspaceId, row.id))
+          .pipe(Effect.mapError(failed('reading the steps')))
+        if (steps.length === 0) {
+          return `${row.name} is a folder of yours: Hemera cleans up only the Workspaces it made`
+        }
+        return null
+      })
+
+    /**
+     * What still needs a Workspace a cleanup would delete: a service running in it, or a build
+     * that has not ended (D8-14, D8-13). Its reason, or null.
+     */
+    const inUse = (row: typeof workspaces.$inferSelect) =>
       Effect.gen(function* () {
         const running = yield* database
           .select({ name: commandRuns.name })
@@ -625,10 +659,7 @@ export const workspacesLayer = Layer.effect(
           .limit(1)
           .pipe(Effect.mapError(failed('reading the runs')))
         if (running[0] !== undefined) {
-          return yield* refuseCleanup(
-            row,
-            `the service ${running[0].name} of ${row.name} is running`,
-          )
+          return `the service ${running[0].name} of ${row.name} is running`
         }
         // A build that has not ended works in this folder, and a cleanup would delete it from
         // under that Session: the cleanup waits until it is archived (D8-14, D8-13).
@@ -644,9 +675,14 @@ export const workspacesLayer = Layer.effect(
           )
           .limit(1)
           .pipe(Effect.mapError(failed('reading the builds')))
-        if (building[0] !== undefined) {
-          return yield* refuseCleanup(row, `the build of ${row.name} is still open`)
-        }
+        if (building[0] !== undefined) return `the build of ${row.name} is still open`
+        return null
+      })
+
+    const cleaned = (row: typeof workspaces.$inferSelect) =>
+      Effect.gen(function* () {
+        const busy = yield* inUse(row)
+        if (busy !== null) return yield* refuseCleanup(row, busy)
 
         const main = yield* mainPathOf(row.projectId)
         const records = yield* database
@@ -1046,29 +1082,11 @@ export const workspacesLayer = Layer.effect(
       cleanup: (id) =>
         Effect.gen(function* () {
           const row = yield* workspaceRow(id)
-          if (row.name === MAIN_WORKSPACE) {
-            return yield* refuseCleanup(row, `${MAIN_WORKSPACE} cannot be cleaned up`)
-          }
           // Beyond `main`, a running service, a build Session and Git's refusal, D8-14 as amended
           // by Decided 14 refuses three more: a Workspace already cleaned, one made on a folder
           // the user picked, and one being prepared.
-          if (row.state === 'cleaned') {
-            return yield* refuseCleanup(row, `${row.name} is already cleaned up`)
-          }
-          // A Workspace made on a folder of the user's has no step: that folder is theirs, and a
-          // cleanup that deleted it would delete their work (D8-02; D8-14 as amended by
-          // Decided 14).
-          const steps = yield* database
-            .select({ state: workspaceSteps.state })
-            .from(workspaceSteps)
-            .where(eq(workspaceSteps.workspaceId, id))
-            .pipe(Effect.mapError(failed('reading the steps')))
-          if (steps.length === 0) {
-            return yield* refuseCleanup(
-              row,
-              `${row.name} is a folder of yours: Hemera cleans up only the Workspaces it made`,
-            )
-          }
+          const unfit = yield* unfitForCleanup(row)
+          if (unfit !== null) return yield* refuseCleanup(row, unfit)
           // A preparation under way is writing into the folder a cleanup would delete: the two
           // never overlap, and the preparation is let to end first (D8-05, D8-14 as amended by
           // Decided 14). Under way means running in this engine: a `preparing` Workspace whose
@@ -1079,6 +1097,15 @@ export const workspacesLayer = Layer.effect(
           }
           yield* cleaned(row).pipe(Effect.ensuring(release(id)))
           return yield* viewOf(id).pipe(Effect.tap(told))
+        }),
+
+      cleanupRefusal: (id) =>
+        Effect.gen(function* () {
+          const row = yield* workspaceRow(id)
+          const unfit = yield* unfitForCleanup(row)
+          if (unfit !== null) return unfit
+          if (held.has(id)) return `the Workspace ${row.name} is being prepared`
+          return yield* inUse(row)
         }),
 
       hold,

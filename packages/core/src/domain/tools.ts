@@ -35,6 +35,8 @@ export const TOOL_NAMES = [
   'commands_stop',
   'commands_propose',
   'project_get',
+  'setup_read',
+  'setup_propose',
   'session_get',
   'spec_read',
   'spec_write',
@@ -60,6 +62,8 @@ export type ToolMark =
   | 'command-output'
   | 'propose-command'
   | 'project'
+  | 'read-setup'
+  | 'propose-setup'
   | 'session'
   | 'read-spec'
   | 'write-spec'
@@ -103,6 +107,12 @@ export const TOOL_LABELS: Readonly<Record<ToolName, ToolLabel>> = {
     doing: 'Proposing a command',
   },
   project_get: { label: 'Project', mark: 'project', doing: 'Reading the Project' },
+  setup_read: { label: 'Project setup', mark: 'read-setup', doing: 'Reading the Project setup' },
+  setup_propose: {
+    label: 'Propose setup',
+    mark: 'propose-setup',
+    doing: 'Proposing changes to the Project setup',
+  },
   session_get: { label: 'Session', mark: 'session', doing: 'Reading the Session' },
   spec_read: { label: 'Read Spec', mark: 'read-spec', doing: 'Reading the Spec' },
   spec_write: { label: 'Write Spec', mark: 'write-spec', doing: 'Writing the Spec' },

@@ -56,8 +56,12 @@ import type { ToolAccess } from '#engine/tools/access.ts'
 import { toolCatalogueLayer } from '#engine/tools/catalogue.ts'
 import { type ToolPermissions, toolPermissionsLayer } from '#engine/tools/permissions.ts'
 import { ToolServer, toolServerLayer } from '#engine/tools/server.ts'
-import { gitLayer } from '#engine/git.ts'
+import { type Git, gitLayer } from '#engine/git.ts'
+import { setupDeskLayer } from '#engine/setup/proposals.ts'
+import { type SetupValues, setupValuesLayer } from '#engine/setup/values.ts'
+import { type Recipe, recipeLayer } from '#engine/workspaces/recipe.ts'
 import { type Variables, variablesLayer } from '#engine/workspaces/variables.ts'
+import { type Workspaces, WorkspacesRoot, workspacesLayer } from '#engine/workspaces/workspaces.ts'
 
 export const SHIPPED = join(import.meta.dirname, '..', 'drizzle')
 
@@ -417,6 +421,10 @@ export type ToolEngine =
   | SqliteClient
   | HeldWords
   | Variables
+  | Workspaces
+  | Recipe
+  | SetupValues
+  | Git
 
 /**
  * One supervisor for an agent that is the fake and commands that are real (D5-04, D6-11, D6-12).
@@ -452,6 +460,20 @@ export const besideTheAgent = (
   ).pipe(Layer.provide(processSupervisorLayer))
 
 /**
+ * The Workspaces and the recipe the setup tools read, and the values they hold (#218), over the
+ * machine's `git`, made under the data folder: handed up, so a suite accepting a proposal changes
+ * what the tools read.
+ */
+export function setupPlaces(dataFolder: string, notices: Layer.Layer<AgentNotices> = NoNotices) {
+  const places = Layer.mergeAll(workspacesLayer, recipeLayer, setupValuesLayer).pipe(
+    Layer.provideMerge(gitLayer()),
+    Layer.provide(Layer.succeed(WorkspacesRoot, join(dataFolder, 'workspaces'))),
+    Layer.provide(notices),
+  )
+  return setupDeskLayer.pipe(Layer.provideMerge(places))
+}
+
+/**
  * A run of the whole engine over one fake agent that reaches Hemera's tools (design D6-11).
  *
  * `application` hands its runtime an address nothing listens on; this one is the composition the
@@ -479,12 +501,14 @@ export function toolApplication(
           written.push(line)
         }),
     })
+    const places = setupPlaces(dataFolder)
     const tools = toolServerLayer.pipe(
       Layer.provideMerge(toolCatalogueLayer),
       Layer.provideMerge(toolAccessLayer),
       Layer.provideMerge(toolPermissionsLayer),
       Layer.provideMerge(commandsLayer),
       Layer.provide(variablesLayer),
+      Layer.provideMerge(places),
     )
     const services: Layer.Layer<ToolEngine> = runtimeLayer.pipe(
       Layer.provideMerge(tools),

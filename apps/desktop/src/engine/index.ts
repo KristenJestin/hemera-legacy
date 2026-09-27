@@ -31,6 +31,8 @@ import type { Discovery } from './agents/discovery.ts'
 import { StderrSink, hostProcessesLayer, processSupervisorLayer } from './agents/supervisor.ts'
 import { type Proposals, proposalsLayer } from './commands/proposals.ts'
 import { type Commands, commandsLayer } from './commands/service.ts'
+import { type SetupProposals, setupDeskLayer, setupProposalsLayer } from './setup/proposals.ts'
+import { setupValuesLayer } from './setup/values.ts'
 import { type Context, contextLayer } from './context/service.ts'
 import { toolAccessLayer } from './tools/access.ts'
 import { toolCatalogueLayer } from './tools/catalogue.ts'
@@ -199,6 +201,7 @@ export type EngineServices =
   | Agents
   | Commands
   | Proposals
+  | SetupProposals
   | Context
   | Workspaces
   | Recipe
@@ -245,6 +248,16 @@ function servicesOf(
   // The Specs, and the window that hears of them: one service, which the Spec tools write through
   // as the window's own requests do.
   const specs = specsLayer.pipe(Layer.provide(specNoticesTo(port, log)))
+  // The Workspaces of the Projects and their recipe, one instance for the whole engine: the setup
+  // tools read them and the settings change them (#218), and a preparation holds a Workspace in
+  // the very book a cleanup and a tool read. Made under the data folder unless a Project names a
+  // folder of its own (D8-02, D8-03), over the machine's `git`.
+  const git = gitLayer()
+  const places = Layer.mergeAll(workspacesLayer, recipeLayer).pipe(
+    Layer.provide(git),
+    Layer.provide(Layer.succeed(WorkspacesRoot, join(start.directory, 'workspaces'))),
+    Layer.provide(agents),
+  )
   // Hemera's own tools, and the one loopback address they are served on (D6-01 to D6-05). The
   // server and the runtime are handed the very same book of tokens — `provideMerge` hands it up
   // rather than minting a second one, and a token of one book means nothing to the other.
@@ -255,6 +268,8 @@ function servicesOf(
     Layer.provideMerge(commandsLayer),
     // The variables a run is given are the Project's overridden by the Workspace's (D8-06).
     Layer.provide(variablesLayer),
+    // What the setup tools read, and the values of the variables they propose (#218).
+    Layer.provide(setupDeskLayer.pipe(Layer.provide(places), Layer.provide(setupValuesLayer))),
     Layer.provide(rows),
     Layer.provide(specs),
     Layer.provide(processes),
@@ -265,7 +280,6 @@ function servicesOf(
   )
   // What a Session is provided with, and the book of which agents are live (D6-07, D5-05).
   // The context names each repository's branch, read through the machine's `git` (D8-08).
-  const git = gitLayer()
   const provisions = Layer.mergeAll(
     contextLayer.pipe(Layer.provide(rows), Layer.provide(git)),
     poolLayer,
@@ -310,10 +324,9 @@ function servicesOf(
   // Project names a folder of its own (D8-02, D8-03), and prepared through the very commands the
   // tools run: a `run` step is one of their runs, with no Session (D8-05, Decided 11).
   const workspaces = preparationLayer.pipe(
-    Layer.provideMerge(Layer.mergeAll(workspacesLayer, recipeLayer, variablesLayer)),
+    Layer.provideMerge(Layer.mergeAll(places, variablesLayer)),
     Layer.provide(git),
     Layer.provide(hostLinks),
-    Layer.provide(Layer.succeed(WorkspacesRoot, join(start.directory, 'workspaces'))),
     Layer.provide(tools),
     // Its diagnostic, and the window it tells when a Workspace or its steps change.
     Layer.provide(agents),
@@ -331,6 +344,15 @@ function servicesOf(
     // What a human decides of the commands the agent proposed: the catalogue is written from
     // there, on the very commands the tools run (D8-11).
     proposalsLayer.pipe(Layer.provide(tools), Layer.provide(rows), Layer.provide(agents)),
+    // What a human decides of the setup changes the agent proposed: applied through the use cases
+    // the settings call, on the very Workspaces and commands the window asks (#218).
+    setupProposalsLayer.pipe(
+      Layer.provide(workspaces),
+      Layer.provide(tools),
+      Layer.provide(rows),
+      Layer.provide(agents),
+      Layer.provide(setupValuesLayer),
+    ),
     workspaces,
     runtime,
   ).pipe(

@@ -279,8 +279,17 @@ export const Keyboard: Story = {
     const trigger = canvas.getByRole('button', { name: 'Use an existing Workspace' })
     await expect(trigger).toHaveFocus()
     await userEvent.keyboard('{ArrowDown}')
-    await waitFor(() => body.getByRole('menu'))
+    const menu = await waitFor(() => body.getByRole('menu'))
+    // Each key once the focus is where the last one put it: the menu hands the focus to its first
+    // item a moment after it is in the page, and an arrow pressed before then is spent on the
+    // trigger, leaving Enter on the wrong item.
+    await waitFor(() => {
+      expect(within(menu).getByRole('menuitem', { name: 'Prepare a Workspace only' })).toHaveFocus()
+    })
     await userEvent.keyboard('{ArrowDown}')
+    await waitFor(() => {
+      expect(within(menu).getByRole('menuitem', { name: 'main' })).toHaveFocus()
+    })
     await userEvent.keyboard('{Enter}')
     await expect(args.onUseWorkspace).toHaveBeenCalledWith('ws-main')
     await waitFor(() => {

@@ -117,6 +117,8 @@ function labelOf(entry: JournalEntry): string {
       return payload.writer === true
         ? 'Session opened on the Spec, as its writer'
         : 'Session opened on the Spec, as a reader'
+    case 'spec.heading_written':
+      return `Spec is the ${said('type')} “${said('title')}”`
     case 'spec.section_written':
       return `${said('name')} written by ${said('author')} · v${said('version')}`
     case 'spec.stories_written':

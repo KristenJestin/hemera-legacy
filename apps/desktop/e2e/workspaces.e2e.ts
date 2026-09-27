@@ -308,7 +308,10 @@ async function startSession(workspace: string, said: string): Promise<void> {
     await browser.keys('Escape')
     await browser.pause(400)
   }
-  await choose('Workspace', workspace)
+  // The composer's select is named after the Workspace it is on (`Workspace: main`, #180): its
+  // label is read first, then chosen from as any other select.
+  const current = await $('button[aria-label^="Workspace: "]').getAttribute('aria-label')
+  await choose(current ?? 'Workspace', workspace)
   await write(said)
   await press('Start chat')
   await awaits(said)

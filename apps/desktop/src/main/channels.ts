@@ -250,6 +250,9 @@ const RELAYED = [
   'commands.stopService',
   'commands.proposeAccept',
   'commands.proposeDecline',
+  'setup.accept',
+  'setup.acceptAll',
+  'setup.decline',
   'context.read',
   // The Workspaces of a Project, their preparation, the recipe and the variables: rows, worktrees
   // and steps the engine holds and runs (D8-01 to D8-06).

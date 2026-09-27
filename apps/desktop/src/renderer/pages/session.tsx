@@ -726,10 +726,12 @@ export function SessionPage({
       width and one left edge, and nothing stands beside them but the Spec of a `define` Session —
       the Session details are a dialog the reader opens from the head (second review of #18). The
       screen runs under the frame all the same, and the page's own scroll is the thread's. The row
-      is the container the unfolded Spec panel's width is a share of.
+      is the container the unfolded Spec panel's width is a share of. The chat takes what the
+      panel leaves it and no more: never wider than that for what it holds, which would push the
+      row past the window and make it scroll sideways (issue #181).
     */
     <div className="@container flex h-full min-h-0">
-      <div className="flex min-h-0 flex-1 flex-col">
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
         <div className="mx-auto flex w-full max-w-3xl flex-col gap-4 px-6 pt-6 pb-4">
           <SessionHeader
             title={session.title}

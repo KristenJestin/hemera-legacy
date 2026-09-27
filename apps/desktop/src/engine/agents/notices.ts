@@ -49,6 +49,12 @@ export interface AgentNoticesService {
    * Project: the panel open on that Spec reads it again, and reads the whole of where it stands.
    */
   readonly launched: (specId: string, projectId: string) => void
+  /**
+   * What this machine has of the agents changed since a list was given: a version that answered
+   * after the list went without it, or another version than the one it gave. About the machine
+   * rather than a Session: the window reads the list again.
+   */
+  readonly agents: () => void
 }
 
 export class AgentNotices extends Context.Service<AgentNotices, AgentNoticesService>()(
@@ -68,4 +74,5 @@ export const NoNotices = Layer.succeed(AgentNotices, {
   ran: () => undefined,
   workspace: () => undefined,
   launched: () => undefined,
+  agents: () => undefined,
 })

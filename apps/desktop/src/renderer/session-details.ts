@@ -1,4 +1,4 @@
-import { MAIN_WORKSPACE } from '@hemera/core'
+import { MAIN_WORKSPACE, PHASE_IDS } from '@hemera/core'
 import type { CommandRun, ContextView, Provided } from '@hemera/ipc'
 import type {
   CommandPanelRun,
@@ -117,6 +117,7 @@ function atOf(iso: string): string {
 export interface ContextLists {
   workspace: ContextWorkspace
   instructions: ContextEntry[]
+  handed: ContextEntry[]
   tools: ContextTool[]
   lentAt: string | undefined
   commands: ContextCommand[]
@@ -171,6 +172,63 @@ function fileLineOf(file: Provided | undefined, change: Provided | undefined): C
   return { label: 'This Workspace has no AGENTS.md' }
 }
 
+/** The phases a brief can be composed for. */
+const PHASES: ReadonlySet<string> = new Set(PHASE_IDS)
+
+/** A section or a phase as the Spec names it: `expected_outcome` is `Expected outcome`. */
+function titled(name: string): string {
+  const words = name.replaceAll('_', ' ')
+  return `${words.charAt(0).toUpperCase()}${words.slice(1)}`
+}
+
+/**
+ * What a `define` Session handed its agent besides its instructions (#74), one line each, oldest
+ * first, in the reader's words and never the engine's: the instructions of each phase, the human's
+ * edits and answers, the results of sub-agents, and what Hemera said to it of its own. The engine names what each was — the key a
+ * brief was composed for, the sections an edit touched, the question an answer answered — and a
+ * row written before it did is said without it.
+ */
+function handedOf(provided: ContextView['provided']): ContextEntry[] {
+  return provided.flatMap((one): ContextEntry[] => {
+    const at = atOf(one.deliveredAt)
+    switch (one.kind) {
+      case 'brief': {
+        // `shape · revision 2 · writer`, or `no phase · …` for a Spec with no phase open.
+        const [phase = '', revision = ''] = one.path.split(' · ')
+        const named = PHASES.has(phase) ? `the ${titled(phase)} phase` : 'the Spec'
+        // The revision is said once there is more than one: after a Rework.
+        const number = Number(revision.replace('revision ', ''))
+        const again = number > 1 ? ` of revision ${number}` : ''
+        return [{ label: `The instructions for ${named}${again} went to the agent`, at }]
+      }
+      case 'edit': {
+        const sections = one.path.split(',').filter((name) => name !== '')
+        const named = sections.length === 0 ? 'the Spec' : sections.map(titled).join(', ')
+        return [{ label: `Your edits to ${named} went to the agent`, at }]
+      }
+      case 'answer':
+        return [
+          {
+            label:
+              one.path === ''
+                ? 'Your answers went to the agent'
+                : `Your answer to “${one.path}” went to the agent`,
+            at,
+          },
+        ]
+      case 'internal':
+        return [{ label: 'The result of a sub-agent went to the agent', at }]
+      // Hemera's own words: the only notice it sends is that the user declined a proposal.
+      case 'notice':
+        return [{ label: 'Hemera told the agent you declined its proposal', at }]
+      case 'request':
+        return [{ label: 'The New Spec request went to the agent', at }]
+      default:
+        return []
+    }
+  })
+}
+
 /**
  * The Context view of a Session, in the words the view draws it with (D6-10).
  *
@@ -188,6 +246,7 @@ export function contextListsOf(
   return {
     workspace: { name: workspace, path: root },
     instructions: instructionsOf(view.provided),
+    handed: handedOf(view.provided),
     tools: view.tools.map((tool) => ({ name: tool.name, bound: tool.bound })),
     lentAt: base === undefined ? undefined : atOf(base.deliveredAt),
     commands: view.commands.map((command) => ({ name: command.name, command: command.line })),

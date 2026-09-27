@@ -133,6 +133,7 @@ describe('The cards say the engine views in their own words', () => {
           scope: 'workspace',
           portless: true,
           portlessName: null,
+          runAtOpen: false,
           createdAt: 0,
         },
       ],
@@ -286,6 +287,7 @@ describe('A dedicated Workspace from the settings is made from its plan', () => 
   const plan: WorkspacePlan = {
     name: '',
     root: '/data/workspaces/atlas',
+    temporary: false,
     path: '/data/workspaces/atlas',
     branchPrefix: 'atlas',
     repositories: ['sources/api', 'docs'],
@@ -371,6 +373,7 @@ describe('A dedicated Workspace from the settings is made from its plan', () => 
     expect(
       worktreesOf({
         name: 'login-form',
+        root: '/data/workspaces/atlas',
         repositories: [{ path: 'sources/api', base: 'a'.repeat(40), branch: 'kris/login' }],
       }),
     ).toEqual([{ relativePath: 'sources/api', base: 'a'.repeat(40), branch: 'kris/login' }])

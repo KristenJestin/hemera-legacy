@@ -1,0 +1,1 @@
+ALTER TABLE `project_commands` ADD `run_at_open` integer DEFAULT 0 NOT NULL;

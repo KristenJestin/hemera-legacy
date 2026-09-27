@@ -128,6 +128,7 @@ export {
   nextPending,
   resumedSteps,
   slugify,
+  specWorkspaceName,
   stepsFor,
   variableKey,
   workspaceName,
@@ -174,6 +175,7 @@ export {
   specPrefix,
   specPrefixFrom,
   staleAfterWrite,
+  storyFailures,
   takeOverRefusal,
   taskGraph,
   unbriefedEdit,
@@ -211,6 +213,7 @@ export type {
 export {
   DEFINE_MISSION_BRIEF,
   PHASE_BRIEFS,
+  QUESTION_RULE,
   answersText,
   composeBrief,
   editsText,

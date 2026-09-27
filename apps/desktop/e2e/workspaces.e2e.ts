@@ -308,7 +308,10 @@ async function startSession(workspace: string, said: string): Promise<void> {
     await browser.keys('Escape')
     await browser.pause(400)
   }
-  await choose('Workspace', workspace)
+  // The composer's select is named after the Workspace it is on (`Workspace: main`, #180): its
+  // label is read first, then chosen from as any other select.
+  const current = await $('button[aria-label^="Workspace: "]').getAttribute('aria-label')
+  await choose(current ?? 'Workspace', workspace)
   await write(said)
   await press('Start chat')
   await awaits(said)
@@ -484,8 +487,13 @@ describe('A URL is ready only after it answers', () => {
 describe('Two Workspaces run the same command as two instances', () => {
   it('runs dev from a Session in login-form too, where running it again joins it', async () => {
     await startSession('login-form', 'Serve the app in login-form.')
-    // The agent started in login-form: its Workspace is fixed now (D8-08).
-    expect(await shows('The Workspace is fixed once the agent has started.')).toBe(true)
+    // The agent started in login-form: its Workspace is fixed now (D8-08), a plain label whose
+    // tooltip says why (issue #128).
+    expect(
+      await $(
+        '[aria-label="Workspace: login-form. The Workspace is fixed once the agent has started."]',
+      ).waitForExist(),
+    ).toBe(true)
     await openCommands()
     await runLine('dev')
     await awaitsIn('[role="dialog"]', 'Running')

@@ -18,12 +18,10 @@ import {
   type OfferedAgent,
 } from '../composer/agent-model-menu.tsx'
 import { Composer } from '../composer/composer.tsx'
-import { UsageMeter } from '../composer/usage-meter.tsx'
 import { TooltipProvider } from '../components/tooltip/tooltip.tsx'
 import { AgentText } from '../message/agent-text.tsx'
 import { MessageDaySeparator, MessageGroup } from '../message/message.tsx'
 import { MessageScroller, type ScrollerEntry } from '../message/scroller/scroller.tsx'
-import { ActivityRow } from './activity-row.tsx'
 import type { PlanEntry } from './plan-panel.tsx'
 import { ResumeFallbackBanner } from './resume-fallback-banner.tsx'
 import { SessionEmpty, SessionHeader } from './session.tsx'
@@ -33,6 +31,7 @@ import { CommandsPanel } from './commands-panel.tsx'
 import { ContextView } from './context-view.tsx'
 import { SessionDetails, type SessionDetailsTab, type TouchedFile } from './session-details.tsx'
 import { StoppedTurn } from './stopped-turn.tsx'
+import { TurnLine } from './turn-line.tsx'
 
 /**
  * A Session with an agent in it, at once (design D17-11, D17-13).
@@ -388,8 +387,7 @@ function Page({
           <div className="mx-auto flex w-full max-w-3xl flex-col gap-4 px-6 pt-6 pb-4">
             <SessionHeader
               title={fresh ? 'Untitled' : 'CSV invoice export'}
-              projectName="Atlas"
-              meta={fresh ? 'created just now · 0 entries' : 'started 12 minutes ago · 9 entries'}
+
               onRename={fn()}
               onStartEditing={fn()}
               onCancelEditing={fn()}
@@ -430,10 +428,10 @@ function Page({
               doing on the left where the agent writes, what it has cost on the right. */}
           <div className="mx-auto flex w-full max-w-3xl flex-col gap-2 px-6 pb-4">
             {!fresh && (
-              <div className="flex items-center justify-between gap-3">
-                <ActivityRow state="waiting" />
-                <UsageMeter used={12400} size={200000} cost={{ amount: 0.42, currency: 'EUR' }} />
-              </div>
+              <TurnLine
+                activity={{ state: 'waiting' }}
+                usage={{ used: 12400, size: 200000, cost: { amount: 0.42, currency: 'EUR' } }}
+              />
             )}
             <Composer
               value={value}
@@ -496,7 +494,7 @@ function Page({
 }
 
 const meta = {
-  tags: ['autodocs'],
+  tags: ['autodocs', 'updated'],
   title: 'Surfaces/Session',
   component: Page,
   parameters: { layout: 'fullscreen' },
@@ -628,7 +626,7 @@ export const Complete: Story = {
     await expect(onOneLine(at, menu), 'the agent menu left the box’s own row').toBe(true)
     await expect(canvas.queryByRole('combobox', { name: 'Mode' })).toBeNull()
     await expect(canvas.queryByRole('button', { name: /New Spec/ })).toBeNull()
-    const pill = canvas.getByRole('combobox', { name: 'Workspace' })
+    const pill = canvas.getByRole('combobox', { name: /^Workspace:/ })
     await expect(onOneLine(pill, stops[2]!), 'the foot of the composer wrapped').toBe(true)
 
     /*
@@ -651,8 +649,9 @@ export const Complete: Story = {
     await expect(answered.left, 'the agent’s block left the frame’s left edge').toBe(frame.left)
     await expect(answered.right, 'the agent’s block left the frame’s right edge').toBe(frame.right)
     const rail = canvas.getByRole('navigation', { name: /^Marks of/ }).getBoundingClientRect()
-    await expect(rail.left, 'the rail is inside the thread’s column').toBeGreaterThanOrEqual(
-      frame.right,
+    // Outside the column, at its left, away from the panel a mission opens on the right (#149).
+    await expect(rail.right, 'the rail is inside the thread’s column').toBeLessThanOrEqual(
+      frame.left,
     )
     /*
      * And the thread is what a wheel turns anywhere under the head, not only over the column:
@@ -684,6 +683,19 @@ export const Complete: Story = {
     // And what the turn has spent is said above the box, not in the row that would have wrapped.
     await expect(canvas.getByLabelText(/12,400 of 200,000 tokens used/)).toBeVisible()
     await expect(canvas.getByText(/could not resume its own session/)).toBeVisible()
+    /*
+     * The meter stays at the foot, above the box, whatever unfolds in the thread above it
+     * (recette of 26 September 2026, issue #134): a call opened is room taken in the thread, not
+     * in the row the meter stands on.
+     */
+    const spent = canvas.getByLabelText(/12,400 of 200,000 tokens used/)
+    const foot = spent.getBoundingClientRect().bottom
+    const call = canvas.getByRole('button', { name: /^Hemera Read file/ })
+    // Pressed on the row itself: the middle of the line is the file, which is a press of its own.
+    call.click()
+    await expect(await canvas.findByText('fs_read')).toBeVisible()
+    await expect(spent.getBoundingClientRect().bottom, 'the meter moved').toBe(foot)
+    call.click()
   },
 }
 

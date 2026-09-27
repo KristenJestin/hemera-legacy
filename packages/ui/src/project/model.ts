@@ -110,6 +110,8 @@ export interface CommandLine {
   portless: boolean
   /** The name Portless serves it under, when it goes through Portless; null otherwise. */
   portlessName: string | null
+  /** Whether Hemera runs it in the Project's `main` each time it opens. */
+  runAtOpen: boolean
   /**
    * What the folder is relative to: the path of one of the Project's repositories, as declared,
    * or null for the Workspace root. It follows the Workspace the run is in.

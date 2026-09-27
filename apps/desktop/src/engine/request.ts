@@ -38,6 +38,7 @@ import { AgentRuntime, type AgentRuntimeError } from './agents/runtime.ts'
 import { Agents, availabilityOf, type AgentUpdateRefusedError } from './agents/service.ts'
 import { type BareModeNotQualifiedError, refusedUnlessBare } from './agents/bare.ts'
 import { ADAPTERS, Discovery } from './agents/discovery.ts'
+import { runAtOpen } from './commands/at-open.ts'
 import {
   type NothingToRunError,
   type UnknownCommandFolderError,
@@ -55,6 +56,7 @@ import { Commands, type UnknownCommandError, type UnknownRunError } from './comm
 import { type Context, type UnreadableInstructionsError } from './context/service.ts'
 import { contextOf } from './context/view.ts'
 import { type InvalidCursorError, Journal } from './journal.ts'
+import { type PathOutsideBaseError, entriesUnder } from './paths.ts'
 import { Preferences } from './preferences.ts'
 import {
   type InvalidBranchPrefixError,
@@ -324,10 +326,12 @@ export function answer(
       return yield* runtime.setOption(sessionId, optionId, value)
     }
     if (decision.name === 'agents.prompt') {
-      const { sessionId, text } = decision.argument
+      // New Spec creates no Spec (#198): its request rides this turn, and the Spec is made from
+      // the agent's proposal once the user accepts it, or is the existing one they continue.
+      const { sessionId, text, intent } = decision.argument
       // What the page is waiting for is why the turn ended; everything else about it reached the
       // window as it happened, on the engine's own channel (design D5-12).
-      const report = yield* runtime.prompt(sessionId, text)
+      const report = yield* runtime.prompt(sessionId, text, intent)
       return { stopReason: report.stopReason }
     }
     if (decision.name === 'agents.stop') return yield* runtime.stop(decision.argument.sessionId)
@@ -339,6 +343,8 @@ export function answer(
       const report = yield* runtime.resume(decision.argument.sessionId)
       return { state: report.state, reason: report.reason }
     }
+    if (decision.name === 'agents.handOver')
+      return yield* runtime.handOver(decision.argument.sessionId)
 
     // What the Agents section asks about the three agents of this machine, and the one thing it
     // does about the answer (design D5-18). The check is the only use case of this process that
@@ -393,6 +399,9 @@ export function answer(
       const { projectId, runId } = decision.argument
       return yield* commands.stopIn(projectId, runId)
     }
+    // Asked by the main process once the window is shown (#114): what is marked to run when
+    // Hemera opens runs in its Project's `main`, and what could not be started is answered.
+    if (decision.name === 'engine.atOpen') return yield* runAtOpen
     // What a human decides of a command the agent proposed: the one way into the catalogue
     // besides the settings (D8-11).
     if (decision.name === 'commands.proposeAccept') {
@@ -477,6 +486,12 @@ export function answer(
       return yield* variables.remove(projectId, workspaceId, key)
     }
 
+    // The entries of a folder under a base, which a path field offers as it is typed (#109).
+    if (decision.name === 'paths.entries') {
+      const { base, relative, kinds } = decision.argument
+      return yield* entriesUnder(base, relative, kinds)
+    }
+
     // The Spec use cases (D7-03). The renderer is the human actor: whatever it writes carries
     // human provenance and the Session whose panel it came from (D7-04, D7-11).
     const specs = yield* Specs
@@ -505,6 +520,14 @@ export function answer(
         `Hemera told the agent you declined the ${declined.type} Spec “${declined.title}”.`,
       )
       return
+    }
+    if (decision.name === 'specs.acceptExisting') {
+      const { sessionId, proposalId } = decision.argument
+      const joined = yield* specs.acceptExisting(sessionId, proposalId)
+      // As a proposal accepted: the agent was granted the tools of a free Session, and is started
+      // again with those of a define one, and handed the mission brief in a turn of its own.
+      yield* runtime.briefWhenIdle(joined.session.id)
+      return joined
     }
     if (decision.name === 'specs.openSession') return yield* specs.openSession(decision.argument)
     if (decision.name === 'specs.writeSection') {
@@ -640,3 +663,4 @@ export type Refusal =
   | WorkspaceFixedError
   | UnknownProposalError
   | ProposalDecidedError
+  | PathOutsideBaseError

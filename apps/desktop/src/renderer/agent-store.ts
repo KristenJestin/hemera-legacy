@@ -5,14 +5,17 @@ import type {
   AgentUpdate,
   ConfigOption,
   EngineEvent,
+  PromptIntent,
   ResumeState,
   SessionEntry,
   StopReason,
 } from '@hemera/ipc'
-import type { ActivityState } from '@hemera/ui'
+import { TOOL_LABELS, hemeraToolNamed } from '@hemera/core'
+import type { ActivityState, AgentListing, SpecTarget } from '@hemera/ui'
 
 import { effortStage, effortToLand, modelStage } from './agent-options.ts'
-import { commandRunOf } from './agent-tool-payloads.ts'
+import { commandRunOf, specWriteOf } from './agent-tool-payloads.ts'
+import { patiently } from './patiently.ts'
 
 /**
  * What the agents of this window are doing (design D5-12, D5-13, D5-17).
@@ -47,10 +50,36 @@ export interface AgentSessionState {
    * only the order of the pushes says which that is.
    */
   latest: string | null
+  /**
+   * When this window last heard anything of the Session: an entry pushed, or its turn begun
+   * (issue #131). Null for a Session nothing has been heard of since it was opened.
+   */
+  heardAt: number | null
 }
 
 /** What a Session nothing has happened in yet holds. */
-const QUIET: AgentSessionState = { entries: [], running: false, stopReason: null, latest: null }
+const QUIET: AgentSessionState = {
+  entries: [],
+  running: false,
+  stopReason: null,
+  latest: null,
+  heardAt: null,
+}
+
+/**
+ * Since when a running turn has heard nothing (issue #131): the last push this window heard, or
+ * — for a Session opened while its turn was already running — when the last entry of its thread
+ * was written. Null when neither says anything, and while the turn waits on Hemera itself.
+ */
+export function heardSince(
+  agent: AgentSessionState,
+  thread: readonly SessionEntry[],
+): number | null {
+  if (waitsOnHemera(thread)) return null
+  const written = thread.at(-1)?.createdAt ?? null
+  if (agent.heardAt === null) return written
+  return written === null ? agent.heardAt : Math.max(agent.heardAt, written)
+}
 
 /**
  * The Sessions whose turn the engine said had begun and has not yet said had ended.
@@ -101,6 +130,12 @@ export interface AgentState {
   offerings: ReadonlyMap<string, AgentOffering>
   /** What this machine has, as `agents.list` and `agents.check` answered. */
   agents: readonly AgentAvailability[]
+  /**
+   * Where that list stands: `looking` until the engine has answered it once, `failed` when it
+   * did not answer even asked again, `listed` from its first answer on. An empty `agents` is not an
+   * answer: it is what the window holds before there is one.
+   */
+  listing: AgentListing
   /** Whether that list is the one a registry answered, which is the settings' own question. */
   checked: boolean
   /** What the last act was refused with, in the engine's own words, or null. */
@@ -112,6 +147,7 @@ const EMPTY: AgentState = {
   options: new Map(),
   offerings: new Map(),
   agents: [],
+  listing: 'looking',
   checked: false,
   refusal: null,
 }
@@ -154,6 +190,8 @@ export interface Activity {
   state: ActivityState
   /** What is being run, when a tool call is: its title, as the agent wrote it. */
   detail?: string | undefined
+  /** What one of Hemera's own tools is doing, said whole: "Writing the Spec" (issue #170). */
+  doing?: string | undefined
   /** The thought arriving now, which is the last one of the turn that is running. */
   thought?: string | undefined
   /** How long the last turn took, from the user's message to its `turn` entry, once it is over. */
@@ -256,11 +294,15 @@ export function activityOf(
   const command = [...running].reverse().find((entry) => entry.kind === 'command_run')
   const run = command === undefined ? null : commandRunOf(command)
   if (run !== null && run.state === 'running' && run.type !== 'serve') {
-    return { state: 'running', detail: `Running ${run.name}`, thought }
+    return { state: 'running', detail: run.name, thought }
   }
 
   const call = [...running].reverse().find((entry) => entry.kind === 'tool_call')
   if (call !== undefined && UNFINISHED.includes(call.state ?? '')) {
+    // One of Hemera's own tools says what it is doing in words of its own, never by the agent's
+    // word for it, `mcp__hemera__spec_write` (issue #159), nor as "Running Write Spec" (#170).
+    const named = hemeraToolNamed(call.body)
+    if (named !== null) return { state: 'running', doing: TOOL_LABELS[named].doing, thought }
     return { state: 'running', detail: call.body, thought }
   }
 
@@ -272,6 +314,39 @@ export function activityOf(
   }
 
   return { state: 'thinking', thought }
+}
+
+/**
+ * The part of the Spec the running turn is writing now: the target of a `spec_write` call it has
+ * not finished, or null (issue #185). Read off the thread like the row's "Writing the Spec", and
+ * over the same entries: a call a dead turn left `in_progress` is not a write that is happening.
+ */
+export function specWritingOf(entries: readonly SessionEntry[]): SpecTarget | null {
+  const running = entries.slice(Math.max(lastSaid(entries), lastEnd(entries)) + 1)
+  for (const entry of [...running].reverse()) {
+    if (!UNFINISHED.includes(entry.state ?? '')) continue
+    const target = specWriteOf(entry)
+    if (target !== null) return target
+  }
+  return null
+}
+
+/**
+ * Whether the running turn waits on Hemera rather than on its agent (issue #170): a command
+ * Hemera runs for it, or one of Hemera's tools that has not answered yet. Nothing is pushed
+ * while a three-minute test runs, and that silence is Hemera's, not the agent's. An app left
+ * running is not what the turn waits on.
+ */
+function waitsOnHemera(entries: readonly SessionEntry[]): boolean {
+  const running = entries.slice(Math.max(lastSaid(entries), lastEnd(entries)) + 1)
+  return running.some((entry) => {
+    if (entry.kind === 'command_run') {
+      const run = commandRunOf(entry)
+      return run !== null && run.state === 'running' && run.type !== 'serve'
+    }
+    const unfinished = entry.kind === 'tool_call' && UNFINISHED.includes(entry.state ?? '')
+    return unfinished && hemeraToolNamed(entry.body) !== null
+  })
 }
 
 /** Whether the agent is waiting on an answer: a request with no decision written after it. */
@@ -357,6 +432,7 @@ export function listenToAgents(): () => void {
       changed(event.sessionId, {
         entries: withEntry(held.entries, event.entry),
         latest: event.entry.id,
+        heardAt: Date.now(),
       })
       return
     }
@@ -371,12 +447,17 @@ export function listenToAgents(): () => void {
     // word that comes back (design D5-12).
     if (event.event === 'turn_start') {
       announced.add(event.sessionId)
-      changed(event.sessionId, { running: true })
+      changed(event.sessionId, { running: true, heardAt: Date.now() })
     }
     if (event.event === 'turn') {
       announced.delete(event.sessionId)
       changed(event.sessionId, { running: false })
     }
+    // What the machine has changed since it was listed — a version that answered late, an agent
+    // updated — and the list is read again rather than patched. Checked again once the Agents
+    // section has asked the registries: a plain list answers no published version, and reading
+    // one would take away what that section shows.
+    if (event.event === 'agents.changed') void (state.checked ? checkAgents() : loadAgents())
   })
   return () => {
     listening = false
@@ -511,16 +592,43 @@ export async function setOffered(
  * then is what emptied the row and put the Stop away five seconds into every turn (trial of
  * 22 September 2026): once the turn is announced, the engine's own `turn` is what ends it.
  */
-export async function say(sessionId: string, text: string): Promise<string | null> {
+export async function say(
+  sessionId: string,
+  text: string,
+  intent?: PromptIntent,
+): Promise<string | null> {
   changed(sessionId, { running: true })
   try {
-    const answered = await window.hemera.invoke('agents.prompt', { sessionId, text })
+    // The intent is said only when there is one: a message like any other carries none.
+    const asked = intent === undefined ? { sessionId, text } : { sessionId, text, intent }
+    const answered = await window.hemera.invoke('agents.prompt', asked)
     changed(sessionId, { running: false, stopReason: answered.stopReason })
     return null
   } catch (cause) {
     if (!announced.has(sessionId)) changed(sessionId, { running: false })
     replace({ ...state, refusal: message(cause) })
     return message(cause)
+  }
+}
+
+/**
+ * Whether a Session has an ACP trace to open (issue #131): written only while the settings ask
+ * for it, so a Session may well have none. A question the main process cannot answer is none.
+ */
+export async function hasTrace(sessionId: string): Promise<boolean> {
+  try {
+    return await window.hemera.invoke('trace.exists', { sessionId })
+  } catch {
+    return false
+  }
+}
+
+/** Opens the ACP trace of a Session with the desktop, the way the diagnostic is opened. */
+export async function openTrace(sessionId: string): Promise<void> {
+  try {
+    await window.hemera.invoke('trace.open', { sessionId })
+  } catch (cause) {
+    replace({ ...state, refusal: message(cause) })
   }
 }
 
@@ -547,6 +655,19 @@ export async function decide(
 ): Promise<void> {
   try {
     await window.hemera.invoke('agents.decide', { sessionId, toolCallId, optionId })
+    replace({ ...state, refusal: null })
+  } catch (cause) {
+    replace({ ...state, refusal: message(cause) })
+  }
+}
+
+/**
+ * Hands the agent of a Session what waits for it, after a delivery it did not take: the Retry of
+ * the row that said so (issue #211). The agent is started first if it is not running.
+ */
+export async function handOver(sessionId: string): Promise<void> {
+  try {
+    await window.hemera.invoke('agents.handOver', { sessionId })
     replace({ ...state, refusal: null })
   } catch (cause) {
     replace({ ...state, refusal: message(cause) })
@@ -592,13 +713,23 @@ export async function resume(sessionId: string): Promise<ResumeState | null> {
   }
 }
 
-/** What this machine has, read without leaving it: which command exists, and which version. */
+/**
+ * What this machine has, read without leaving it: which command exists, and which version.
+ *
+ * Asked again when it fails (`patiently`): the window asks it once at start, while a Session's
+ * agent may be starting beside it, and a list that failed then was a menu left empty for as long
+ * as the window stayed open. Until the first answer the list is `looking`, and a list that never
+ * answered is `failed` — for the menu to say so, and to offer this again. A list already on
+ * screen stays there when reading it again fails.
+ */
 export async function loadAgents(): Promise<void> {
+  if (state.listing === 'failed') replace({ ...state, listing: 'looking' })
   try {
-    const answered = await window.hemera.invoke('agents.list', {})
-    replace({ ...state, agents: answered.agents, refusal: null })
+    const answered = await patiently(async () => await window.hemera.invoke('agents.list', {}))
+    replace({ ...state, agents: answered.agents, listing: 'listed', refusal: null })
   } catch (cause) {
-    replace({ ...state, refusal: message(cause) })
+    const listing = state.listing === 'listed' ? 'listed' : 'failed'
+    replace({ ...state, listing, refusal: message(cause) })
   }
 }
 
@@ -609,7 +740,7 @@ export async function loadAgents(): Promise<void> {
 export async function checkAgents(): Promise<void> {
   try {
     const answered = await window.hemera.invoke('agents.check', {})
-    replace({ ...state, agents: answered.agents, checked: true, refusal: null })
+    replace({ ...state, agents: answered.agents, listing: 'listed', checked: true, refusal: null })
   } catch (cause) {
     replace({ ...state, refusal: message(cause) })
   }

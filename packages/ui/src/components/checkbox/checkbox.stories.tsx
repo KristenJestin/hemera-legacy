@@ -1,7 +1,9 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
+import { MotionConfig } from 'motion/react'
 import { useState } from 'react'
-import { expect, fn, userEvent, within } from 'storybook/test'
+import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
 
+import { emulateReducedMotion } from '../../../.storybook/reduced-motion.ts'
 import { Checkbox } from './checkbox.tsx'
 
 /** A box whose state the story keeps, so ticking it in the canvas does what it says. */
@@ -29,7 +31,7 @@ function Kept({
 }
 
 const meta = {
-  tags: ['autodocs'],
+  tags: ['autodocs', 'updated'],
   title: 'Components/Checkbox',
   component: Checkbox,
   parameters: { layout: 'centered' },
@@ -117,5 +119,110 @@ export const Keyboard: Story = {
     expect(box).toBeChecked()
     await userEvent.click(canvas.getByText('Serve through Portless'))
     expect(box).not.toBeChecked()
+  },
+}
+
+/** How much of the tick is drawn, from nothing (0) to all of it (1), as motion writes it. */
+function drawnOf(box: HTMLElement): number {
+  const path = box.querySelector('path')!
+  return Number.parseFloat(path.getAttribute('stroke-dasharray') ?? '0')
+}
+
+/** How far the box is drawn under its own size, 1 at rest. */
+function scaleOf(box: HTMLElement): number {
+  const matrix = new DOMMatrixReadOnly(getComputedStyle(box).transform)
+  return matrix.a
+}
+
+/** What the tick and the box go through, frame by frame, until the tick is at `end`. */
+async function framesUntil(
+  box: HTMLElement,
+  end: number,
+): Promise<{ drawn: number[]; scales: number[] }> {
+  const drawn: number[] = []
+  const scales: number[] = []
+  const started = performance.now()
+  while (performance.now() - started < 2000) {
+    // oxlint-disable-next-line no-await-in-loop -- one frame, then a look, then the next: the order is the point
+    await new Promise((next) => requestAnimationFrame(next))
+    drawn.push(drawnOf(box))
+    scales.push(scaleOf(box))
+    if (drawn.at(-1) === end && scales.at(-1) === 1) break
+  }
+  return { drawn, scales }
+}
+
+/**
+ * Checked: the tick draws itself along its stroke and the box gives a little under it, then
+ * settles, drawn.
+ */
+export const Checked: Story = {
+  parameters: { controls: { disable: true } },
+  render: () => <Kept initial={false} label="Serve through Portless" />,
+  play: async ({ canvasElement }) => {
+    const box = within(canvasElement).getByRole('checkbox', { name: /portless/i })
+    await expect(drawnOf(box)).toBe(0)
+    await userEvent.click(box)
+    const { drawn, scales } = await framesUntil(box, 1)
+    // Part of the way along on some frame: drawn, and not switched on.
+    expect(drawn.some((one) => one > 0 && one < 1)).toBe(true)
+    expect(Math.min(...scales)).toBeLessThan(1)
+    expect(drawn.at(-1)).toBe(1)
+    expect(scales.at(-1)).toBe(1)
+    expect(box).toBeChecked()
+  },
+}
+
+/** Unchecked: the tick undraws the way it came, while the fill fades from under it. */
+export const Unchecked: Story = {
+  parameters: { controls: { disable: true } },
+  render: () => <Kept initial label="Serve through Portless" />,
+  play: async ({ canvasElement }) => {
+    const box = within(canvasElement).getByRole('checkbox', { name: /portless/i })
+    // Opened checked, it is drawn already: nothing draws itself on the way in.
+    await expect(drawnOf(box)).toBe(1)
+    await userEvent.click(box)
+    const { drawn, scales } = await framesUntil(box, 0)
+    expect(drawn.some((one) => one > 0 && one < 1)).toBe(true)
+    // Letting go is not pressed: the box stays its size.
+    expect(Math.min(...scales)).toBe(1)
+    expect(drawn.at(-1)).toBe(0)
+    expect(box).not.toBeChecked()
+  },
+}
+
+/**
+ * The same box for a reader who asked for less movement: the tick is there or not, at once, the
+ * box never gives, and its fill does not fade. What motion draws is asked through a
+ * `MotionConfig`; the fill is the stylesheet's, which answers the system's own preference.
+ */
+export const ReducedMotion: Story = {
+  parameters: { controls: { disable: true } },
+  render: () => (
+    <MotionConfig reducedMotion="always">
+      <Kept initial={false} label="Serve through Portless" />
+    </MotionConfig>
+  ),
+  play: async ({ canvasElement }) => {
+    const box = within(canvasElement).getByRole('checkbox', { name: /portless/i })
+    await userEvent.click(box)
+    // Nothing part of the way on any frame: the tick goes from none of it to all of it.
+    const checked = await framesUntil(box, 1)
+    expect(checked.drawn.filter((one) => one > 0 && one < 1)).toEqual([])
+    expect(checked.drawn.at(-1)).toBe(1)
+    expect(checked.scales.every((one) => one === 1)).toBe(true)
+    await userEvent.click(box)
+    const unchecked = await framesUntil(box, 0)
+    expect(unchecked.drawn.filter((one) => one > 0 && one < 1)).toEqual([])
+    expect(unchecked.drawn.at(-1)).toBe(0)
+    const restore = await emulateReducedMotion()
+    if (restore === null) return
+    try {
+      await waitFor(() => {
+        expect(getComputedStyle(box).transitionProperty).toBe('none')
+      })
+    } finally {
+      await restore()
+    }
   },
 }

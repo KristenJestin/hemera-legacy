@@ -299,8 +299,9 @@ export const push: Transition = morph
 /**
  * The `crossfade` kind: one content giving way to another in the same place, in opacity alone.
  *
- * For a box whose frame does not move while what it holds is replaced — the tabs of the details
- * of a Session, where the dialog keeps its height and only the panel inside it changes. A slide
+ * For a box whose frame stays where it is while what it holds is replaced — the tabs of the
+ * details of a Session, where the panel inside the dialog changes and the dialog only follows its
+ * height. A slide
  * there would say the new panel came from somewhere; it did not, it was behind its tab all
  * along, and what has to be read is the same room showing something else. The stage of the Spec
  * panel is that room too: it shows one part of a Spec at a time, and a reader walking the
@@ -321,19 +322,6 @@ export const CROSSFADE = {
   from: { filter: 'opacity(0)' },
   to: { filter: 'opacity(1)' },
 } as const
-
-/**
- * The `fill` kind: a measure filling up to where it stands.
- *
- * The readiness bar of a Spec is seven segments, and one that passes fills from its left edge
- * rather than switching colour: the eye catches a change it saw happen. The theme's `slow`, on
- * the calm curve, and each segment a `FILL_STEP` behind the one before it, so a bar that fills
- * at once reads as a sweep from left to right and not as seven lamps going on together.
- */
-export const fill: Transition = { duration: durations.slow, ease: easing }
-
-/** How far behind the segment before it a segment of a measure starts filling, in seconds. */
-export const FILL_STEP = 0.04
 
 /**
  * The `ping` kind: a ring leaving what is running, over and over.
@@ -360,3 +348,59 @@ export const pinging: Transition = {
   ease: easing,
   repeat: Number.POSITIVE_INFINITY,
 }
+
+/**
+ * The `swap` kind: two surfaces trading places at the window's edge, in two moves that overlap —
+ * the Spec folded to its small frame, and the Spec open as its panel (issue #164).
+ *
+ * The surface that leaves goes first, out by the edge; a beat later, while it is still going, the
+ * one that arrives comes in from that edge. The two moves always overlap, so there is no frame
+ * where neither is there, and the whole exchange is about a third of a second: a gesture, not a
+ * scene.
+ *
+ * - `move` is what the panel slides on, and what the chat beside it is pushed on: `lead`, the
+ *   quickest spring of the preset that still reads as a slide, started from rest so that a swap
+ *   turned round half-way leaves from where it is rather than carrying on for a frame.
+ * - `fade` is what the small frame slides and fades on: the same spring as the panel. A shorter
+ *   fade would be all but gone by the time the beat is over and the panel shows, which reads as
+ *   a moment with nothing at the edge; on one spring the frame is still leaving as the panel
+ *   comes in, and still arriving as it goes.
+ * - `beat` is how long the second move waits for the first, the beat a folding panel's labels
+ *   already wait for its width.
+ *
+ * A reader asking for less movement gets both moves at once, with no beat between them: read
+ * `move` and `fade` through `useTransition`, and delay the second through `onTheBeat`.
+ */
+export const swap = {
+  move: { ...lead, velocity: 0 },
+  fade: { ...lead, velocity: 0 },
+  beat: LABEL_DELAY,
+} as const
+
+/**
+ * The second move of a swap: the transition it is handed, a beat late. `instant` stays instant —
+ * a reader asking for less movement has nothing to wait for.
+ */
+export function onTheBeat(transition: Transition): Transition {
+  return transition === instant ? instant : { ...transition, delay: swap.beat }
+}
+
+/**
+ * The `check` kind: a tick drawing itself when a box is checked, and undrawing when it is not
+ * (issue #185).
+ *
+ * - `draw` is what the stroke's length travels on: the theme's `base` beat, on a curve that sets
+ *   off fast and lands slowly, so the tick reads as a pen stroke rather than as a bar filling.
+ * - `press` and `pressed` are the small give of the box as it is checked: down to `CHECK_PRESS`
+ *   of itself and back, on the `fast` beat. A tween and not a spring, because it passes through
+ *   three values and a spring only goes to one.
+ *
+ * A reader asking for less movement gets the tick drawn and the box still: read both through
+ * `useTransition`, which answers `instant`.
+ */
+export const CHECK_PRESS = 0.92
+export const check = {
+  draw: { duration: durations.base, ease: [0.16, 1, 0.3, 1] },
+  press: { duration: durations.fast, ease: easing },
+  pressed: { scale: [1, CHECK_PRESS, 1] },
+} as const satisfies { draw: Transition; press: Transition; pressed: TargetAndTransition }

@@ -4,7 +4,7 @@ import { type ReactNode, useEffect, useId, useRef, useState } from 'react'
 import { IconButton } from '../components/button/button.tsx'
 import { Frame, FrameFooter } from '../components/frame/frame.tsx'
 import { IconAt, IconPaperclip } from '../icons.ts'
-import { collapse, expand, morph, useTransition } from '../motion.ts'
+import { CROSSFADE, crossfade, useTransition } from '../motion.ts'
 import { ComposerActions } from './composer-actions.tsx'
 import { ComposerAttachments } from './composer-attachments.tsx'
 import { ComposerBox, type ComposerBoxHandle } from './composer-box.tsx'
@@ -102,13 +102,23 @@ export interface ComposerProps {
    */
   agentMenu?: ReactNode | undefined
   /**
-   * Whether the foot offers to turn what is written into a Spec (design D4b-02).
+   * Writes the text as the start of a Session that writes a Spec, and answers as `onSend` does
+   * (design D4b-02, issue #128).
    *
-   * The Home does and a Session does not: a Session is a conversation that is already under
-   * way, and a Spec is made from the question that starts one. Off unless the page asks for it,
-   * so the control has to be earned rather than removed.
+   * The Home offers it and a Session does not: a Session is a conversation that is already under
+   * way, and a Spec is made from the question that starts one. No `New Spec` unless the page
+   * hands this over, so the control has to be earned rather than removed.
    */
-  spec?: boolean | undefined
+  onSpec?: ((text: string) => Promise<string | null>) | undefined
+  /**
+   * Whether the page asks for the caret in the box, now (issue #128).
+   *
+   * A one-shot request rather than an `autoFocus`: the Home is often already on screen when a new
+   * Session is asked for, and a box that is not mounted again is never focused by a mount. The box
+   * takes the caret when this turns true, and `onFocusTaken` tells the page it can let go.
+   */
+  takeFocus?: boolean | undefined
+  onFocusTaken?: (() => void) | undefined
   /**
    * Whether a turn is running, which is what the send becomes while it does (design D17-13).
    *
@@ -131,7 +141,9 @@ export interface ComposerProps {
    * What waits for the reader's answer, pinned above the box for as long as it waits (issue
    * #130): a proposal of the agent, a question it asked. The thread scrolls on under the agent's
    * words and would carry them out of sight; here they stay in reach, and once answered the page
-   * draws them back in the thread. Each grows into its room and folds away on `morph`.
+   * draws them back in the thread. Each takes its room at once and fades in on `crossfade`, and
+   * leaves at once: it leaves because the page draws it back in the thread in that same frame
+   * (issue #209).
    */
   pinned?: readonly Pinned[] | undefined
 }
@@ -159,14 +171,23 @@ export function Composer({
   placeholder = 'Ask anything, think out loud, or describe what you want to do…',
   onSend,
   agentMenu,
-  spec = false,
+  onSpec,
+  takeFocus = false,
+  onFocusTaken,
   running = false,
   onStop,
   blocked,
   pinned = [],
 }: ComposerProps): ReactNode {
-  const growing = useTransition(morph)
+  const fading = useTransition(crossfade)
   const box = useRef<ComposerBoxHandle>(null)
+
+  // The caret, where the page asked for it: once per request, after the box is on screen.
+  useEffect(() => {
+    if (!takeFocus) return
+    box.current?.focus()
+    onFocusTaken?.()
+  }, [takeFocus])
   const [matches, setMatches] = useState<string[]>([])
   const [picking, setPicking] = useState<Picking>(null)
   const [active, setActive] = useState(0)
@@ -304,10 +325,10 @@ export function Composer({
    * busy with this one, and Enter keeps the sentence where it is rather than sending it into a
    * turn that would refuse it.
    */
-  const send = async () => {
+  const send = async (write: (text: string) => Promise<string | null> = onSend) => {
     if (!ready || running) return
     setSending(true)
-    const said = await onSend(value)
+    const said = await write(value)
     setSending(false)
     setRefusal(said)
     if (said !== null) return
@@ -346,20 +367,35 @@ export function Composer({
 
   return (
     <div className="flex flex-col gap-2">
-      <AnimatePresence initial={false}>
-        {pinned.map((one) => (
-          <motion.div
-            key={one.id}
-            className="shrink-0 overflow-hidden"
-            initial={collapse}
-            animate={expand}
-            exit={collapse}
-            transition={growing}
-          >
-            {one.content}
-          </motion.div>
-        ))}
-      </AnimatePresence>
+      {/* Bounded, and scrolled on its own past that: however many wait, the thread keeps its
+          room above them and the box stays in reach under them. Empty, it takes no gap.
+
+          A card leaves with no exit (issue #209): what takes it away is its answer, and the page
+          draws it back in the thread in the same frame. Folding here while the thread had already
+          grown by it gave the thread its whole height and its room only frame by frame, so a
+          thread following its end jumped down by the card, then slid back as the fold ended.
+
+          It arrives the same way, at its whole height, and only fades in. Grown on `morph`, it
+          took the thread's room a few pixels a frame, and a thread following its end was dragged
+          up with it for the whole spring while the card unrolled under it. */}
+      <section
+        aria-label="Waiting for your answer"
+        className="scroll-quiet flex max-h-pinned shrink-0 flex-col gap-2 overflow-y-auto empty:hidden"
+      >
+        <AnimatePresence initial={false}>
+          {pinned.map((one) => (
+            <motion.div
+              key={one.id}
+              className="shrink-0"
+              initial={CROSSFADE.from}
+              animate={CROSSFADE.to}
+              transition={fading}
+            >
+              {one.content}
+            </motion.div>
+          ))}
+        </AnimatePresence>
+      </section>
       {blocked}
       <Frame
         animated
@@ -385,7 +421,9 @@ export function Composer({
               sending={sending}
               running={running}
               forcing={stopPressed}
-              spec={spec}
+              // The same write as the send, handed to the page's other door: what is written
+              // leaves the box, or stays with the reason, exactly as it does for a send.
+              onSpec={onSpec === undefined ? undefined : () => void send(onSpec)}
               action={action}
               onSend={() => void send()}
               onStop={stop}

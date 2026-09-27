@@ -1,4 +1,4 @@
-import { useRef, useState, useSyncExternalStore } from 'react'
+import { Fragment, useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import type { ReactNode } from 'react'
 
 import type {
@@ -6,7 +6,6 @@ import type {
   ConfigOption,
   ContextView as Provided,
   PlanRepository,
-  SectionName,
   Session,
   SessionEntry,
   SpecRevision,
@@ -14,7 +13,7 @@ import type {
   WorkspacePlan,
 } from '@hemera/ipc'
 import {
-  ActivityRow,
+  ActionGroup,
   AgentModelMenu,
   BlockedBanner,
   CommandsPanel,
@@ -29,15 +28,27 @@ import {
   SessionDetails,
   SessionHeader,
   SpecPanel,
-  UsageMeter,
+  TurnLine,
+  STUCK_AFTER_MS,
   type MessageLine,
   type MessageState,
   type OfferedAgent,
   type PermissionOption,
   type ScrollerEntry,
+  type UsageMeterProps,
 } from '@hemera/ui'
 
-import { activityOf, hasEnded, type Activity, type AgentSessionState } from '../agent-store.ts'
+import {
+  activityOf,
+  hasEnded,
+  hasTrace,
+  heardSince,
+  openTrace,
+  specWritingOf,
+  type Activity,
+  type AgentSessionState,
+} from '../agent-store.ts'
+import { type Grouping, groupActions, groupingOf } from '../action-groups.ts'
 import { effortDefaultOf, effortStage, modeStage, modelStage } from '../agent-options.ts'
 import { drawEntry, planOf, touchedOf, usageOf, waitingOf } from '../agent-blocks.tsx'
 import { elsewhereOf, foldedCallsOf } from '../agent-tool-payloads.ts'
@@ -45,30 +56,36 @@ import { whenOf } from '../journal-lines.ts'
 import { contextListsOf, detailsTabsOf, openingTabOf, panelRunsOf } from '../session-details.ts'
 import { openSessions, type OfferedWorkspace, workspaceFixedOf } from '../sessions-store.ts'
 import { selectEntry } from '../shell-store.ts'
-import { type DefinedSpec, questionAnchor, waitsForAnswer } from '../spec-entries.ts'
+import { type DefinedSpec, questionMarkOf, waitsForAnswer } from '../spec-entries.ts'
 import {
   answerQuestion,
   askForBuild,
   createSpec,
   declineSpecProposal,
-  discardMine,
+  joinSpec,
   markReady,
+  resumeBuildWorkspace,
   retryBuild,
   rework,
-  saveSection,
-  saveStory,
   selectRevision,
   specSnapshot,
   startBuild,
   subscribeToSpec,
   takeOver,
 } from '../spec-store.ts'
-import { launchOf, readerOf, specViewOf, specWorkspacesOf } from '../spec-views.ts'
+import {
+  launchOf,
+  provisionalViewOf,
+  readerOf,
+  specViewOf,
+  specWorkspacesOf,
+} from '../spec-views.ts'
 import {
   closePlanReading,
   createForSpec,
   isPlanReadingOpen,
   openPlanReading,
+  pickWorkspacesFolder,
   planForSpec,
   readPlanRepositories,
 } from '../workspaces-store.ts'
@@ -120,6 +137,83 @@ function together(read: readonly SessionEntry[], live: readonly SessionEntry[]):
 /** What a turn that has just been asked for is doing, before anything of it has arrived. */
 const THINKING: Activity = { state: 'thinking' }
 
+/** How often a running turn's silence is measured again: the line counts it by fives. */
+const QUIET_TICK_MS = 5_000
+
+/**
+ * The clock a running turn's silence is read on, moving every few seconds while it is asked to
+ * and standing still otherwise: a page that rendered every second for a line that changes every
+ * five would be a thread redrawn for nothing.
+ */
+function useTicking(active: boolean): number {
+  const [now, setNow] = useState(() => Date.now())
+  useEffect(() => {
+    if (!active) return undefined
+    setNow(Date.now())
+    const timer = setInterval(() => setNow(Date.now()), QUIET_TICK_MS)
+    return () => clearInterval(timer)
+  }, [active])
+  return now
+}
+
+/** Whether a Session has a trace to open, asked each time `asking` turns true. */
+function useTrace(sessionId: string, asking: boolean): boolean {
+  const [traced, setTraced] = useState(false)
+  useEffect(() => {
+    if (!asking) return undefined
+    let current = true
+    void hasTrace(sessionId).then((held) => {
+      if (current) setTraced(held)
+    })
+    return () => {
+      current = false
+    }
+  }, [sessionId, asking])
+  return traced
+}
+
+/**
+ * The row above the box (`TurnLine`): what the turn is doing and what the Session has spent. The
+ * running turn is told how long it has heard nothing (issue #131): past half a minute its line
+ * says so, and past two it offers Stop and, when the settings had it written, the trace of what
+ * the agent and Hemera said. Its own component, so the clock it ticks on redraws the row and not
+ * the thread.
+ */
+function TurnRow({
+  activity,
+  usage,
+  since,
+  sessionId,
+  onStop,
+}: {
+  activity: Activity | null
+  usage: UsageMeterProps | null
+  since: number | null
+  sessionId: string
+  onStop: () => void
+}): ReactNode {
+  const listening = activity !== null && since !== null && !hasEnded(activity)
+  const now = useTicking(listening)
+  const quietMs = listening ? Math.max(0, now - since) : undefined
+  const stuck = quietMs !== undefined && quietMs >= STUCK_AFTER_MS
+  const traced = useTrace(sessionId, stuck)
+  return (
+    <TurnLine
+      activity={
+        activity === null
+          ? null
+          : {
+              ...activity,
+              quietMs,
+              onStop,
+              onOpenTrace: traced ? () => void openTrace(sessionId) : undefined,
+            }
+      }
+      usage={usage}
+    />
+  )
+}
+
 /** When a run was written, `HH:MM`, in the one reading the whole window uses. */
 function timeOf(at: number): string {
   return new Date(at).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })
@@ -128,24 +222,6 @@ function timeOf(at: number): string {
 /** The whole date behind that time, for the reader who asks a time three days old which day it is. */
 function dateOf(at: number): string {
   return new Date(at).toLocaleString('en-GB')
-}
-
-/** `4 messages`, and the singular for the one that has just been written. */
-function countOf(entries: number): string {
-  return entries === 1 ? '1 message' : `${String(entries)} messages`
-}
-
-/**
- * The line under a Session's title: when it was made, what runs it, and how much is in it — or,
- * for a `define` Session, its mission, its agent and model, and the key of the Spec it defines
- * (core.md, "Session view": `DEFINE · Claude Sonnet`).
- */
-function metaOf(session: Session, entries: number, now: number, specKey: string | null): string {
-  const agent = session.provider === null ? 'no agent' : session.provider
-  if (session.mission === 'define') {
-    return ['DEFINE', agent, session.model, specKey].filter((one) => one !== null).join(' · ')
-  }
-  return `created ${whenOf(session.createdAt, now)} · ${agent} · ${countOf(entries)}`
 }
 
 /** The Spec a Session defines as its first revision named it, once it is read (D7-07). */
@@ -158,19 +234,8 @@ function definedOf(
   return { key: snapshot.spec.key, title: first.title, type: first.type }
 }
 
-/**
- * Takes the thread to where a question of the Spec is asked, and the keyboard to its first
- * answer: the register of the panel links there, and the answer is given in the thread.
- */
-function goToQuestion(id: string): void {
-  const block = document.getElementById(questionAnchor(id))
-  block?.scrollIntoView({ block: 'center' })
-  block?.querySelector('button')?.focus()
-}
-
 /** What the last act of a thread was refused with, when the engine refused it. */
 export interface SessionPageProps {
-  projectName: string
   session: Session
   /** The thread, oldest first, as the engine read it back. */
   entries: SessionEntry[]
@@ -228,6 +293,8 @@ export interface SessionPageProps {
   onOpenUrl: (url: string) => void
   /** Stops a run and everything it started. */
   onStopRun: (runId: string) => void
+  /** Hands the agent again what waits for it, after a delivery it did not take (issue #211). */
+  onHandOver: () => void
   /** The Workspace root, which is what a run's folder is said relative to; null until known. */
   root: string | null
   /** Runs a line from the Commands panel: a command of the catalogue by name, or a one-off. */
@@ -247,7 +314,6 @@ export interface SessionPageProps {
 }
 
 export function SessionPage({
-  projectName,
   session,
   entries,
   loaded,
@@ -274,6 +340,7 @@ export function SessionPage({
   commandRuns,
   onOpenUrl,
   onStopRun,
+  onHandOver,
   root,
   onRunCommand,
   context,
@@ -291,6 +358,8 @@ export function SessionPage({
   const [attempted, setAttempted] = useState<string | null>(null)
   /** Whether the reader has the Session details open: only the head's button opens them. */
   const [detailsOpen, setDetailsOpen] = useState(false)
+  // Whether the details have a trace to offer, asked each time they open (#131).
+  const traced = useTrace(session.id, detailsOpen)
   /**
    * What the reader's last decision in the thread was refused with — a proposal or a one-off
    * run whose name the catalogue already holds (D8-11) — or null once one went through. Said
@@ -305,19 +374,25 @@ export function SessionPage({
   // proposal just made, and it arrives rather than standing there (issue #130). The page is
   // keyed by the Session, so this is read once per Session opened.
   const openedFree = useRef(session.mission === 'free')
+  // The questions pinned above the composer since the page opened: one answered comes back to
+  // its place in the thread in front of the reader, and draws its check there (issue #199).
+  const waitedRef = useRef(new Set<string>())
   const defined = stored.snapshot?.spec.id === session.specId ? stored.snapshot : null
+  // New Spec's provisional Spec, while this Session has no Spec of its own (issue #198).
+  const provisional = stored.provisional.get(session.id) ?? null
+  const thread = together(entries, agent.entries)
   const spec =
     defined === null
       ? null
       : specViewOf({
           snapshot: defined,
           revisions: stored.revisions,
-          buffers: stored.buffers,
           journal: stored.journal,
           readyRefused: stored.readyRefused,
+          // The part a `spec_write` of the running turn is writing, as the thread says it: the
+          // section says so at once, and goes back to what it held if the write fails.
+          writing: agent.running ? specWritingOf(thread) : null,
         })
-  const versionOf = (name: SectionName): number =>
-    spec?.sections.find((one) => one.name === name)?.version ?? 0
   /** The plan the Workspace dialog is open on, and what it is to leave behind. */
   const [workspacePlan, setWorkspacePlan] = useState<WorkspacePlan | null>(null)
   /** What Git has answered of that plan so far, in the order the answers arrived (#110). */
@@ -383,7 +458,6 @@ export function SessionPage({
     return said
   }
 
-  const thread = together(entries, agent.entries)
   const waiting = waitingOf(thread)
 
   // The Workspace the Session works in, on the pill: it can be changed until the agent has
@@ -423,6 +497,8 @@ export function SessionPage({
    */
   const byLine = new Map(runs.map((run, index) => [run.lines[0]?.id ?? '', index]))
   const byEntry = new Map<string, ScrollerEntry>()
+  // What each block is to a run of tool calls, which the thread folds into one group (#149).
+  const groupings = new Map<string, Grouping>()
   // A call to one of Hemera's tools is drawn once, as Hemera's block, where the agent reported
   // it: the agent's own report of it stays in the thread and is not drawn a second time (D6-06).
   const folded = foldedCallsOf(thread)
@@ -445,11 +521,13 @@ export function SessionPage({
    * agent goes on writing under it, and the reader had to scroll back up past all of it to answer.
    */
   const pinned: { id: string; content: ReactNode }[] = []
+  const waited = waitedRef.current
   for (let at = 0; at < thread.length; at += 1) {
     const entry = thread[at]
     if (entry === undefined || folded.hidden.has(entry.id)) continue
     const next = thread[at + 1]
-    const block = drawEntry(folded.inPlaceOf.get(entry.id) ?? entry, {
+    const drawn = folded.inPlaceOf.get(entry.id) ?? entry
+    const block = drawEntry(drawn, {
       now,
       nextAt: next === undefined ? null : next.createdAt,
       onDecide,
@@ -457,6 +535,7 @@ export function SessionPage({
       workspace: workspace?.name,
       onOpenUrl,
       onStopRun,
+      onHandOver,
       reportedCall: (toolCallId) => reported.get(toolCallId),
       onAcceptProposal: (proposalId) => deciding(onAcceptProposal(proposalId)),
       onDeclineProposal: (proposalId) => deciding(onDeclineProposal(proposalId)),
@@ -466,8 +545,10 @@ export function SessionPage({
         specId: session.specId,
         defined: definedOf(defined, stored.revisions),
         asked,
+        waited,
         onAnswer: (questionId, answer) => void answerQuestion(questionId, answer),
         onCreate: (title, type) => void createSpec(session.id, type, title),
+        onJoin: (proposalId) => void joinSpec(session.id, proposalId),
         onDecline: (proposalId) => deciding(declineSpecProposal(session.id, proposalId)),
       },
     })
@@ -476,17 +557,50 @@ export function SessionPage({
     if (block === null) continue
     if (waitsForAnswer(entry, thread, session.specId, asked)) {
       pinned.push({ id: entry.id, content: block })
+      // Answered, it comes back to the thread in front of the reader, and draws its check there.
+      waited.add(entry.id)
       continue
     }
-    byEntry.set(entry.id, { id: entry.id, content: block })
+    // An answer to a question is the reader's, and marked on the rail as their messages are (issue
+    // #149), by what they typed or the choice they made; the card that holds it carries the mark.
+    const mark = entry.kind === 'spec_question' ? questionMarkOf(entry, thread, asked) : undefined
+    byEntry.set(entry.id, { id: entry.id, mark, content: block })
+    groupings.set(entry.id, groupingOf(drawn))
   }
 
   const scroller: ScrollerEntry[] = []
+  /**
+   * The agent's blocks since the last thing the user wrote, waiting to be laid out: every run of
+   * two tool calls or more between two things the agent said is one row, folded (issue #149).
+   */
+  let pending: { item: ScrollerEntry; grouping: Grouping }[] = []
+  const lay = (): void => {
+    for (const piece of groupActions(pending)) {
+      if (piece.kind === 'one') {
+        scroller.push(piece.item)
+        continue
+      }
+      scroller.push({
+        // Named after its first row, which stays its first row however long the run grows: the
+        // group the reader unfolded is the same group when the next call arrives in it.
+        id: `actions-${piece.items[0]?.id ?? ''}`,
+        content: (
+          <ActionGroup count={piece.count} status={piece.status} latest={piece.latest}>
+            {piece.items.map((one) => (
+              <Fragment key={one.id}>{one.content}</Fragment>
+            ))}
+          </ActionGroup>
+        ),
+      })
+    }
+    pending = []
+  }
   /** The day last named over the thread, so a run that follows the agent's words repeats nothing. */
   let named: string | null = null
   for (const entry of thread) {
     const run = byLine.get(entry.id)
     if (run !== undefined) {
+      lay()
       const held = runs[run]
       const last = run === runs.length - 1
       const day = held?.day ?? ''
@@ -530,8 +644,10 @@ export function SessionPage({
     const held = runs.at(-1)
     if (held !== undefined) held.broken = true
     const block = byEntry.get(entry.id)
-    if (block !== undefined) scroller.push(block)
+    if (block !== undefined)
+      pending.push({ item: block, grouping: groupings.get(entry.id) ?? null })
   }
+  lay()
 
   /**
    * What the turn is doing, for as long as it runs (design D17-04, trial of 22 September 2026).
@@ -578,22 +694,30 @@ export function SessionPage({
    * The panel beside the chat, chosen by the Session's mission here and nowhere else. A `define`
    * Session has its Spec. A `free` Session has no panel and nothing that offers one: a Spec begins
    * with the agent's proposal in the thread (D7-07). `build` plugs in here, with the panel of its
-   * tasks, workers and evidence standing in the same `MissionPanel` the Spec stands in.
+   * tasks, workers and evidence. The Spec panel is its own slot of the row: folded to a small frame
+   * at the window's edge, and swapped for the open panel, which pushes the chat (issue #164).
    */
   function missionPanel(): ReactNode {
+    // New Spec's Spec before it exists (issue #198): the same panel, on a provisional Spec, until
+    // the real one is read — it then takes its place in the panel already there, with no jump.
+    if (spec === null && provisional !== null) {
+      return (
+        <SpecPanel
+          spec={provisionalViewOf(provisional)}
+          arrives={openedFree.current}
+          onMarkReady={() => undefined}
+          onRework={() => undefined}
+          onPickRevision={() => undefined}
+          onTakeOver={() => undefined}
+        />
+      )
+    }
     if (session.mission !== 'define' || spec === null || defined === null) return null
     return (
       <SpecPanel
         spec={spec}
         arrives={openedFree.current}
         reader={readerOf(defined, session.id, sessions, running)}
-        // Checked against the version the edit was opened on, which the panel hands back:
-        // an agent may have written the section meanwhile (D7-12).
-        onSaveSection={(name, body, base) => void saveSection(session.id, name, body, base)}
-        onApplyMine={(name, body) => void saveSection(session.id, name, body, versionOf(name))}
-        onDiscardMine={(name) => void discardMine(name)}
-        onSaveStory={(story) => void saveStory(session.id, story)}
-        onGoToQuestion={goToQuestion}
         onMarkReady={() => void markReady(session.id)}
         onRework={(reason) => void rework(session.id, reason)}
         onPickRevision={(revision) => {
@@ -601,16 +725,17 @@ export function SessionPage({
           void selectRevision(revision === current?.number ? null : revision)
         }}
         onTakeOver={() => void takeOver(session.id)}
-        // Where the build of this frozen Spec stands, and what is to be pressed next (D8-12,
-        // D8-13): the panel's head holds it, and the whole journey it opens — the plan, the
-        // Workspace, the launch — belongs here.
+        // Where the build of this ready Spec stands, and what is to be pressed next (D8-12,
+        // D8-13): the panel's footer holds it (issue #135), and the whole journey it
+        // opens — the plan, the Workspace, the launch — belongs here.
         build={{
-          launch: launchOf(stored.launches),
+          launch: launchOf(stored.launches, defined.spec),
           ...specWorkspacesOf(stored.launches),
           onPrepareAndStart: () => prepareWorkspace(true),
           onPrepareOnly: () => prepareWorkspace(false),
           onUseWorkspace: (id) => void askForBuild(id),
           onStart: () => void startBuild(),
+          onResume: () => void resumeBuildWorkspace(),
           onRetry: () => void retryBuild(),
           onOpen: openBuild,
         }}
@@ -624,15 +749,15 @@ export function SessionPage({
       width and one left edge, and nothing stands beside them but the Spec of a `define` Session —
       the Session details are a dialog the reader opens from the head (second review of #18). The
       screen runs under the frame all the same, and the page's own scroll is the thread's. The row
-      is the container the unfolded Spec panel's width is a share of.
+      is the container the unfolded Spec panel's width is a share of. The chat takes what the
+      panel leaves it and no more: never wider than that for what it holds, which would push the
+      row past the window and make it scroll sideways (issue #181).
     */
     <div className="@container flex h-full min-h-0">
-      <div className="flex min-h-0 flex-1 flex-col">
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
         <div className="mx-auto flex w-full max-w-3xl flex-col gap-4 px-6 pt-6 pb-4">
           <SessionHeader
             title={session.title}
-            projectName={projectName}
-            meta={metaOf(session, thread.length, now, spec?.key ?? null)}
             onRename={onRename}
             editing={editing}
             onStartEditing={onStartEditing}
@@ -675,34 +800,25 @@ export function SessionPage({
           something to say, and the meter keeps its end of it whether or not a turn is running.
         */}
         <div className="mx-auto flex w-full max-w-3xl flex-col gap-2 px-6 pb-4">
-          {(activity !== null || usage !== null) && (
-            <div className="flex items-center justify-between gap-3">
-              {activity !== null ? (
-                <ActivityRow
-                  state={activity.state}
-                  detail={activity.detail}
-                  thought={activity.thought}
-                  elapsedMs={activity.elapsedMs}
-                />
-              ) : (
-                <span />
-              )}
-              {usage !== null && (
-                <UsageMeter used={usage.used} size={usage.size} cost={usage.cost} />
-              )}
-            </div>
-          )}
+          <TurnRow
+            activity={activity}
+            usage={usage}
+            since={agent.running ? heardSince(agent, thread) : null}
+            sessionId={session.id}
+            onStop={onStop}
+          />
           {/*
             What the page's last act was refused with — a rename, an archive, a thread that could
             not be read, a Workspace changed once the agent had started (D8-08) — said here and
             not on the send: those are refusals of the header and of the opening, and a Session
             whose archive was refused is one that can still be written in. It stands in the same
             stack as the meter rather than over the thread, so what it moves is itself and nothing
-            above it (D4b-02).
+            above it (D4b-02). A build that could not be asked for is said here too, as a sentence
+            (#132), until the build's actions have a place of their own to say it.
           */}
-          {(refused ?? refusal ?? stored.refusal) !== null && (
+          {(refused ?? refusal ?? stored.refusal ?? stored.buildRefused) !== null && (
             <p role="alert" className="text-sm text-muted-foreground">
-              {refused ?? refusal ?? stored.refusal}
+              {refused ?? refusal ?? stored.refusal ?? stored.buildRefused}
             </p>
           )}
           <Composer
@@ -785,6 +901,7 @@ export function SessionPage({
         plan={plan}
         files={touched}
         onSelectFile={onOpenFile}
+        onOpenTrace={traced ? () => void openTrace(session.id) : undefined}
         // The commands of a Session with an agent, whoever started them (D6-12): the same runs
         // the thread's blocks read, and the line a one-off is run from. A Session nothing
         // answers has no agent to lend a command to, and says so on the tab.
@@ -822,8 +939,8 @@ export function SessionPage({
       {/*
         The panel of the Session's mission, beside the chat: the working surface the thread gave
         up width for, where the side column stood before the Session details took its plan and its
-        files into a dialog. It opens folded to a band beside the chat, and unfolds pushing it
-        aside when the hand or the agent asks (brief revisions 4, 4b).
+        files into a dialog. It opens folded to a small frame at the window's edge, and is swapped
+        for its panel, which pushes the chat aside, when the hand or the agent asks (issue #164).
       */}
       {missionPanel()}
       {workspacePlan !== null && (
@@ -836,6 +953,8 @@ export function SessionPage({
             }
           }}
           root={workspacePlan.root}
+          temporary={workspacePlan.temporary}
+          onBrowse={pickWorkspacesFolder}
           defaultName={workspacePlan.name}
           repositories={planLinesOf(workspacePlan, workspaceReads)}
           gitMissing={!workspacePlan.gitAvailable}
@@ -849,6 +968,7 @@ export function SessionPage({
               held.spec.id,
               draft.name,
               worktreesOf(draft),
+              draft.root,
             )
             if (made.workspace === null) return made.refusal
             // A build asked for while the preparation runs waits for it, then starts (D8-13):

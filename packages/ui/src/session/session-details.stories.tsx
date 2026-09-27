@@ -46,7 +46,7 @@ function Harness(props: Omit<SessionDetailsProps, 'open' | 'onOpenChange'>): Rea
 const meta = {
   title: 'Blocks/Session/SessionDetails',
   component: Harness,
-  tags: ['autodocs'],
+  tags: ['autodocs', 'updated'],
   parameters: { layout: 'padded' },
   args: {
     plan: [
@@ -111,6 +111,7 @@ const meta = {
       description: 'The tab the dialog opens on.',
     },
     onSelectFile: { description: 'Opens a file, when the reader presses its path.' },
+    onOpenTrace: { description: 'Opens the ACP trace of this Session, when there is one.' },
   },
 } satisfies Meta<typeof Harness>
 
@@ -192,8 +193,10 @@ async function hugsTheTab(
     await waitFor(() => {
       expect(fadeOf(dialog, tab)).toBe(1)
     })
-    // oxlint-disable-next-line no-await-in-loop -- the dialog is read once the tab has landed
-    expect(spare(dialog), `the dialog has room to spare under the ${tab} tab`).toBeLessThan(SPARE)
+    // oxlint-disable-next-line no-await-in-loop -- the dialog is read once its height has landed
+    await waitFor(() => {
+      expect(spare(dialog), `the dialog has room to spare under the ${tab} tab`).toBeLessThan(SPARE)
+    })
   }
 }
 
@@ -372,14 +375,15 @@ export const Keyboard: Story = {
 
 /**
  * Changing tab: the panel that was left goes, the one that was chosen comes up from transparent
- * on the `crossfade` kind, and the dialog is never taller than the tab it shows — not at a frame
- * of it.
+ * on the `crossfade` kind, and the dialog goes from the height of the one to the height of the
+ * other on `morph` rather than at once (issue #183), to land as tall as the tab it shows.
  */
 export const TabChange: Story = {
   args: { defaultTab: 'activity' },
   play: async ({ canvasElement }) => {
     const dialog = await opened(canvasElement)
-    const room: number[] = []
+    const from = dialog.getBoundingClientRect().height
+    const heights: number[] = []
     // Every value the crossfade writes, watched from before the press: a fade of `fast` is drawn
     // in two or three frames on a busy runner, so what is read is what was written, not how many
     // frames the runner took to write it.
@@ -393,7 +397,7 @@ export const TabChange: Story = {
       for (let seen = 0; seen < 40; seen += 1) {
         // oxlint-disable-next-line no-await-in-loop -- one frame after the other, as they are drawn
         await frame()
-        room.push(spare(dialog))
+        heights.push(dialog.getBoundingClientRect().height)
       }
     })()
     await userEvent.click(within(dialog).getByRole('tab', { name: 'Commands' }))
@@ -412,6 +416,42 @@ export const TabChange: Story = {
       ).toBe(true)
     }
     expect(drawn.at(-1), 'the new panel did not land opaque').toBe(1)
-    expect(Math.max(...room), 'the dialog grew away from the tab it shows').toBeLessThan(SPARE)
+    // It lands as tall as the tab it shows…
+    await waitFor(() => {
+      expect(spare(dialog), 'the dialog did not land on the tab it shows').toBeLessThan(SPARE)
+    })
+    const to = dialog.getBoundingClientRect().height
+    expect(to, 'the two tabs are the same height, and there is nothing to follow').not.toBeCloseTo(
+      from,
+      0,
+    )
+    if (!movesLess()) {
+      // …and gets there over frames, never in one: a height between the two was drawn.
+      expect(
+        heights.some((height) => Math.abs(height - from) > 1 && Math.abs(height - to) > 1),
+        'the dialog jumped to the height of the new tab',
+      ).toBe(true)
+    }
+  },
+}
+
+/**
+ * A Session whose conversation with its agent was written down, because the settings asked for it
+ * (issue #131): the trace is one press away, under what the Session is doing.
+ */
+export const WithATrace: Story = {
+  args: { onOpenTrace: fn() },
+  play: async ({ args, canvasElement }) => {
+    const dialog = await opened(canvasElement)
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Open the trace' }))
+    await expect(args.onOpenTrace).toHaveBeenCalledOnce()
+  },
+}
+
+/** A Session with no trace offers none: there is nothing to open. */
+export const WithoutATrace: Story = {
+  play: async ({ canvasElement }) => {
+    const dialog = await opened(canvasElement)
+    await expect(within(dialog).queryByRole('button', { name: 'Open the trace' })).toBeNull()
   },
 }

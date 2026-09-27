@@ -6,6 +6,7 @@ import { type ReactNode, useEffect, useRef, useState } from 'react'
 import { Button, IconButton } from '../components/button/button.tsx'
 import { Card } from '../components/card/card.tsx'
 import { List, ListItem } from '../components/list/list.tsx'
+import { OVER_MARK } from '../components/sliding-mark/sliding-mark.tsx'
 import { Menu, type MenuItem } from '../components/menu/menu.tsx'
 import { Tooltip } from '../components/tooltip/tooltip.tsx'
 import {
@@ -36,10 +37,13 @@ import { LABEL_DELAY, LABEL_TRAVEL, instant, morph, useTransition } from '../mot
 /** What the head of a Session says, and what it offers to do with it. */
 const HEAD = 'flex items-center gap-3'
 
-/** The title and where the Session lives, on one line, taking the room the menu leaves. */
+/**
+ * The title, taking the room the menu leaves. The Project it lives in is not said beside it: the
+ * tab above already says it (issue #159).
+ */
 const COLUMN = 'flex min-w-0 flex-1 items-baseline gap-3'
 
-/** The title, which truncates rather than pushing the directory and the menu out of the line. */
+/** The title, which truncates rather than pushing the menu out of the line. */
 const TITLE = 'min-w-0 truncate text-2xl font-medium'
 
 /**
@@ -50,9 +54,6 @@ const TITLE = 'min-w-0 truncate text-2xl font-medium'
  * same thing for whoever reads the menu before touching anything.
  */
 const TITLE_ACTION = 'focus-ring -mx-1 min-w-0 truncate rounded-md px-1 text-left hover:bg-accent'
-
-/** Where the Session lives: the Project it belongs to, and what it holds. */
-const SUB = 'min-w-0 truncate text-sm text-muted-foreground'
 
 /** The commands of the head, at the end of the line rather than under it. */
 const ACTIONS = 'ml-auto flex shrink-0 items-center gap-2'
@@ -84,10 +85,6 @@ export interface SessionHeaderProps {
    * design system decides on.
    */
   title: string
-  /** The Project it belongs to, which is where it will be found again. */
-  projectName: string
-  /** The rest of the line under the title, already written: `created 3 days ago · 5 messages`. */
-  meta: string
   /**
    * What the title becomes, once it is saved.
    *
@@ -129,8 +126,7 @@ export interface SessionHeaderProps {
 /**
  * The head of a Session: what it is called, where it lives, and what can be done to it.
  *
- * One line (review of #40, defect 4): the title, the directory it lives in, and the commands at
- * the end of the same line. The title is the page's first line and the only editable one, so it
+ * One line (review of #40, defect 4): the title and the commands at the end of the same line. The title is the page's first line and the only editable one, so it
  * is edited where it stands — a dialog over the page to change a line of it would hide the thread
  * being named — and the title is itself the control that opens the field, because that is where
  * the hand already is.
@@ -145,8 +141,6 @@ export interface SessionHeaderProps {
  */
 export function SessionHeader({
   title,
-  projectName,
-  meta,
   onRename,
   editing = false,
   onStartEditing,
@@ -201,7 +195,6 @@ export function SessionHeader({
             )}
           </h1>
         )}
-        <p className={SUB}>{`${projectName} · ${meta}`}</p>
       </div>
       <div className={ACTIONS}>
         {onOpenDetails !== undefined && (
@@ -437,10 +430,13 @@ export function ArchivedSessions({ sessions, onRestore }: ArchivedSessionsProps)
  * for two commands that fit. It is also why nothing here is a menu: the row is a button, and a
  * button inside a button is not a row anybody can press.
  *
- * The mark's `layoutId` is the sidebar's own, so that the one filled surface of the panel is
- * handed from a Session to the Journal rather than each entry drawing its own.
+ * The mark is the sidebar's own and not the row's (issue #127): the row says which one it is
+ * with `data-mark`, is drawn over the mark while it is the one looked at, and is crossed by it
+ * otherwise — so the one filled surface of the panel is handed from a Session to the Journal
+ * rather than each entry drawing its own.
  */
 export function SidebarSessionEntry({
+  id,
   title,
   active,
   collapsed,
@@ -448,6 +444,8 @@ export function SidebarSessionEntry({
   onRename,
   onArchive,
 }: {
+  /** Which Session it is: what the sidebar's mark finds the row by. */
+  id: string
   /** What the Session is called, said in the row and read out as its name. */
   title: string
   /** Whether the window is on it. */
@@ -467,7 +465,7 @@ export function SidebarSessionEntry({
   const labels = collapsed || still ? transition : { ...transition, delay: LABEL_DELAY }
   const commands = !collapsed && (onRename !== undefined || onArchive !== undefined)
   return (
-    <div className="group relative flex w-full">
+    <div data-mark={id} className={cn('group relative flex w-full', active && OVER_MARK)}>
       <Tooltip label={title} side="right" disabled={!collapsed}>
         <Button
           variant="ghost"
@@ -476,7 +474,6 @@ export function SidebarSessionEntry({
           aria-current={active ? 'true' : undefined}
           onClick={onSelect}
         >
-          {active && <motion.span layoutId="active-nav" className={MARK} transition={transition} />}
           <span className={cn(ICON_PLACE, active ? ICON_ACTIVE : ICON)}>
             <IconMessages size="md" />
           </span>
@@ -520,9 +517,6 @@ export function SidebarSessionEntry({
  */
 const ENTRY = 'w-full shrink-0 justify-start'
 
-/** The one filled surface of the sidebar: the place being looked at, pressed into the panel. */
-const MARK = 'absolute inset-0 rounded-md bg-sidebar-accent'
-
 /**
  * Where the icon of a row sits, and what it weighs when the row is not the one looked at.
  *
@@ -532,7 +526,7 @@ const MARK = 'absolute inset-0 rounded-md bg-sidebar-accent'
  * the transparent border the ghost variant draws, which lands it one pixel right of the middle
  * of the rail. The day the button's density changes, this is the number that follows it.
  */
-const ICON_PLACE = 'relative ml-1 flex shrink-0'
+const ICON_PLACE = 'relative z-1 ml-1 flex shrink-0'
 
 const ICON = 'text-muted-foreground'
 
@@ -546,7 +540,7 @@ const ICON_ACTIVE = 'text-sidebar-accent-foreground'
  * The row is a button, so they are its siblings and never its children.
  */
 const COMMANDS =
-  'absolute inset-y-0 right-2 flex items-center gap-1 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100'
+  'absolute inset-y-0 right-2 z-1 flex items-center gap-1 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100'
 
 /** The part of a row that goes away with the width, and comes back after it. */
 function Label({
@@ -561,7 +555,7 @@ function Label({
   const travel = collapsed ? -LABEL_TRAVEL : 0
   return (
     <motion.span
-      className="relative ml-3 truncate"
+      className="relative z-1 ml-3 truncate"
       initial={false}
       animate={{ opacity: collapsed ? 0 : 1, x: travel }}
       transition={transition}

@@ -145,6 +145,7 @@ import {
   subscribeToSessions,
   writeMessage,
 } from './sessions-store.ts'
+import { definedAtOnceOf } from './spec-entries.ts'
 import {
   closeSpec,
   forgetSpecRefusal,
@@ -407,6 +408,8 @@ export function Application() {
   const named = useRef(new Set<string>())
   /** The ended turns that already sent the list to be read again for a Session's Workspace. */
   const turnsRead = useRef(new Set<string>())
+  /** The Sessions already read again once New Spec's Spec was created at once in them. */
+  const definedRead = useRef(new Set<string>())
   /** The folder the settings are showing, which is what everything below it is read against. */
   const [shownPath, setShownPath] = useState<string | null>(null)
 
@@ -617,6 +620,18 @@ export function Application() {
       (id) => !turnsRead.current.has(id),
     )
     for (const id of unread) turnsRead.current.add(id)
+    if (unread.length > 0) void readSessions(projectId)
+  }, [agents.sessions, sessions.sessions, shell.activeProjectId])
+
+  // And when New Spec's Spec was created at once, during the agent's turn (issue #205): the
+  // Session turned define with nothing pressed here, and the list says so once it is read again.
+  useEffect(() => {
+    const projectId = shell.activeProjectId
+    if (projectId === null) return
+    const unread = definedAtOnceOf(sessions.sessions, agents.sessions).filter(
+      (id) => !definedRead.current.has(id),
+    )
+    for (const id of unread) definedRead.current.add(id)
     if (unread.length > 0) void readSessions(projectId)
   }, [agents.sessions, sessions.sessions, shell.activeProjectId])
 

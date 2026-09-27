@@ -43,6 +43,8 @@ export interface SpecToolsNeeds {
   readonly sessions: SessionsService
   readonly held: HeldWordsService
   readonly inThread: (sessionId: string, entry: ThreadWrite) => ReturnType<SessionsService['write']>
+  /** Whether the Session was started by New Spec: its agent was handed New Spec's request. */
+  readonly askedForSpec: (sessionId: string) => Effect.Effect<boolean>
 }
 
 /** The phase a `phase_done` names, which its schema requires it to send. */
@@ -106,7 +108,7 @@ function pageOf(text: string, offset: number, limit: number) {
 }
 
 /** The three tools, over the services they need. */
-export function specTools({ specs, sessions, held, inThread }: SpecToolsNeeds) {
+export function specTools({ specs, sessions, held, inThread, askedForSpec }: SpecToolsNeeds) {
   /** The Session as its row says now, its mission and its Spec: read at every call. */
   const sessionNow = (sessionId: string) =>
     sessions.one(sessionId).pipe(
@@ -269,6 +271,10 @@ export function specTools({ specs, sessions, held, inThread }: SpecToolsNeeds) {
   /**
    * The Spec a `free` Session's agent proposes (D7-07): the entry the human accepts or not, and
    * nothing else — the Spec is created, and the Session turns `define`, only when they accept.
+   *
+   * A Session started by New Spec is the exception (issue #205): the user asked for a Spec
+   * already, so it is created at once as proposed, and the entry is the line that says so. Should
+   * that fail, the card asks as it would anywhere else.
    */
   const proposeSpec = (
     session: Session,
@@ -281,6 +287,28 @@ export function specTools({ specs, sessions, held, inThread }: SpecToolsNeeds) {
         )
       }
       const { title, type } = SPEC_PROPOSED.parse(call)
+      if (yield* askedForSpec(session.id)) {
+        const made = yield* specs.create({ sessionId: session.id, type, title }).pipe(Effect.result)
+        if (Result.isSuccess(made)) {
+          const { key } = made.success.snapshot.spec
+          // The Spec exists whether or not its line could be written: the panel shows it.
+          yield* inThread(session.id, {
+            role: 'hemera',
+            kind: 'spec_proposal',
+            body: title,
+            payload: JSON.stringify({ title, type, createdKey: key }),
+            correlationId: `proposal:${crypto.randomUUID()}`,
+            settled: true,
+          }).pipe(Effect.ignore)
+          return completed(
+            `created the ${type} Spec ${key} "${title}"`,
+            [
+              `Hemera created the ${type} Spec ${key} "${title}" at once: the user asked for a Spec with New Spec, so no card asks them. This Session defines it now.`,
+              "End this turn: you are then started again with the Spec tools and handed the Spec's mission brief. If you are unsure of its type, ask the user with a question once you hold them.",
+            ].join('\n'),
+          )
+        }
+      }
       const written = yield* inThread(session.id, {
         role: 'hemera',
         kind: 'spec_proposal',

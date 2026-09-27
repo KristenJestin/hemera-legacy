@@ -357,6 +357,8 @@ export interface SpecContext {
   asked: ReadonlySet<string> | null
   onAnswer: (questionId: string, answer: SpecAnswer) => void
   onCreate: (title: string, type: SpecType) => void
+  /** `Continue it`: this Session defines the existing Spec the agent pointed to (issue #198). */
+  onJoin: (proposalId: string) => void
   /** `Not now`: the engine keeps the proposal declined and tells the agent (issue #130). */
   onDecline: (proposalId: string) => void
 }
@@ -593,6 +595,8 @@ export function drawEntry(entry: SessionEntry, context: AgentContext): ReactNode
         type={proposal.type}
         state={proposal.state}
         createdKey={defined?.key}
+        existingKey={proposal.existing?.key}
+        onContinue={() => context.spec.onJoin(proposalIdOf(entry))}
         onCreate={context.spec.onCreate}
         onDecline={() => context.spec.onDecline(proposalIdOf(entry))}
       />

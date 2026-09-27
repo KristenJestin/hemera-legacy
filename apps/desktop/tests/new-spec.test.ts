@@ -1,10 +1,12 @@
 /**
- * The Home's `New Spec` (issues #128, #179), over the whole engine as the window drives it.
+ * The Home's `New Spec` (issues #128, #179, #198), over the whole engine as the window drives it.
  *
  * `New Spec` makes the Session `Start chat` makes, and sends the same message with the intent
- * `spec`: Hemera creates the draft Spec from it before the prompt goes out, so the Session is
- * `define` from its first turn, and the request reaches the agent on that turn behind Hemera's
- * marker, never as the user's words. A message sent without the intent carries nothing of it.
+ * `spec`. No Spec is created then (#198): the window shows a provisional one, saved nowhere, and
+ * the request reaches the agent on that first turn behind Hemera's marker, never as the user's
+ * words. The agent checks the Project's Specs first, then proposes a new Spec or points to one
+ * that exists; the user's answer to that card is what makes a Spec this Session defines. A message
+ * sent without the intent carries nothing of it.
  */
 
 import { mkdtempSync, realpathSync, rmSync } from 'node:fs'
@@ -13,8 +15,8 @@ import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
 
 import { DELIVERY_MARKER, QUESTION_RULE } from '@hemera/core'
-import { fakeAgent } from '#engine/agents/fake.ts'
-import { SPEC_REQUEST, SPEC_REQUEST_URI, requestedSpec } from '#engine/agents/spec-request.ts'
+import { type FakeStep, fakeAgent } from '#engine/agents/fake.ts'
+import { SPEC_REQUEST, SPEC_REQUEST_URI } from '#engine/agents/spec-request.ts'
 import { listenToAgents, say } from '#renderer/agent-store.ts'
 import {
   closeSessions,
@@ -24,11 +26,24 @@ import {
   sessionsSnapshot,
   startSession,
 } from '#renderer/sessions-store.ts'
-import { closeSpec, openSpec, specSnapshot } from '#renderer/spec-store.ts'
+import {
+  closeSpec,
+  createSpec,
+  holdProvisionalSpec,
+  provisionalSpecOf,
+  provisionalTitleOf,
+} from '#renderer/spec-store.ts'
 
 import { type OpenWindow, install, openWindow } from './window.ts'
 
-describe('A Session started with New Spec defines its Spec from the first turn', () => {
+/** A call the fake agent makes to one of Hemera's tools. */
+const uses = (call: string, sent: Record<string, string>): FakeStep => ({
+  does: 'uses',
+  call,
+  arguments: sent,
+})
+
+describe('New Spec shows a provisional Spec, and saves none until one is proposed and accepted', () => {
   let dataFolder: string
   let main: string
   let opened: OpenWindow | null = null
@@ -43,14 +58,17 @@ describe('A Session started with New Spec defines its Spec from the first turn',
     for (const stop of stops) stop()
     stops = []
     closeSessions()
+    closeSpec()
     await opened?.close()
     opened = null
     for (const folder of [dataFolder, main]) rmSync(folder, { recursive: true, force: true })
   })
 
-  test('Hemera creates the draft Spec, and the Session defines it before the prompt goes out', async () => {
-    const agent = fakeAgent({ steps: [{ does: 'says', text: 'Which type is it?' }] })
-    opened = await openWindow(dataFolder, agent)
+  /** The window over the engine, a Project, and its list of Sessions read. */
+  async function atlas(...agents: Parameters<typeof openWindow>[1][]) {
+    const [first, ...others] = agents
+    if (first === undefined) throw new Error('the suite handed over no agent')
+    opened = await openWindow(dataFolder, first, ...others)
     install(opened.bridge)
     stops = [listenToAgents()]
     const project = await opened.bridge.invoke('projects.create', {
@@ -59,31 +77,32 @@ describe('A Session started with New Spec defines its Spec from the first turn',
       mainPath: main,
     })
     await openSessions(project.id)
+    return { bridge: opened.bridge, running: opened.running, projectId: project.id }
+  }
 
-    const made = await startSession(project.id, 'claude', null)
-    expect(made).not.toBeNull()
+  /** The Home's New Spec, as `application.tsx` wires it: the Session, the page, the message. */
+  async function newSpec(projectId: string, text: string): Promise<string> {
+    const made = await startSession(projectId, 'claude', null)
+    const sessionId = made?.id ?? ''
+    await openSession(sessionId)
+    holdProvisionalSpec(sessionId, text)
+    expect(await say(sessionId, text, 'spec')).toBeNull()
+    return sessionId
+  }
+
+  test('New Spec leaves the Session free, saves no Spec, and hands the request on the first turn', async () => {
+    const agent = fakeAgent({ steps: [{ does: 'says', text: 'Let me look at the Specs.' }] })
+    const { bridge, projectId } = await atlas(agent)
     const text = 'Export the invoices with HT and TTC\n\nThe accountant asks for both.'
-    expect(await say(made?.id ?? '', text, 'spec')).toBeNull()
+    const sessionId = await newSpec(projectId, text)
 
-    // The Session is `define` and writes a feature Spec titled with the request's first line.
-    const [session] = await opened.bridge.invoke('sessions.list', { projectId: project.id })
-    expect(session?.mission).toBe('define')
-    const specs = await opened.bridge.invoke('specs.list', { projectId: project.id })
-    expect(specs).toEqual([
-      expect.objectContaining({
-        id: session?.specId,
-        title: 'Export the invoices with HT and TTC',
-        type: 'feature',
-        status: 'draft',
-        writerSessionId: made?.id,
-      }),
-    ])
+    const [session] = await bridge.invoke('sessions.list', { projectId })
+    expect(session?.mission).toBe('free')
+    expect(session?.specId).toBeNull()
+    expect(await bridge.invoke('specs.list', { projectId })).toEqual([])
 
-    // The first turn hands the mission brief over first, then the request and the user's words,
-    // the request behind Hemera's marker and never as the user's.
-    expect(agent.answers.blocks[0]?.[0]).toEqual({ type: 'text', text: DELIVERY_MARKER })
-    expect(JSON.stringify(agent.answers.blocks[0])).toContain('# Mission: define')
-    expect(agent.answers.blocks[1]).toEqual([
+    // The request rides the first turn behind Hemera's marker, in front of the user's words.
+    expect(agent.answers.blocks[0]).toEqual([
       { type: 'text', text: DELIVERY_MARKER },
       {
         type: 'resource',
@@ -91,103 +110,72 @@ describe('A Session started with New Spec defines its Spec from the first turn',
       },
       { type: 'text', text },
     ])
-    expect(SPEC_REQUEST).toContain('`spec_write` and `type`')
     // And the Context tab lists it, as something Hemera handed the agent on that turn.
-    const context = await opened.bridge.invoke('context.read', { sessionId: made?.id ?? '' })
+    const context = await bridge.invoke('context.read', { sessionId })
     expect(context.provided.filter((one) => one.kind === 'request')).toEqual([
       expect.objectContaining({ path: '', reached: 'embedded_resource' }),
     ])
 
-    // The next message is a message like any other, and makes no second Spec.
-    expect(await say(made?.id ?? '', 'The HT first')).toBeNull()
+    // The next message is a message like any other.
+    expect(await say(sessionId, 'The HT first')).toBeNull()
     expect(agent.answers.blocks.at(-1)).toEqual([{ type: 'text', text: 'The HT first' }])
-    expect(await opened.bridge.invoke('specs.list', { projectId: project.id })).toHaveLength(1)
+    expect(await bridge.invoke('specs.list', { projectId })).toEqual([])
   })
 
-  test('the first turn of a New Spec Session says every question goes through the question card', async () => {
-    const agent = fakeAgent({ steps: [{ does: 'says', text: 'Which type is it?' }] })
-    opened = await openWindow(dataFolder, agent)
-    install(opened.bridge)
-    stops = [listenToAgents()]
-    const project = await opened.bridge.invoke('projects.create', {
-      name: 'Atlas',
-      tone: 'primary',
-      mainPath: main,
-    })
-    await openSessions(project.id)
-    const made = await startSession(project.id, 'claude', null)
-    expect(await say(made?.id ?? '', 'A simple HTML menu to test with', 'spec')).toBeNull()
+  test('the first turn asks the agent to check the Specs first, and carries the question-card rule', async () => {
+    const agent = fakeAgent({ steps: [{ does: 'says', text: 'Let me look.' }] })
+    const { projectId } = await atlas(agent)
+    await newSpec(projectId, 'A simple HTML menu to test with')
 
-    // Everything the agent read before its first answer: the mission brief handed over, then the
-    // request in front of the user's words. Both carry the rule, word for word.
-    const first = agent.answers.blocks.slice(0, 2).map((blocks) => JSON.stringify(blocks))
-    expect(first).toHaveLength(2)
-    for (const text of first) expect(text).toContain(JSON.stringify(QUESTION_RULE).slice(1, -1))
+    expect(SPEC_REQUEST).toContain('`project_get`')
+    expect(SPEC_REQUEST).toContain('`spec_propose` with kind `spec`')
+    expect(SPEC_REQUEST).toContain('`spec_propose` with kind `existing`')
     expect(SPEC_REQUEST).toContain(QUESTION_RULE)
+    const first = JSON.stringify(agent.answers.blocks[0])
+    expect(first).toContain(JSON.stringify(QUESTION_RULE).slice(1, -1))
   })
 
-  test('New Spec, then the Spec exists and its panel is open before the agent first answers', async () => {
+  test('the provisional panel exists before the first answer, and nothing is saved', async () => {
     /** What the window holds at the moment the agent is about to answer for the first time. */
     let before: {
+      provisional: string | null
       mission: string | null
-      shown: string | null
-      title: string | null
+      saved: number
       answered: number
     } | null = null
     let projectId = ''
-    let sessionId = ''
     const agent = fakeAgent({
-      steps: [{ does: 'says', text: 'Is it a feature, a bug or maintenance?' }],
+      steps: [{ does: 'says', text: 'Let me look at the Specs.' }],
       between: async () => {
         if (before !== null) return
-        // What the window does as the Session's first entry arrives: it reads the Sessions again,
-        // and opens the Spec of the one on screen once it defines one (`application.tsx`).
         await readSessions(projectId)
-        const session = sessionsSnapshot().sessions.find((one) => one.id === sessionId)
-        if (session?.specId !== null && session?.specId !== undefined)
-          await openSpec(session.specId)
+        const session = sessionsSnapshot().sessions[0]
+        const sessionId = session?.id ?? ''
         const read = await window.hemera.invoke('sessions.read', { sessionId })
         before = {
+          provisional: provisionalSpecOf(sessionId),
           mission: session?.mission ?? null,
-          shown: specSnapshot().snapshot?.spec.id ?? null,
-          title: specSnapshot().snapshot?.revision.title ?? null,
+          saved: (await window.hemera.invoke('specs.list', { projectId })).length,
           answered: read.entries.filter((entry) => entry.role === 'agent').length,
         }
       },
     })
-    opened = await openWindow(dataFolder, agent)
-    install(opened.bridge)
-    stops = [listenToAgents()]
-    const project = await opened.bridge.invoke('projects.create', {
-      name: 'Atlas',
-      tone: 'primary',
-      mainPath: main,
-    })
-    projectId = project.id
-    await openSessions(project.id)
+    const atlasOpened = await atlas(agent)
+    projectId = atlasOpened.projectId
+    await newSpec(projectId, 'Mise en place d’une interface du menu simple en html\nPour tester.')
 
-    // The Home's New Spec, as `application.tsx` wires it: the Session, the page, then the message.
-    const made = await startSession(project.id, 'claude', null)
-    sessionId = made?.id ?? ''
-    await openSession(sessionId)
-    expect(
-      await say(sessionId, 'Mise en place d’une interface du menu simple en html', 'spec'),
-    ).toBeNull()
-
-    const [spec] = await opened.bridge.invoke('specs.list', { projectId: project.id })
     expect(before).toEqual({
-      mission: 'define',
-      shown: spec?.id,
-      title: 'Mise en place d’une interface du menu simple en html',
+      provisional: 'Mise en place d’une interface du menu simple en html',
+      mission: 'free',
+      saved: 0,
       answered: 0,
     })
-    closeSpec()
   })
 
-  test('a New Spec Session lists spec_write and spec_read on its first turn, and writes its title', async () => {
+  test('the agent that takes the turn after the proposal is accepted lists spec_write and spec_read, and writes the title', async () => {
     // The page reads what the Session's agent offers as soon as it is on screen, which starts the
-    // agent while the message is still on its way (`readOptions` in `application.tsx`). Its start
-    // is held until the Spec exists, as a cold start on the machine outlasts the prompt's request.
+    // agent while the Session is still free (`readOptions` in `application.tsx`). Its start is
+    // held until the proposal is accepted, as a cold start on the machine outlasts the click.
     let hold: () => void = () => undefined
     const held = new Promise<void>((resolve) => {
       hold = resolve
@@ -196,37 +184,20 @@ describe('A Session started with New Spec defines its Spec from the first turn',
     // The agent started for the turn, if the first one is let go of: each start takes the next.
     const agent = fakeAgent({
       listsTools: true,
-      steps: [
-        { does: 'uses', call: 'spec_write', arguments: { title: 'Invoice export', key: 't-1' } },
-      ],
+      steps: [uses('spec_write', { title: 'Invoice export', key: 't-1' })],
     })
-    opened = await openWindow(dataFolder, early, agent)
-    install(opened.bridge)
-    stops = [listenToAgents()]
-    const project = await opened.bridge.invoke('projects.create', {
-      name: 'Atlas',
-      tone: 'primary',
-      mainPath: main,
-    })
-    await openSessions(project.id)
-    const made = await startSession(project.id, 'claude', null)
+    const { bridge, projectId } = await atlas(early, agent)
+    const made = await startSession(projectId, 'claude', null)
     const sessionId = made?.id ?? ''
 
-    const options = opened.bridge.invoke('agents.options', { sessionId })
-    const said = say(sessionId, 'Export the invoices with HT and TTC', 'spec')
-    for (let look = 0; look < 200; look += 1) {
-      // oxlint-disable-next-line no-await-in-loop -- a poll: each look waits for the one before it
-      const [session] = await opened.bridge.invoke('sessions.list', { projectId: project.id })
-      if (session?.mission === 'define') break
-      // oxlint-disable-next-line no-await-in-loop -- the same poll, after its pause
-      await new Promise((resolve) => setTimeout(resolve, 10))
-    }
+    const options = bridge.invoke('agents.options', { sessionId })
+    expect(await createSpec(sessionId, 'feature', 'Export the invoices')).toBe(true)
     hold()
     await options
-    expect(await said).toBeNull()
+    expect(await say(sessionId, 'Go on')).toBeNull()
 
-    // The agent started while the Session was free took no turn: it listed the tools of a free
-    // Session. The one that took the first turn listed the define tools, and its write went in.
+    // The agent started while the Session was free took no turn. The one that took the turn
+    // listed the define tools, and its write went in.
     expect(early.answers.prompts).toEqual([])
     const listed = agent.answers.tools.at(-1) ?? []
     expect(listed).toContain('spec_write')
@@ -234,32 +205,24 @@ describe('A Session started with New Spec defines its Spec from the first turn',
     expect(agent.answers.used).toEqual([
       expect.objectContaining({ tool: 'spec_write', isError: false }),
     ])
-    const specs = await opened.bridge.invoke('specs.list', { projectId: project.id })
+    const specs = await bridge.invoke('specs.list', { projectId })
     expect(specs.map((spec) => spec.title)).toEqual(['Invoice export'])
   })
 
-  test('the title is the first line of the request, cut on a word when it is long', () => {
-    expect(requestedSpec('\n  Fix   the menu \nmore').title).toBe('Fix the menu')
-    const long = requestedSpec(`${'word '.repeat(30)}end`).title
+  test('the provisional title is the first line of the request, cut on a word when it is long', () => {
+    expect(provisionalTitleOf('\n  Fix   the menu \nmore')).toBe('Fix the menu')
+    const long = provisionalTitleOf(`${'word '.repeat(30)}end`)
     expect(long.length).toBeLessThanOrEqual(81)
     expect(long.endsWith('word…')).toBe(true)
-    expect(requestedSpec('   ')).toEqual({ title: 'New Spec', type: 'feature' })
+    expect(provisionalTitleOf('   ')).toBe('New Spec')
   })
 
-  test('a Session started with Start chat carries no request', async () => {
+  test('a Session started with Start chat carries no request and shows no provisional Spec', async () => {
     const agent = fakeAgent({ steps: [{ does: 'says', text: 'Sure.' }] })
-    opened = await openWindow(dataFolder, agent)
-    install(opened.bridge)
-    stops = [listenToAgents()]
-    const project = await opened.bridge.invoke('projects.create', {
-      name: 'Atlas',
-      tone: 'primary',
-      mainPath: main,
-    })
-    await openSessions(project.id)
-
-    const made = await startSession(project.id, 'claude', null)
+    const { projectId } = await atlas(agent)
+    const made = await startSession(projectId, 'claude', null)
     expect(await say(made?.id ?? '', 'Export the invoices')).toBeNull()
     expect(agent.answers.blocks[0]).toEqual([{ type: 'text', text: 'Export the invoices' }])
+    expect(provisionalSpecOf(made?.id ?? '')).toBeNull()
   })
 })

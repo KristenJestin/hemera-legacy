@@ -1107,6 +1107,19 @@ export const toolCatalogueLayer: Layer.Layer<
                 ? 'reads from: nothing but the root'
                 : `reads from: ${repositories.join(', ')}`,
             ]
+            // Its Specs, so the agent of a New Spec checks what exists before proposing one: a
+            // second Spec for the same thing is what the user would not know was made (#198).
+            const listed = yield* answered(specs.list(projectId))
+            if (listed === undefined) {
+              lines.push('specs: they could not be read')
+            } else if (listed.length === 0) {
+              lines.push('specs: none')
+            } else {
+              lines.push(
+                'specs:',
+                ...listed.map((one) => `${one.key} ${one.type} ${one.status}: ${one.title}`),
+              )
+            }
             return completed(`read the Project ${projectName}`, lines.join('\n'))
           }
 

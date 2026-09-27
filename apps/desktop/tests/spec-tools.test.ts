@@ -580,6 +580,32 @@ describe('Stories, tasks and a question are written through the tool', () => {
   })
 })
 
+describe('The title and the type the user settled are written through the tool', () => {
+  test('a bug takes its reproduction section, the slug follows the title, and both at once are refused', async () => {
+    const agent = fakeAgent({
+      steps: [
+        uses('spec_write', { type: 'bug', key: 'type-1' }),
+        uses('spec_write', { title: 'Invoices lose their VAT', key: 'title-1' }),
+        uses('spec_write', { title: 'Two things', type: 'feature', key: 'both-1' }),
+      ],
+    })
+    const seen = await toolApplication(dataFolder)(agent)(
+      Effect.gen(function* () {
+        const { sessionId, specId, projectId } = yield* defining
+        yield* turn(sessionId)
+        const journal = yield* (yield* Journal).read({ projectId, specId })
+        return { after: yield* (yield* Specs).read(specId), journal: journal.entries }
+      }),
+    )
+    expect(agent.answers.used.map((answer) => answer.isError)).toEqual([false, false, true])
+    expect(agent.answers.used[2]?.text).toContain('send exactly one of')
+    expect(seen.after.revision).toMatchObject({ title: 'Invoices lose their VAT', type: 'bug' })
+    expect(seen.after.spec.slug).toBe('invoices-lose-their-vat')
+    expect(seen.after.sections.map((section) => section.name)).toContain('reproduction')
+    expect(seen.journal.filter((line) => line.type === 'spec.heading_written')).toHaveLength(2)
+  })
+})
+
 describe('The agent proposes a Spec through spec_propose in a free Session', () => {
   test('the proposal entry is written, and nothing else: no Spec, the Session stays free', async () => {
     const agent = fakeAgent({

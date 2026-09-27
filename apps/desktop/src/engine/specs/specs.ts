@@ -175,6 +175,17 @@ export interface TaskWrite {
   stories: readonly string[]
 }
 
+/**
+ * The title or the type of the current draft, rewritten (issue #179): a Spec New Spec created
+ * starts on the first line of the request and the type `feature`, which the agent settles with
+ * the user. One of the two per write.
+ */
+export interface HeadingWrite {
+  specId: string
+  title?: string | undefined
+  type?: SpecType | undefined
+}
+
 export interface QuestionRaise {
   specId: string
   body: string
@@ -317,6 +328,8 @@ export interface SpecsService {
     actor: SpecWriter,
     input: { specId: string; tasks: readonly TaskWrite[] },
   ) => Answer<SpecSnapshot>
+  /** Renames the draft or changes its type; a new type brings the empty sections it requires. */
+  readonly writeHeading: (actor: SpecWriter, input: HeadingWrite) => Answer<SpecSnapshot>
   /** Kept in the Spec, and asked in the chat of the actor's Session when it has one (D7-01). */
   readonly raiseQuestion: (actor: SpecWriter, input: QuestionRaise) => Answer<SpecSnapshot>
   /** Human only, answered beside the question in the chat it was asked in (D7-03). */
@@ -590,6 +603,72 @@ function writeSectionIn(
         payload: { name: input.name, version: version + 1, author: actor.kind },
       }),
       ...phases,
+    ]
+  })
+}
+
+/**
+ * Writes the title or the type of the current revision (issue #179). A title renames the Spec's
+ * slug with it: a draft has no branch yet. A type adds the empty sections its contract requires
+ * and the revision does not hold, as `createIn` does (D7-06); what the other type had stays.
+ */
+function writeHeadingIn(
+  transaction: EngineTransaction,
+  snapshot: SpecSnapshot,
+  actor: SpecWriter,
+  input: HeadingWrite,
+) {
+  return Effect.gen(function* () {
+    const title = input.title?.trim()
+    if (title !== undefined) {
+      const slug = yield* slugged(title)
+      yield* transaction
+        .update(specRevisions)
+        .set({ title })
+        .where(eq(specRevisions.id, snapshot.revision.id))
+        .pipe(Effect.mapError(failed('renaming the revision')))
+      yield* transaction
+        .update(specs)
+        .set({ slug })
+        .where(eq(specs.id, snapshot.spec.id))
+        .pipe(Effect.mapError(failed('renaming the Spec')))
+    }
+    const type = input.type
+    if (type !== undefined) {
+      yield* transaction
+        .update(specRevisions)
+        .set({ type })
+        .where(eq(specRevisions.id, snapshot.revision.id))
+        .pipe(Effect.mapError(failed('changing the type')))
+      const held = new Set(snapshot.sections.map((section) => section.name))
+      const missing = contractOf(type).filter((name) => !held.has(name))
+      if (missing.length > 0) {
+        const at = now()
+        yield* transaction
+          .insert(specSections)
+          .values(
+            missing.map((name) => ({
+              id: crypto.randomUUID(),
+              revisionId: snapshot.revision.id,
+              name,
+              author: actor.kind,
+              sessionId: actor.sessionId,
+              updatedAt: at,
+            })),
+          )
+          .pipe(Effect.mapError(failed('writing the sections')))
+      }
+    }
+    return [
+      specEvent(snapshot.spec, snapshot.revision.id, 'spec.heading_written', {
+        author: actor.kind,
+        sessionId: actor.sessionId,
+        phaseId: 'shape',
+        payload: {
+          title: title ?? snapshot.revision.title,
+          type: type ?? snapshot.revision.type,
+        },
+      }),
     ]
   })
 }
@@ -1171,6 +1250,11 @@ export const specsLayer = Layer.effect(
       writeTasks: (actor, input) =>
         onContent('writing the tasks', input.specId, actor, (transaction, snapshot) =>
           writeTasksIn(transaction, snapshot, actor, input.tasks).pipe(Effect.map(only)),
+        ),
+
+      writeHeading: (actor, input) =>
+        onContent('writing the heading', input.specId, actor, (transaction, snapshot) =>
+          writeHeadingIn(transaction, snapshot, actor, input).pipe(Effect.map(only)),
         ),
 
       raiseQuestion: (actor, input) =>

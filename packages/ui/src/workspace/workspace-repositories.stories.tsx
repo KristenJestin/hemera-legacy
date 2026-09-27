@@ -157,3 +157,29 @@ export const GitError: Story = {
   args: { repositories: [{ path: './sources/api', git: { ok: false, error: BROKEN } }, FRONT] },
   play: aGitErrorIsSurfacedAsIs,
 }
+
+// Scenario "A repository not prepared yet waits for its worktree" (#217).
+async function aRepositoryNotPreparedYetWaitsForItsWorktree({ canvasElement }: Context) {
+  const canvas = within(canvasElement)
+  const api = within(canvas.getByText('./sources/api').closest('li')!)
+  await expect(api.getByText('Waiting for its worktree')).toBeVisible()
+  const front = within(canvas.getByText('./sources/front').closest('li')!)
+  await expect(front.getByText('Making its worktree…')).toBeVisible()
+  // A folder not made yet is no Git error, and Git is not being read in it either.
+  await expect(canvas.queryByText('Git error')).toBeNull()
+  await expect(canvas.queryByText('Reading Git…')).toBeNull()
+}
+
+/**
+ * Being prepared: one worktree waits for its step, the other is being made. Each row says its
+ * step, quietly, and nothing of Git until the folder is there to read.
+ */
+export const Preparing: Story = {
+  args: {
+    repositories: [
+      { path: './sources/api', git: null, step: 'pending' },
+      { path: './sources/front', git: null, step: 'running' },
+    ],
+  },
+  play: aRepositoryNotPreparedYetWaitsForItsWorktree,
+}

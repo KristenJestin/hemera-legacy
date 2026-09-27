@@ -26,6 +26,7 @@ import {
   STEP_KINDS,
   STEP_STATES,
   WORKSPACE_STATES,
+  type StepState,
   type WorkspaceState,
   type WorkspaceStep,
   branchNameFor,
@@ -246,10 +247,17 @@ export interface WorkspaceDraft {
   readonly repositories: readonly WorktreeRecord[]
 }
 
-/** A repository of a Workspace as it is shown: Git's answer, or Git's own words (D8-15). */
+/**
+ * A repository of a Workspace as it is shown: Git's answer, or Git's own words (D8-15) — or, while
+ * its worktree step is not done, that step's state and nothing read of a folder not made (#217).
+ */
 export interface RepositoryState {
   readonly relativePath: string
-  readonly git: ({ readonly ok: true } & GitStatus) | { readonly ok: false; readonly error: string }
+  readonly step: Exclude<StepState, 'done'> | null
+  readonly git:
+    | ({ readonly ok: true } & GitStatus)
+    | { readonly ok: false; readonly error: string }
+    | null
 }
 
 export interface WorkspacesService {
@@ -1026,20 +1034,37 @@ export const workspacesLayer = Layer.effect(
           // none declared is the root itself, which Git is asked about all the same (D8-04).
           const { repositories } = yield* describedWorkspace(database, row.projectId, id)
           const locations = repositories.length > 0 ? repositories : [ROOT_REPOSITORY]
-          return yield* Effect.forEach(locations, (relativePath) =>
-            git.status(join(row.path, relativePath)).pipe(
-              Effect.map((status): RepositoryState => ({
-                relativePath,
-                git: { ok: true, ...status },
-              })),
-              // Git's own words, for this repository alone: the others show their state (D8-15).
-              Effect.catch((refused) =>
-                Effect.succeed({
+          // A repository whose worktree step is not done has no folder yet, or only half of one:
+          // Git is not asked of it, and its step's state is what it shows (#217).
+          const worktrees = yield* database
+            .select({ target: workspaceSteps.target, state: workspaceSteps.state })
+            .from(workspaceSteps)
+            .where(and(eq(workspaceSteps.workspaceId, id), eq(workspaceSteps.kind, 'worktree')))
+            .pipe(Effect.mapError(failed('reading the steps')))
+          return yield* Effect.forEach(
+            locations,
+            (relativePath): Effect.Effect<RepositoryState> => {
+              const step = worktrees.find((one) => one.target === relativePath)
+              const waiting = STEP_STATES.find((state) => state === step?.state && state !== 'done')
+              if (waiting !== undefined && waiting !== 'done') {
+                return Effect.succeed({ relativePath, step: waiting, git: null })
+              }
+              return git.status(join(row.path, relativePath)).pipe(
+                Effect.map((status): RepositoryState => ({
                   relativePath,
-                  git: { ok: false as const, error: refused.message },
-                }),
-              ),
-            ),
+                  step: null,
+                  git: { ok: true, ...status },
+                })),
+                // Git's own words, for this repository alone: the others show their state (D8-15).
+                Effect.catch((refused) =>
+                  Effect.succeed({
+                    relativePath,
+                    step: null,
+                    git: { ok: false as const, error: refused.message },
+                  }),
+                ),
+              )
+            },
           )
         }),
 

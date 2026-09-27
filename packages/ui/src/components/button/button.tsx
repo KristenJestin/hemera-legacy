@@ -1,7 +1,7 @@
 import { Button as BaseButton } from '@base-ui/react/button'
 import { type VariantProps, cva } from 'class-variance-authority'
 import { cn } from 'cn'
-import { AnimatePresence, motion } from 'motion/react'
+import { AnimatePresence, motion, useIsPresent } from 'motion/react'
 import type { ReactNode } from 'react'
 
 import { IconAlertTriangle, IconCheck } from '../../icons.ts'
@@ -166,20 +166,40 @@ function Content({ state, children }: { state: ButtonState; children: ReactNode 
     <>
       <AnimatePresence mode="popLayout" initial={false}>
         {mark !== null && (
-          <motion.span
-            key={state}
-            className="inline-flex"
-            initial={{ opacity: 0, y: MARK_TRAVEL, scale: 0.7 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: -MARK_TRAVEL, scale: 0.7 }}
-            transition={transition}
-          >
+          <Mark key={state} transition={transition}>
             {mark}
-          </motion.span>
+          </Mark>
         )}
       </AnimatePresence>
       {children}
     </>
+  )
+}
+
+/**
+ * The mark of a state, in front of the label. The moment it starts leaving it is hidden from
+ * assistive technology: the state it said is over, and a loader still read while it fades out
+ * named the button `Working Create` once the work was done.
+ */
+function Mark({
+  transition,
+  children,
+}: {
+  transition: ReturnType<typeof useTransition>
+  children: ReactNode
+}) {
+  const present = useIsPresent()
+  return (
+    <motion.span
+      className="inline-flex"
+      aria-hidden={present ? undefined : true}
+      initial={{ opacity: 0, y: MARK_TRAVEL, scale: 0.7 }}
+      animate={{ opacity: 1, y: 0, scale: 1 }}
+      exit={{ opacity: 0, y: -MARK_TRAVEL, scale: 0.7 }}
+      transition={transition}
+    >
+      {children}
+    </motion.span>
   )
 }
 

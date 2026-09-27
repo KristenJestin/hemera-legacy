@@ -55,6 +55,7 @@ import { ToolAccess, toolAccessLayer } from '#engine/tools/access.ts'
 import { ToolPermissions } from '#engine/tools/permissions.ts'
 import type { OutsideAnswer, OutsideRequest } from '#engine/tools/permissions.ts'
 import { variablesLayer } from '#engine/workspaces/variables.ts'
+import { setupPlaces } from './application.ts'
 
 const SHIPPED = join(import.meta.dirname, '..', 'drizzle')
 
@@ -143,6 +144,7 @@ function engine(human: Human) {
     Layer.provideMerge(Layer.succeed(ToolPermissions, human.service)),
     Layer.provideMerge(commandsLayer),
     Layer.provide(variablesLayer),
+    Layer.provide(setupPlaces(folder)),
     Layer.provideMerge(
       Layer.mergeAll(
         projectsLayer,

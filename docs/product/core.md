@@ -254,6 +254,17 @@ and the human can also add a one-off execution from the Session. Repeating a one
 is not enough to promote it automatically. The details of groups and script imports remain to
 be designed.
 
+The agent can also set the Project up, as the human does in its settings. It reads the whole
+setup freely through `setup_read` — repositories with their Git state, Workspaces with their
+state and preparation, the recipe, the commands and services, and the variables by name only —
+and changes nothing of it: `setup_propose` draws each change it wants as a card of its Session,
+applied only when a human accepts it, through the very use case the settings call. The changes
+proposed together are accepted one by one or all at once, in the order proposed. What the
+settings refuse is refused to the agent with the same reason, and each accepted change is
+journaled as the human's acceptance of the agent's proposal. The agent may write a variable's
+value when it has it — the user gave it, or it is in the Project's files — and that value is
+never shown back, in the thread or in the Journal: only that it was set.
+
 ## Spec
 
 A Spec represents the intention and the shared state of a piece of work followed end to end.

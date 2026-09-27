@@ -147,6 +147,10 @@ export const CHANNELS = {
   'commands.stopService': ENGINE_REQUESTS['commands.stopService'],
   'commands.proposeAccept': ENGINE_REQUESTS['commands.proposeAccept'],
   'commands.proposeDecline': ENGINE_REQUESTS['commands.proposeDecline'],
+  // What a human decides of the setup changes the agent proposed (#218).
+  'setup.accept': ENGINE_REQUESTS['setup.accept'],
+  'setup.acceptAll': ENGINE_REQUESTS['setup.acceptAll'],
+  'setup.decline': ENGINE_REQUESTS['setup.decline'],
   'context.read': ENGINE_REQUESTS['context.read'],
 
   // The Workspaces of a Project, their preparation, the Project's recipe and its variables,

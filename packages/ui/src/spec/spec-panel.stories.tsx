@@ -84,13 +84,11 @@ function markReadyOf(canvasElement: HTMLElement): HTMLElement {
 }
 
 /**
- * What the footer says is left before ready, while `Mark ready` cannot be pressed (issue #205):
- * the line, and the whole list it stands for in its tooltip.
+ * Whether the panel says nothing of what is left before ready: while `Mark ready` cannot be
+ * pressed, the footer counts nothing (issue #209).
  */
-function leftOf(canvasElement: HTMLElement): HTMLElement {
-  const foot = footOf(canvasElement, 'ready')
-  if (foot === null) throw new Error('the footer says nothing of what is left')
-  return within(foot).getByText(/left before ready$/)
+function saysNothingLeft(canvasElement: HTMLElement): boolean {
+  return !/left before ready/.test(dockOf(canvasElement).textContent ?? '')
 }
 
 /** Whether a button is drawn as the primary action, rather than a quiet one. */
@@ -266,8 +264,8 @@ export const Folded: Story = {
 
 /**
  * Open: a feature being planned, the head with no sentence under it and the fold at its end, the
- * Spec as one column — no band of phases and no tabs — and what is left before ready in the
- * footer.
+ * Spec as one column — no band of phases and no tabs — and nothing in the footer, since it cannot
+ * be marked ready yet.
  */
 export const Open: Story = {
   play: async ({ canvasElement }) => {
@@ -291,7 +289,8 @@ export const Open: Story = {
     await expect(headingOf(canvasElement, 'Decompose')).toHaveTextContent('2 of 3 written')
     await expect(isStuck(canvasElement, 'Shape')).toBe(true)
     await expect(canvas.queryByRole('button', { name: 'Mark ready' })).toBeNull()
-    await expect(leftOf(canvasElement)).toHaveTextContent('4 things left before ready')
+    await expect(footOf(canvasElement, 'ready')).toBeNull()
+    await expect(saysNothingLeft(canvasElement)).toBe(true)
     await expect(buildFootOf(canvasElement)).toBeNull()
     await expect(canvas.queryByText('Prototype')).toBeNull()
   },
@@ -508,7 +507,7 @@ export const ProvisionalBecomesReal: Story = {
       // oxlint-disable-next-line no-await-in-loop -- read on each frame as it is drawn
       await expect([now.left, now.width]).toEqual([before.left, before.width])
     }
-    await expect(leftOf(canvasElement)).toHaveTextContent('5 things left before ready')
+    await expect(footOf(canvasElement, 'ready')).toBeNull()
   },
 }
 
@@ -934,34 +933,28 @@ export const ReducedMotion: Story = {
 }
 
 /**
- * A draft that still lacks something (issue #205): `Mark ready` is not offered, since the press
- * could only be refused. The footer says how much is left in one quiet line, the whole list in its
- * tooltip, and nothing is said in red.
+ * A draft that still lacks something (issues #205, #209): `Mark ready` is not offered, since the
+ * press could only be refused, and the footer shows nothing: no count of what is left, and nothing
+ * said in red.
  */
 export const NotReadyYet: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     await expect(canvas.queryByRole('button', { name: 'Mark ready' })).toBeNull()
-    const left = leftOf(canvasElement)
-    await expect(left).toHaveTextContent(/^4 things left before ready$/)
-    await expect(left).toHaveAttribute(
-      'title',
-      "Still to do:\nthe tasks\nthe credit-note question\nplan and decompose\nthe agent's final check",
-    )
+    await expect(footOf(canvasElement, 'ready')).toBeNull()
+    await expect(saysNothingLeft(canvasElement)).toBe(true)
     await expect(canvas.queryByRole('alert')).toBeNull()
     await expect(canvas.getByRole('img', { name: 'Draft' })).toBeVisible()
   },
 }
 
-/** One thing left: said in the singular. */
+/** One thing left: still nothing in the footer, and no `Mark ready` (issue #209). */
 export const OneThingLeft: Story = {
   args: { spec: ONE_QUESTION_LEFT },
   play: async ({ canvasElement }) => {
-    await expect(leftOf(canvasElement)).toHaveTextContent(/^1 thing left before ready$/)
-    await expect(leftOf(canvasElement)).toHaveAttribute(
-      'title',
-      'Still to do:\nthe credit-note question',
-    )
+    await expect(within(canvasElement).queryByRole('button', { name: 'Mark ready' })).toBeNull()
+    await expect(footOf(canvasElement, 'ready')).toBeNull()
+    await expect(saysNothingLeft(canvasElement)).toBe(true)
   },
 }
 
@@ -999,8 +992,8 @@ export const OlderRevision: Story = {
 
 /**
  * A draft half done (issue #150): shaped, the plan being written, nothing split into tasks. The
- * head says no sentence of the phase, and the footer says what is left, with no `Mark ready`
- * (issue #205), on the rim under the column, at the panel's end.
+ * head says no sentence of the phase, and the footer shows nothing: no `Mark ready` and no count
+ * of what is left (issues #205, #209).
  */
 export const DraftHalfDone: Story = {
   play: async ({ canvasElement }) => {
@@ -1008,10 +1001,8 @@ export const DraftHalfDone: Story = {
     await expect(within(header).queryByRole('button', { name: 'Mark ready' })).toBeNull()
     await expect(header.querySelectorAll('p')).toHaveLength(0)
     await expect(within(canvasElement).queryByRole('button', { name: 'Mark ready' })).toBeNull()
-    await expect(leftOf(canvasElement)).toBeVisible()
-    const foot = footOf(canvasElement, 'ready')!.getBoundingClientRect()
-    const column = columnOf(canvasElement).getBoundingClientRect()
-    await expect(foot.top).toBeGreaterThanOrEqual(column.bottom)
+    await expect(footOf(canvasElement, 'ready')).toBeNull()
+    await expect(saysNothingLeft(canvasElement)).toBe(true)
     await expect(buildFootOf(canvasElement)).toBeNull()
   },
 }
@@ -1049,7 +1040,7 @@ export const AttestedWithAPhaseOpen: Story = {
   },
   play: async ({ canvasElement }) => {
     await expect(within(canvasElement).queryByRole('button', { name: 'Mark ready' })).toBeNull()
-    await expect(leftOf(canvasElement)).toHaveTextContent('1 thing left before ready')
+    await expect(footOf(canvasElement, 'ready')).toBeNull()
   },
 }
 
@@ -1085,8 +1076,8 @@ export const ReadyWithItsBuild: Story = {
 
 /**
  * The build's actions arrive when the Spec becomes ready: `Mark ready` pressed, it folds away as
- * they grow in its place; `Rework` confirmed, they fold away and the footer says what is left,
- * since the agent has to confirm the reworked Spec anew.
+ * they grow in its place; `Rework` confirmed, they fold away and the footer is left empty, since
+ * the agent has to confirm the reworked Spec anew.
  */
 export const BuildArrivesWhenReady: Story = {
   args: { spec: GATE_FULL },
@@ -1114,15 +1105,14 @@ export const BuildArrivesWhenReady: Story = {
     await waitFor(() => expect(buildFootOf(canvasElement)).toBeNull())
     await expect(canvas.queryByRole('button', { name: 'Prepare and start the build' })).toBeNull()
     await expect(canvas.queryByRole('button', { name: 'Mark ready' })).toBeNull()
-    await waitFor(() =>
-      expect(leftOf(canvasElement)).toHaveTextContent('2 things left before ready'),
-    )
+    await waitFor(() => expect(footOf(canvasElement, 'ready')).toBeNull())
+    await expect(saysNothingLeft(canvasElement)).toBe(true)
   },
 }
 
 /**
  * A Rework while the build waits for its Workspace: the launch is taken back, and the draft it
- * leaves has its footer — what is left before ready, with the cancelled launch said beside it.
+ * leaves has its footer — the cancelled launch, and no count of what is left before ready.
  */
 export const ReworkWhileTheLaunchWaits: Story = {
   args: {
@@ -1139,14 +1129,14 @@ export const ReworkWhileTheLaunchWaits: Story = {
     await waitFor(() => expect(buildFootOf(canvasElement)).toBeNull())
     const foot = within(footOf(canvasElement, 'ready')!)
     await expect(foot.queryByRole('button', { name: 'Mark ready' })).toBeNull()
-    await expect(leftOf(canvasElement)).toHaveTextContent('2 things left before ready')
+    await expect(saysNothingLeft(canvasElement)).toBe(true)
     await expect(foot.getByRole('status')).toHaveTextContent('Cancelled by the Rework')
   },
 }
 
 /**
- * A draft with a failed launch still on it: the footer says what is left before ready, the failure
- * beside it, and nothing offers to start the agent again on a Spec that is not ready.
+ * A draft with a failed launch still on it: the footer says the failure, no count of what is left,
+ * and nothing offers to start the agent again on a Spec that is not ready.
  */
 export const DraftWithAFailedLaunch: Story = {
   args: {
@@ -1156,7 +1146,7 @@ export const DraftWithAFailedLaunch: Story = {
     await expect(buildFootOf(canvasElement)).toBeNull()
     const foot = within(footOf(canvasElement, 'ready')!)
     await expect(foot.queryByRole('button', { name: 'Mark ready' })).toBeNull()
-    await expect(leftOf(canvasElement)).toBeVisible()
+    await expect(saysNothingLeft(canvasElement)).toBe(true)
     await expect(foot.getByText(/The agent did not start: the agent exited/)).toBeVisible()
     await expect(foot.queryByRole('button', { name: 'Retry' })).toBeNull()
   },

@@ -413,11 +413,11 @@ describe('A second Session reads but does not write', () => {
 })
 
 describe('Mark ready waits until the Spec can be marked ready', () => {
-  it('is not offered on a draft that still lacks something, which says how much is left', async () => {
-    // A press could only be refused (issue #205): the footer says how much is left instead.
+  it('is not offered on a draft that still lacks something, whose footer says nothing', async () => {
+    // A press could only be refused (issues #205, #209): the footer says nothing instead.
     expect(await region(PANEL)).not.toContain('checks met')
     expect(await control('Mark ready')).toBeNull()
-    expect(await region(PANEL)).toMatch(/\d+ things? left before ready/)
+    expect(await region(PANEL)).not.toMatch(/left before ready/)
     expect(await region(PANEL)).not.toContain('is not ready yet')
     const { specId } = await sessionOf(ASKED)
     const status = await browser.execute(async (spec: string) => {

@@ -847,7 +847,7 @@ describe('A cleanup and a preparation never overlap', () => {
 
     expect(seen.during[2]?.state).toBe('running')
     expect(seen.refused).toBeInstanceOf(CleanupRefusedError)
-    expect(seen.refused.message).toBe('the Workspace login-form is being prepared')
+    expect(seen.refused.message).toBe('the Workspace hem-7-login-form is being prepared')
     expect(seen.prepared.state).toBe('ready')
     expect(seen.after.state).toBe('ready')
     expect(existsSync(join(seen.after.path, 'sources', 'api', '.git'))).toBe(true)
@@ -1069,6 +1069,7 @@ describe('A preparation that fails in the background is told as no longer live',
       changed: () => undefined,
       ran: () => undefined,
       launched: () => undefined,
+      agents: () => undefined,
       workspace: (_projectId, workspaceId) => {
         if (workspaces === null) return
         const free = Effect.runSync(workspaces.hold(workspaceId))

@@ -12,12 +12,27 @@ const meta = {
   component: CreateSpecProposal,
   tags: ['autodocs', 'updated'],
   parameters: { layout: 'padded' },
-  args: { title: 'CSV invoice export', type: 'feature', onCreate: fn(), onDecline: fn() },
+  args: {
+    title: 'CSV invoice export',
+    type: 'feature',
+    onCreate: fn(),
+    onDecline: fn(),
+    onContinue: fn(),
+  },
   argTypes: {
     title: { control: 'text', description: 'The title the agent understood.' },
     type: { control: 'inline-radio', options: ['feature', 'bug', 'maintenance'] },
     state: { control: 'inline-radio', options: ['proposed', 'created', 'declined'] },
     createdKey: { control: 'text', description: 'The key given, once created.' },
+    atOnce: {
+      control: 'boolean',
+      description: 'Whether Hemera created it at once, in a Session New Spec started.',
+    },
+    existingKey: {
+      control: 'text',
+      description: 'The key of a Spec that already exists, which the agent points to.',
+    },
+    onContinue: { description: 'Continue it: this Session defines the existing Spec.' },
     onCreate: { description: 'Creates the Spec with the title and the type as left.' },
     onDecline: { description: 'Not now.' },
   },
@@ -74,11 +89,63 @@ export const Created: Story = {
   },
 }
 
+/**
+ * Created at once, in a Session New Spec started (issue #205): the user asked for a Spec already,
+ * so nothing was asked. The thread keeps one quiet line, and nothing to press.
+ */
+export const CreatedAtOnce: Story = {
+  args: { state: 'created', createdKey: 'XC-2', atOnce: true },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await expect(canvas.getByRole('status')).toHaveTextContent(/^Spec XC-2 created · feature$/)
+    await expect(canvas.queryByRole('button')).toBeNull()
+  },
+}
+
 /** Declined: `Not now`, and the conversation goes on as it was. */
 export const Declined: Story = {
   args: { state: 'declined' },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     await expect(canvas.getByText(/was not created/)).toBeVisible()
+  },
+}
+
+/**
+ * The agent found the Spec already exists (issue #198): it points to it by its key rather than
+ * proposing a second one. Nothing to edit, the Spec has its own title and type: `Continue it`
+ * makes this Session define that one, or `Not now`.
+ */
+export const ExistingSpec: Story = {
+  args: { existingKey: 'ATL-4' },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement)
+    const card = canvas.getByRole('group', { name: 'Continue a Spec' })
+    await expect(card).toHaveTextContent('This Spec already exists')
+    await expect(card).toHaveTextContent('ATL-4')
+    await expect(card).toHaveTextContent('CSV invoice export')
+    await expect(canvas.queryByRole('textbox', { name: 'Title of the Spec' })).toBeNull()
+    await expect(canvas.queryByRole('button', { name: 'Create' })).toBeNull()
+    await userEvent.click(canvas.getByRole('button', { name: 'Continue it' }))
+    await expect(args.onContinue).toHaveBeenCalled()
+    await expect(args.onCreate).not.toHaveBeenCalled()
+  },
+}
+
+/** The existing Spec continued: folded to the line that says this Session defines it now. */
+export const ExistingContinued: Story = {
+  args: { existingKey: 'ATL-4', state: 'created' },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await expect(canvas.getByRole('status')).toHaveTextContent('Continued ATL-4')
+  },
+}
+
+/** The existing Spec not continued: the conversation goes on as it was. */
+export const ExistingDeclined: Story = {
+  args: { existingKey: 'ATL-4', state: 'declined' },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await expect(canvas.getByText(/ATL-4 « CSV invoice export » was not continued/)).toBeVisible()
   },
 }

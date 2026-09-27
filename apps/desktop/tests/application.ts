@@ -36,6 +36,7 @@ import {
   processSupervisorLayer,
 } from '#engine/agents/supervisor.ts'
 import { agentDirectoriesLayer } from '#engine/agents/bare.ts'
+import { acpTracesLayer } from '#engine/agents/trace.ts'
 import { type HeldWords, heldWordsLayer } from '#engine/agents/held.ts'
 import { type Commands, commandsLayer } from '#engine/commands/service.ts'
 import { type Context as AgentContext, contextLayer } from '#engine/context/service.ts'
@@ -45,6 +46,7 @@ import { preferencesLayer } from '#engine/preferences.ts'
 import type { Preferences } from '#engine/preferences.ts'
 import { Projects, projectsLayer } from '#engine/projects.ts'
 import { Sessions, sessionsLayer, type ThreadWrite } from '#engine/sessions.ts'
+import { domainEventsLayer } from '#engine/domain-events.ts'
 import { NoSpecNotices, type SpecNotices } from '#engine/specs/notices.ts'
 import { type Specs, specsLayer } from '#engine/specs/specs.ts'
 import { DatabaseError, databaseLayer } from '#engine/storage/database.ts'
@@ -129,6 +131,8 @@ export function watching() {
       launched: () => undefined,
       // A Workspace change is about a Project: the suites about Workspaces read it of their own.
       workspace: () => undefined,
+      // A change of the machine's agents is the Agents section's own: its suites read it.
+      agents: () => undefined,
     }),
   }
 }
@@ -229,7 +233,11 @@ export function application(
           storage.sessions,
           preferencesLayer,
           specsLayer.pipe(Layer.provide(NoSpecNotices)),
-        ).pipe(Layer.provideMerge(databaseLayer(join(dataFolder, 'hemera.sqlite')))),
+        ).pipe(
+          Layer.provideMerge(
+            Layer.mergeAll(databaseLayer(join(dataFolder, 'hemera.sqlite')), domainEventsLayer),
+          ),
+        ),
       ),
       Layer.provide(discoveryLayer.pipe(Layer.provide(environment))),
       Layer.provide(supervisor ?? fakeSupervisor(agent)),
@@ -241,6 +249,7 @@ export function application(
       Layer.provideMerge(TestClock.layer()),
       Layer.provideMerge(heldWordsLayer),
       Layer.provide(agentDirectoriesLayer(dataFolder)),
+      Layer.provide(acpTracesLayer(dataFolder)),
     )
     return <A, E>(
       program: Effect.Effect<
@@ -488,7 +497,11 @@ export function toolApplication(
           storage.sessions,
           preferencesLayer,
           specsLayer.pipe(Layer.provide(specNotices)),
-        ).pipe(Layer.provideMerge(databaseLayer(join(dataFolder, 'hemera.sqlite')))),
+        ).pipe(
+          Layer.provideMerge(
+            Layer.mergeAll(databaseLayer(join(dataFolder, 'hemera.sqlite')), domainEventsLayer),
+          ),
+        ),
       ),
       Layer.provide(discoveryLayer.pipe(Layer.provide(environment))),
       Layer.provide(
@@ -501,6 +514,7 @@ export function toolApplication(
       Layer.provide(poolLayer.pipe(Layer.provide(clockLayer))),
       Layer.provideMerge(heldWordsLayer),
       Layer.provide(agentDirectoriesLayer(dataFolder)),
+      Layer.provide(acpTracesLayer(dataFolder)),
     )
     return <A, E>(program: Effect.Effect<A, E, ToolEngine | Scope.Scope>) =>
       Effect.runPromise(

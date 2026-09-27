@@ -94,6 +94,7 @@ export const CHANNELS = {
   'specs.revisions': ENGINE_REQUESTS['specs.revisions'],
   'specs.create': ENGINE_REQUESTS['specs.create'],
   'specs.declineProposal': ENGINE_REQUESTS['specs.declineProposal'],
+  'specs.acceptExisting': ENGINE_REQUESTS['specs.acceptExisting'],
   'specs.openSession': ENGINE_REQUESTS['specs.openSession'],
   'specs.writeSection': ENGINE_REQUESTS['specs.writeSection'],
   'specs.writeStories': ENGINE_REQUESTS['specs.writeStories'],
@@ -124,6 +125,7 @@ export const CHANNELS = {
   'agents.stop': ENGINE_REQUESTS['agents.stop'],
   'agents.decide': ENGINE_REQUESTS['agents.decide'],
   'agents.resume': ENGINE_REQUESTS['agents.resume'],
+  'agents.handOver': ENGINE_REQUESTS['agents.handOver'],
   // The two the Agents section is drawn from: what this machine has, and the one thing that
   // changes it, which happens because somebody pressed a button and not on its own (D5-18).
   'agents.check': ENGINE_REQUESTS['agents.check'],
@@ -167,6 +169,7 @@ export const CHANNELS = {
   'variables.list': ENGINE_REQUESTS['variables.list'],
   'variables.set': ENGINE_REQUESTS['variables.set'],
   'variables.remove': ENGINE_REQUESTS['variables.remove'],
+  'paths.entries': ENGINE_REQUESTS['paths.entries'],
 
   /**
    * The four the main process answers itself, because each of them is something only it can do.
@@ -205,6 +208,22 @@ export const CHANNELS = {
    */
   'shell.open': {
     arguments: z.object({ what: z.enum(['folder', 'diagnostic']) }),
+    response: z.void(),
+  },
+  /**
+   * Whether a Session has an ACP trace beside the diagnostic, and opening it with the desktop
+   * (issue #131).
+   *
+   * The Session and never a path, for the reason `shell.open` takes a choice: the main process
+   * resolves the file from the data folder it was started on, and refuses an identifier that
+   * could name anything else.
+   */
+  'trace.exists': {
+    arguments: z.object({ sessionId: z.string() }),
+    response: z.boolean(),
+  },
+  'trace.open': {
+    arguments: z.object({ sessionId: z.string() }),
     response: z.void(),
   },
   'repositories.status': {

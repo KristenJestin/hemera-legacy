@@ -107,7 +107,7 @@ const MODES: ModeChoice[] = [
  * cannot wrap onto a line the frame would have to grow for.
  *
  * The Home is also the one place `New Spec` is drawn: a Spec is made from the question that
- * starts a Session, so the Session's own composer is handed no `spec` at all.
+ * starts a Session, so the Session's own composer is handed no `onSpec` at all.
  */
 function Writing(): ReactNode {
   const [value, setValue] = useState('')
@@ -125,7 +125,7 @@ function Writing(): ReactNode {
       onSearchFiles={() => Promise.resolve([])}
       onSend={() => Promise.resolve(null)}
       sendDisabledReason={agent === null ? 'Choose an agent first' : undefined}
-      spec
+      onSpec={() => Promise.resolve(null)}
       agentMenu={
         <AgentModelMenu
           agents={AGENTS}
@@ -230,7 +230,7 @@ export const Variants: Story = {
     const at = canvas.getByRole('button', { name: 'Mention a file of the Project' })
     expect(onOneLine(at, menu), 'the agent menu left the box’s own row').toBe(true)
     expect(
-      onOneLine(canvas.getByRole('combobox', { name: 'Workspace' }), send),
+      onOneLine(canvas.getByRole('combobox', { name: /^Workspace:/ }), send),
       'the foot of the composer wrapped',
     ).toBe(true)
 

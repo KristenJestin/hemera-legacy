@@ -102,12 +102,18 @@ can thus be two independent worktrees in the same Workspace. It is therefore lim
 a single worktree nor to a full copy of the `main` folder.
 
 A dedicated Workspace lives in the Project's Workspaces folder, set in its configuration and by
-default a folder of Hemera's own, never inside `main`. It is named after the Spec's slug by
-default, a name the user can change. Each repository is included in every Workspace by default
-or not, as the Project configures it, and the choice can be changed at creation. Each worktree
-is created on a new branch `<prefix>/<key>-<slug>` — the prefix is the Project's, its name as a
-slug by default — from the local HEAD of that repository in `main`; the creation dialog shows
-the base and the branch of each repository before anything is made. Every check runs before
+default a folder of Hemera's own, never inside `main`; the creation dialog can put it in another
+folder, and says so when the folder it proposes is under the system's temporary directory. A
+Spec's Workspace is named by default after the Spec's key and at most four meaningful words of
+its title (`aaa-1-progress-bar-atomes`), a name the user can change. Each repository is
+included in every Workspace by default or not, as the Project configures it, and the choice can
+be changed at creation. Each worktree is created on a new branch — `<prefix>/<key>-<slug>` for a
+Spec's Workspace, `<prefix>/<name>` for one made from the Project's settings, following the name
+as it is typed until the user writes the branch by hand; the prefix is the Project's, its name as
+a slug by default. The branch starts from a base chosen among the local branches of that
+repository in `main`, preselected on the one `main` is checked out on, or on the current commit
+when `main` is on no branch; the creation dialog shows the base and the branch of each
+repository before anything is made. Every check runs before
 anything is written, and one that fails refuses the whole creation, naming it. No network
 operation is ever made. A declared location that holds no repository in `main` gets no
 worktree and is said so. The user can also create a Workspace on a folder they pick, named
@@ -152,8 +158,9 @@ Services can be started as needed, in the environment intended for that
 Workspace.
 
 The preparation follows a recipe the Project holds: an ordered list of steps, each of which
-copies a file of `main`, links an unversioned file or folder of `main`, or runs a command of the
-catalogue in the Workspace. A copied or linked file sits at the Workspace root or in each of its
+copies a file of `main`, links an unversioned file or folder of `main`, or runs a command in the
+Workspace: a command of the catalogue, or a line of the step's own, written as a command's line
+is but never added to the catalogue, so that no agent sees it. A copied or linked file sits at the Workspace root or in each of its
 repositories. A copy never overwrites a file already there, and does nothing when the source is
 absent from `main`; a run fails when its command ends with a non-zero exit, its output kept. The
 recipe is replayed for each dedicated Workspace as it stood when the Workspace was created:
@@ -210,8 +217,15 @@ seven types, drawn with the icon the type fixes:
 - `test`, `lint` and `build`: verifications, with their results;
 - `configure`, `debug` and `script`: preparation, data generation and other reusable scripts.
 
-A command is one entry with a default line and, optionally, a line of its own for Windows and
-one for Linux: the machine runs its own line when there is one, the default line otherwise.
+A command is one entry with either one line for every system, or a line per system — one for
+Windows, one for Linux and macOS: the machine runs its own line when there is one, the one line
+otherwise.
+
+A command can be marked "Run when Hemera opens": each time the application opens, once its
+window is shown, Hemera runs it once per Project, in `main`, whatever its type — a script that
+ends as well as a service that stays. A service of it still running from the last time is
+stopped and started again, so it starts clean; a run that fails is shown like any other and
+never stops Hemera from opening.
 
 A `serve` command runs either once per Workspace, each Workspace having its own instance, or
 once for the Project, in `main`, whichever Workspace asks for it; asking again for a running one
@@ -223,8 +237,10 @@ and the Workspace holding the port. Stopping a service stops that instance only.
 
 A `serve` command can be marked to run through Portless. At launch, Hemera checks that Portless
 is installed and refuses by name, starting nothing, when it is not; otherwise the line runs
-through Portless under the Workspace's name and the command's, the `.localhost` address it
-prints is the service's URL, checked like any other, and no port conflict is looked for.
+through Portless under one name — the command's Portless name, or the Project's name as a slug
+when it has none, never the Workspace's: Portless itself puts the branch in front of it in a
+worktree. The `.localhost` address it prints is the service's URL, checked like any other, and
+no port conflict is looked for.
 
 A one-off execution requested by the agent remains visible in the activity of its Session,
 with the Workspace concerned, without automatically creating a permanent entry in that
@@ -768,8 +784,9 @@ writer Session's agent at its next safe point, between two turns, never in the m
 
 A question of the Spec is asked in the chat, where it is answered. The agent offers its answers
 as options, one of them recommended, and the user picks one or writes their own; a question
-with no option takes a text only. The answer is written beside the question in the thread,
-resolves it, and reaches the agent at its next safe point like a human edit. The questions part
+with no option takes a text only. The answer is written beside the question in the thread, drawn
+there as the user's own message — the option chosen or the text typed —, resolves it, and reaches the
+agent at its next safe point like a human edit. The questions part
 of the Spec is the register of what was asked and what was decided.
 
 Presentation examples:
@@ -778,6 +795,9 @@ Presentation examples:
 DEFINE · Claude Sonnet
 BUILD · Claude Opus
 ```
+
+The head of a Session names its Project and nothing else: the mission shows in the panel beside
+the chat, and the agent in the composer.
 
 At this stage, Hemera does not need distinct `Role` or `AgentDefinition` business entities.
 They will only become useful if a need for reusable and configurable profiles is

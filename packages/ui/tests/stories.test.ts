@@ -17,7 +17,7 @@
  */
 
 import { execFileSync } from 'node:child_process'
-import { readFileSync, readdirSync } from 'node:fs'
+import { existsSync, readFileSync, readdirSync } from 'node:fs'
 import { join, relative } from 'node:path'
 import { describe, expect, test } from 'vite-plus/test'
 
@@ -216,16 +216,7 @@ const NAMED_STATES = new Map([
   // path picked outside its base.
   [
     'project/preparation-editor',
-    [
-      'Empty',
-      'Filled',
-      'Adding',
-      'Editing',
-      'SourceMissing',
-      'OwnLine',
-      'PickedOutside',
-      'Keyboard',
-    ],
+    ['Empty', 'Filled', 'Adding', 'Editing', 'SourceMissing', 'OwnLine', 'Suggestions', 'Keyboard'],
   ],
   // Recette 1 of lot 20: the settings of a Project, one section at a time, each its story.
   [
@@ -397,6 +388,8 @@ describe('Catalogue, coquille et surfaces, et rien d’autre', () => {
       'Sidebar',
       'Gutter',
       'CommandPalette',
+      // What the window shows while it starts, before its first page is ready.
+      'StartScreen',
     ]
     const surfaces = [
       'ProjectDialog',
@@ -457,6 +450,8 @@ describe('Catalogue, coquille et surfaces, et rien d’autre', () => {
       'ToolCallCard',
       'TerminalOutput',
       'DiffBlock',
+      // #149: the calls of a turn between two things the agent said, folded into one row.
+      'ActionGroup',
       'PermissionRequest',
       'DecisionSummary',
       // The agent, its model and its effort are one control since the trial of 22 September
@@ -470,11 +465,15 @@ describe('Catalogue, coquille et surfaces, et rien d’autre', () => {
       // marker the thread already had.
       'ActivityRow',
       'UsageMeter',
+      // Issue #134: the two share the row above the box, and the meter stands at its foot.
+      'TurnLine',
       'BlockedBanner',
       'AgentsSection',
       'PlanPanel',
       'SessionDetails',
       'StoppedTurn',
+      // #131: what an agent reported outside the conversation, or asked and nobody could see.
+      'AgentReport',
       'ResumeFallbackBanner',
       // HEM-18: Hemera lends the agent its own tools. A call to one of them is a block of the
       // thread with the mark that tells it from a native call, a command it runs is a block of
@@ -498,19 +497,17 @@ describe('Catalogue, coquille et surfaces, et rien d’autre', () => {
       'PreparationSteps',
       'WorkspaceList',
       'CleanupDialog',
-      // Lot 19: the Spec panel of a `define` Session, its rail and its parts, and the three
-      // blocks of the thread: what the agent was handed, a question of the Spec asked in the
-      // chat, and the agent proposing a Spec in a `free` Session.
+      // Lot 19: the Spec panel of a `define` Session and its parts — folded to a small frame and
+      // open as one column since #164 — and the three blocks of the thread: what the agent was
+      // handed, a question of the Spec asked in the chat, and the agent proposing a Spec in a
+      // `free` Session.
       'SpecPanel',
       'SpecPart',
-      'SpecStage',
-      'SpecRail',
       'SpecHead',
       'SectionPart',
       'StoriesPart',
       'TasksPart',
       'QuestionsPart',
-      'ConflictBanner',
       'ReaderBar',
       'ReworkDialog',
       'MissionBrief',
@@ -519,10 +516,6 @@ describe('Catalogue, coquille et surfaces, et rien d’autre', () => {
       // The build of a frozen Spec: what it is launched in, and where that launch stands
       // (D8-12, D8-13).
       'WorkspaceActions',
-      // The shell the Spec panel stands in, which any mission's panel opens in beside the chat,
-      // and the rail it is fed with.
-      'MissionPanel',
-      'MissionRail',
       // Recette 1 of lot 20: every addition and every edit of the settings is a dialog.
       'CommandDialog',
       'RepositoryDialog',
@@ -563,6 +556,9 @@ describe('Catalogue, coquille et surfaces, et rien d’autre', () => {
       'NESTED_RADIUS',
       'PROJECT_SETTINGS_ENTRY',
       'PROJECT_TONES',
+      // #131: how long a running turn may hear nothing before its line says so, and offers more.
+      'QUIET_AFTER_MS',
+      'STUCK_AFTER_MS',
       // Recette 1 of lot 20: the icons a repository may be drawn with.
       'REPOSITORY_ICONS',
       'SIDEBAR_DEFAULT',
@@ -607,7 +603,9 @@ describe('Surfaces du lot 4 montrées en Storybook', () => {
  * entry that more than one file feeds are named after the state they show.
  */
 describe('Les cinq racines du catalogue', () => {
-  const ROOTS = ['Foundations', 'Components', 'Blocks', 'Surfaces', 'Shell']
+  // `Explorations` is the sixth, last: a design question drawn in several variants, deleted once
+  // one of them is built (`AGENTS.md`).
+  const ROOTS = ['Foundations', 'Components', 'Blocks', 'Surfaces', 'Shell', 'Explorations']
 
   /**
    * The order is not the alphabet's: a reader is given the five roots in the order above, and,
@@ -629,10 +627,15 @@ describe('Les cinq racines du catalogue', () => {
       'Session',
       'Complete',
       'Shell',
+      'Explorations',
     ])
     // The alphabet, asked for rather than hoped for: Storybook keeps the index's own order for
     // every name the list above does not mention, so the method is what makes the rule true.
     expect(settings).toContain("method: 'alphabetical'")
+  })
+
+  test('an exploration goes once the variant chosen is built: the questions, card B (#199)', () => {
+    expect(existsSync(join(designSystem, 'explorations', 'questions'))).toBe(false)
   })
 
   test('every story file is filed under one of the five roots', () => {

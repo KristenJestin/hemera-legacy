@@ -83,6 +83,7 @@ describe('The catalogue is edited and read', () => {
       scope: 'workspace',
       portless: false,
       portlessName: null,
+      runAtOpen: false,
       folderBase: 'api',
       folder: null,
     })
@@ -100,6 +101,7 @@ describe('The catalogue is edited and read', () => {
       scope: 'workspace',
       portless: false,
       portlessName: null,
+      runAtOpen: false,
       folderBase: null,
       folder: null,
     })
@@ -127,6 +129,7 @@ describe('The catalogue is edited and read', () => {
       scope: 'workspace' as const,
       portless: false,
       portlessName: null,
+      runAtOpen: false,
       folderBase: null,
     }
     await bridge.invoke('commands.create', { ...draft, folder: null })
@@ -169,6 +172,7 @@ describe('The agent starts the app and the user opens it', () => {
       scope: 'workspace',
       portless: false,
       portlessName: null,
+      runAtOpen: false,
       folderBase: null,
       folder: null,
     })
@@ -246,6 +250,7 @@ describe('The view lists the sources with their provenance', () => {
       scope: 'workspace',
       portless: false,
       portlessName: null,
+      runAtOpen: false,
       folderBase: null,
       folder: null,
     })

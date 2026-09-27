@@ -275,6 +275,7 @@ export async function createDedicated(
   projectId: string,
   name: string,
   repositories: readonly Worktree[],
+  root: string | null = null,
 ): Promise<string | null> {
   forgetWorkspacesRefusal()
   let made: Workspace
@@ -283,6 +284,7 @@ export async function createDedicated(
       projectId,
       specId: null,
       name,
+      root,
       repositories: [...repositories],
     })
   } catch (cause) {
@@ -304,6 +306,14 @@ export async function createDedicated(
  * The plan of a Workspace made for a Spec (D8-04): the same as the settings', except that the
  * branches are named after the Spec's key and slug rather than after the name typed.
  */
+/**
+ * Asks the system for a folder to make a Workspace under, from the one the dialog shows (#136),
+ * and answers null when the picker was dismissed.
+ */
+export async function pickWorkspacesFolder(start: string): Promise<string | null> {
+  return await window.hemera.invoke('dialog.pickFolder', { start })
+}
+
 export async function planForSpec(
   projectId: string,
   key: string,
@@ -429,6 +439,7 @@ export async function createForSpec(
   specId: string,
   name: string,
   repositories: readonly Worktree[],
+  root: string | null = null,
 ): Promise<{ workspace: Workspace; refusal: null } | { workspace: null; refusal: string }> {
   forgetWorkspacesRefusal()
   let made: Workspace
@@ -437,6 +448,7 @@ export async function createForSpec(
       projectId,
       specId,
       name,
+      root,
       repositories: [...repositories],
     })
   } catch (cause) {

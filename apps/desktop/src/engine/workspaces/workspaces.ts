@@ -17,7 +17,8 @@
 
 import { existsSync, realpathSync, statSync } from 'node:fs'
 import { rm } from 'node:fs/promises'
-import { basename, join } from 'node:path'
+import { tmpdir } from 'node:os'
+import { basename, isAbsolute, join, relative, sep } from 'node:path'
 
 import {
   MAIN_WORKSPACE,
@@ -29,6 +30,7 @@ import {
   type WorkspaceStep,
   branchNameFor,
   defaultBranchPrefix,
+  specWorkspaceName,
   stepsFor,
   workspaceName,
 } from '@hemera/core'
@@ -46,6 +48,7 @@ import {
   projectRepositories,
   projects,
   sessions,
+  specs,
   workspaceRepositories,
   workspaceSteps,
   workspaces,
@@ -215,6 +218,11 @@ function readLocation(
 export interface WorkspacePlan {
   readonly name: string
   readonly root: string
+  /**
+   * Whether that folder is under the system's temporary directory, which may be emptied on a
+   * restart (#136): the dialog says so, and the user chooses another there or in the settings.
+   */
+  readonly temporary: boolean
   readonly path: string
   readonly branchPrefix: string
   /**
@@ -230,6 +238,11 @@ export interface WorkspacePlan {
 export interface WorkspaceDraft {
   readonly specId: string | null
   readonly name: string
+  /**
+   * The folder the Workspace is made under, chosen in the dialog for this Workspace alone (#136),
+   * or null for the Project's own folder of Workspaces, which stays the default.
+   */
+  readonly root?: string | null | undefined
   readonly repositories: readonly WorktreeRecord[]
 }
 
@@ -346,6 +359,31 @@ export function workspaceEvent(
 /** A location as its label reads: `sources/api` for `./sources/api`, and `.` for the root. */
 export function labelOf(relativePath: string): string {
   return relativePath.replace(/^\.\//, '')
+}
+
+/** Whether `folder` is `parent` itself or somewhere under it, as the system compares paths. */
+function isWithin(folder: string, parent: string): boolean {
+  const below = relative(parent, folder)
+  return below === '' || !(below === '..' || below.startsWith(`..${sep}`) || isAbsolute(below))
+}
+
+/** A folder as the system resolves it, or as it is written when it does not exist yet. */
+function resolved(path: string): string {
+  try {
+    return realpathSync.native(path)
+  } catch {
+    return path
+  }
+}
+
+/**
+ * Whether a folder is under the system's temporary directory (#136), which may be emptied on a
+ * restart: compared as written and as resolved, since either may be the short form of the other.
+ */
+export function isTemporary(folder: string, temporaryDirectory: string = tmpdir()): boolean {
+  return (
+    isWithin(folder, temporaryDirectory) || isWithin(resolved(folder), resolved(temporaryDirectory))
+  )
 }
 
 export const workspacesLayer = Layer.effect(
@@ -496,6 +534,25 @@ export const workspacesLayer = Layer.effect(
     /** Where a Project's dedicated Workspaces are made (D8-02). */
     const rootOf = (project: typeof projects.$inferSelect) =>
       project.workspacesRoot ?? join(hemeraRoot, project.id)
+
+    /**
+     * The folder a Workspace is made under: the one chosen in the dialog for this Workspace alone,
+     * or the Project's own (#136). A chosen one is held to what the settings hold the Project's
+     * to (D8-02): an absolute path, and never inside `main`.
+     */
+    const chosenRoot = (
+      project: typeof projects.$inferSelect,
+      main: string,
+      asked: string | null | undefined,
+    ) => {
+      const root = asked?.trim() ?? ''
+      if (root === '') return Effect.succeed(rootOf(project))
+      if (!isAbsolute(root)) return refuse('folder', `the folder ${root} is not an absolute path`)
+      if (isWithin(resolved(root), resolved(main))) {
+        return refuse('folder', `the folder ${root} is inside main (${main})`)
+      }
+      return Effect.succeed(root)
+    }
 
     /** Whether a Workspace of this Project already has that name. */
     const nameTaken = (projectId: string, name: string) =>
@@ -667,6 +724,13 @@ export const workspacesLayer = Layer.effect(
               // What still waited on that folder has nothing left to wait for: its launches are
               // cancelled, saying the Workspace was removed, in this very transaction (D8-13).
               const ended = yield* endWaitingLaunches(transaction, row.id, { state: 'cancelled' })
+              // The Spec it was made for is set on no Workspace any more: its panel offers a new
+              // one, never `Start the build` in a folder that is gone (D8-12).
+              yield* transaction
+                .update(specs)
+                .set({ workspaceId: null })
+                .where(eq(specs.workspaceId, row.id))
+                .pipe(Effect.mapError(failed('freeing the Spec of the Workspace')))
               return {
                 result: undefined,
                 events: [
@@ -697,7 +761,7 @@ export const workspacesLayer = Layer.effect(
 
       one: viewOf,
 
-      plan: (projectId, _key, slug) =>
+      plan: (projectId, key, slug) =>
         Effect.gen(function* () {
           const project = yield* projectRow(projectId)
           const main = yield* mainPathOf(projectId)
@@ -710,10 +774,14 @@ export const workspacesLayer = Layer.effect(
             Effect.catchTag('GitUnavailableError', () => Effect.succeed(false)),
           )
           const root = rootOf(project)
+          // A Spec's Workspace is proposed its key and a few words of its title (#136); one made
+          // from the settings has no Spec, and is proposed what it was asked.
+          const name = key === null ? slug : specWorkspaceName(key, slug)
           return {
-            name: slug,
+            name,
             root,
-            path: join(root, slug),
+            temporary: isTemporary(root),
+            path: join(root, name),
             branchPrefix,
             // The locations themselves, in the Project's order: what the dialog opens with, and it
             // asks for each of them as it shows its row (#110).
@@ -762,7 +830,7 @@ export const workspacesLayer = Layer.effect(
             Effect.catchTag('GitUnavailableError', (missing) => refuse('git', missing.message)),
           )
           const name = yield* checkedName(projectId, draft.name)
-          const path = join(rootOf(project), name)
+          const path = join(yield* chosenRoot(project, main, draft.root), name)
           if (existsSync(path)) return yield* refuse('folder', `the folder ${path} already exists`)
 
           const worktrees: WorktreeRecord[] = []

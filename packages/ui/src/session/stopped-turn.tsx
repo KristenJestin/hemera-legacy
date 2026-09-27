@@ -26,6 +26,11 @@ const AT = 'text-xs text-muted-foreground'
 export interface StoppedTurnProps {
   /** What the turn was doing when it stopped, in one line. */
   doing?: string | undefined
+  /**
+   * Why it stopped, when it stopped on its own, as the end of a sentence: "the agent could not
+   * answer." It is said after a colon, and wins over `doing`.
+   */
+  reason?: string | undefined
   /** When it stopped, already written for the platform. */
   at: string
   /** Whether the reader is the one who stopped it, which is the usual case. */
@@ -36,17 +41,20 @@ export interface StoppedTurnProps {
 
 export function StoppedTurn({
   doing,
+  reason,
   at,
   byTheReader = true,
   className,
 }: StoppedTurnProps): ReactNode {
   const who = byTheReader ? 'Stopped by you' : 'Stopped'
+  const said =
+    reason !== undefined ? `${who}: ${reason}` : doing === undefined ? who : `${who} while ${doing}`
   return (
     <p className={cn(LINE, className)}>
       <span aria-hidden="true" className={MARK}>
         <IconPlayerStop size="sm" />
       </span>
-      <span className={TEXT}>{doing === undefined ? who : `${who} while ${doing}`}</span>
+      <span className={TEXT}>{said}</span>
       <span className={AT}>{at}</span>
     </p>
   )

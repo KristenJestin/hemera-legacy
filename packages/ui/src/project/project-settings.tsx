@@ -1,17 +1,20 @@
 import { Tabs as BaseTabs } from '@base-ui/react/tabs'
-import { LayoutGroup, motion } from 'motion/react'
-import { type FunctionComponent, type ReactNode, useId, useState } from 'react'
+import { cn } from 'cn'
+import { type FunctionComponent, type ReactNode, useState } from 'react'
 
 import { AlertDialog } from '../components/alert-dialog/alert-dialog.tsx'
 import { Badge } from '../components/badge/badge.tsx'
 import { Button, IconButton } from '../components/button/button.tsx'
 import { Card, CardRow } from '../components/card/card.tsx'
+import type { PathEntry, PathListing } from '../components/suggest/path-input.tsx'
 import { Input } from '../components/field/field.tsx'
+import { OVER_MARK, SlidingMark } from '../components/sliding-mark/sliding-mark.tsx'
 import { Tooltip } from '../components/tooltip/tooltip.tsx'
 import { useAppForm } from '../form/app-form.ts'
 import { projectSettingsSchema } from '../form/schemas.ts'
 import {
   IconArchive,
+  IconBolt,
   IconChecklist,
   IconFolders,
   IconGitFork,
@@ -23,7 +26,6 @@ import {
   IconVariable,
   IconX,
 } from '../icons.ts'
-import { arrival, useTransition } from '../motion.ts'
 import { CommandDialog, TypeMark } from './command-dialog.tsx'
 import type { CommandLine, ProjectSettingsDraft, RepositoryDraft, RepositoryLine } from './model.ts'
 import { slugOf } from './naming.ts'
@@ -76,17 +78,26 @@ const INCLUDED = 'flex shrink-0 rounded-sm text-muted-foreground focus-ring'
 
 const EMPTY_MARK = 'size-icon-sm shrink-0'
 
+/** The quiet mark of a command Hemera runs each time it opens (#114). */
+const AT_OPEN = 'flex shrink-0 rounded-sm text-muted-foreground focus-ring'
+
 const LAYOUT = 'flex items-start gap-8'
 
-const NAV = 'flex w-menu-side shrink-0 flex-col gap-1'
+/** The navigation, which the mark is placed against and whose layers stay inside it. */
+const NAV = 'relative isolate flex w-menu-side shrink-0 flex-col gap-1'
 
-/** One entry of the navigation and the room its mark travels through. */
-const NAV_SLOT = 'relative flex'
-
+/** The section chosen is drawn over the fill; the others are crossed by it. */
 const NAV_ITEM =
-  'relative flex h-control-md w-full items-center gap-2 rounded-md px-3 text-sm text-muted-foreground outline-none select-none focus-ring data-selected:text-foreground'
+  'relative flex h-control-md w-full items-center gap-2 rounded-md px-3 text-sm text-muted-foreground outline-none select-none focus-ring data-active:z-1 data-active:text-foreground'
 
-/** The one fill of the navigation, which travels to the section chosen. */
+/** What an entry says, drawn over the fill whichever entry the fill is crossing. */
+const NAV_CONTENT = 'flex items-center gap-2'
+
+/**
+ * The one fill of the navigation, which travels to the section chosen: the navigation's
+ * `SlidingMark` and no entry's (issue #127), so that it crosses the entries between two
+ * sections rather than going under them.
+ */
 const NAV_MARK = 'absolute inset-0 rounded-md bg-accent'
 
 const PANEL = 'flex min-w-0 flex-1 flex-col gap-4 outline-none'
@@ -154,8 +165,8 @@ export interface ProjectSettingsProps {
   /** Rewrites a command the catalogue holds, found by its name; answers like `onAddCommand`. */
   onUpdateCommand?: ((command: CommandLine) => Promise<string | null>) | undefined
   onRemoveCommand?: ((id: string) => void) | undefined
-  /** Asks for a folder a command runs in, handed the base it runs from (recette 2). */
-  onBrowseCommandFolder?: ((base: string | null) => Promise<string | null>) | undefined
+  /** Lists one folder under the base a command runs from, as its Folder is typed (#109). */
+  onListCommandFolder?: ((listing: PathListing) => Promise<readonly PathEntry[]>) | undefined
   /** Whether `portless` is on this machine, which is what offers it on a server (D8-10). */
   portlessInstalled: boolean
   onArchive: () => void
@@ -193,7 +204,7 @@ export function ProjectSettings({
   onAddCommand,
   onUpdateCommand,
   onRemoveCommand,
-  onBrowseCommandFolder,
+  onListCommandFolder,
   portlessInstalled,
   onArchive,
   workspaces,
@@ -206,8 +217,6 @@ export function ProjectSettings({
 }: ProjectSettingsProps): ReactNode {
   const [chosen, setChosen] = useState<ProjectSettingsSection>(defaultSection)
   const current = section ?? chosen
-  const transition = useTransition(arrival)
-  const group = useId()
   const [refusal, setRefusal] = useState<string | null>(null)
 
   const form = useAppForm({
@@ -350,7 +359,7 @@ export function ProjectSettings({
         onAdd={onAddCommand}
         onUpdate={onUpdateCommand}
         onRemove={onRemoveCommand}
-        onBrowse={onBrowseCommandFolder}
+        onListFolder={onListCommandFolder}
       />
     ),
     preparation: slot(preparation, 'The preparation of this Project cannot be read yet.'),
@@ -374,23 +383,21 @@ export function ProjectSettings({
         className={LAYOUT}
       >
         <BaseTabs.List activateOnFocus aria-label="Project settings" className={NAV}>
-          <LayoutGroup id={group}>
-            {SECTIONS.map((one) => (
-              <span key={one.value} className={NAV_SLOT}>
-                {one.value === current && (
-                  <motion.span
-                    layoutId={`${group}-section`}
-                    className={NAV_MARK}
-                    transition={transition}
-                  />
-                )}
-                <BaseTabs.Tab value={one.value} className={NAV_ITEM}>
-                  <one.icon size="sm" aria-hidden="true" />
-                  {one.label}
-                </BaseTabs.Tab>
+          {SECTIONS.map((one) => (
+            <BaseTabs.Tab
+              key={one.value}
+              value={one.value}
+              data-mark={one.value}
+              className={NAV_ITEM}
+            >
+              <span className={cn(OVER_MARK, NAV_CONTENT)}>
+                <one.icon size="sm" aria-hidden="true" />
+                {one.label}
               </span>
-            ))}
-          </LayoutGroup>
+            </BaseTabs.Tab>
+          ))}
+          {/* Last, so that it is drawn after every entry it can cross. */}
+          <SlidingMark target={current} shape={NAV_MARK} />
         </BaseTabs.List>
         {SECTIONS.map((one) => (
           // Not a stop of the tab order of its own: the Tab key goes from the navigation to the
@@ -595,7 +602,8 @@ export function RepositoryList({
  * this list holds and nothing else.
  *
  * A row says the type of a command with its fixed icon, its name, its line and, for a Portless
- * server, the address it answers at. The scope, where it runs from and the line of each system
+ * server, the address it answers at; a command Hemera runs each time it opens wears one quiet
+ * mark with a tooltip (#114). The scope, where it runs from and the line of each system
  * are in the dialog its pencil opens: a badge saying `Workspace root` told the reader where a
  * command ran and never what it ran, and four badges on every row said the same thing four times
  * (recette 2).
@@ -612,7 +620,7 @@ export function CommandList({
   onAdd,
   onUpdate,
   onRemove,
-  onBrowse,
+  onListFolder,
 }: {
   commands: readonly CommandLine[]
   /** The repositories of the Project, which a command's folder may start from. */
@@ -625,8 +633,8 @@ export function CommandList({
   /** Rewrites the command of the same name. */
   onUpdate?: ((command: CommandLine) => Promise<string | null>) | undefined
   onRemove?: ((id: string) => void) | undefined
-  /** Asks for a folder, handed the base a command runs from; null for the Workspace root. */
-  onBrowse?: ((base: string | null) => Promise<string | null>) | undefined
+  /** Lists one folder under the base a command runs from; null for the Workspace root. */
+  onListFolder?: ((listing: PathListing) => Promise<readonly PathEntry[]>) | undefined
 }): ReactNode {
   /**
    * The command the dialog edits, or null when it adds one. Kept while the dialog closes, so it
@@ -674,6 +682,19 @@ export function CommandList({
                     https://{one.portlessName ?? slugOf(projectName)}.localhost
                   </span>
                 )}
+                {one.runAtOpen && (
+                  <Tooltip label="Runs when Hemera opens">
+                    <i
+                      role="img"
+                      // Focusable so the keyboard reaches its tooltip as the pointer does.
+                      tabIndex={0}
+                      aria-label={`${one.name} runs when Hemera opens`}
+                      className={AT_OPEN}
+                    >
+                      <IconBolt size="sm" aria-hidden="true" />
+                    </i>
+                  </Tooltip>
+                )}
                 {onUpdate === undefined ? null : (
                   <IconButton
                     variant="ghost"
@@ -705,7 +726,7 @@ export function CommandList({
         repositories={repositories}
         portlessInstalled={portlessInstalled}
         projectName={projectName}
-        onBrowse={onBrowse}
+        onListFolder={onListFolder}
         onSubmit={submit}
       />
     </Card>

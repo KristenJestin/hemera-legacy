@@ -13,6 +13,7 @@
 import {
   COMMAND_TYPES,
   PHASE_IDS,
+  QUESTION_RULE,
   READ_PAGE_BYTES,
   SEARCH_MATCH_LIMIT,
   SEARCH_SCAN_BYTES,
@@ -146,11 +147,11 @@ export const OPTION_SENT = z.object({
 /** How long a list of the Spec tools may be, as the JSON text it is sent as. */
 const LIST_CHARACTERS = SPEC_PAGE_CHARACTERS
 
-/** What `spec_write` writes: exactly one of the four. */
-const SPEC_WRITES = ['section', 'stories', 'tasks', 'question'] as const
+/** What `spec_write` writes: exactly one of these. */
+const SPEC_WRITES = ['section', 'stories', 'tasks', 'question', 'title', 'type'] as const
 
 /** What `spec_propose` hands over. */
-export const PROPOSALS = ['phase_done', 'ready', 'spec'] as const
+export const PROPOSALS = ['phase_done', 'ready', 'spec', 'existing'] as const
 
 /**
  * The arguments of every tool, as the agent is told them and as they are read back.
@@ -295,7 +296,9 @@ export const TOOL_ARGUMENTS = {
         .min(1)
         .max(SPEC_PAGE_CHARACTERS)
         .optional()
-        .describe('a question for the user, asked in the chat; send blocking with it'),
+        .describe(
+          'one question for the user, shown to them as a question card: every question to the user is asked here, never as text in your reply; send blocking with it',
+        ),
       blocking: z
         .boolean()
         .optional()
@@ -306,7 +309,20 @@ export const TOOL_ARGUMENTS = {
         .max(LIST_CHARACTERS)
         .optional()
         .describe(
-          'with question: the answers offered, as a JSON array of {"id", "label", "recommended"?}; none for an answer in the user\'s own words',
+          'with question: the answers offered, as a JSON array of {"id", "label", "recommended"?}, your recommendation marked "recommended": true; none for an answer in the user\'s own words. Hemera labels them A, B, C… and adds an "Other" answer itself: no letter, no "other" answer and no "(recommended)" in a label',
+        ),
+      title: z
+        .string()
+        .trim()
+        .min(1)
+        .max(200)
+        .optional()
+        .describe('the title the Spec takes, short, as the user would name it'),
+      type: z
+        .enum(SPEC_TYPES)
+        .optional()
+        .describe(
+          'the type the Spec takes, feature, bug or maintenance, once the user confirmed it',
         ),
       revision: z
         .number()
@@ -321,7 +337,7 @@ export const TOOL_ARGUMENTS = {
       if (writes.length !== 1) {
         context.addIssue({
           code: 'custom',
-          message: `send exactly one of section, stories, tasks or question, not ${writes.length === 0 ? 'none' : writes.join(' and ')}`,
+          message: `send exactly one of section, stories, tasks, question, title or type, not ${writes.length === 0 ? 'none' : writes.join(' and ')}`,
         })
       }
       if (
@@ -355,7 +371,7 @@ export const TOOL_ARGUMENTS = {
       kind: z
         .enum(PROPOSALS)
         .describe(
-          'phase_done: declare a phase finished, with a summary; ready: attest the contract is complete, for the user to mark it ready; spec: from a free Session, propose the user a Spec to create, with a title and a type',
+          'phase_done: declare a phase finished, with a summary; ready: attest the contract is complete, for the user to mark it ready; spec: from a free Session, propose the user a Spec to create, with a title and a type; existing: from a free Session, point the user to a Spec the Project already has, by its key',
         ),
       phase: z.enum(PHASE_IDS).optional().describe('with phase_done: the phase declared finished'),
       summary: z
@@ -378,6 +394,13 @@ export const TOOL_ARGUMENTS = {
         ),
       title: z.string().trim().min(1).max(200).optional().describe('with spec: its title'),
       type: z.enum(SPEC_TYPES).optional().describe('with spec: feature, bug or maintenance'),
+      spec: z
+        .string()
+        .trim()
+        .min(1)
+        .max(40)
+        .optional()
+        .describe('with existing: the key of the Spec, as project_get lists it'),
       key: KEY.describe('an idempotency key, so a retry is answered once and not declared twice'),
     })
     .superRefine((sent, context) => {
@@ -389,6 +412,9 @@ export const TOOL_ARGUMENTS = {
       }
       if (sent.kind === 'spec' && (sent.title === undefined || sent.type === undefined)) {
         context.addIssue({ code: 'custom', message: 'spec is sent with a title and a type' })
+      }
+      if (sent.kind === 'existing' && sent.spec === undefined) {
+        context.addIssue({ code: 'custom', message: 'existing is sent with the key of the Spec' })
       }
       if (sent.assumptions === undefined) return
       const listed = jsonList(z.string()).safeParse(sent.assumptions)
@@ -419,13 +445,13 @@ export const TOOL_DESCRIPTIONS: Record<ToolName, string> = {
   commands_propose:
     "Proposes a command worth keeping in the Project's catalogue. A human accepts or declines it in the Session; nothing enters the catalogue by this call.",
   project_get:
-    'The Project this Session belongs to: its name, where its Workspace root is, and what it reads from.',
+    'The Project this Session belongs to: its name, where its Workspace root is, what it reads from, and its Specs, one per line with their key, type, status and title.',
   session_get:
     'This Session: its title, its Project, its agent, and the last entries of its thread.',
   spec_read: `Read the Spec this Session defines, rendered as Markdown: its key, type, status and revision, each section with its version as <!-- version: n -->, the stories with their criteria, the tasks, the phases and the open questions. The current revision, or an older one by number, which is read-only. One call returns at most ${SPEC_PAGE_CHARACTERS} characters and ends with the range read as JSON: offset, end, size, truncated and next.`,
-  spec_write: `Write the current draft of the Spec this Session defines, and only while this Session holds its write right. Exactly one of: a section, with its whole body and the version you read it at; every story; every task; or a question for the user, asked in the chat. A section that changed since the version you send, a Spec that is not a draft, an older revision, and a Session that does not hold the write right are refused, and nothing is written. Send a key so that a retry after a lost answer does not write twice.`,
+  spec_write: `Write the current draft of the Spec this Session defines, and only while this Session holds its write right. Exactly one of: a section, with its whole body and the version you read it at; every story; every task; a question for the user; the title; or the type. A section that changed since the version you send, a Spec that is not a draft, an older revision, and a Session that does not hold the write right are refused, and nothing is written. Send a key so that a retry after a lost answer does not write twice. ${QUESTION_RULE}`,
   spec_propose:
-    "Hand the Spec this Session defines over to Hemera's checks. phase_done declares a phase finished with a summary, the elements of the Spec that support it and the assumptions still open: Hemera runs the phase's exit checks, and either finishes it and opens the phases that wait on it, or answers what fails and changes nothing. ready attests the contract is complete and executable: the user's Mark ready is what freezes it, never this call. Both only while this Session holds the write right. spec is for a free Session, which defines no Spec yet: it proposes one, a title and a type, and the user creates it or not. Send a key so that a retry after a lost answer is answered once.",
+    "Hand the Spec this Session defines over to Hemera's checks. phase_done declares a phase finished with a summary, the elements of the Spec that support it and the assumptions still open: Hemera runs the phase's exit checks, and either finishes it and opens the phases that wait on it, or answers what fails and changes nothing. ready attests the contract is complete and executable: the user's Mark ready is what freezes it, never this call. Both only while this Session holds the write right. spec is for a free Session, which defines no Spec yet: it proposes one, a title and a type, and the user creates it or not; in a Session started by New Spec the user asked for it already, and Hemera creates it at once. existing is for a free Session too: when the Project already has the Spec the user asks for, it points to that one by its key, as project_get lists it, and the user continues it or not. Send a key so that a retry after a lost answer is answered once.",
 }
 
 /**
@@ -445,12 +471,12 @@ export const TOOL_BOUNDS: Record<ToolName, string> = {
   commands_output: `the last ${OUTPUT_KEPT_BYTES / 1024} KiB a run printed`,
   commands_stop: 'a run of this Project, and all it started',
   commands_propose: 'a proposal a human decides; nothing written to the catalogue',
-  project_get: 'this Project',
+  project_get: 'this Project and the list of its Specs',
   session_get: `this Session and its last ${THREAD_TAIL} entries`,
   spec_read: `this Session's Spec, ${SPEC_PAGE_CHARACTERS / 1024} K characters a page`,
   spec_write: "one write of this Session's draft, on its current version",
   spec_propose:
-    'a phase declared finished, the contract attested, or a Spec proposed; never marked ready',
+    'a phase declared finished, the contract attested, or a Spec proposed or pointed to; never marked ready',
 }
 
 /** What one reading of the arguments answered. */

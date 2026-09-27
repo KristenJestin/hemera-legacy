@@ -1,6 +1,8 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
+
+import { arrived } from '../../.storybook/reveal.ts'
 
 import { Button } from '../components/button/button.tsx'
 import {
@@ -120,18 +122,37 @@ interface Extra {
    * the dialog twice, before and after the answers, and compare the two.
    */
   answered?: readonly PlanRepositoryLine[] | undefined
+  /**
+   * Whether `answered` arrives while the dialog is open, when a story says Git answered
+   * (`gitAnswers`), rather than at the next opening.
+   */
+  answersWhileOpen?: boolean | undefined
+}
+
+/** Where a story says Git answered the reads of a dialog that is open. */
+const git = new EventTarget()
+
+function gitAnswers(): void {
+  git.dispatchEvent(new Event('answered'))
 }
 
 function Controlled({
   open,
   refusal = null,
   answered,
+  answersWhileOpen = false,
   onOpenChange,
   onCreate,
   ...rest
 }: CreateWorkspaceDialogProps & Extra) {
   const [shown, setShown] = useState(open)
   const [read, setRead] = useState<readonly PlanRepositoryLine[] | undefined>(undefined)
+  useEffect(() => {
+    if (!answersWhileOpen || answered === undefined) return
+    const land = (): void => setRead(answered)
+    git.addEventListener('answered', land)
+    return () => git.removeEventListener('answered', land)
+  }, [answersWhileOpen, answered])
   return (
     <div className="flex h-screen flex-col items-start gap-2 p-6">
       <Button onClick={() => setShown(true)}>New Workspace</Button>
@@ -143,7 +164,7 @@ function Controlled({
           setShown(next)
           // Git answered every location before the dialog was closed (#110): the next opening is
           // the same plan, read.
-          if (!next && answered !== undefined) setRead(answered)
+          if (!next && answered !== undefined && !answersWhileOpen) setRead(answered)
           onOpenChange(next)
         }}
         onCreate={async (draft) => {
@@ -156,7 +177,7 @@ function Controlled({
 }
 
 const meta = {
-  tags: ['autodocs'],
+  tags: ['autodocs', 'updated'],
   title: 'Blocks/Workspace/CreateWorkspaceDialog',
   component: CreateWorkspaceDialog,
   render: (args) => <Controlled {...args} />,
@@ -164,6 +185,8 @@ const meta = {
   args: {
     open: true,
     root: '/home/someone/.local/share/hemera/workspaces/atlas',
+    temporary: false,
+    onBrowse: fn(async () => await Promise.resolve('/home/someone/trees')),
     defaultName: 'login-form',
     repositories: [API, FRONT],
     gitMissing: false,
@@ -174,7 +197,15 @@ const meta = {
   argTypes: {
     open: { control: 'boolean', description: 'Whether the dialog is on screen.' },
     root: { control: 'text', description: 'Where the dedicated Workspaces of the Project live.' },
-    defaultName: { control: 'text', description: 'The name proposed: the Spec’s slug.' },
+    temporary: {
+      control: 'boolean',
+      description: 'Whether that folder is under the system’s temporary directory.',
+    },
+    onBrowse: { control: false, description: 'Asks the system for a folder.' },
+    defaultName: {
+      control: 'text',
+      description: 'The name proposed: the Spec’s key and a few words of its title.',
+    },
     repositories: {
       control: 'object',
       description:
@@ -285,6 +316,7 @@ async function aLocationWithoutARepositoryGetsNoWorktree({ args }: Context) {
   await waitFor(() => {
     expect(args.onCreate).toHaveBeenCalledWith({
       name: 'login-form',
+      root: '/home/someone/.local/share/hemera/workspaces/atlas',
       repositories: [{ path: './sources/api', base: 'main', branch: 'hemera/HEM-7-login-form' }],
     })
   })
@@ -305,7 +337,12 @@ async function aNameIsTypedBeforeThePlanArrives(): Promise<void> {
   const dialog = within(document.body).getByRole('dialog')
   // The row nothing is known about yet is on screen with the others, and says as much.
   const front = rowOf(dialog, './sources/front')
-  front.getByText('being read')
+  const being = front.getByText('being read')
+  // With the loader of the whole application beside the words, and no icon of its own.
+  expect(being.querySelector('svg')).toBeNull()
+  expect(getComputedStyle(being.querySelector('[role="status"]')!.children[0]!).animationName).toBe(
+    'turn',
+  )
   // And it is already the height of the row it becomes: what Git has not answered for yet is
   // reserved at the size the fields take, so the dialog never moves under the answers (#110).
   await expect(lineOf(dialog, './sources/front').getBoundingClientRect().height).toBeCloseTo(
@@ -322,8 +359,57 @@ async function aNameIsTypedBeforeThePlanArrives(): Promise<void> {
   await expect(name).toHaveValue('login-form at once')
   // And the folder follows it, before Git has said anything of any repository.
   within(dialog).getByText('/home/someone/.local/share/hemera/workspaces/atlas/login-form at once')
-  // Create waits for the last location to be read.
-  await expect(within(dialog).getByRole('button', { name: 'Create' })).toBeDisabled()
+  // Create waits for the last location to be read, and says so.
+  await expect(
+    within(dialog).getByRole('button', { name: 'Create, waiting for the repositories to be read' }),
+  ).toHaveAttribute('aria-disabled', 'true')
+}
+
+/**
+ * Create while repositories are still being read: disabled, with the loader in it and a name that
+ * says what it waits for, so it reads as loading and not as a field left empty. Once Git has
+ * answered the last of them it is the plain Create button again.
+ */
+export const WaitingForReads: Story = {
+  args: {
+    repositories: [API, { path: './sources/front', read: null }],
+    answered: [API, FRONT],
+    answersWhileOpen: true,
+  },
+  play: createSaysItWaitsForTheReads,
+}
+
+async function createSaysItWaitsForTheReads(): Promise<void> {
+  const dialog = within(document.body).getByRole('dialog')
+  const waiting = within(dialog).getByRole('button', {
+    name: 'Create, waiting for the repositories to be read',
+  })
+  await expect(waiting).toHaveAttribute('aria-disabled', 'true')
+  // The loader of the whole application, inside the button, turning.
+  const loader = waiting.querySelector('[role="status"]')!
+  await expect(getComputedStyle(loader.children[0]!).animationName).toBe('turn')
+  await expect(within(dialog).queryByRole('button', { name: 'Create' })).toBeNull()
+  gitAnswers()
+  // Every read in: the plain button, which nothing holds back, with no loader left in it.
+  const create = await waitFor(() => within(dialog).getByRole('button', { name: 'Create' }))
+  await waitFor(() => {
+    expect(create).toBeEnabled()
+    expect(create.querySelector('[role="status"]')).toBeNull()
+  })
+}
+
+/**
+ * Every read in, and a field still missing: the plain Create button, disabled, and no loader —
+ * what holds it back is the field, which says so.
+ */
+export const ReadsDoneFieldMissing: Story = {
+  args: { defaultName: '' },
+  play: async () => {
+    const dialog = within(document.body).getByRole('dialog')
+    const create = within(dialog).getByRole('button', { name: 'Create' })
+    await expect(create).toBeDisabled()
+    await expect(create.querySelector('[role="status"]')).toBeNull()
+  },
 }
 
 /**
@@ -376,6 +462,7 @@ async function aFailedCheckRefusesTheWholeCreation({ args }: Context) {
   await waitFor(() => {
     expect(args.onCreate).toHaveBeenCalledWith({
       name: 'login-form',
+      root: '/home/someone/.local/share/hemera/workspaces/atlas',
       repositories: [
         { path: './sources/api', base: 'main', branch: 'hemera/HEM-7-login-form' },
         { path: './sources/front', base: 'dev', branch: 'hemera/HEM-7-login-form' },
@@ -511,11 +598,82 @@ export const FromSettings: Story = {
     await waitFor(() => {
       expect(args.onCreate).toHaveBeenCalledWith({
         name: 'spike-auth',
+        root: '/home/someone/.local/share/hemera/workspaces/atlas',
         repositories: [
           { path: './sources/api', base: 'main', branch: 'atlas/spike-auth' },
           { path: './sources/front', base: 'dev', branch: 'kris/front-spike' },
         ],
       })
+    })
+  },
+}
+
+/** What the story dispatches to have Git answer the rest of the plan, while the dialog is open. */
+const GIT_ANSWERS = 'story:git-answers'
+
+/** The dialog of `FromSettings`, whose plan is answered while it is open, when the story says so. */
+function AnsweredWhileOpen({
+  answered,
+  ...rest
+}: CreateWorkspaceDialogProps & { answered: readonly PlanRepositoryLine[] }) {
+  const [read, setRead] = useState(false)
+  useEffect(() => {
+    const answer = () => setRead(true)
+    window.addEventListener(GIT_ANSWERS, answer)
+    return () => window.removeEventListener(GIT_ANSWERS, answer)
+  }, [])
+  return <CreateWorkspaceDialog {...rest} repositories={read ? answered : rest.repositories} />
+}
+
+/**
+ * From the settings, a name typed before Git answered for a repository: the branch that repository
+ * gets once it is read is the one the name makes, and not the plan's empty `atlas/`.
+ */
+export const NamedBeforeRead: Story = {
+  args: {
+    defaultName: '',
+    repositories: [
+      { ...API, read: { ...API.read, branch: 'atlas/' } },
+      { path: './sources/front', read: null },
+    ],
+    branchOf: (name) => `atlas/${name}`,
+  },
+  render: (args) => (
+    <AnsweredWhileOpen
+      {...args}
+      answered={[
+        { ...API, read: { ...API.read, branch: 'atlas/' } },
+        { ...FRONT, read: { ...FRONT.read, branch: 'atlas/' } },
+      ]}
+    />
+  ),
+  play: async () => {
+    const dialog = within(document.body).getByRole('dialog')
+    const inside = within(dialog)
+    rowOf(dialog, './sources/front').getByText('being read')
+    // While a row is read, Create says it waits for it.
+    await expect(
+      inside.getByRole('button', { name: 'Create, waiting for the repositories to be read' }),
+    ).toHaveAttribute('aria-disabled', 'true')
+    await userEvent.type(inside.getByRole('textbox', { name: 'Name' }), 'spike')
+
+    window.dispatchEvent(new Event(GIT_ANSWERS))
+    await waitFor(() => {
+      expect(inside.queryByText('being read')).toBeNull()
+    })
+    await expect(
+      rowOf(dialog, './sources/api').getByRole('textbox', { name: 'Branch' }),
+    ).toHaveValue('atlas/spike')
+    await expect(
+      rowOf(dialog, './sources/front').getByRole('textbox', { name: 'Branch' }),
+    ).toHaveValue('atlas/spike')
+    // Create comes on by a fade once the last row is read: the accessibility pass measures its
+    // contrast once it has. Its name is the label alone from then on: the loader leaving it is
+    // not read on its way out.
+    const create = inside.getByRole('button', { name: 'Create' })
+    await expect(create).toBeEnabled()
+    await waitFor(() => {
+      expect(getComputedStyle(create).opacity).toBe('1')
     })
   },
 }
@@ -530,12 +688,19 @@ async function walkRow(row: ReturnType<typeof rowOf>) {
   await expect(row.getByRole('textbox', { name: 'Branch' })).toHaveFocus()
 }
 
-/** The name, then each repository's box, its base, its branch, then Create, then Cancel. */
+/**
+ * The name, the folder and its Browse, then each repository's box, its base, its branch, then
+ * Create, then Cancel.
+ */
 export const Keyboard: Story = {
   play: async ({ args }) => {
     const dialog = within(document.body).getByRole('dialog')
     const name = within(dialog).getByRole('textbox', { name: 'Name' })
     name.focus()
+    await userEvent.tab()
+    await expect(within(dialog).getByRole('textbox', { name: 'Workspaces folder' })).toHaveFocus()
+    await userEvent.tab()
+    await expect(within(dialog).getByRole('button', { name: 'Browse…' })).toHaveFocus()
     await walkRow(rowOf(dialog, './sources/api'))
     await walkRow(rowOf(dialog, './sources/front'))
     await userEvent.tab()
@@ -570,4 +735,79 @@ async function aRepositoryGitKeepsRefusingIsShownWithItsReason() {
 export const Unread: Story = {
   args: { repositories: [API, UNREAD] },
   play: aRepositoryGitKeepsRefusingIsShownWithItsReason,
+}
+
+// Scenario "The folder of a Workspace is chosen in its dialog, the Project's stays the default".
+async function theFolderIsChosenForThisWorkspaceAlone({ args }: Context) {
+  args.onCreate.mockClear()
+  const dialog = within(document.body).getByRole('dialog')
+  const inside = within(dialog)
+  const folder = inside.getByRole('textbox', { name: 'Workspaces folder' })
+  // The Project's folder is what is proposed, and where the Workspace would be.
+  await expect(folder).toHaveValue('/home/someone/.local/share/hemera/workspaces/atlas')
+  await expect(
+    inside.getByText('/home/someone/.local/share/hemera/workspaces/atlas/login-form'),
+  ).toBeVisible()
+  // Browse puts the folder picked in the field, and the Workspace's folder follows.
+  await userEvent.click(inside.getByRole('button', { name: 'Browse…' }))
+  await expect(args.onBrowse).toHaveBeenCalledWith(
+    '/home/someone/.local/share/hemera/workspaces/atlas',
+  )
+  await waitFor(() => {
+    expect(folder).toHaveValue('/home/someone/trees')
+  })
+  await expect(inside.getByText('/home/someone/trees/login-form')).toBeVisible()
+  // Typed, it is taken as typed; emptied, it holds Create back and says why.
+  await userEvent.clear(folder)
+  await waitFor(() => {
+    expect(inside.getByText('A Workspace needs a folder.')).toHaveStyle({ opacity: '1' })
+  })
+  await expect(inside.getByRole('button', { name: 'Create' })).toBeDisabled()
+  await userEvent.type(folder, '/srv/trees')
+  // The Workspace's folder, which the empty field had taken away, comes back in (issue #183).
+  await arrived(inside.getByText('/srv/trees/login-form'))
+  await userEvent.click(inside.getByRole('button', { name: 'Create' }))
+  await waitFor(() => {
+    expect(args.onCreate).toHaveBeenCalledWith({
+      name: 'login-form',
+      root: '/srv/trees',
+      repositories: [
+        { path: './sources/api', base: 'main', branch: 'hemera/HEM-7-login-form' },
+        { path: './sources/front', base: 'dev', branch: 'hemera/HEM-7-login-form' },
+      ],
+    })
+  })
+}
+
+/** The folder changed for this Workspace, picked with Browse then typed. */
+export const FolderChosen: Story = {
+  play: theFolderIsChosenForThisWorkspaceAlone,
+}
+
+// Scenario "A default folder under the temporary directory is said so" (#136).
+async function aTemporaryDefaultFolderIsSaidSo() {
+  const dialog = within(document.body).getByRole('dialog')
+  const inside = within(dialog)
+  await expect(
+    inside.getByText(/This folder is temporary: it may be cleared on restart/),
+  ).toBeVisible()
+  // Another folder chosen is the user's own choice: the notice is about the default alone.
+  const folder = inside.getByRole('textbox', { name: 'Workspaces folder' })
+  await userEvent.clear(folder)
+  await userEvent.type(folder, '/srv/trees')
+  // It folds away rather than vanishing (issue #183), and is gone once it has.
+  await waitFor(() => {
+    expect(inside.queryByText(/This folder is temporary/)).toBeNull()
+  })
+  await userEvent.clear(folder)
+  await userEvent.type(folder, '/tmp/hemera-trial/workspaces/atlas')
+  await expect(inside.getByText(/This folder is temporary/)).toBeVisible()
+  // Back on the default, it comes in again with the dialog growing around it.
+  await arrived(inside.getByText(/This folder is temporary/))
+}
+
+/** The Project's folder of Workspaces is under the system's temporary directory. */
+export const TemporaryFolder: Story = {
+  args: { root: '/tmp/hemera-trial/workspaces/atlas', temporary: true },
+  play: aTemporaryDefaultFolderIsSaidSo,
 }

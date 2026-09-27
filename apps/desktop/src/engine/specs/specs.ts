@@ -50,7 +50,7 @@ import { z } from 'zod'
 import { DomainEvents } from '../domain-events.ts'
 import type { NewEvent } from '../journal.ts'
 import { UnknownProjectError } from '../projects.ts'
-import { UnknownWorkspaceError } from '../workspaces/described.ts'
+import { UnknownWorkspaceError, WorkspaceTakenError, takenBy } from '../workspaces/described.ts'
 import { type Session, type UnknownSessionError, entryOf } from '../sessions.ts'
 import { Database, type DatabaseError, type EngineTransaction } from '../storage/database.ts'
 import {
@@ -310,6 +310,7 @@ export type SpecRefusal =
   | ReadyRefusedError
   | ReopenRefusedError
   | UnknownWorkspaceError
+  | WorkspaceTakenError
 
 type Answer<A> = Effect.Effect<A, SpecRefusal>
 
@@ -1363,6 +1364,11 @@ export const specsLayer = Layer.effect(
             const workspace = found[0]
             if (workspace === undefined) {
               return yield* Effect.fail(new UnknownWorkspaceError(workspaceId))
+            }
+            // One Spec, one Workspace (D8-12): one made for another Spec is refused here too.
+            const taken = yield* takenBy(transaction, workspace.id, specId)
+            if (taken !== null) {
+              return yield* Effect.fail(new WorkspaceTakenError(workspace.name, taken))
             }
             const at = now()
             yield* transaction

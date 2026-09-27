@@ -23,6 +23,7 @@ import { ReopenRefusedError } from '#engine/specs/revisions.ts'
 import { Specs, specsLayer } from '#engine/specs/specs.ts'
 import { Database, type EngineDatabase, SqliteClient } from '#engine/storage/database.ts'
 import { Launches, StartDeadline, launchesLayer } from '#engine/workspaces/launches.ts'
+import { WorkspaceTakenError } from '#engine/workspaces/described.ts'
 import { Preparation, recovered } from '#engine/workspaces/preparation.ts'
 import { Workspaces } from '#engine/workspaces/workspaces.ts'
 
@@ -99,8 +100,12 @@ const atlas = (ready = true) =>
     return { project, key: snapshot.spec.key, specId: snapshot.spec.id, session }
   })
 
-/** A Workspace of that Project: `preparing`, with the worktree of its repository as a step. */
-const making = (projectId: string, specId: string, key: string) =>
+/**
+ * A Workspace of that Project: `preparing`, with the worktree of its repository as a step. Made
+ * for the Spec named, or — `specId` null — from the Project's settings, for no Spec: one that
+ * two Specs may both be built in (D8-12).
+ */
+const making = (projectId: string, specId: string | null, key: string) =>
   Effect.gen(function* () {
     const workspaces = yield* Workspaces
     const plan = yield* workspaces.plan(projectId, key, 'export')
@@ -706,7 +711,8 @@ describe('One build left on nothing holds back nothing beside it', () => {
         const { project, key, specId } = yield* atlas()
         const launched = yield* Launches
         const preparation = yield* Preparation
-        const workspace = yield* making(project.id, specId, key)
+        // Made from the settings, for no Spec: the two Specs may both be built in it (D8-12).
+        const workspace = yield* making(project.id, null, key)
         const nothing = yield* unwrittenSpec(project.id)
         // Two launches wait on the one Workspace: the one that will be refused is asked for
         // first, so it is the one started first.
@@ -743,7 +749,8 @@ describe('A launch a Rework cancelled is not failed by a start racing it', () =>
       Effect.gen(function* () {
         const { project, key, specId } = yield* atlas()
         const launched = yield* Launches
-        const workspace = yield* making(project.id, specId, key)
+        // Made from the settings, for no Spec: the two Specs may both be built in it (D8-12).
+        const workspace = yield* making(project.id, null, key)
         const nothing = yield* unwrittenSpec(project.id)
         const asked = yield* launched.request(specId, workspace.id)
         const raced = yield* launched.request(nothing.id, workspace.id)
@@ -1001,6 +1008,29 @@ describe('A Spec whose launch was cancelled or never got an agent can be launche
     expect(seen.resumed.state).toBe('ready')
     expect(seen.started.state).toBe('started')
     expect(seen.builds.map((one) => one.id)).toEqual([seen.started.sessionId])
+  })
+})
+
+describe('A Spec cannot be given another Spec’s dedicated Workspace', () => {
+  test('A build of a Spec is refused in a Workspace made for another Spec', async () => {
+    opened = await openWindow(dataFolder, fakeAgent())
+    const seen = await opened.running(
+      Effect.gen(function* () {
+        const { project, key, specId } = yield* atlas()
+        const launched = yield* Launches
+        const other = yield* unwrittenSpec(project.id)
+        const workspace = yield* making(project.id, specId, key)
+        const refused = yield* Effect.flip(launched.request(other.id, workspace.id))
+        return { builtIn: yield* builtIn(other.id), key, refused, rows: yield* launches }
+      }),
+    )
+    expect(seen.refused).toBeInstanceOf(WorkspaceTakenError)
+    expect(seen.refused.message).toBe(
+      `the Workspace atl-1-export was made for ${seen.key}: a Spec is built in a Workspace of its own`,
+    )
+    // Nothing was written: no launch, and the other Spec is set on no Workspace.
+    expect(seen.rows).toEqual([])
+    expect(seen.builtIn).toBeNull()
   })
 })
 

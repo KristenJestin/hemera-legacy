@@ -119,6 +119,21 @@ export interface Motion {
   readonly beat: (pass: Pass) => Beat
 }
 
+/**
+ * The loading's two clocks, each drawn from the seed and neither knowing the other: how wide the
+ * dots sit — as they are, spread out or drawn in — and how fast they go — at the indicator's own
+ * beat or twice as fast. Each keeps what it drew for a while inside its bounds, in seconds, then
+ * eases into the next draw, which may be the same one again: never a pause, never a pattern.
+ */
+export const LOADING = {
+  reaches: [0, 0.35, -0.3],
+  reachHold: [0.5, 2.5],
+  reachEase: 0.45,
+  paces: [1, 2],
+  paceHold: [1, 3],
+  paceEase: 0.5,
+} as const
+
 /** Where the lines of a page sit for a reader, from the first to the last. */
 const PAGE = [-0.3, -0.15, 0, 0.15, 0.3]
 
@@ -405,16 +420,7 @@ export interface FlourishFrame {
  * with a longer name. The randomness is around them instead: when one plays, and which side a
  * look goes to, never how it goes.
  */
-export type FlourishName =
-  | 'rush'
-  | 'huddle'
-  | 'spread'
-  | 'hmm'
-  | 'sigh'
-  | 'widen'
-  | 'plead'
-  | 'hop'
-  | 'yawn'
+export type FlourishName = 'hmm' | 'sigh' | 'widen' | 'plead' | 'hop' | 'yawn'
 
 export interface Flourish {
   /** How long it takes, in seconds: drawn inside these bounds each time it plays. */
@@ -428,30 +434,6 @@ export interface Flourish {
 }
 
 export const FLOURISHES: Record<FlourishName, Flourish> = {
-  /**
-   * Loading, all at once in a hurry: the dots speed up and slow back down, two thirds of a turn
-   * ahead of where they would have been — three alike dots, so ahead by thirds shows nothing.
-   */
-  rush: {
-    length: [1.4, 2],
-    every: [0, 0],
-    mouthless: true,
-    play: (q) => ({ w: 0, beat: beat({ turn: (2 / 3) * faceArrive(q) }) }),
-  },
-  /** Loading, drawn in: the dots close in on the middle, and go back out. */
-  huddle: {
-    length: [1.2, 1.8],
-    every: [0, 0],
-    mouthless: true,
-    play: (q) => ({ w: arc(q, 0.3, 0.35, 0.35), beat: beat({ reach: -0.3 }) }),
-  },
-  /** Loading, let out: the dots spread wider, and come back in. */
-  spread: {
-    length: [1.2, 1.8],
-    every: [0, 0],
-    mouthless: true,
-    play: (q) => ({ w: arc(q, 0.3, 0.35, 0.35), beat: beat({ reach: 0.35 }) }),
-  },
   /** Thinking harder: the head turns away, the eyes narrow and look up, the mouth twists. */
   hmm: {
     length: [1.2, 1.8],

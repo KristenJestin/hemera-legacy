@@ -5,6 +5,8 @@ import { type ReactNode, useEffect, useRef, useState } from 'react'
 
 import { Button, IconButton } from '../components/button/button.tsx'
 import { Card } from '../components/card/card.tsx'
+import { Face } from '../components/face/face.tsx'
+import type { FaceState } from '../components/face/states.ts'
 import { List, ListItem } from '../components/list/list.tsx'
 import { OVER_MARK } from '../components/sliding-mark/sliding-mark.tsx'
 import { Menu, type MenuItem } from '../components/menu/menu.tsx'
@@ -434,10 +436,18 @@ export function ArchivedSessions({ sessions, onRestore }: ArchivedSessionsProps)
  * with `data-mark`, is drawn over the mark while it is the one looked at, and is crossed by it
  * otherwise — so the one filled surface of the panel is handed from a Session to the Journal
  * rather than each entry drawing its own.
+ *
+ * Its mark is Hemera's face (issue #140), wearing what the Session's agent is doing: asleep while
+ * nothing runs, at work while a turn does, asking while it waits on the reader for an answer or a
+ * permission. A column of Sessions is read at a glance for the one that wants the reader, and the
+ * face is what says it, folded to the rail as well as open. Each row keeps a seed of its own,
+ * drawn from its id, so a Session wears the same life every time the panel is drawn and two rows
+ * side by side never blink together.
  */
 export function SidebarSessionEntry({
   id,
   title,
+  agent = 'asleep',
   active,
   collapsed,
   onSelect,
@@ -448,6 +458,8 @@ export function SidebarSessionEntry({
   id: string
   /** What the Session is called, said in the row and read out as its name. */
   title: string
+  /** What its agent is doing, worn by the row's face; asleep when nothing is said. */
+  agent?: FaceState | undefined
   /** Whether the window is on it. */
   active: boolean
   /** Whether the panel is folded to its rail, where a row is its icon and nothing else. */
@@ -475,7 +487,7 @@ export function SidebarSessionEntry({
           onClick={onSelect}
         >
           <span className={cn(ICON_PLACE, active ? ICON_ACTIVE : ICON)}>
-            <IconMessages size="md" />
+            <Face state={agent} size="icon" seed={seedOf(id)} />
           </span>
           <Label collapsed={collapsed} transition={labels}>
             {title}
@@ -506,6 +518,13 @@ export function SidebarSessionEntry({
       )}
     </div>
   )
+}
+
+/** A seed drawn from a Session's id, the same for the same id: a string hashed to 31 bits. */
+function seedOf(id: string): number {
+  let hash = 0
+  for (const unit of id) hash = (Math.imul(hash, 31) + (unit.codePointAt(0) ?? 0)) >>> 0
+  return hash % 2 ** 31
 }
 
 /**

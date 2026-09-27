@@ -467,7 +467,7 @@ describe('The build of a frozen Spec is read and reached', () => {
       'launches.forSpec',
       launches({
         launch: { ...held },
-        workspace: { id: 'w-1', name: 'csv-invoice' },
+        workspace: { id: 'w-1', name: 'csv-invoice', state: 'ready' },
         step: 'install',
       }),
     )

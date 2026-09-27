@@ -13,7 +13,7 @@ import {
   IconPlayerPlay,
   IconRefresh,
 } from '../icons.ts'
-import type { LaunchView, LaunchWorkspace } from './model.ts'
+import type { LaunchView, LaunchWorkspace, SpecWorkspace } from './model.ts'
 
 /**
  * What to do next on a ready Spec, and where the build it starts stands (D8-12, D8-13).
@@ -29,8 +29,9 @@ import type { LaunchView, LaunchWorkspace } from './model.ts'
  * With no Workspace yet, the two ways in are the hand's: prepare one from the plan and start the
  * build in it, or start the build in a Workspace the Project already has — `main`, which every
  * Project has, or one made by hand. A Workspace a Spec made for its own build is not offered
- * here: it belongs to that build. Once a Workspace is ready there is one thing left to do,
- * `Start the build`.
+ * here: it belongs to that build. Once a Workspace is set there is one thing left to do,
+ * `Start the build` — unless its preparation failed, and then it is resumed, or another Workspace
+ * is taken; one cleaned up leaves the Spec with none, and the two ways in are offered again.
  *
  * A launch is a request that waits: the Workspace is prepared first, then the agent is started,
  * and each of those says where it is in the width of a sentence — the step running, then the
@@ -74,8 +75,8 @@ const GROUP = 'The build of this Spec'
 export interface WorkspaceActionsProps {
   /** Where the launch stands, or `null` while none has been asked for (D8-13). */
   launch: LaunchView | null
-  /** The Workspace the Spec is set on, once one is ready; absent while it has none. */
-  workspace?: LaunchWorkspace | undefined
+  /** The Workspace the Spec is set on, and where it stands; absent while it has none. */
+  workspace?: SpecWorkspace | undefined
   /** The Workspaces a build may be started in: `main`, and the ones made by hand. */
   workspaces: readonly LaunchWorkspace[]
   /** Prepares a Workspace from the plan and starts the build in it. */
@@ -86,6 +87,8 @@ export interface WorkspaceActionsProps {
   onUseWorkspace: (id: string) => void
   /** Starts the build in the Workspace the Spec is set on. */
   onStart: () => void
+  /** Resumes the preparation of the Workspace the Spec is set on, after it failed. */
+  onResume: () => void
   /**
    * Starts the agent again, after it refused to. Absent where there is nothing to start again: on
    * a draft, whose launch is only said.
@@ -189,27 +192,47 @@ function Offers({
   onPrepareOnly,
   onUseWorkspace,
   onStart,
+  onResume,
 }: Omit<WorkspaceActionsProps, 'launch' | 'onRetry' | 'onOpen'>): ReactNode {
-  if (workspace === undefined) {
-    // `Prepare a Workspace only` first, and the Workspaces after it: the separator between the
-    // two groups is what says the one is not the other.
-    const prepareOnly: MenuItem = {
-      label: 'Prepare a Workspace only',
-      icon: <IconFolderPlus size="sm" aria-hidden="true" />,
-      onSelect: onPrepareOnly,
-    }
-    const existing: MenuItem[] = workspaces.map((one) => ({
-      label: one.name,
-      icon: <IconGitBranch size="sm" aria-hidden="true" />,
-      onSelect: () => onUseWorkspace(one.id),
-    }))
+  // `Prepare a Workspace only` first, and the Workspaces after it: the separator between the two
+  // groups is what says the one is not the other.
+  const prepareOnly: MenuItem = {
+    label: 'Prepare a Workspace only',
+    icon: <IconFolderPlus size="sm" aria-hidden="true" />,
+    onSelect: onPrepareOnly,
+  }
+  const existing: MenuItem[] = workspaces.map((one) => ({
+    label: one.name,
+    icon: <IconGitBranch size="sm" aria-hidden="true" />,
+    onSelect: () => onUseWorkspace(one.id),
+  }))
+  const menu = (
+    <Menu
+      label="Use an existing Workspace"
+      size="sm"
+      groups={existing.length === 0 ? [[prepareOnly]] : [[prepareOnly], existing]}
+    />
+  )
+
+  // A Workspace whose preparation failed has nothing to start a build in: the engine refuses it.
+  // It is resumed where it stopped, or another one is taken.
+  if (workspace?.state === 'failed') {
     return (
       <div role="group" aria-label={GROUP} className={ACTIONS}>
-        <Menu
-          label="Use an existing Workspace"
-          size="sm"
-          groups={existing.length === 0 ? [[prepareOnly]] : [[prepareOnly], existing]}
-        />
+        {menu}
+        <Button variant="primary" size="sm" onClick={onResume}>
+          <IconRefresh size="sm" aria-hidden="true" />
+          Resume the preparation
+        </Button>
+      </div>
+    )
+  }
+
+  // One cleaned up is a folder that is gone: the Spec is offered as one set on none.
+  if (workspace === undefined || workspace.state === 'cleaned') {
+    return (
+      <div role="group" aria-label={GROUP} className={ACTIONS}>
+        {menu}
         <Button variant="primary" size="sm" onClick={onPrepareAndStart}>
           <IconHammer size="sm" aria-hidden="true" />
           Prepare and start the build

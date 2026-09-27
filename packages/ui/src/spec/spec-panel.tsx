@@ -366,14 +366,6 @@ export function SpecPanel({
                 onFold={() => fold(true, true)}
                 provisional={spec.provisional}
               />
-              {spec.provisional === true && (
-                // Said plainly, where the line of an older revision goes: nothing of it is saved
-                // until the user creates it from the agent's proposal (issue #198).
-                <p className={NOW}>
-                  Not created yet. The agent checks the Project's Specs first, then proposes this
-                  one or points to one that exists.
-                </p>
-              )}
               {spec.replacedBy !== undefined && (
                 // The one line under the head, and only for an older revision: where the phases
                 // stand is their headings' to say, and whether it is done the footer's (#150).

@@ -339,6 +339,7 @@ export const sessionEntryKindSchema = z.enum([
   'spec_answer',
   'spec_proposal',
   'command_proposal',
+  'setup_proposal',
 ])
 
 /**
@@ -767,6 +768,22 @@ export const ENGINE_REQUESTS = {
     response: commandSchema,
   },
   'commands.proposeDecline': {
+    arguments: z.object({ sessionId: z.string(), proposalId: z.string() }),
+    response: z.void(),
+  },
+  // What a human decides of a change to the Project's setup the agent proposed (#218): accepted,
+  // it is applied through the use case the settings call; `acceptAll` accepts every change still
+  // waiting of the batch it was proposed in, in order, and stops at the first one refused.
+  // Each answers the Project the changes were applied to, for the window to read it again.
+  'setup.accept': {
+    arguments: z.object({ sessionId: z.string(), proposalId: z.string() }),
+    response: z.object({ projectId: z.string(), accepted: z.number() }),
+  },
+  'setup.acceptAll': {
+    arguments: z.object({ sessionId: z.string(), batchId: z.string() }),
+    response: z.object({ projectId: z.string(), accepted: z.number() }),
+  },
+  'setup.decline': {
     arguments: z.object({ sessionId: z.string(), proposalId: z.string() }),
     response: z.void(),
   },

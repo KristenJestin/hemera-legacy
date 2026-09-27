@@ -1,5 +1,4 @@
 import {
-  DETAILS,
   FACE_SIZES,
   FACE_STATES,
   FaceFigure,
@@ -16,7 +15,7 @@ import { cn } from 'cn'
 import { type ReactNode, useMemo, useRef } from 'react'
 
 import { useSprite } from '../sprites.tsx'
-import { type Played, type Telling, playerOver } from '../story.ts'
+import { type Played, type Telling, detailFor, playerOver } from '../story.ts'
 
 /** How long a crowd's story lasts before it is told again from its start. */
 const STORY = 120
@@ -61,7 +60,11 @@ function Head({ index, telling }: { index: number; telling: Telling }): ReactNod
   return (
     <span className="flex size-12 items-center justify-center rounded-md border border-border">
       <span className={cn('block', SIZE_CLASSES[size])}>
-        <FaceFigure detail={DETAILS[detailOf(size)]} gain={telling.tuning.gain} painter={painter} />
+        <FaceFigure
+          detail={detailFor({ ...telling, detail: detailOf(size) })}
+          gain={telling.tuning.gain}
+          painter={painter}
+        />
       </span>
     </span>
   )

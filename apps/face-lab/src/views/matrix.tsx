@@ -1,5 +1,4 @@
 import {
-  DETAILS,
   FACE_STATES,
   FaceFigure,
   type FacePainter,
@@ -10,7 +9,7 @@ import {
 import { type ReactNode, useMemo, useRef } from 'react'
 
 import { useSprite } from '../sprites.tsx'
-import type { Telling } from '../story.ts'
+import { type Telling, detailFor } from '../story.ts'
 
 /** How long every cell holds the state it starts in, and how long a round of the grid lasts. */
 const HOLD = 1.2
@@ -32,7 +31,7 @@ function Cell({
       state: from,
       at: 0,
       seed: telling.seed,
-      detail: DETAILS[telling.detail],
+      detail: detailFor(telling),
       reduced: telling.reduced,
       tuning: telling.tuning,
     })
@@ -45,7 +44,7 @@ function Cell({
   const said = from === to ? from : `${from} to ${to}: ${changeBetween(from, to)}`
   return (
     <span title={said} className="size-10 shrink-0">
-      <FaceFigure detail={DETAILS[telling.detail]} gain={telling.tuning.gain} painter={painter} />
+      <FaceFigure detail={detailFor(telling)} gain={telling.tuning.gain} painter={painter} />
     </span>
   )
 }

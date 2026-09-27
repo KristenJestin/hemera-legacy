@@ -3,6 +3,9 @@ import { type ReactNode, useState } from 'react'
 import { expect, fn, screen, userEvent, waitFor, within } from 'storybook/test'
 
 import { Composer } from '../composer/composer.tsx'
+import { AgentText } from '../message/agent-text.tsx'
+import { MessageScroller, type ScrollerEntry } from '../message/scroller/scroller.tsx'
+import { TurnLine } from '../session/turn-line.tsx'
 import { CREDIT_NOTES } from './spec-fixtures.ts'
 import { SpecQuestion } from './spec-question.tsx'
 
@@ -33,6 +36,11 @@ type Story = StoryObj<typeof meta>
 function rowsOf(canvasElement: HTMLElement): HTMLElement[] {
   const canvas = within(canvasElement)
   return within(canvas.getByRole('list', { name: 'Answers' })).getAllByRole('listitem')
+}
+
+/** Resolves on the next frame, once whatever was asked has been drawn. */
+function nextFrame(): Promise<void> {
+  return new Promise((resolve) => requestAnimationFrame(() => resolve()))
 }
 
 /**
@@ -350,5 +358,115 @@ export const Pinned: Story = {
     const area = canvas.getByRole('region', { name: 'Waiting for your answer' })
     await expect(within(area).getByRole('group', { name: /^Question: / })).toBeVisible()
     await expect(within(area).getByText(/^Blocking · /)).toBeVisible()
+  },
+}
+
+/** What the agent wrote before it asked, enough of it for the thread to overflow its room. */
+const EARLIER = Array.from({ length: 6 }, (_, index) => ({
+  id: `earlier-${String(index)}`,
+  content: (
+    <AgentText
+      text={`Step ${String(index + 1)} of the plan: the export reuses the invoice query of \`export.service.ts\`, streams its rows in the order the ledger imports them, and writes one line per invoice with its number, its date, its customer and its amount, the totals checked against the billing page before the file is handed over.`}
+    />
+  ),
+}))
+
+/**
+ * A Session's chat as the page lays it out: the thread, the row of the turn under it, and the
+ * composer with the question pinned above its box. Answered, the card leaves the pin and comes
+ * back to its place in the thread, and the turn starts thinking again, as the page does.
+ */
+function ThreadWithAPinnedQuestion(props: Parameters<typeof SpecQuestion>[0]): ReactNode {
+  const [answer, setAnswer] = useState(props.question.answer)
+  const card = (
+    <SpecQuestion
+      {...props}
+      question={{ ...props.question, answer }}
+      arrives
+      onAnswer={(given) => {
+        props.onAnswer(given)
+        setAnswer(given)
+      }}
+    />
+  )
+  const entries: ScrollerEntry[] = [
+    ...EARLIER,
+    ...(answer === null ? [] : [{ id: props.question.id, content: card }]),
+    {
+      id: 'after',
+      content: <AgentText text="One question blocks the plan; I wait for your answer." />,
+    },
+  ]
+  return (
+    <div className="flex h-screen min-h-0 flex-col bg-background text-foreground">
+      <MessageScroller className="flex-1" label="The thread of this Session" entries={entries} />
+      <div className="mx-auto flex w-full max-w-3xl flex-col gap-2 px-6 pb-4">
+        <TurnLine
+          activity={answer === null ? { state: 'done', elapsedMs: 12_000 } : { state: 'thinking' }}
+          usage={null}
+        />
+        <Composer
+          value=""
+          onValueChange={fn()}
+          files={[]}
+          onFilesChange={fn()}
+          onSearchFiles={async () => await Promise.resolve([])}
+          onSend={async () => await Promise.resolve(null)}
+          variant="inline"
+          action="Send"
+          placeholder="Say something to claude…"
+          running={answer !== null}
+          pinned={answer === null ? [{ id: props.question.id, content: card }] : []}
+        />
+      </div>
+    </div>
+  )
+}
+
+/**
+ * Answered from the pin (issue #209): a press on a choice takes the card from above the composer
+ * back to its place in the thread, and the thread does not move — no jump down and back.
+ */
+export const AnsweredFromThePin: Story = {
+  parameters: { layout: 'fullscreen' },
+  render: (args) => <ThreadWithAPinnedQuestion {...args} />,
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const area = canvas.getByRole('region', { name: 'Waiting for your answer' })
+    await expect(within(area).getByRole('group', { name: /^Question: / })).toBeVisible()
+    const thread = canvas.getByRole('log', { name: 'The thread of this Session' })
+    // The reader follows the end of the thread, the card pinned under it.
+    await waitFor(() =>
+      expect(thread.scrollHeight - thread.scrollTop - thread.clientHeight).toBeLessThanOrEqual(1),
+    )
+    const before = thread.scrollTop
+    // Where the thread is scrolled, read on every frame from the press until well after the card
+    // would have finished folding out of the pin.
+    const tops: number[] = []
+    let reading = true
+    const read = (): void => {
+      tops.push(thread.scrollTop)
+      if (reading) requestAnimationFrame(read)
+    }
+    requestAnimationFrame(read)
+    await userEvent.click(within(area).getByRole('button', { name: /Negative rows/ }))
+    await waitFor(() =>
+      expect(within(thread).getByRole('group', { name: /^You answered / })).toBeVisible(),
+    )
+    for (const _ of Array.from({ length: 45 })) {
+      // oxlint-disable-next-line no-await-in-loop -- one frame after the other
+      await nextFrame()
+    }
+    reading = false
+    // Never scrolled down: the thread did not jump by the card it took back.
+    await expect(Math.max(...tops), 'the thread jumped down').toBeLessThanOrEqual(before)
+    // And never slid back: from the frame the card is in the thread, the position holds. All the
+    // thread gives is, at once, what the pin gave back beyond what the card takes in the thread.
+    const settled = tops.at(-1)!
+    await expect(
+      tops.filter((top) => top !== before && top !== settled),
+      'the thread slid',
+    ).toEqual([])
+    await expect(thread.scrollHeight - settled - thread.clientHeight).toBeLessThanOrEqual(1)
   },
 }

@@ -1,9 +1,8 @@
 /**
  * What the catalogue claims about itself: the components anything may use, the composed pieces
  * a feature draws with them, the pieces of the shell and the surfaces a lot assembles — each
- * with the stories the lot says they all have, and with the badge that says whether the lot in
- * flight created it or changed it. A component whose stories are missing is a component nobody
- * validated.
+ * with the stories the lot says they all have. A component whose stories are missing is a
+ * component nobody validated.
  *
  * Five roots, and the split is what a reader needs to find anything (`AGENTS.md`):
  * `Foundations/` is the tokens, the icons and the motion, `Components/` is what is reusable and
@@ -16,7 +15,6 @@
  * `specs/window-shell/spec.md` it covers.
  */
 
-import { execFileSync } from 'node:child_process'
 import { readFileSync, readdirSync } from 'node:fs'
 import { join, relative } from 'node:path'
 import { describe, expect, test } from 'vite-plus/test'
@@ -557,59 +555,17 @@ describe('Stories dans les deux thèmes', () => {
 })
 
 /**
- * The badges of the sidebar, which are how a lot's stories are found in the catalogue rather
+ * The badges of the sidebar, which are how a branch's stories are found in the catalogue rather
  * than read out of a diff.
  *
- * A story file the lot created wears `new`, one whose component the lot changed wears `updated`.
- * The badge belongs to the lot that touches the design system and not to the component: the
- * first thing such a lot does is take the previous lot's badges off, and a branch that changes
- * nothing of this package carries no badge change at all — which is what keeps a PR that is not
- * about the interface from showing up in the catalogue. Git is the only thing that can say
- * whether a badge was earned, so the test asks Git, and where Git cannot answer (a checkout of
- * `dev`, a shallow clone) there is nothing to refuse.
+ * Git says which story files the branch created or changed, when Storybook indexes them
+ * (`.storybook/badges.ts`, tested in `badges.test.ts`); no story file writes a badge of its own,
+ * so no branch carries a diff of badges put on and taken off.
  */
-describe('Badges du lot en cours', () => {
+describe('Badges calculés depuis Git', () => {
   const BADGES = ['new', 'updated']
 
-  /** The package, as Git names it: what a branch has to touch for a badge to be its business. */
-  const PACKAGE = `${asGitPath(join(import.meta.dirname, '..'))}/`
-
-  /**
-   * Whether the badges are this branch's business at all.
-   *
-   * A branch that changes nothing of this package is asked nothing: the badges of the lot
-   * before stay where they are, and a PR that is not about the interface shows up nowhere in
-   * the catalogue — which is the whole point of a badge that belongs to a lot rather than to a
-   * component.
-   */
-  function badgesAreTheBranchsBusiness(touched: Set<string>): boolean {
-    return [...touched].some((path) => path.startsWith(PACKAGE))
-  }
-
-  /**
-   * What this branch did to a file, told by Git, or `null` when Git cannot tell.
-   *
-   * A checkout of `dev` itself, a shallow clone and a folder without Git all answer nothing,
-   * and then there is nothing to check.
-   */
-  function touchedByTheBranch(): Set<string> | null {
-    const git = (args: string[]): string =>
-      execFileSync('git', args, { cwd: repositoryRoot, encoding: 'utf8' })
-    try {
-      const branch = git(['rev-parse', '--abbrev-ref', 'HEAD']).trim()
-      if (branch === 'dev' || branch === 'main' || branch === 'HEAD') return null
-      const base = git(['merge-base', 'dev', 'HEAD']).trim()
-      const committed = git(['diff', '--name-only', base]).split('\n')
-      const untracked = git(['ls-files', '--others', '--exclude-standard']).split('\n')
-      return new Set(
-        [...committed, ...untracked].map((path) => path.trim()).filter((path) => path !== ''),
-      )
-    } catch {
-      return null
-    }
-  }
-
-  test('the sidebar draws the two badges of a lot, and nothing else', () => {
+  test('the sidebar draws the two badges, and nothing else', () => {
     expect(main, 'the addon that draws the badges is not declared').toContain(
       'storybook-addon-tag-badges',
     )
@@ -622,33 +578,17 @@ describe('Badges du lot en cours', () => {
     )
   })
 
-  test('a story file declares no tag that nothing reads', () => {
-    const unknown = STORY_FILES.flatMap((file) =>
+  test('the badges are handed out by the indexer, from Git', () => {
+    expect(main).toContain('experimental_indexers')
+    expect(main).toContain('withBadges(')
+  })
+
+  test('a story file declares no tag but autodocs, and no badge by hand', () => {
+    const declared = STORY_FILES.flatMap((file) =>
       tagsOf(readFileSync(file, 'utf8'))
-        .filter((tag) => tag !== 'autodocs' && !BADGES.includes(tag))
+        .filter((tag) => tag !== 'autodocs')
         .map((tag) => `${asGitPath(file)}: ${tag}`),
     )
-    expect(unknown).toEqual([])
-  })
-
-  test('a branch that changes nothing of the design system is asked nothing', () => {
-    // A PR about the engine, the IPC or the tools carries no badge diff: the rule only bites
-    // where the interface was touched, which is what keeps the catalogue out of unrelated PRs.
-    expect(badgesAreTheBranchsBusiness(new Set(['tools/boundaries.ts']))).toBe(false)
-    expect(
-      badgesAreTheBranchsBusiness(new Set(['apps/desktop/src/main/channels.ts', 'README.md'])),
-    ).toBe(false)
-    expect(badgesAreTheBranchsBusiness(new Set([`${PACKAGE}src/message/message.tsx`]))).toBe(true)
-  })
-
-  test('a badge the branch did not earn is refused', () => {
-    const touched = touchedByTheBranch()
-    if (touched === null) return
-    if (!badgesAreTheBranchsBusiness(touched)) return
-    const lying = STORY_FILES.filter((file) => {
-      const worn = tagsOf(readFileSync(file, 'utf8')).some((tag) => BADGES.includes(tag))
-      return worn && !touched.has(asGitPath(file))
-    }).map(asGitPath)
-    expect(lying, 'the badge of the lot before, on files this branch never touched').toEqual([])
+    expect(declared).toEqual([])
   })
 })

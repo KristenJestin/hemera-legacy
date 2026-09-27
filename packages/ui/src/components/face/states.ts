@@ -54,7 +54,8 @@ export interface Expression {
   readonly blink: Blink | null
   readonly motion: MotionKind
   readonly aside: Aside | null
-  readonly flourish: FlourishName | null
+  /** The fixed pieces the state plays now and then, one drawn at a time. */
+  readonly flourishes: readonly FlourishName[]
   readonly tone: FaceTone
 }
 
@@ -90,7 +91,7 @@ export const EXPRESSIONS: Record<FaceState, Expression> = {
     blink: null,
     motion: 'hold',
     aside: null,
-    flourish: null,
+    flourishes: ['rush', 'huddle', 'spread'],
     tone: 'current',
   },
   /** Working something out: heavy-lidded, looking up and away. */
@@ -103,7 +104,7 @@ export const EXPRESSIONS: Record<FaceState, Expression> = {
     blink: { every: [2.8, 6], double: 0.12 },
     motion: 'ponder',
     aside: { motion: 'weigh', chance: 0.3 },
-    flourish: 'hmm',
+    flourishes: ['hmm'],
     tone: 'busy',
   },
   /** Reading: flattened on the page, a line at a time. */
@@ -116,7 +117,7 @@ export const EXPRESSIONS: Record<FaceState, Expression> = {
     blink: { every: [2.2, 4.8], double: 0.2 },
     motion: 'scan',
     aside: { motion: 'glance', chance: 0.15 },
-    flourish: null,
+    flourishes: [],
     tone: 'busy',
   },
   /** Writing: flattened and lidded, looking down at what it writes, following the caret. */
@@ -129,7 +130,7 @@ export const EXPRESSIONS: Record<FaceState, Expression> = {
     blink: { every: [1.8, 3.8], double: 0.3 },
     motion: 'trace',
     aside: { motion: 'glance', chance: 0.12 },
-    flourish: 'sigh',
+    flourishes: ['sigh'],
     tone: 'busy',
   },
   /** Running a command: two terminal cursors on the output, watching it scroll. */
@@ -142,7 +143,7 @@ export const EXPRESSIONS: Record<FaceState, Expression> = {
     blink: { every: [2.4, 5], double: 0.15 },
     motion: 'watch',
     aside: { motion: 'glance', chance: 0.2 },
-    flourish: null,
+    flourishes: [],
     tone: 'busy',
   },
   /**
@@ -158,7 +159,7 @@ export const EXPRESSIONS: Record<FaceState, Expression> = {
     blink: { every: [2, 4.2], double: 0.28 },
     motion: 'tick',
     aside: { motion: 'glance', chance: 0.25 },
-    flourish: null,
+    flourishes: [],
     tone: 'build',
   },
   /**
@@ -174,7 +175,7 @@ export const EXPRESSIONS: Record<FaceState, Expression> = {
     blink: { every: [2.2, 4.4], double: 0.4 },
     motion: 'ask',
     aside: null,
-    flourish: 'widen',
+    flourishes: ['widen'],
     tone: 'needs',
   },
   /**
@@ -190,7 +191,7 @@ export const EXPRESSIONS: Record<FaceState, Expression> = {
     blink: { every: [2, 4], double: 0.35 },
     motion: 'offer',
     aside: null,
-    flourish: 'plead',
+    flourishes: ['plead'],
     tone: 'needs',
   },
   /**
@@ -206,7 +207,7 @@ export const EXPRESSIONS: Record<FaceState, Expression> = {
     blink: { every: [2.6, 5], double: 0.2 },
     motion: 'strain',
     aside: null,
-    flourish: 'sigh',
+    flourishes: ['sigh'],
     tone: 'needs',
   },
   /** A turn that ended well: creased, smiling, nodding now and then. */
@@ -219,7 +220,7 @@ export const EXPRESSIONS: Record<FaceState, Expression> = {
     blink: { every: [3, 5.5], double: 0.25 },
     motion: 'settle',
     aside: null,
-    flourish: 'hop',
+    flourishes: ['hop'],
     tone: 'good',
   },
   /** Something went wrong: a glare and a frown, and it does not blink. */
@@ -232,7 +233,7 @@ export const EXPRESSIONS: Record<FaceState, Expression> = {
     blink: null,
     motion: 'shudder',
     aside: null,
-    flourish: null,
+    flourishes: [],
     tone: 'bad',
   },
   /** Nothing running: eyes closed, breathing, yawning now and then. */
@@ -245,7 +246,7 @@ export const EXPRESSIONS: Record<FaceState, Expression> = {
     blink: null,
     motion: 'breathe',
     aside: null,
-    flourish: 'yawn',
+    flourishes: ['yawn'],
     tone: 'quiet',
   },
 }

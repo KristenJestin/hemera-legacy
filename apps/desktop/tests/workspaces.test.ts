@@ -18,9 +18,9 @@ import {
   writeFileSync,
 } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, parse } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vite-plus/test'
-import { Effect } from 'effect'
+import { Effect, Result } from 'effect'
 
 import { InvalidRepositoryPathError } from '@hemera/core'
 import { Commands } from '#engine/commands/service.ts'
@@ -34,9 +34,10 @@ import {
   CleanupRefusedError,
   CreationRefusedError,
   Workspaces,
+  isTemporary,
 } from '#engine/workspaces/workspaces.ts'
 
-import { git } from './repositories.ts'
+import { git, repository as repositoryAt } from './repositories.ts'
 import { aSessionOf, atlas, atlasMain, saved, workspaceEngine } from './workspace-engine.ts'
 
 let folder: string
@@ -156,7 +157,9 @@ describe('A dedicated Workspace assembles one worktree per repository', () => {
     // The plan names its locations and reads none of them: the dialog opens on the folder and on
     // the rows, and each row is read on its own afterwards (#110).
     expect(seen.plan.repositories).toEqual([API, FRONT])
-    expect(seen.plan.path).toBe(join(seen.plan.root, 'login-form'))
+    // Named after the Spec's key and the words of its title (#136).
+    expect(seen.plan.name).toBe('hem-7-login-form')
+    expect(seen.plan.path).toBe(join(seen.plan.root, 'hem-7-login-form'))
     // One location read on its own: the branch it is checked out on, out of the branches it has
     // here — a branch name as the base, and never the sha it points at (D8-04) — and the branch
     // it would be given under the prefix set since.
@@ -199,13 +202,135 @@ describe('A dedicated Workspace assembles one worktree per repository', () => {
         git(join(main, 'sources', repository), 'rev-parse', 'HEAD'),
       )
     }
-    expect(workspace.path.endsWith(join('workspaces', workspace.projectId, 'login-form'))).toBe(
-      true,
-    )
+    expect(
+      workspace.path.endsWith(join('workspaces', workspace.projectId, 'hem-7-login-form')),
+    ).toBe(true)
     expect(workspace.state).toBe('ready')
     expect(workspace.specId).toBe('HEM-7')
     expect(workspace.repositories.map((one) => one.relativePath)).toEqual([API, FRONT])
     expect(git(join(main, 'sources', 'api'), 'remote')).toBe('')
+  })
+})
+
+// Scenario "A Spec's Workspace is proposed a readable name" (#136).
+describe("A Spec's Workspace is proposed its key and at most four words of its title", () => {
+  it('names the plan after the key and the meaningful words, and one from the settings as asked', async () => {
+    const seen = await workspaceEngine(folder)(
+      Effect.gen(function* () {
+        const workspaces = yield* Workspaces
+        const project = yield* atlas(main, [API, FRONT])
+        return {
+          spec: yield* workspaces.plan(
+            project.id,
+            'AAA-1',
+            'progress-bar-des-atomes-restent-allumes-au-debut',
+          ),
+          settings: yield* workspaces.plan(project.id, null, 'spike'),
+        }
+      }),
+    )
+
+    expect(seen.spec.name).toBe('aaa-1-progress-bar-atomes-restent')
+    expect(seen.spec.path).toBe(join(seen.spec.root, 'aaa-1-progress-bar-atomes-restent'))
+    expect(seen.settings.name).toBe('spike')
+  })
+})
+
+// Scenario "The folder of a Workspace is chosen in its dialog, the Project's stays the default".
+describe('The folder of a Workspace can be chosen at its creation', () => {
+  /** The plan for `HEM-7`, created under `root` as the dialog hands it over. */
+  const createdUnder = (root: string | null) =>
+    workspaceEngine(folder)(
+      Effect.gen(function* () {
+        const workspaces = yield* Workspaces
+        const project = yield* atlas(main, [API, FRONT])
+        const plan = yield* workspaces.plan(project.id, 'HEM-7', 'login-form')
+        const reads = yield* readPlan(project.id, 'HEM-7', 'login-form', plan.repositories)
+        const made = yield* Effect.result(
+          workspaces.create(project.id, {
+            specId: 'HEM-7',
+            name: plan.name,
+            root,
+            repositories: reads
+              .filter((one) => one.included)
+              .map((one) => ({
+                relativePath: one.relativePath,
+                base: one.base ?? '',
+                branch: one.branch,
+              })),
+          }),
+        )
+        // The Project's own folder is what the next plan proposes again: the choice was this
+        // Workspace's alone.
+        const after = yield* workspaces.plan(project.id, 'HEM-7', 'login-form')
+        return { plan, made, after }
+      }),
+    )
+
+  it('makes the Workspace under the folder chosen, and leaves the Project its own', async () => {
+    const chosen = join(folder, 'elsewhere')
+    const seen = await createdUnder(chosen)
+
+    if (!Result.isSuccess(seen.made)) throw seen.made.failure
+    expect(seen.made.success.path).toBe(join(chosen, 'hem-7-login-form'))
+    expect(seen.after.root).toBe(seen.plan.root)
+  })
+
+  it('makes it under the Project’s folder when none is chosen', async () => {
+    const seen = await createdUnder(null)
+
+    if (!Result.isSuccess(seen.made)) throw seen.made.failure
+    expect(seen.made.success.path).toBe(seen.plan.path)
+  })
+
+  it('refuses a folder that is not absolute', async () => {
+    const seen = await createdUnder('workspaces')
+
+    if (!Result.isFailure(seen.made)) throw new Error('a relative folder was taken')
+    expect(seen.made.failure).toMatchObject({ check: 'folder' })
+    expect(seen.made.failure.message).toBe('the folder workspaces is not an absolute path')
+  })
+
+  it('refuses a folder inside main', async () => {
+    const seen = await createdUnder(join(main, 'trees'))
+
+    if (!Result.isFailure(seen.made)) throw new Error('a folder inside main was taken')
+    expect(seen.made.failure).toMatchObject({ check: 'folder' })
+    expect(seen.made.failure.message).toBe(
+      `the folder ${join(main, 'trees')} is inside main (${main})`,
+    )
+  })
+})
+
+// Scenario "A default folder under the temporary directory is said so" (#136).
+describe('A folder of Workspaces under the temporary directory is said to be temporary', () => {
+  it('says so of the default folder of a data folder in the temporary directory, and not of another', async () => {
+    // Out of the temporary directory, at the root of its drive; never made, only named.
+    const kept = join(parse(folder).root, 'hemera-workspaces-kept')
+    const seen = await workspaceEngine(folder)(
+      Effect.gen(function* () {
+        const projects = yield* Projects
+        const workspaces = yield* Workspaces
+        const project = yield* atlas(main, [API, FRONT])
+        const before = yield* workspaces.plan(project.id, 'HEM-7', 'login-form')
+        yield* projects.setWorkspacesRoot(project.id, project.version, kept)
+        const after = yield* workspaces.plan(project.id, 'HEM-7', 'login-form')
+        return { before, after }
+      }),
+    )
+
+    // The suite's data folder is a temporary one, like a trial run's `--data-dir` in %TEMP%.
+    expect(seen.before.temporary).toBe(true)
+    expect(seen.after.root).toBe(kept)
+    expect(seen.after.temporary).toBe(false)
+  })
+
+  it('compares a folder with the temporary directory, itself included', () => {
+    const temporary = join(parse(folder).root, 'scratch')
+    expect(isTemporary(join(temporary, 'hemera', 'workspaces'), temporary)).toBe(true)
+    expect(isTemporary(temporary, temporary)).toBe(true)
+    expect(isTemporary(join(parse(folder).root, 'scratch-kept'), temporary)).toBe(false)
+    expect(isTemporary(join(parse(folder).root, 'data'), temporary)).toBe(false)
   })
 })
 
@@ -446,6 +571,90 @@ describe('A location without a repository gets no worktree', () => {
   })
 })
 
+describe('A Project with no declared repository', () => {
+  it('A Project with no repository makes the Workspace the worktree of main', async () => {
+    // `main` is itself the repository, and the Project declares none: the root is its only
+    // location (D8-04), and the Workspace is a worktree of `main` on the Spec's branch.
+    const root = join(folder, 'single')
+    repositoryAt(root)
+    writeFileSync(join(root, 'README.md'), 'single\n')
+    git(root, 'add', 'README.md')
+    git(root, 'commit', '-q', '-m', 'readme')
+
+    const seen = await workspaceEngine(folder)(
+      Effect.gen(function* () {
+        const workspaces = yield* Workspaces
+        const project = yield* atlas(root, [])
+        const plan = yield* workspaces.plan(project.id, 'HEM-7', 'login-form')
+        const workspace = yield* prepared(project.id)
+        return { plan, workspace, steps: yield* stepsOf(workspace.id) }
+      }),
+    )
+
+    expect(seen.plan.repositories).toEqual(['.'])
+    expect(seen.steps).toEqual([{ kind: 'worktree', target: '.', state: 'done', message: null }])
+    expect(seen.workspace.state).toBe('ready')
+    expect(seen.workspace.repositories.map((one) => one.relativePath)).toEqual(['.'])
+    // The Workspace's folder is the worktree itself, on the branch named after the Spec.
+    expect(existsSync(join(seen.workspace.path, '.git'))).toBe(true)
+    // With the line ends the machine's Git gives it (CRLF under Windows' `core.autocrlf`).
+    const readme = readFileSync(join(seen.workspace.path, 'README.md'), 'utf8')
+    expect(readme.replaceAll('\r\n', '\n')).toBe('single\n')
+    expect(git(seen.workspace.path, 'rev-parse', '--abbrev-ref', 'HEAD')).toBe(
+      'atlas/HEM-7-login-form',
+    )
+    expect(git(root, 'worktree', 'list')).toContain('login-form')
+  })
+
+  it('A main without Git is prepared by its copy steps alone, never overwriting', async () => {
+    // A plain folder as `main`, declaring no repository: nothing to make a worktree of, and the
+    // copy steps of the recipe are what the Workspace is made of (D8-05).
+    const plain = join(folder, 'plain')
+    mkdirSync(join(plain, 'config'), { recursive: true })
+    writeFileSync(join(plain, '.env'), 'PORT=from-main\n')
+    writeFileSync(join(plain, 'config', 'app.json'), '{"from":"main"}\n')
+
+    const seen = await workspaceEngine(folder)(
+      Effect.gen(function* () {
+        const recipe = yield* Recipe
+        const preparation = yield* Preparation
+        const project = yield* atlas(plain, [])
+        for (const path of ['.env', 'config']) {
+          yield* recipe.add(project.id, {
+            kind: 'copy',
+            base: null,
+            path,
+            commandId: null,
+            line: null,
+            lineWindows: null,
+            lineLinux: null,
+          })
+        }
+        const workspace = yield* created(project.id)
+        // A file already in the Workspace's folder is the user's: the copy keeps it.
+        mkdirSync(workspace.path, { recursive: true })
+        writeFileSync(join(workspace.path, '.env'), 'PORT=mine\n')
+        const ready = yield* preparation.prepare(workspace.id)
+        return { ready, steps: yield* stepsOf(workspace.id) }
+      }),
+    )
+
+    expect(seen.steps).toEqual([
+      { kind: 'worktree', target: '.', state: 'skipped', message: '. holds no repository in main' },
+      { kind: 'copy', target: './.env', state: 'done', message: '.env: kept as it was' },
+      { kind: 'copy', target: './config', state: 'done', message: null },
+    ])
+    expect(seen.ready.state).toBe('ready')
+    expect(readFileSync(join(seen.ready.path, '.env'), 'utf8')).toBe('PORT=mine\n')
+    expect(readFileSync(join(seen.ready.path, 'config', 'app.json'), 'utf8')).toBe(
+      '{"from":"main"}\n',
+    )
+    // Nothing made `main` a repository, and main's own files are untouched.
+    expect(existsSync(join(plain, '.git'))).toBe(false)
+    expect(readFileSync(join(plain, '.env'), 'utf8')).toBe('PORT=from-main\n')
+  })
+})
+
 describe('A failed check refuses the whole creation', () => {
   /** A creation from the plan, changed by `edit`, and what it left behind. */
   const refusedWith = (
@@ -466,7 +675,7 @@ describe('A failed check refuses the whole creation', () => {
         const refused = yield* Effect.flip(
           workspaces.create(project.id, {
             specId: 'HEM-7',
-            name: 'login-form',
+            name: plan.name,
             repositories: edit(
               reads
                 .filter((one) => one.included)
@@ -705,7 +914,7 @@ describe('Cleanup removes the worktrees and keeps the branches', () => {
         // The old branches stay, so the new Workspace is made on branches of its own.
         const again = yield* workspaces.create(project.id, {
           specId: 'HEM-7',
-          name: 'login-form',
+          name: 'hem-7-login-form',
           repositories: first.repositories.map((one) => ({
             relativePath: one.relativePath,
             base: one.base,
@@ -716,14 +925,37 @@ describe('Cleanup removes the worktrees and keeps the branches', () => {
       }),
     )
 
-    expect(seen.again.name).toBe('login-form')
+    expect(seen.again.name).toBe('hem-7-login-form')
     expect(seen.again.specId).toBe('HEM-7')
     expect(seen.again.id).not.toBe(seen.first.id)
     expect(seen.listed.map((one) => [one.name, one.state])).toEqual([
       ['main', 'ready'],
-      ['login-form', 'cleaned'],
-      ['login-form', 'preparing'],
+      ['hem-7-login-form', 'cleaned'],
+      ['hem-7-login-form', 'preparing'],
     ])
+  })
+})
+
+describe('A cleaned-up Workspace frees its Spec', () => {
+  it('sets the Workspace of its Spec to none, in the cleanup itself', async () => {
+    const seen = await workspaceEngine(folder)(
+      Effect.gen(function* () {
+        const workspaces = yield* Workspaces
+        const sql = yield* SqliteClient
+        const project = yield* atlas(main, [API, FRONT])
+        const workspace = yield* prepared(project.id)
+        // The Spec the Workspace was made for, set on it as a launch sets it (D8-12).
+        yield* sql`UPDATE specs SET workspace_id = ${workspace.id} WHERE id = 'HEM-7'`
+        const cleaned = yield* workspaces.cleanup(workspace.id)
+        const [spec] = yield* sql<{ workspace_id: string | null }>`
+          SELECT workspace_id FROM specs WHERE id = 'HEM-7'`
+        return { cleaned, spec }
+      }),
+    )
+
+    expect(seen.cleaned.state).toBe('cleaned')
+    // Its Spec is set on no Workspace any more: the panel offers it a new one.
+    expect(seen.spec?.workspace_id).toBeNull()
   })
 })
 
@@ -788,7 +1020,7 @@ describe('Cleanup is refused while a service runs or Git refuses', () => {
     )
 
     expect(seen.whileRunning).toBeInstanceOf(CleanupRefusedError)
-    expect(seen.whileRunning.message).toBe('the service dev of login-form is running')
+    expect(seen.whileRunning.message).toBe('the service dev of hem-7-login-form is running')
     expect(seen.whileChanged).toBeInstanceOf(CleanupRefusedError)
     expect(seen.whileChanged.message).toMatch(
       /^fatal: .*sources[\\/]front.* contains modified or untracked files/,
@@ -798,6 +1030,71 @@ describe('Cleanup is refused while a service runs or Git refuses', () => {
     expect(existsSync(join(seen.workspace.path, 'sources', 'api', '.git'))).toBe(true)
     expect(existsSync(join(seen.workspace.path, 'sources', 'front', '.git'))).toBe(true)
     expect(seen.after.state).toBe('ready')
+  })
+})
+
+describe('Cleanup refuses a picked folder and a cleaned Workspace', () => {
+  it('refuses a folder the user picked, says so in the Journal, and removes nothing', async () => {
+    const picked = join(folder, 'spike')
+    mkdirSync(picked, { recursive: true })
+    writeFileSync(join(picked, 'notes.md'), 'mine\n')
+
+    const seen = await workspaceEngine(folder)(
+      Effect.gen(function* () {
+        const workspaces = yield* Workspaces
+        const sql = yield* SqliteClient
+        const project = yield* atlas(main, [API, FRONT])
+        const workspace = yield* workspaces.createOnFolder(project.id, picked, 'spike')
+        const refused = yield* Effect.flip(workspaces.cleanup(workspace.id))
+        const events = yield* sql<{ type: string; payload: string }>`
+          SELECT type, payload FROM domain_events WHERE type LIKE 'workspace.clean%'`
+        return { refused, events, after: yield* workspaces.one(workspace.id) }
+      }),
+    )
+
+    const reason = 'spike is a folder of yours: Hemera cleans up only the Workspaces it made'
+    expect(seen.refused).toBeInstanceOf(CleanupRefusedError)
+    expect(seen.refused.message).toBe(reason)
+    expect(seen.events).toEqual([
+      { type: 'workspace.cleanup_refused', payload: JSON.stringify({ reason }) },
+    ])
+    // The folder is the user's, and all of it is still there.
+    expect(readFileSync(join(picked, 'notes.md'), 'utf8')).toBe('mine\n')
+    expect(seen.after.state).toBe('ready')
+    expect(seen.after.cleanedAt).toBeNull()
+  })
+
+  it('refuses a Workspace already cleaned, says so in the Journal, and changes nothing', async () => {
+    const seen = await workspaceEngine(folder)(
+      Effect.gen(function* () {
+        const workspaces = yield* Workspaces
+        const sql = yield* SqliteClient
+        const project = yield* atlas(main, [API, FRONT])
+        const workspace = yield* prepared(project.id)
+        const cleaned = yield* workspaces.cleanup(workspace.id)
+        const refused = yield* Effect.flip(workspaces.cleanup(workspace.id))
+        const events = yield* sql<{ type: string; payload: string }>`
+          SELECT type, payload FROM domain_events WHERE type LIKE 'workspace.clean%'
+          ORDER BY sequence`
+        return { cleaned, refused, events, after: yield* workspaces.one(workspace.id) }
+      }),
+    )
+
+    const reason = 'hem-7-login-form is already cleaned up'
+    expect(seen.refused).toBeInstanceOf(CleanupRefusedError)
+    expect(seen.refused.message).toBe(reason)
+    expect(seen.events).toEqual([
+      { type: 'workspace.cleaned', payload: JSON.stringify({ path: seen.cleaned.path }) },
+      { type: 'workspace.cleanup_refused', payload: JSON.stringify({ reason }) },
+    ])
+    // The second cleanup touched nothing: the row is as the first one left it, and the branches
+    // the first one kept are still there.
+    expect(seen.after).toEqual(seen.cleaned)
+    for (const repository of ['api', 'front']) {
+      expect(
+        git(join(main, 'sources', repository), 'branch', '--list', 'atlas/HEM-7-login-form'),
+      ).toContain('atlas/HEM-7-login-form')
+    }
   })
 })
 
@@ -836,10 +1133,10 @@ describe('A Workspace with a running build Session is not cleaned up', () => {
     )
 
     expect(seen.running).toBeInstanceOf(CleanupRefusedError)
-    expect(seen.running.message).toBe('the build of login-form is still open')
+    expect(seen.running.message).toBe('the build of hem-7-login-form is still open')
     expect(seen.kept).toEqual({ api: true, folder: true, front: true, state: 'ready' })
     expect(seen.events).toEqual([
-      { payload: JSON.stringify({ reason: 'the build of login-form is still open' }) },
+      { payload: JSON.stringify({ reason: 'the build of hem-7-login-form is still open' }) },
     ])
     expect(seen.cleaned.state).toBe('cleaned')
     expect(existsSync(seen.workspace.path)).toBe(false)
@@ -1010,6 +1307,7 @@ describe('A repository is rewritten with its icon, and what named it follows', (
             scope: 'workspace',
             portless: false,
             portlessName: null,
+            runAtOpen: false,
           },
           false,
         )

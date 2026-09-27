@@ -28,6 +28,7 @@ import { commandsLayer, type Commands } from '#engine/commands/service.ts'
 import { openProfile } from '#engine/migrate.ts'
 import { Projects, projectsLayer } from '#engine/projects.ts'
 import { Sessions, sessionsLayer } from '#engine/sessions.ts'
+import { domainEventsLayer } from '#engine/domain-events.ts'
 import { NoSpecNotices } from '#engine/specs/notices.ts'
 import { specsLayer } from '#engine/specs/specs.ts'
 import { databaseLayer } from '#engine/storage/database.ts'
@@ -150,7 +151,11 @@ function engine(
         projectsLayer,
         sessionsLayer,
         specsLayer.pipe(Layer.provide(NoSpecNotices)),
-      ).pipe(Layer.provideMerge(databaseLayer(join(folder, 'hemera.sqlite')))),
+      ).pipe(
+        Layer.provideMerge(
+          Layer.mergeAll(databaseLayer(join(folder, 'hemera.sqlite')), domainEventsLayer),
+        ),
+      ),
     ),
     Layer.provide(Layer.mergeAll(processes, sink)),
     Layer.provide(heldWordsLayer),

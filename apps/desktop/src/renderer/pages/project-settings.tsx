@@ -2,6 +2,7 @@ import { type ReactNode, useState } from 'react'
 
 import type {
   Command,
+  PathEntryKind,
   PlanRepository,
   RecipeStep,
   RepositoryState,
@@ -32,7 +33,6 @@ import {
   commandLineOf,
   commandWriteOf,
   folderBasePath,
-  folderUnderBase,
 } from '../project-lines.ts'
 import {
   branchOfName,
@@ -164,7 +164,7 @@ function WorkspacesCards({
   projectVariables: readonly Variable[]
   catalogue: readonly Command[]
   actions: WorkspaceActions
-  onBrowse: () => Promise<string | null>
+  onBrowse: (start?: string) => Promise<string | null>
   onPlan: () => Promise<WorkspacePlan | null>
   /**
    * Reads the locations of the plan the dialog is open on, in the plan's order, one after the
@@ -175,7 +175,12 @@ function WorkspacesCards({
     reading: number,
     onRead: (read: PlanRepository) => void,
   ) => Promise<void>
-  onCreateDedicated: (name: string, repositories: readonly Worktree[]) => Promise<string | null>
+  /** Creates it under `root`: the Project's folder of Workspaces, or one chosen for it (#136). */
+  onCreateDedicated: (
+    name: string,
+    repositories: readonly Worktree[],
+    root: string,
+  ) => Promise<string | null>
   onCreate: (path: string, name: string) => Promise<string | null>
   onCleanup: (id: string) => Promise<string | null>
 }): ReactNode {
@@ -246,12 +251,16 @@ function WorkspacesCards({
             setCreating(open)
           }}
           root={plan.root}
+          temporary={plan.temporary}
+          onBrowse={onBrowse}
           defaultName={plan.name}
           repositories={planLinesOf(plan, reads)}
           // No Spec to name the branches after: they follow the name (D8-04).
           branchOf={branchOfName(plan.branchPrefix)}
           gitMissing={!plan.gitAvailable}
-          onCreate={async (draft) => await onCreateDedicated(draft.name, worktreesOf(draft))}
+          onCreate={async (draft) =>
+            await onCreateDedicated(draft.name, worktreesOf(draft), draft.root)
+          }
         />
       )}
       {cleaning !== null && (
@@ -283,6 +292,7 @@ export function ProjectSettingsPage({
   folders,
   onSave,
   onBrowse,
+  onListEntries,
   onCheckFolder,
   onMainPathChange,
   onAddRepository,
@@ -323,6 +333,16 @@ export function ProjectSettingsPage({
    * at all.
    */
   onBrowse: (start?: string) => Promise<string | null>
+  /**
+   * The entries of one folder under an absolute base, of the kinds asked for: what a command's
+   * Folder offers as it is typed, from where it runs and never above it (#109), and what a
+   * preparation step's path offers from its base in `main` (#104).
+   */
+  onListEntries: (
+    base: string,
+    relative: string,
+    kinds: readonly PathEntryKind[],
+  ) => Promise<readonly { name: string; kind: PathEntryKind }[]>
   onCheckFolder: (path: string) => Promise<string | null>
   onMainPathChange: (path: string) => void
   onAddRepository: (path: string) => Promise<string | null>
@@ -364,7 +384,12 @@ export function ProjectSettingsPage({
     onRead: (read: PlanRepository) => void,
   ) => Promise<void>
   /** Creates it from what the dialog kept, then prepares it; answers the refusal, or null. */
-  onCreateDedicated: (name: string, repositories: readonly Worktree[]) => Promise<string | null>
+  /** Creates it under `root`: the Project's folder of Workspaces, or one chosen for it (#136). */
+  onCreateDedicated: (
+    name: string,
+    repositories: readonly Worktree[],
+    root: string,
+  ) => Promise<string | null>
   /** Makes a Workspace on a folder the user picked; answers the engine's refusal, or null. */
   onCreateWorkspace: (path: string, name: string) => Promise<string | null>
   /** Cleans a dedicated Workspace up; answers the engine's refusal, or null (D8-14). */
@@ -387,17 +412,6 @@ export function ProjectSettingsPage({
    */
   workspacesRefusal: string | null
 }): ReactNode {
-  /**
-   * The picker of the system, opened where a step works and answered from there (recette 2): what
-   * comes back is a path relative to that base — the folder a command runs in, the file or the
-   * folder a copy takes, the folder a step's own line runs in — and a folder outside that base
-   * climbs out, which the field refuses.
-   */
-  const browseUnderBase = async (base: string | null): Promise<string | null> => {
-    const chosen = await onBrowse(folderBasePath(project.mainPath, base))
-    return chosen === null ? null : folderUnderBase(project.mainPath, base, chosen)
-  }
-
   return (
     // Wide enough for the navigation beside a section (recette 1).
     <div className="mx-auto w-full max-w-5xl px-6 py-10">
@@ -417,7 +431,9 @@ export function ProjectSettingsPage({
         onAddCommand={async (line) => await onSaveCommand(commandWriteOf(line), false)}
         onUpdateCommand={async (line) => await onSaveCommand(commandWriteOf(line), true)}
         onRemoveCommand={onRemoveCommand}
-        onBrowseCommandFolder={browseUnderBase}
+        onListCommandFolder={async ({ base, relative, kinds }) =>
+          await onListEntries(folderBasePath(project.mainPath, base), relative, kinds)
+        }
         portlessInstalled={portlessInstalled}
         onArchive={onArchive}
         slotRefusal={workspacesRefusal}
@@ -442,7 +458,9 @@ export function ProjectSettingsPage({
             steps={recipeLinesOf(recipe)}
             repositories={repositories.map((one) => one.path)}
             commands={recipeCommandsOf(commands)}
-            onBrowse={browseUnderBase}
+            onList={async ({ base, relative, kinds }) =>
+              await onListEntries(folderBasePath(project.mainPath, base), relative, kinds)
+            }
             onAdd={async (step) => await onAddRecipeStep(recipeAddOf(step))}
             onUpdate={async (id, step) => await onUpdateRecipeStep(id, recipeAddOf(step))}
             onRemove={onRemoveRecipeStep}

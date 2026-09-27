@@ -22,6 +22,7 @@ import type {
   ComposerChoice,
   EngineStatus,
   MotionMeasure,
+  PathEntryKind,
   Project,
   Session,
 } from '@hemera/ipc'
@@ -34,6 +35,7 @@ import {
   PROJECT_SETTINGS_ENTRY,
   ProjectDialog,
   Shell,
+  StartScreen,
   type ArchivedProject,
   type CommandGroup,
   type HomeSession,
@@ -68,6 +70,7 @@ import {
   checkAgents,
   chooseOption,
   decide,
+  handOver,
   listenToAgents,
   loadAgents,
   offerAgent,
@@ -143,7 +146,14 @@ import {
   subscribeToSessions,
   writeMessage,
 } from './sessions-store.ts'
-import { closeSpec, forgetSpecRefusal, listenToSpecs, openSpec } from './spec-store.ts'
+import { definedAtOnceOf } from './spec-entries.ts'
+import {
+  closeSpec,
+  forgetSpecRefusal,
+  holdProvisionalSpec,
+  listenToSpecs,
+  openSpec,
+} from './spec-store.ts'
 import {
   closeJournal,
   filterJournal,
@@ -174,6 +184,7 @@ import {
   subscribeToProjects,
   updateRepository,
 } from './projects-store.ts'
+import { patiently } from './patiently.ts'
 import {
   keepActiveProject,
   persistWidthOnRelease,
@@ -263,12 +274,28 @@ function unanswered(channel: string) {
 /**
  * The system's own folder picker, which belongs to the main process.
  *
- * Opened on the folder the caller says the user is working in, when it says one: a command's
- * picker starts where that command runs from. The pages that have nowhere in mind ask for no
+ * Opened on the folder the caller says the user is working in, when it says one: a preparation
+ * step's picker starts where that step works. The pages that have nowhere in mind ask for no
  * start, and the system's own last place is what they get.
  */
 async function pickFolder(start?: string): Promise<string | null> {
   return await window.hemera.invoke('dialog.pickFolder', start === undefined ? {} : { start })
+}
+
+/**
+ * The entries of one folder under a base, which a path field offers as it is typed (#109).
+ *
+ * A refusal — a folder above the base — offers nothing: the field says why on its own, in the
+ * words of its schema, and a list is help rather than a verdict.
+ */
+async function listEntries(
+  base: string,
+  relative: string,
+  kinds: readonly PathEntryKind[],
+): Promise<readonly { name: string; kind: PathEntryKind }[]> {
+  return await window.hemera
+    .invoke('paths.entries', { base, relative, kinds: [...kinds] })
+    .catch(() => [])
 }
 
 /**
@@ -354,6 +381,8 @@ export function Application() {
    * the reader comes back to a Project they already chose an agent in.
    */
   const [composers, setComposers] = useState<Record<string, ComposerChoice>>({})
+  /** Whether the ACP trace of each Session is written, as the settings last said (#131). */
+  const [acpTrace, setAcpTrace] = useState(false)
   /**
    * Which agent is being updated, and what its own tool last said about it (design D5-18).
    *
@@ -367,6 +396,8 @@ export function Application() {
   const [putAway, setPutAway] = useState<Session[]>([])
   /** The Session whose title is being typed into, when one is. */
   const [naming, setNaming] = useState<string | null>(null)
+  /** Whether a new Session was asked for and the Home's composer has not taken the caret yet. */
+  const [focusHome, setFocusHome] = useState(false)
   /** Which Project the window has already decided where to look in. */
   const placed = useRef<string | null>(null)
   /**
@@ -379,6 +410,8 @@ export function Application() {
   const named = useRef(new Set<string>())
   /** The ended turns that already sent the list to be read again for a Session's Workspace. */
   const turnsRead = useRef(new Set<string>())
+  /** The Sessions already read again once New Spec's Spec was created at once in them. */
+  const definedRead = useRef(new Set<string>())
   /** The folder the settings are showing, which is what everything below it is read against. */
   const [shownPath, setShownPath] = useState<string | null>(null)
 
@@ -436,19 +469,28 @@ export function Application() {
   useEffect(() => {
     void loadProjects()
     void loadUnseen()
-    // Where the window was looking last. Read once, and read before anything can decide which
-    // Session to open: the Session an opening lands on is this answer's and no one else's.
-    void window.hemera
-      .invoke('preferences.read', {})
+    // Where the window was looking last. Read before anything can decide which Session to open:
+    // the Session an opening lands on is this answer's and no one else's. Asked again when it
+    // fails, and given up on as a window that remembers nothing: a `remembered` left null is a
+    // window that never opens a Session at all.
+    void patiently(async () => await window.hemera.invoke('preferences.read', {}))
+      .catch((failed: Error) => {
+        unanswered('preferences.read')(failed)
+        return null
+      })
       .then((worn) => {
+        if (worn === null) {
+          setRemembered({})
+          setComposers({})
+          return
+        }
         setRemembered(worn.activeSessions)
         // Nothing where an older data folder, or an engine that predates the preference, answers
         // without it: what a window does then is open on no choice at all, not fall over.
         setComposers(worn.composers ?? {})
+        setAcpTrace(worn.acpTrace)
       })
-      .catch(unanswered('preferences.read'))
-    void window.hemera
-      .invoke('engine.status', {})
+    void patiently(async () => await window.hemera.invoke('engine.status', {}))
       .then((status) => {
         setFacts(factsOf(status))
         setSubtitle(`Hemera ${status.version} · channel ${status.channel}`)
@@ -588,6 +630,18 @@ export function Application() {
       (id) => !turnsRead.current.has(id),
     )
     for (const id of unread) turnsRead.current.add(id)
+    if (unread.length > 0) void readSessions(projectId)
+  }, [agents.sessions, sessions.sessions, shell.activeProjectId])
+
+  // And when New Spec's Spec was created at once, during the agent's turn (issue #205): the
+  // Session turned define with nothing pressed here, and the list says so once it is read again.
+  useEffect(() => {
+    const projectId = shell.activeProjectId
+    if (projectId === null) return
+    const unread = definedAtOnceOf(sessions.sessions, agents.sessions).filter(
+      (id) => !definedRead.current.has(id),
+    )
+    for (const id of unread) definedRead.current.add(id)
     if (unread.length > 0) void readSessions(projectId)
   }, [agents.sessions, sessions.sessions, shell.activeProjectId])
 
@@ -758,10 +812,14 @@ export function Application() {
    * Session exists from the moment that first message is sent, and the message names it (D4b-01):
    * a Session made before there is an agent to answer it would be a thread nothing can be said
    * to, which is exactly what the Home used to make.
+   *
+   * The caret goes into that composer at once (issue #128): what was asked for is a Session, and
+   * the next thing the hand does is type its first message.
    */
   const newSession = useCallback(() => {
     if (shell.activeProjectId === null) return
     goTo(HOME_ENTRY)
+    setFocusHome(true)
   }, [shell.activeProjectId, goTo])
 
   /** Writes a message into a Session, and reads the Journal again when one was written. */
@@ -890,6 +948,11 @@ export function Application() {
     [active, projects, sessions.sessions, open, putAway, goTo, preference, newSession, archive],
   )
 
+  // The start screen `index.html` drew on the first frame stays until the Projects are known:
+  // drawn before, the shell would open on the first launch's page and swap it a moment later for
+  // the Project the window was left on (issue #185).
+  if (!held.loaded) return <StartScreen />
+
   return (
     <Shell
       projects={projects}
@@ -1012,6 +1075,13 @@ export function Application() {
             void window.hemera
               .invoke('shell.open', { what: 'diagnostic' })
               .catch(unanswered('shell.open'))
+          }}
+          acpTrace={acpTrace}
+          onAcpTraceChange={(on) => {
+            setAcpTrace(on)
+            void window.hemera
+              .invoke('preferences.write', { acpTrace: on })
+              .catch(unanswered('preferences.write'))
           }}
           agents={{
             agents: agents.agents.map((one) => ({
@@ -1145,6 +1215,7 @@ export function Application() {
           }}
           folders={folders}
           onBrowse={pickFolder}
+          onListEntries={listEntries}
           onCheckFolder={checkFolder}
           onMainPathChange={setShownPath}
           onAddRepository={async (path) => {
@@ -1196,8 +1267,8 @@ export function Application() {
           onReadPlanWorkspace={async (relativePaths, reading, onRead) =>
             await readPlanRepositories(current.id, null, '', relativePaths, reading, onRead)
           }
-          onCreateDedicated={async (name, worktrees) =>
-            await createDedicated(current.id, name, worktrees)
+          onCreateDedicated={async (name, worktrees, root) =>
+            await createDedicated(current.id, name, worktrees, root)
           }
           onCreateWorkspace={async (path, name) => await createOnFolder(current.id, path, name)}
           onCleanupWorkspace={async (id) => await cleanUp(current.id, id)}
@@ -1226,7 +1297,6 @@ export function Application() {
           // Keyed on the Session: a draft of a title belongs to the Session it is about, and
           // carrying it to the next one would be renaming something nobody asked about.
           key={open.id}
-          projectName={active.name}
           session={open}
           entries={sessions.thread}
           // Read back or not: until the thread has come back, the page says nothing about it
@@ -1260,6 +1330,7 @@ export function Application() {
             window.open(url, '_blank', 'noopener')
           }}
           onStopRun={(runId) => void stopRun(open.id, runId)}
+          onHandOver={() => void handOver(open.id)}
           root={root}
           context={tools.contexts.get(open.id) ?? null}
           // A line that names a command of the catalogue runs that command, in its folder; any
@@ -1286,6 +1357,10 @@ export function Application() {
         sessions={recent}
         entries={linesOf(journal.entries).slice(0, ACTIVITY)}
         agents={agents.agents.map(offeredOf)}
+        // Whether that list is known yet: the menu says it is looking, or that it could not be
+        // read and offers to read it again, rather than drawing an empty list (never "no agent").
+        agentsListing={agents.listing}
+        onRetryAgents={() => void loadAgents()}
         // What this Project's composer was left on, which is what the Home opens on.
         choice={composers[active.id] ?? null}
         offeringOf={(chosen) => offeringOf(active.id, providerOf(chosen))}
@@ -1312,7 +1387,7 @@ export function Application() {
         // Session it opens is opened on them (D5-17). An agent the engine does not know is
         // refused by the engine rather than by a sentence written here.
         workspaces={offeredWorkspacesOf(sessions.workspaces)}
-        onSend={async (text, chosen, workspaceId) => {
+        onSend={async (text, chosen, workspaceId, intent) => {
           const asked = providerOf(chosen)
           const made = await startSession(active.id, asked, workspaceId)
           if (made === null) return sessionsSnapshot().refusal
@@ -1322,9 +1397,14 @@ export function Application() {
           await openSession(made.id)
           // The turn is watched in the Session, which is where the window just went, and the Home
           // does not wait for it: a first answer can take a minute.
-          void say(made.id, text)
+          // With what it was sent for: New Spec shows a provisional Spec at once, saved nowhere,
+          // and the Spec is the one the user accepts from the agent's proposal (issue #198).
+          if (intent === 'spec') holdProvisionalSpec(made.id, text)
+          void say(made.id, text, intent)
           return null
         }}
+        focusComposer={focusHome}
+        onFocusTaken={() => setFocusHome(false)}
       />
     )
   }

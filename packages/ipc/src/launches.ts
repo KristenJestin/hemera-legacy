@@ -10,6 +10,8 @@
 
 import { z } from 'zod'
 
+import { workspaceStateSchema } from './workspaces.ts'
+
 /** Where a launch of a Spec stands (D8-13). */
 export const launchStateSchema = z.enum(['waiting', 'starting', 'started', 'failed', 'cancelled'])
 
@@ -54,8 +56,11 @@ export type Launch = z.infer<typeof launchSchema>
  */
 export const specLaunchesSchema = z.object({
   launch: launchSchema.nullable(),
-  /** The Workspace the Spec is set on (D8-12); null while it has none. */
-  workspace: launchWorkspaceSchema.nullable(),
+  /**
+   * The Workspace the Spec is set on (D8-12), and where it stands: a failed one is resumed and a
+   * cleaned one replaced; null while it has none.
+   */
+  workspace: launchWorkspaceSchema.extend({ state: workspaceStateSchema }).nullable(),
   /** `main`, which every Project has, first, then the Workspaces made by hand. */
   workspaces: z.array(launchWorkspaceSchema),
   /** The step running while it waits, as the Workspace names it (D8-05). */

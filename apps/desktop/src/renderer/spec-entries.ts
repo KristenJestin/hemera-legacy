@@ -5,7 +5,7 @@ import {
   type SessionEntry,
   type SpecType,
 } from '@hemera/ipc'
-import type { MissionBriefProps, ProposalState, SpecAnswer, SpecQuestionView } from '@hemera/ui'
+import type { ProposalState, SpecAnswer, SpecQuestionView } from '@hemera/ui'
 import { z } from 'zod'
 
 /**
@@ -13,13 +13,11 @@ import { z } from 'zod'
  *
  * A `define` step writes four kinds into a Session's thread: the brief a turn rode on, a
  * question of the Spec asked in the chat, the answer given beside it, and — in a `free`
- * Session — the Spec its agent proposes. `agent-blocks.tsx` draws them; this reads them, pure
+ * Session — the Spec its agent proposes. `agent-blocks.tsx` draws the question and the proposal;
+ * this reads them, pure
  * and free of what `@hemera/ui` runs when it loads, so it is tested on Node. A payload that does
  * not parse is an entry this version does not draw, as everywhere in the thread.
  */
-
-/** The brief of a `define` turn, titled with the phase it was composed for. */
-const briefSchema = z.object({ phase: phaseIdSchema.nullable() })
 
 /** A question as its entry carries it: the question view, open when it was asked. */
 const questionSchema = z.object({
@@ -37,8 +35,18 @@ const answerSchema = z.object({
   text: z.string().optional(),
 })
 
-/** What the agent of a `free` Session proposed, through `spec_propose`. */
-const proposalSchema = z.object({ title: z.string(), type: specTypeSchema })
+/**
+ * What the agent of a `free` Session proposed, through `spec_propose`: a Spec to create, or one
+ * that exists, named by its id and its key (issue #198). In a New Spec Session, a Spec to create
+ * is created at once, and the entry carries the key it was given (issue #205).
+ */
+const proposalSchema = z.object({
+  title: z.string(),
+  type: specTypeSchema,
+  specId: z.string().optional(),
+  key: z.string().optional(),
+  createdKey: z.string().optional(),
+})
 
 function parsed<S extends z.ZodType>(schema: S, payload: string): z.infer<S> | null {
   try {
@@ -49,25 +57,14 @@ function parsed<S extends z.ZodType>(schema: S, payload: string): z.infer<S> | n
   }
 }
 
-/** When an entry was written, `HH:MM`, as the thread says a time. */
-function timeOf(at: number): string {
-  return new Date(at).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })
-}
-
 /**
- * The folded line of a turn's brief: `What the agent was told · Shape`, its time, and what was
- * handed. Said as the reader would say it: `mission brief` is the engine's word for it.
+ * Whether a Spec entry draws a row in the thread. The brief a turn rode on does not (issue #205):
+ * it is long and of no interest while the conversation is read, and the Session details' Context
+ * tab lists every brief handed to the agent. Nor does an answer, which its question's card draws
+ * where it was given (issue #199).
  */
-export function briefOf(entry: SessionEntry): MissionBriefProps {
-  const phase = parsed(briefSchema, entry.payload)?.phase ?? null
-  return {
-    title:
-      phase === null
-        ? 'What the agent was told'
-        : `What the agent was told · ${phase.charAt(0).toUpperCase()}${phase.slice(1)}`,
-    detail: timeOf(entry.createdAt),
-    brief: entry.body,
-  }
+export function drawnInThread(entry: SessionEntry): boolean {
+  return entry.kind !== 'mission_brief' && entry.kind !== 'spec_answer'
 }
 
 /** A question as its block draws it, and whether it was left behind by a Rework. */
@@ -119,6 +116,22 @@ function answeredIn(questionId: string, thread: readonly SessionEntry[]): SpecAn
   return null
 }
 
+/**
+ * What an answered question is marked by on the rail, as the reader's messages are (issue #149):
+ * the label of the choice made, or the words typed under `Other`. The answer is drawn by the
+ * question's own card (issue #199), so the mark is the card's; an open question marks nothing.
+ */
+export function questionMarkOf(
+  entry: SessionEntry,
+  thread: readonly SessionEntry[],
+  asked: ReadonlySet<string> | null,
+): string | undefined {
+  const question = questionEntryOf(entry, thread, asked)?.question
+  if (question === undefined || question.answer === null) return undefined
+  const { optionId, text } = question.answer
+  return question.options.find((option) => option.id === optionId)?.label ?? text
+}
+
 /** What the thread finds a question's block by: the page scrolls to it from the register. */
 export function questionAnchor(questionId: string): string {
   return `ask-${questionId}`
@@ -136,6 +149,10 @@ export interface ProposalView {
   title: string
   type: SpecType
   state: ProposalState
+  /** The Spec it points to, when it is one that exists rather than one to create (#198). */
+  existing?: { specId: string; key: string } | undefined
+  /** The key of the Spec Hemera created from it at once, in a New Spec Session (#205). */
+  createdAtOnce?: string | undefined
 }
 
 /**
@@ -145,11 +162,16 @@ export interface ProposalView {
  */
 function createdFrom(thread: readonly SessionEntry[], spec: DefinedSpec): string | null {
   const proposals = thread.filter((entry) => entry.kind === 'spec_proposal')
-  const same = proposals.find((entry) => {
+  // A proposal that points to an existing Spec never created one.
+  const creating = proposals.filter((entry) => {
+    const said = parsed(proposalSchema, entry.payload)
+    return said?.specId === undefined && said?.createdKey === undefined
+  })
+  const same = creating.find((entry) => {
     const said = parsed(proposalSchema, entry.payload)
     return said?.title === spec.title && said.type === spec.type
   })
-  return (same ?? proposals.at(-1))?.id ?? null
+  return (same ?? creating.at(-1))?.id ?? null
 }
 
 /**
@@ -168,11 +190,24 @@ export function proposalOf(
   const proposal = parsed(proposalSchema, entry.payload)
   if (proposal === null) return null
   const { title, type } = proposal
+  // Created at once (issue #205): nothing was asked, and nothing waits for an answer.
+  if (proposal.createdKey !== undefined) {
+    return { title, type, state: 'created', createdAtOnce: proposal.createdKey }
+  }
+  const existing =
+    proposal.specId === undefined || proposal.key === undefined
+      ? undefined
+      : { specId: proposal.specId, key: proposal.key }
+  const view = existing === undefined ? { title, type } : { title, type, existing }
   if (specId === null) {
-    return { title, type, state: entry.state === 'declined' ? 'declined' : 'proposed' }
+    return { ...view, state: entry.state === 'declined' ? 'declined' : 'proposed' }
+  }
+  // The Spec pointed to is continued once the Session defines it, whatever else it defines.
+  if (existing !== undefined) {
+    return { ...view, state: specId === existing.specId ? 'created' : 'declined' }
   }
   if (spec === null) return null
-  return { title, type, state: createdFrom(thread, spec) === entry.id ? 'created' : 'declined' }
+  return { ...view, state: createdFrom(thread, spec) === entry.id ? 'created' : 'declined' }
 }
 
 /** What the engine names a proposal by: its entry's correlation, without the prefix. */
@@ -200,4 +235,25 @@ export function waitsForAnswer(
     return block !== null && block.question.answer === null && !block.cancelled
   }
   return false
+}
+
+/**
+ * The Sessions the list still says are `free` whose thread holds a Spec Hemera created at once
+ * (issue #205): the Session turned `define` during the agent's turn, with nothing pressed on this
+ * side, so the list is read again and the Spec takes the provisional one's place in the panel.
+ */
+export function definedAtOnceOf(
+  sessions: readonly { readonly id: string; readonly mission: string }[],
+  pushed: ReadonlyMap<string, { readonly entries: readonly SessionEntry[] }>,
+): string[] {
+  return sessions
+    .filter((one) => one.mission === 'free')
+    .filter((one) =>
+      (pushed.get(one.id)?.entries ?? []).some(
+        (entry) =>
+          entry.kind === 'spec_proposal' &&
+          parsed(proposalSchema, entry.payload)?.createdKey !== undefined,
+      ),
+    )
+    .map((one) => one.id)
 }

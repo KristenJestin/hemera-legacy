@@ -32,6 +32,7 @@ import {
   offeredTools,
   runsInMain,
 } from '@hemera/core'
+import { and, eq } from 'drizzle-orm'
 import { Context, Deferred, Effect, Layer } from 'effect'
 import { mkdir, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises'
 import { basename, dirname, join, relative } from 'node:path'
@@ -44,6 +45,7 @@ import { Sessions, type ThreadWrite } from '../sessions.ts'
 import { Specs } from '../specs/specs.ts'
 import type { DescribedWorkspace } from '../workspaces/described.ts'
 import { Database } from '../storage/database.ts'
+import { contextDeliveries } from '../storage/schema.ts'
 import { Variables } from '../workspaces/variables.ts'
 import { mutate } from '../transaction.ts'
 import { ToolAccess } from './access.ts'
@@ -297,7 +299,21 @@ export const toolCatalogueLayer: Layer.Layer<
         Effect.tap((written) => Effect.sync(() => notices.wrote(sessionId, written.entry))),
       )
 
-    const spec = specTools({ specs, sessions, held, inThread })
+    /** Whether a Session's agent was handed New Spec's request: a Session New Spec started. */
+    const askedForSpec = (sessionId: string) =>
+      database
+        .select({ id: contextDeliveries.id })
+        .from(contextDeliveries)
+        .where(
+          and(eq(contextDeliveries.sessionId, sessionId), eq(contextDeliveries.kind, 'request')),
+        )
+        .limit(1)
+        .pipe(
+          Effect.map((rows) => rows.length > 0),
+          Effect.orElseSucceed(() => false),
+        )
+
+    const spec = specTools({ specs, sessions, held, inThread, askedForSpec })
 
     /**
      * The answers already given, per Session and by tool and key, so a retry is answered and not
@@ -1107,6 +1123,19 @@ export const toolCatalogueLayer: Layer.Layer<
                 ? 'reads from: nothing but the root'
                 : `reads from: ${repositories.join(', ')}`,
             ]
+            // Its Specs, so the agent of a New Spec checks what exists before proposing one: a
+            // second Spec for the same thing is what the user would not know was made (#198).
+            const listed = yield* answered(specs.list(projectId))
+            if (listed === undefined) {
+              lines.push('specs: they could not be read')
+            } else if (listed.length === 0) {
+              lines.push('specs: none')
+            } else {
+              lines.push(
+                'specs:',
+                ...listed.map((one) => `${one.key} ${one.type} ${one.status}: ${one.title}`),
+              )
+            }
             return completed(`read the Project ${projectName}`, lines.join('\n'))
           }
 

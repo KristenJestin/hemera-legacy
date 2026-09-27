@@ -1,6 +1,7 @@
 import { hemeraToolNamed } from '@hemera/core'
 import type { CommandRun as Run, SessionEntry, SpecType } from '@hemera/ipc'
 import {
+  AgentReport,
   AgentText,
   CommandProposal,
   CommandRun,
@@ -10,7 +11,6 @@ import {
   HemeraToolCall,
   type HemeraToolStatus,
   MessageGroup,
-  MissionBrief,
   PermissionRequest,
   SpecQuestion,
   StoppedTurn,
@@ -32,12 +32,16 @@ import type { ReactNode } from 'react'
 import { z } from 'zod'
 
 import {
+  agentReportOf,
   commandProposalOf,
   commandRunOf,
   contextDeliveryOf,
   elsewhereOf,
+  failureNoteOf,
   hemeraPermissionOf,
   hemeraToolCallOf,
+  reportedFailureOf,
+  stoppedTurnOf,
   hemeraToolLabelOf,
   nativeSubjectOf,
   questionOpen,
@@ -45,7 +49,7 @@ import {
 } from './agent-tool-payloads.ts'
 import {
   type DefinedSpec,
-  briefOf,
+  drawnInThread,
   proposalIdOf,
   proposalOf,
   questionAnchor,
@@ -149,8 +153,6 @@ const decisionSchema = z.object({
   toolCallId: z.string(),
   optionId: z.string().nullable(),
 })
-
-const turnSchema = z.object({ stopReason: z.string() })
 
 const planSchema = z.object({ entries: z.array(planEntrySchema) })
 
@@ -324,6 +326,8 @@ export interface AgentContext {
   onOpenUrl: (url: string) => void
   /** Stops a run and everything it started. */
   onStopRun: (runId: string) => void
+  /** Hands the agent again what waits for it, after a delivery it did not take (issue #211). */
+  onHandOver: () => void
   /**
    * The agent's report of a call, by the identifier the agent gave it: what a question about
    * that call is headed by — the label and the subject of its line (recette 3 of 23 September
@@ -350,8 +354,15 @@ export interface SpecContext {
   defined: DefinedSpec | null
   /** The ids of the current revision's questions, null until the Spec is read. */
   asked: ReadonlySet<string> | null
+  /**
+   * The question entries the page pinned above the composer while it was open: answered, one of
+   * them comes back to the thread answered in front of the reader, and draws its check there.
+   */
+  waited: ReadonlySet<string>
   onAnswer: (questionId: string, answer: SpecAnswer) => void
   onCreate: (title: string, type: SpecType) => void
+  /** `Continue it`: this Session defines the existing Spec the agent pointed to (issue #198). */
+  onJoin: (proposalId: string) => void
   /** `Not now`: the engine keeps the proposal declined and tells the agent (issue #130). */
   onDecline: (proposalId: string) => void
 }
@@ -397,6 +408,8 @@ export function drawEntry(entry: SessionEntry, context: AgentContext): ReactNode
           subject={subjectOf(hemera, call.rawInput?.text ?? '', context.runs)}
           status={reportedStatus(call.status)}
           summary={call.title}
+          // What the agent was answered, when Hemera never was asked: the call's only reason.
+          error={reportedFailureOf(entry)}
           defaultOpen={false}
         />
       )
@@ -420,7 +433,9 @@ export function drawEntry(entry: SessionEntry, context: AgentContext): ReactNode
         }))}
         input={boundedNode(input)}
         output={boundedNode(output)}
-        error={call.status === 'failed' ? entry.body : undefined}
+        // Why it failed, in words: its output already says it where there is one, and its name
+        // said nothing (issue #198).
+        error={call.status === 'failed' && output === null ? reportedFailureOf(entry) : undefined}
       />
     )
   }
@@ -517,30 +532,28 @@ export function drawEntry(entry: SessionEntry, context: AgentContext): ReactNode
   }
 
   if (entry.kind === 'turn') {
-    const read = readPayload(turnSchema, entry.payload)
     // A turn that simply ended is not news: the agent's answer above it is. What is worth a line
     // is a turn that stopped for a reason the reader has to know about (D5-13).
-    if (read === null || read.stopReason === 'end_turn') return null
+    const stopped = stoppedTurnOf(entry)
+    if (stopped === null) return null
     return (
       <StoppedTurn
-        doing={entry.body}
+        reason={stopped.reason}
         at={new Date(entry.createdAt).toLocaleTimeString('en-GB', {
           hour: '2-digit',
           minute: '2-digit',
         })}
-        byTheReader={read.stopReason === 'cancelled'}
+        byTheReader={stopped.byTheReader}
       />
     )
   }
 
-  // The brief a `define` turn rode on: Hemera's line, folded, never a message of yours (D7-09).
-  if (entry.kind === 'mission_brief') {
-    const { title, detail, brief } = briefOf(entry)
-    return <MissionBrief title={title} detail={detail} brief={brief} />
-  }
+  // The brief a `define` turn rode on is listed in the Session details' Context tab, and draws no
+  // row here (issue #205); an answer is drawn by its question's card, where it was given (#199).
+  if (!drawnInThread(entry)) return null
 
-  // A question of the Spec, asked here and answered here (D7-01). The answer written beside it is
-  // drawn by the question itself, folded to what was chosen, and has no block of its own.
+  // A question of the Spec, asked here and answered here (D7-01). Once answered it stays as it was
+  // asked, the choice made marked in it (issue #199).
   if (entry.kind === 'spec_question') {
     const block = questionEntryOf(entry, context.spec.thread, context.spec.asked)
     if (block === null) return null
@@ -550,15 +563,15 @@ export function drawEntry(entry: SessionEntry, context: AgentContext): ReactNode
         <SpecQuestion
           question={question}
           cancelled={cancelled}
+          arrives={context.spec.waited.has(entry.id)}
           onAnswer={(answer) => context.spec.onAnswer(question.id, answer)}
         />
       </div>
     )
   }
 
-  if (entry.kind === 'spec_answer') return null
-
-  // The Spec the agent of a `free` Session proposed, which `Create` accepts (D7-07).
+  // The Spec the agent of a `free` Session proposed, which `Create` accepts (D7-07), or which
+  // Hemera created at once in a Session New Spec started (issue #205).
   if (entry.kind === 'spec_proposal') {
     const { thread, specId, defined } = context.spec
     const proposal = proposalOf(entry, thread, specId, defined)
@@ -568,7 +581,10 @@ export function drawEntry(entry: SessionEntry, context: AgentContext): ReactNode
         title={proposal.title}
         type={proposal.type}
         state={proposal.state}
-        createdKey={defined?.key}
+        createdKey={proposal.createdAtOnce ?? defined?.key}
+        atOnce={proposal.createdAtOnce !== undefined}
+        existingKey={proposal.existing?.key}
+        onContinue={() => context.spec.onJoin(proposalIdOf(entry))}
         onCreate={context.spec.onCreate}
         onDecline={() => context.spec.onDecline(proposalIdOf(entry))}
       />
@@ -576,6 +592,34 @@ export function drawEntry(entry: SessionEntry, context: AgentContext): ReactNode
   }
 
   if (entry.kind === 'note') {
+    // An error a turn failed with is a row in words, never the raw error as a line of Hemera's.
+    const failure = failureNoteOf(entry)
+    if (failure !== null) {
+      return (
+        <AgentReport
+          title={failure.title}
+          detail={failure.detail}
+          at={new Date(entry.createdAt).toLocaleTimeString('en-GB', {
+            hour: '2-digit',
+            minute: '2-digit',
+          })}
+          onRetry={failure.retry ? context.onHandOver : undefined}
+        />
+      )
+    }
+    const report = agentReportOf(entry)
+    if (report !== null) {
+      return (
+        <AgentReport
+          title={report.title}
+          detail={report.detail}
+          at={new Date(entry.createdAt).toLocaleTimeString('en-GB', {
+            hour: '2-digit',
+            minute: '2-digit',
+          })}
+        />
+      )
+    }
     return (
       <MessageGroup author="hemera" name="Hemera" lines={[{ id: entry.id, body: entry.body }]} />
     )
@@ -627,7 +671,13 @@ export function drawEntry(entry: SessionEntry, context: AgentContext): ReactNode
     const drawn = contextDeliveryOf(entry)
     if (drawn === null) return null
     return (
-      <MessageGroup author="hemera" name="Hemera" lines={[{ id: drawn.id, body: drawn.body }]} />
+      <MessageGroup
+        author="hemera"
+        name="Hemera"
+        // What still waits for the agent is a state of Hemera's, said as a quiet row (#211).
+        tone={drawn.waiting ? 'ghost' : undefined}
+        lines={[{ id: drawn.id, body: drawn.body }]}
+      />
     )
   }
 

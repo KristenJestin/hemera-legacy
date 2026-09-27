@@ -32,14 +32,17 @@ import {
   type Spec,
   type SpecSnapshot,
   WORKSPACE_STATES,
+  type WorkspaceState,
   focusOf,
   renderSpecMarkdown,
 } from '@hemera/core'
-import { type SQL, and, desc, eq, inArray } from 'drizzle-orm'
-import { Context, Data, Effect, Layer, Result } from 'effect'
+import { type SQL, and, desc, eq, inArray, ne } from 'drizzle-orm'
+import { Context, Data, Duration, Effect, Layer, Result } from 'effect'
 
 import { AgentNotices } from '../agents/notices.ts'
 import { AgentRuntime } from '../agents/runtime.ts'
+import { StderrSink } from '../agents/supervisor.ts'
+import { DomainEvents } from '../domain-events.ts'
 import { type InvalidCursorError, type NewEvent } from '../journal.ts'
 import { Preferences } from '../preferences.ts'
 import { Sessions, type UnknownSessionError, WorkspaceNotReadyError } from '../sessions.ts'
@@ -62,8 +65,7 @@ import {
   workspaces,
 } from '../storage/schema.ts'
 import { type Mutation, type StaleVersionError, mutate } from '../transaction.ts'
-import { UnknownWorkspaceError } from './described.ts'
-import { launchEvent } from './launch-journal.ts'
+import { UnknownWorkspaceError, WorkspaceTakenError, takenBy } from './described.ts'
 
 /** One launch as the interface reads it: the Spec, the revision, the Workspace, the build. */
 export interface LaunchView {
@@ -105,6 +107,7 @@ export type LaunchRefusal =
   | UnknownSpecError
   | UnknownRevisionError
   | UnknownWorkspaceError
+  | WorkspaceTakenError
   | WorkspaceNotReadyError
   | EmptyTitleError
   | InvalidCursorError
@@ -114,7 +117,10 @@ export type LaunchRefusal =
 
 export interface LaunchesService {
   readonly one: (id: string) => Effect.Effect<LaunchView, LaunchRefusal>
-  /** Asks for a build of a ready Spec in a Workspace: `waiting`, or started at once if it is ready. */
+  /**
+   * Asks for a build of a ready Spec in a Workspace, answered `waiting` once the launch is written;
+   * on a Workspace already ready the build starts right after, in the engine (#132).
+   */
   readonly request: (
     specId: string,
     workspaceId: string,
@@ -123,11 +129,14 @@ export interface LaunchesService {
   readonly workspaceReady: (workspaceId: string) => Effect.Effect<void, LaunchRefusal>
   /**
    * What the engine does once, at its own start (D8-05, D8-13): the launches an engine that
-   * stopped left `starting` are `failed`, and the ones it left `waiting` on a Workspace that is
-   * already ready start now.
+   * stopped left `starting` are started again, and the ones it left `waiting` on a Workspace that
+   * is already ready start now. Answered at once: the work runs in the background (#132).
    */
   readonly recover: () => Effect.Effect<void, LaunchRefusal>
-  /** Starts a build that failed, again: its Session, its revision and its Workspace stand. */
+  /**
+   * Starts a build that failed, again: its Session, its revision and its Workspace stand.
+   * Answered `starting`; the agent is asked right after, in the engine (#132).
+   */
   readonly retry: (id: string) => Effect.Effect<LaunchView, LaunchRefusal>
   /** The whole panel of a Spec: its launch, its Workspace, and the ones a build may use (D8-12). */
   readonly forSpec: (specId: string) => Effect.Effect<SpecLaunchesView, LaunchRefusal>
@@ -135,11 +144,99 @@ export interface LaunchesService {
 
 export class Launches extends Context.Service<Launches, LaunchesService>()('Launches') {}
 
+/**
+ * How long the agent of a build is given to start: a spawn, a handshake and a `session/new`, a
+ * cold one included (#132). Past it the launch is `failed`, saying so, and `Retry` is offered
+ * instead of a "Starting the agent…" that never ends. A suite hands a shorter one.
+ */
+export const StartDeadline = Context.Reference<Duration.Duration>('LaunchStartDeadline', {
+  defaultValue: () => Duration.minutes(2),
+})
+
 /** What a launch waiting on a Workspace whose preparation failed is told (D8-13). */
 const NOT_PREPARED = 'The Workspace could not be prepared'
 
 /** What a launch waiting on a Workspace that was cleaned up is told (D8-13). */
 const REMOVED = 'The Workspace was removed'
+
+/** What a Rework says of the launches it cancels: the revision they waited for is gone (D8-13). */
+const REWORKED = 'reworked'
+
+/** What the Journal says of a launch: the entity is the launch itself (D8-16). */
+function launchEvent(
+  launch: { readonly id: string; readonly specId: string; readonly revisionId: string },
+  projectId: string,
+  type: string,
+  payload: Record<string, string | null>,
+  author: 'human' | 'hemera',
+): NewEvent {
+  return {
+    type,
+    entityKind: 'launch',
+    entityId: launch.id,
+    source: author === 'human' ? 'ui' : 'system',
+    author,
+    projectId,
+    payload: { specId: launch.specId, revisionId: launch.revisionId, ...payload },
+  }
+}
+
+/**
+ * The launches a Rework cancelled (D8-13, #113): every launch that has not started — the one still
+ * `waiting` for its environment, and the one whose agent failed — on a revision its Spec has left
+ * becomes `cancelled`, saying `reworked`. Only a Rework moves a Spec off a revision, so a launch
+ * there is one a Rework took the revision from.
+ *
+ * It reads the Spec's state rather than the Rework as it passed: the one Spec a Rework named, when
+ * the launches hear it, and every Spec at the engine's start, for a Rework the engine stopped
+ * before hearing. Nothing of the Workspace is touched: its worktrees and its steps are what they
+ * were, and the new revision has to reach `ready` and be launched by hand.
+ */
+function cancelReworked(
+  transaction: EngineTransaction,
+  specId: string | null,
+): Effect.Effect<readonly Reworked[], DatabaseError> {
+  return Effect.gen(function* () {
+    const left = yield* transaction
+      .select({ launch: buildLaunches, projectId: specs.projectId })
+      .from(buildLaunches)
+      .innerJoin(specs, eq(specs.id, buildLaunches.specId))
+      .where(
+        and(
+          specId === null ? undefined : eq(buildLaunches.specId, specId),
+          inArray(buildLaunches.state, ['waiting', 'failed']),
+          ne(buildLaunches.revisionId, specs.currentRevisionId),
+        ),
+      )
+      .pipe(Effect.mapError(failed('reading the launches a Rework cancels')))
+    if (left.length === 0) return []
+    const at = now()
+    yield* transaction
+      .update(buildLaunches)
+      .set({ state: 'cancelled', detail: REWORKED, updatedAt: at })
+      .where(
+        inArray(
+          buildLaunches.id,
+          left.map(({ launch }) => launch.id),
+        ),
+      )
+      .pipe(Effect.mapError(failed('cancelling the launches of the Spec')))
+    return left.map(({ launch, projectId }) => ({
+      id: launch.id,
+      specId: launch.specId,
+      projectId,
+      event: launchEvent(launch, projectId, 'launch.cancelled', { reason: REWORKED }, 'human'),
+    }))
+  })
+}
+
+/** A launch a Rework cancelled: which one, whose Spec, and its Journal line. */
+interface Reworked {
+  readonly id: string
+  readonly specId: string
+  readonly projectId: string
+  readonly event: NewEvent
+}
 
 /**
  * The launches still waiting on a Workspace that will never be ready: ended, saying why, in the
@@ -199,13 +296,21 @@ export interface LaunchWorkspaceView {
 }
 
 /**
+ * The Workspace a Spec is set on, and where it stands: a failed one is resumed and a cleaned one
+ * replaced, rather than started in (D8-12).
+ */
+export interface SpecWorkspaceView extends LaunchWorkspaceView {
+  readonly state: WorkspaceState
+}
+
+/**
  * What the panel of a Spec is drawn from (D8-12, D8-13), read whole: the launch of its build and
  * where that build stands, the Workspace the Spec is set on, the ones a build of it may be
  * started in, and the step the launch is waiting on while its Workspace is prepared.
  */
 export interface SpecLaunchesView {
   readonly launch: LaunchView | null
-  readonly workspace: LaunchWorkspaceView | null
+  readonly workspace: SpecWorkspaceView | null
   readonly workspaces: LaunchWorkspaceView[]
   /** The preparation step running while it waits, as the Workspace names it (D8-05). */
   readonly step: string | null
@@ -219,6 +324,11 @@ export const launchesLayer = Layer.effect(
     const preferences = yield* Preferences
     const runtime = yield* AgentRuntime
     const notices = yield* AgentNotices
+    /** The engine's diagnostic log: where a start run in the background says what it could not. */
+    const diagnostic = yield* StderrSink
+    /** The engine's own scope: a start run in the background ends when the engine does (#132). */
+    const scope = yield* Effect.scope
+    const domainEvents = yield* DomainEvents
 
     const withDatabase = <A, E>(effect: Effect.Effect<A, E, Database>): Effect.Effect<A, E> =>
       effect.pipe(Effect.provideService(Database, database))
@@ -329,7 +439,22 @@ export const launchesLayer = Layer.effect(
         if ((yield* briefs(sessionId)).length === 0) {
           yield* writeBrief(sessionId, yield* readLaunched(launch.specId, launch.revisionId))
         }
-        const handshake = yield* Effect.result(runtime.start(sessionId))
+        // Bounded by the agent's start deadline (#132): an agent that never answers its handshake
+        // is a launch `failed` that offers `Retry`, not one "Starting the agent…" for ever.
+        const deadline = yield* StartDeadline
+        const handshake = yield* Effect.result(
+          runtime.start(sessionId).pipe(
+            Effect.timeoutOrElse({
+              duration: deadline,
+              orElse: () =>
+                Effect.fail(
+                  new LaunchRefusedError({
+                    reason: `it did not answer within ${String(Duration.toSeconds(deadline))} seconds`,
+                  }),
+                ),
+            }),
+          ),
+        )
         const at = now()
         const answered: LaunchView = Result.isSuccess(handshake)
           ? { ...launch, state: 'started', sessionId, detail: null, updatedAt: at }
@@ -411,13 +536,17 @@ export const launchesLayer = Layer.effect(
      * The Session is written in the transaction that says `starting`, before the agent is asked:
      * a start that fails is started again on that same Session, so it has to be there first, and
      * its row carries the revision and the Workspace for good (D8-13).
+     *
+     * `claim` is this starter's token: the identifier of the Session it writes, written with
+     * `starting`. It is what tells the launch this start holds from one another starter took, and
+     * `refused` writes `failed` only on its own (#121).
      */
-    const start = (asked: LaunchView) =>
+    const start = (asked: LaunchView, claim: string) =>
       Effect.gen(function* () {
         const snapshot = yield* readLaunched(asked.specId, asked.revisionId)
         const projectId = snapshot.spec.projectId
         const agent = yield* agentOf(snapshot.spec)
-        const sessionId = crypto.randomUUID()
+        const sessionId = claim
         const starting = yield* withDatabase(
           mutate('starting the build', (transaction) =>
             Effect.gen(function* () {
@@ -435,6 +564,15 @@ export const launchesLayer = Layer.effect(
               }
               if (row.state !== 'waiting') {
                 return { result: viewOf(row), events: [] } satisfies Mutation<LaunchView>
+              }
+              // A Rework the launches have not heard yet took the revision this one waited on:
+              // it is cancelled here, never built on a revision the Spec has left (#113).
+              const reworked = yield* cancelReworked(transaction, row.specId)
+              if (reworked.some((each) => each.id === row.id)) {
+                return {
+                  result: { ...viewOf(row), state: 'cancelled' as const, detail: REWORKED },
+                  events: reworked.map((each) => each.event),
+                } satisfies Mutation<LaunchView>
               }
               // The Workspace is read again here, in the very transaction that writes the
               // Session (D8-08): one cleaned up or failed since the launch was written gets no
@@ -507,8 +645,9 @@ export const launchesLayer = Layer.effect(
           ),
         ).pipe(Effect.tap((held) => tell(held, projectId)))
         // Another starter — a request and the Workspace becoming ready at once — took the launch
-        // between the two reads: what it said of the build is not this caller's to say again.
-        if (starting.state !== 'starting') return starting
+        // between the two reads: what it said of the build is not this caller's to say again, and
+        // a launch it holds `starting` is its own, not this one's (#121).
+        if (starting.state !== 'starting' || starting.sessionId !== claim) return starting
         yield* writeBrief(sessionId, snapshot)
         return yield* settled(starting, sessionId, projectId)
       })
@@ -518,8 +657,16 @@ export const launchesLayer = Layer.effect(
      * what the caller is answered with. Its Session, when the start got that far, stands for a
      * `retry` to start again. A launch this start no longer holds — a Rework cancelled it,
      * another starter took it — is left where it stands, and the caller is answered with it.
+     *
+     * `claim` is the token the start holds the launch by (the Session it writes with `starting`):
+     * a launch `starting` on another token is another starter's (#121).
      */
-    const refused = (launch: LaunchView, projectId: string, refusal: LaunchRefusal) =>
+    const refused = (
+      launch: LaunchView,
+      projectId: string,
+      claim: string,
+      refusal: LaunchRefusal,
+    ) =>
       Effect.gen(function* () {
         const at = now()
         const detail = refusal.message
@@ -540,9 +687,11 @@ export const launchesLayer = Layer.effect(
               }
               // A launch that is no longer this refusal's to write is left where it stands, and
               // nothing is said of it (D8-13): a Rework that cancelled it, or another starter
-              // that took it, is not undone by the start that lost it.
+              // that took it, is not undone by the start that lost it. `waiting` is nobody's
+              // claim yet; `starting` is this start's only on its own token (#121).
               const held = LAUNCH_STATES.find((known) => known === row.state)
-              if (held !== 'waiting' && held !== 'starting') {
+              const ours = held === 'waiting' || (held === 'starting' && row.sessionId === claim)
+              if (!ours) {
                 return { result: viewOf(row), events: [] } satisfies Mutation<LaunchView>
               }
               yield* transaction
@@ -570,6 +719,28 @@ export const launchesLayer = Layer.effect(
       })
 
     /**
+     * A start run after the answer, in the engine (#132): the window was answered once the launch
+     * was written and follows the rest through `launch.changed`. What refuses it is said on the
+     * launch, as for every other starter; a launch that cannot even say so goes to the diagnostic.
+     */
+    const inBackground = (
+      launch: LaunchView,
+      projectId: string,
+      claim: string,
+      starting: Effect.Effect<LaunchView, LaunchRefusal>,
+    ) =>
+      Effect.forkIn(scope)(
+        starting.pipe(
+          Effect.catch((refusal) => refused(launch, projectId, claim, refusal)),
+          Effect.catch((failure) =>
+            diagnostic.write(
+              `starting the build of the launch ${launch.id} failed: ${failure.message}`,
+            ),
+          ),
+        ),
+      ).pipe(Effect.asVoid)
+
+    /**
      * Starts each of them on its own (D8-13): one that is refused is `failed` with what refused
      * it, and the next ones still start — one Project left on nothing holds back nothing beside
      * it.
@@ -579,11 +750,13 @@ export const launchesLayer = Layer.effect(
     ) =>
       Effect.forEach(
         waiting,
-        ({ launch, projectId }) =>
-          start(launch).pipe(
-            Effect.catch((refusal) => refused(launch, projectId, refusal)),
+        ({ launch, projectId }) => {
+          const claim = crypto.randomUUID()
+          return start(launch, claim).pipe(
+            Effect.catch((refusal) => refused(launch, projectId, claim, refusal)),
             Effect.asVoid,
-          ),
+          )
+        },
         { discard: true },
       )
 
@@ -609,13 +782,59 @@ export const launchesLayer = Layer.effect(
       })
 
     /**
+     * The launches a Rework cancelled — of one Spec, or of every one when `specId` is null —
+     * written with their Journal lines, and the window told of each Spec whose launch changed.
+     */
+    const cancelledByRework = (specId: string | null) =>
+      withDatabase(
+        mutate('cancelling the launches a Rework left', (transaction) =>
+          cancelReworked(transaction, specId).pipe(
+            Effect.map(
+              (reworked) =>
+                ({
+                  result: reworked,
+                  events: reworked.map((each) => each.event),
+                }) satisfies Mutation<readonly Reworked[]>,
+            ),
+          ),
+        ),
+      ).pipe(
+        Effect.tap((reworked) =>
+          Effect.sync(() => {
+            for (const each of reworked) notices.launched(each.specId, each.projectId)
+          }),
+        ),
+      )
+
+    // A Rework says that the Spec was reworked, and the launches follow it (D8-13, #113). A
+    // cancellation that cannot be written goes to the diagnostic: the Spec's state still says it,
+    // and the next start of the engine cancels it.
+    yield* domainEvents.follow('spec.reopened', (event) =>
+      event.specId === null || event.specId === undefined
+        ? Effect.void
+        : cancelledByRework(event.specId).pipe(
+            Effect.asVoid,
+            Effect.catch((failure) =>
+              diagnostic.write(`cancelling the launches a Rework left failed: ${failure.message}`),
+            ),
+          ),
+    )
+
+    /**
      * The launches an engine that stopped left behind (D8-05, D8-13): one it left `starting` is
      * started again on its Session — the agent of that Session, no new one, as the builds that
      * were running are resumed — and one it left `waiting` on a Workspace that is already ready
      * starts now.
+     *
+     * Nothing of it is waited on (#132): an agent that never answers held the engine's start, and
+     * with it every request of the window. It runs in the background, each start bounded by the
+     * agent's deadline, and a launch it cannot start again is `failed` with its cause.
      */
-    const recover = () =>
+    const recovering = () =>
       Effect.gen(function* () {
+        // A Rework the engine stopped before the launches heard it: what waited on the revision
+        // it left is cancelled first, so nothing below starts a build of it (#113).
+        yield* cancelledByRework(null)
         const left = yield* withDatabase(
           reading('reading the launches a stopped engine left', (transaction) =>
             transaction
@@ -632,14 +851,16 @@ export const launchesLayer = Layer.effect(
         // that never got that far (D8-13).
         yield* Effect.forEach(
           left,
-          ({ launch, projectId }) =>
-            settled(
-              viewOf(launch),
-              // SAFETY: the claim writes the Session in the very transaction that says
-              // `starting`, so a launch a stopped engine left there holds one.
-              launch.sessionId as string,
-              projectId,
-            ),
+          ({ launch, projectId }) => {
+            // SAFETY: the claim writes the Session in the very transaction that says `starting`,
+            // so a launch a stopped engine left there holds one — and it is the claim's token.
+            const claim = launch.sessionId as string
+            return settled(viewOf(launch), claim, projectId).pipe(
+              // One that cannot be started again says why, and the next ones still start.
+              Effect.catch((refusal) => refused(viewOf(launch), projectId, claim, refusal)),
+              Effect.asVoid,
+            )
+          },
           { discard: true },
         )
         // A Workspace that was made ready by an engine that stopped before its ready step: what
@@ -662,6 +883,17 @@ export const launchesLayer = Layer.effect(
           waiting.map(({ launch, projectId }) => ({ launch: viewOf(launch), projectId })),
         )
       })
+
+    const recover = () =>
+      Effect.forkIn(scope)(
+        recovering().pipe(
+          Effect.catch((failure) =>
+            diagnostic.write(
+              `coming back to the launches a stopped engine left failed: ${failure.message}`,
+            ),
+          ),
+        ),
+      ).pipe(Effect.asVoid)
 
     /**
      * The panel of a Spec, read whole in one transaction (D8-12): the launch asked for last and
@@ -716,7 +948,15 @@ export const launchesLayer = Layer.effect(
                     )
             return {
               launch,
-              workspace: worked === undefined ? null : { id: worked.id, name: worked.name },
+              workspace:
+                worked === undefined
+                  ? null
+                  : {
+                      id: worked.id,
+                      name: worked.name,
+                      // The column is checked against `WORKSPACE_STATES`; this is the narrowing.
+                      state: WORKSPACE_STATES.find((known) => known === worked.state) ?? 'ready',
+                    },
               // `main` first: the Workspace every Project has, then the ones made by hand.
               workspaces: [
                 ...offered.filter((each) => each.name === MAIN_WORKSPACE),
@@ -782,6 +1022,12 @@ export const launchesLayer = Layer.effect(
                 if (state === undefined || state === 'cleaned' || state === 'failed') {
                   return yield* Effect.fail(new WorkspaceNotReadyError(chosen.name, chosen.state))
                 }
+                // One Spec, one Workspace (D8-12): a Workspace made for another Spec is that
+                // Spec's build's, and the engine refuses it whatever the window offers.
+                const taken = yield* takenBy(transaction, workspaceId, specId)
+                if (taken !== null) {
+                  return yield* Effect.fail(new WorkspaceTakenError(chosen.name, taken))
+                }
                 const id = crypto.randomUUID()
                 const at = now()
                 yield* transaction
@@ -839,10 +1085,15 @@ export const launchesLayer = Layer.effect(
           // What refuses it is said on the launch, as it is for every other starter: left `waiting`
           // (or `starting`), a start that failed is one the user waits on for ever, asks again for,
           // and the engine starts on the way back — two Sessions for one request (D8-13).
-          if (!asked.ready) return asked.launch
-          return yield* start(asked.launch).pipe(
-            Effect.catch((refusal) => refused(asked.launch, asked.projectId, refusal)),
-          )
+          //
+          // The request is answered once the launch is written, never after the agent (#132): a
+          // cold start outlives the few seconds the window gives a request, and the window follows
+          // the launch through `launch.changed` as it does while a Workspace is prepared.
+          if (asked.ready) {
+            const claim = crypto.randomUUID()
+            yield* inBackground(asked.launch, asked.projectId, claim, start(asked.launch, claim))
+          }
+          return asked.launch
         }),
 
       forSpec,
@@ -862,17 +1113,25 @@ export const launchesLayer = Layer.effect(
               Effect.gen(function* () {
                 // The launch is re-read in the very transaction that writes it (D8-13): a Rework
                 // may have cancelled it since it was read above, and writing `starting` over a
-                // cancelled launch starts a build nobody asked for.
+                // cancelled launch starts a build nobody asked for. One on a revision the Spec has
+                // left is a Rework the launches have not heard yet, and is refused the same (#113).
                 const held = yield* transaction
-                  .select({ state: buildLaunches.state, sessionId: buildLaunches.sessionId })
+                  .select({
+                    state: buildLaunches.state,
+                    sessionId: buildLaunches.sessionId,
+                    revisionId: buildLaunches.revisionId,
+                    current: specs.currentRevisionId,
+                  })
                   .from(buildLaunches)
+                  .innerJoin(specs, eq(specs.id, buildLaunches.specId))
                   .where(eq(buildLaunches.id, launch.id))
                   .pipe(Effect.mapError(failed('reading the launch')))
                 const claimed = held[0]
                 if (
                   claimed === undefined ||
                   claimed.state !== 'failed' ||
-                  claimed.sessionId === null
+                  claimed.sessionId === null ||
+                  claimed.revisionId !== claimed.current
                 ) {
                   return yield* Effect.fail(
                     new LaunchRefusedError({
@@ -893,7 +1152,16 @@ export const launchesLayer = Layer.effect(
               }),
             ),
           ).pipe(Effect.tap((held) => tell(held, snapshot.spec.projectId)))
-          return yield* settled(starting, launch.sessionId, snapshot.spec.projectId)
+          // Answered `starting` once that is written (#132): the agent is asked after, in the
+          // engine, and the window follows the launch to what it answered.
+          yield* inBackground(
+            starting,
+            snapshot.spec.projectId,
+            // A retry holds the launch again on the Session it had: that is its token.
+            launch.sessionId,
+            settled(starting, launch.sessionId, snapshot.spec.projectId),
+          )
+          return starting
         }),
 
       workspaceReady,

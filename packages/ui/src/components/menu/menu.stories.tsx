@@ -5,14 +5,16 @@ import { IconDots, IconPlus, IconSettings, IconTrash } from '../../icons.ts'
 import { Menu } from './menu.tsx'
 
 const meta = {
-  tags: ['autodocs'],
+  tags: ['autodocs', 'updated'],
   title: 'Components/Menu',
   component: Menu,
   args: { label: 'Session', groups: [] },
   argTypes: {
     label: { control: 'text' },
     icon: { table: { disable: true } },
+    trigger: { table: { disable: true } },
     disabled: { control: 'boolean' },
+    size: { control: 'inline-radio', options: ['sm', 'md'] },
     groups: { table: { disable: true } },
     className: { table: { disable: true } },
   },
@@ -54,6 +56,35 @@ export const Variants: Story = {
 }
 
 /**
+ * A small trigger, the height and type of a small button beside it: what the footer of the Spec
+ * rail stacks under `Prepare and start the build` (issue #135).
+ */
+export const Small: Story = {
+  parameters: { controls: { disable: true } },
+  render: (args) => (
+    <div className="flex items-start gap-4">
+      <Menu {...args} label="Session" size="sm" groups={commands(fn())} />
+      <Menu {...args} label="Default" groups={commands(fn())} />
+    </div>
+  ),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const small = canvas.getByRole('button', { name: 'Session' })
+    const regular = canvas.getByRole('button', { name: 'Default' })
+    await expect(small.getBoundingClientRect().height).toBeLessThan(
+      regular.getBoundingClientRect().height,
+    )
+    await userEvent.click(small)
+    const menu = await waitFor(() => within(document.body).getByRole('menu'))
+    expect(within(menu).getByRole('menuitem', { name: /new session/i })).toBeInTheDocument()
+    await userEvent.keyboard('{Escape}')
+    await waitFor(() => {
+      expect(within(document.body).queryByRole('menu')).toBeNull()
+    })
+  },
+}
+
+/**
  * The trigger as one icon of the catalogue: the mark says what is behind it, and the label
  * becomes the control's name, which is what a screen reader reads and what the tests find.
  *
@@ -74,6 +105,49 @@ export const IconTrigger: Story = {
     await waitFor(() => {
       expect(within(document.body).queryByRole('menu')).toBeNull()
     })
+  },
+}
+
+/**
+ * A trigger of the caller's own, and a quiet word at the end of each command: what the heading of
+ * a phase of the Spec draws — its glyph, its name, how much of it is written — and opens on the
+ * three phases, each with how far along it is (issue #164). The label stays the control's name.
+ */
+export const CustomTrigger: Story = {
+  parameters: { controls: { disable: true } },
+  render: (args) => (
+    <Menu
+      {...args}
+      label="Settings, go to another section"
+      trigger={
+        <>
+          <IconSettings size="sm" aria-hidden="true" />
+          <span className="font-medium">Settings</span>
+          <span className="text-muted-foreground">2 of 3 read</span>
+        </>
+      }
+      groups={[
+        [
+          { label: 'General', detail: 'read', onSelect: fn() },
+          { label: 'Appearance', detail: 'read', onSelect: fn() },
+          { label: 'Profile', detail: 'not read', onSelect: fn() },
+        ],
+      ]}
+    />
+  ),
+  play: async ({ canvasElement }) => {
+    const trigger = within(canvasElement).getByRole('button', {
+      name: 'Settings, go to another section',
+    })
+    await expect(trigger).toHaveTextContent(/2 of 3 read$/)
+    await userEvent.click(trigger)
+    const menu = await waitFor(() => within(document.body).getByRole('menu'))
+    await expect(within(menu).getByRole('menuitem', { name: /^Profile/ })).toHaveTextContent(
+      /not read$/,
+    )
+    await userEvent.keyboard('{Escape}')
+    await waitFor(() => expect(within(document.body).queryByRole('menu')).toBeNull())
+    await expect(trigger).toHaveFocus()
   },
 }
 

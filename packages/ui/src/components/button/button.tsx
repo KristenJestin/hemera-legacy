@@ -1,7 +1,7 @@
 import { Button as BaseButton } from '@base-ui/react/button'
 import { type VariantProps, cva } from 'class-variance-authority'
 import { cn } from 'cn'
-import { AnimatePresence, motion } from 'motion/react'
+import { AnimatePresence, motion, useIsPresent } from 'motion/react'
 import type { ReactNode } from 'react'
 
 import { IconAlertTriangle, IconCheck } from '../../icons.ts'
@@ -31,7 +31,10 @@ const buttonVariants = cva(
         primary:
           'border-primary bg-primary text-primary-foreground hover:border-primary-strong hover:bg-primary-strong',
         secondary: 'border-input bg-card text-foreground hover:bg-muted',
-        ghost: 'border-transparent bg-transparent text-foreground hover:bg-accent',
+        // A ghost that is the current place draws no fill under the hand: it is drawn over its
+        // list's mark, which is its fill already (issue #127).
+        ghost:
+          'border-transparent bg-transparent text-foreground hover:bg-accent aria-[current=true]:hover:bg-transparent',
         // What a frame's header and a panel's corner offer: the accent colour and nothing
         // else. A control that is a place to go rather than a thing to press reads as text.
         link: 'border-transparent bg-transparent text-primary-muted-foreground hover:bg-transparent hover:text-primary',
@@ -109,7 +112,10 @@ export function Button({
           // a transform onto whatever carries them, and nesting one inside the other leaves the
           // inner one spending the press correcting for the outer one.
           ref={hand.element}
-          layout
+          // Its size and nothing else (issue #183): what is animated is the width following what
+          // it says. A button carried to wherever its row put it replayed its old place each time
+          // it was drawn again after something beside it changed, and popped where it stood.
+          layout="size"
           whileHover={hand.hover}
           whileTap={hand.tap}
           // Going quiet is a change like any other: it fades rather than switching off, which
@@ -160,20 +166,40 @@ function Content({ state, children }: { state: ButtonState; children: ReactNode 
     <>
       <AnimatePresence mode="popLayout" initial={false}>
         {mark !== null && (
-          <motion.span
-            key={state}
-            className="inline-flex"
-            initial={{ opacity: 0, y: MARK_TRAVEL, scale: 0.7 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: -MARK_TRAVEL, scale: 0.7 }}
-            transition={transition}
-          >
+          <Mark key={state} transition={transition}>
             {mark}
-          </motion.span>
+          </Mark>
         )}
       </AnimatePresence>
       {children}
     </>
+  )
+}
+
+/**
+ * The mark of a state, in front of the label. The moment it starts leaving it is hidden from
+ * assistive technology: the state it said is over, and a loader still read while it fades out
+ * named the button `Working Create` once the work was done.
+ */
+function Mark({
+  transition,
+  children,
+}: {
+  transition: ReturnType<typeof useTransition>
+  children: ReactNode
+}) {
+  const present = useIsPresent()
+  return (
+    <motion.span
+      className="inline-flex"
+      aria-hidden={present ? undefined : true}
+      initial={{ opacity: 0, y: MARK_TRAVEL, scale: 0.7 }}
+      animate={{ opacity: 1, y: 0, scale: 1 }}
+      exit={{ opacity: 0, y: -MARK_TRAVEL, scale: 0.7 }}
+      transition={transition}
+    >
+      {children}
+    </motion.span>
   )
 }
 

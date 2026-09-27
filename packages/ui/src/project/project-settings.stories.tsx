@@ -2,6 +2,7 @@ import type { Meta, StoryObj } from '@storybook/react-vite'
 import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
 import { useState } from 'react'
 
+import { expectNeverBuried, watchThereAndBack } from '../../.storybook/sliding-mark.ts'
 import type { WorkspaceRow } from '../workspace/model.ts'
 import type { VariableLine } from '../workspace/services-model.ts'
 import { PreparationSteps } from '../workspace/preparation-steps.tsx'
@@ -54,12 +55,13 @@ const PLAIN = {
   portless: false,
   portlessName: null,
   folder: '',
+  runAtOpen: false,
 } as const
 
 /**
  * The catalogue of a Project that has one command of each of the seven types (D8-07): `dev` in
- * the front, `check` at the root, an `auth` server shared by the Project and run through
- * Portless, and a `seed` whose Windows line is its own.
+ * the front, `check` at the root, an `auth` server shared by the Project, run through Portless
+ * and each time Hemera opens, and a `seed` whose Windows line is its own.
  */
 const COMMANDS: CommandLine[] = [
   { ...PLAIN, id: 'check', name: 'check', command: 'pnpm check', type: 'test', folderBase: null },
@@ -81,6 +83,7 @@ const COMMANDS: CommandLine[] = [
     portless: true,
     portlessName: 'atlas',
     folderBase: './sources/api',
+    runAtOpen: true,
   },
   { ...PLAIN, id: 'lint', name: 'lint', command: 'pnpm lint', type: 'lint', folderBase: null },
   {
@@ -433,7 +436,7 @@ function Controlled({
 }
 
 const meta = {
-  tags: ['autodocs'],
+  tags: ['autodocs', 'updated'],
   title: 'Surfaces/Project/Settings',
   component: ProjectSettings,
   render: (args) => <Controlled {...args} />,
@@ -544,9 +547,17 @@ export const Complete: Story = {
         .getAllByRole('tab')
         .map((tab) => tab.textContent),
     ).toEqual(['General', 'Repositories', 'Workspaces', 'Commands', 'Preparation', 'Variables'])
-    await expect(canvas.getByRole('tab', { name: 'General' })).toHaveAttribute(
-      'aria-selected',
-      'true',
+    const general = canvas.getByRole('tab', { name: 'General' })
+    await expect(general).toHaveAttribute('aria-selected', 'true')
+    // The section chosen says its name in the foreground colour, the others stay muted.
+    const probe = document.createElement('span')
+    probe.className = 'text-foreground'
+    canvasElement.append(probe)
+    const foreground = getComputedStyle(probe).color
+    probe.remove()
+    await expect(getComputedStyle(general).color).toBe(foreground)
+    await expect(getComputedStyle(canvas.getByRole('tab', { name: 'Variables' })).color).not.toBe(
+      foreground,
     )
     // One section on screen at a time.
     await expect(canvas.getAllByRole('tabpanel')).toHaveLength(1)
@@ -749,11 +760,16 @@ export const Commands: Story = {
     const auth = rowOf(canvasElement, 'pnpm auth:serve')
     await expect(auth.getByText('auth')).toBeVisible()
     await expect(auth.getByText('https://atlas.localhost')).toBeVisible()
-    // Seven commands, and each row its mark: its own type, then the two buttons it carries.
+    // Seven commands, and each row its mark: its own type, then the two buttons it carries; auth
+    // runs when Hemera opens, and says so with one quiet mark and nothing more (#114).
     const rows = canvasElement.querySelectorAll('ul[aria-label="Commands"] > li')
     await expect(rows).toHaveLength(COMMANDS.length)
     const authRow = panel.getByText('pnpm auth:serve').closest('li')!
-    await expect(authRow.querySelectorAll('svg')).toHaveLength(3)
+    await expect(authRow.querySelectorAll('svg')).toHaveLength(4)
+    await expect(auth.getByRole('img', { name: 'auth runs when Hemera opens' })).toBeVisible()
+    await expect(
+      rowOf(canvasElement, 'pnpm dev').queryByRole('img', { name: /runs when Hemera opens/ }),
+    ).toBeNull()
     // The scope, the folder and the four badges the row used to carry are the dialog's now.
     await expect(panel.queryByText('Serve')).toBeNull()
     await expect(panel.queryByText('Project, in main')).toBeNull()
@@ -955,5 +971,24 @@ export const Keyboard: Story = {
       'aria-selected',
       'true',
     )
+  },
+}
+
+/**
+ * The fill of the navigation crossing it, down to the last section and back up to the first: on
+ * every frame of the way it is drawn over the sections it crosses and never under one (issue
+ * #127) — the way up included, which is where a mark drawn inside its entry was lost.
+ */
+export const MarkCrossing: Story = {
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const navigation = canvas.getByRole('tablist', { name: 'Project settings' })
+    const watched = await watchThereAndBack(
+      navigation,
+      () => userEvent.click(canvas.getByRole('tab', { name: 'Variables' })),
+      () => userEvent.click(canvas.getByRole('tab', { name: 'General' })),
+    )
+    expect(canvas.getByRole('tab', { name: 'General' })).toHaveAttribute('aria-selected', 'true')
+    expectNeverBuried(watched)
   },
 }

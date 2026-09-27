@@ -315,30 +315,75 @@ export async function pressIn(area: string, name: string): Promise<void> {
 }
 
 /**
- * Puts a part of a Spec on its panel's stage, the way a hand picks it in the rail: the stage
- * shows one part at a time, and a part that is not on it is not on the page at all.
+ * Answers the question asked in the thread with the option that says this, and waits for its card
+ * to say it was answered.
+ *
+ * Not through `pressIn`: an option is lettered by Hemera (issue #134), so what the button says
+ * starts with its letter — `AThe issue date` — and a hand reads the option, not the letter. A
+ * press on a choice is the answer (issue #199); the card then stays where it was, the choice
+ * marked in it, and names itself after the answer.
  */
-export async function showPart(key: string, part: string): Promise<void> {
-  await pressIn(`nav[aria-label="Parts of ${key}"]`, part)
+export async function answerWith(option: string): Promise<void> {
+  const pressed = await browser.execute((label: string) => {
+    // An answered card's rows stay, and can no longer be pressed: only an open one is looked at.
+    const options = document.querySelectorAll(
+      '[id^="ask-"] [aria-label="Answers"] button:not(:disabled)',
+    )
+    const button = [...options].find((one) => (one.textContent ?? '').includes(label))
+    if (!(button instanceof HTMLButtonElement)) return false
+    button.click()
+    return true
+  }, option)
+  expect(pressed).toBe(true)
+  await browser.waitUntil(
+    async () =>
+      await browser.execute(
+        (label: string) =>
+          [...document.querySelectorAll('[id^="ask-"] [role="group"]')].some((card) =>
+            (card.getAttribute('aria-label') ?? '').endsWith(label),
+          ),
+        option,
+      ),
+    { timeout: 5000, timeoutMsg: `the question's card never says it was answered with ${option}` },
+  )
 }
 
 /**
- * Unfolds the panel of a Spec from the band it opens folded to, the way a hand does: a Session
- * opens its panel folded, and what is read in it — the head, the stage, the reader bar — is drawn
- * only once it is open. A panel already open is left as it is.
+ * Waits for a part of a Spec to be in its panel's column: every part is laid there one after the
+ * other under the heading of its phase (issue #164), so there is nothing to pick for it to be read.
+ */
+export async function showPart(key: string, part: string): Promise<void> {
+  await browser.waitUntil(
+    async () =>
+      await browser.execute(
+        (scope: string, name: string) =>
+          [...(document.querySelector(scope)?.querySelectorAll('[data-part] h3') ?? [])].some(
+            (heading) => (heading.textContent ?? '').startsWith(name),
+          ),
+        `[role="region"][aria-label="Contents of ${key}"]`,
+        part,
+      ),
+    { timeout: 5000, timeoutMsg: `the ${part} of ${key} is not in its column` },
+  )
+}
+
+/**
+ * Unfolds the panel of a Spec from the small frame it opens folded to, the way a hand does: a
+ * Session opens its Spec folded, and what is read in it — the head, the column, the reader bar —
+ * is drawn only once it is open. A panel already open is left as it is.
  */
 export async function unfoldSpec(key: string): Promise<void> {
   await browser.execute((scope: string) => {
-    const band = document
+    const unfold = document
       .querySelector(scope)
       ?.querySelector('button[aria-label="Unfold the Spec"]')
-    if (band instanceof HTMLButtonElement) band.click()
+    if (unfold instanceof HTMLButtonElement) unfold.click()
   }, `section[aria-label="Spec ${key}"]`)
   await browser.waitUntil(
     async () =>
       await browser.execute(
         (scope: string) => document.querySelector(scope) !== null,
-        `[role="region"][aria-label="Stage of ${key}"]`,
+        `[role="region"][aria-label="Contents of ${key}"]`,
       ),
     { timeout: 5000, timeoutMsg: `the panel of ${key} never unfolded` },
   )
@@ -350,51 +395,5 @@ export async function region(selector: string): Promise<string> {
   return await browser.execute(
     (scope: string) => document.querySelector(scope)?.textContent ?? '',
     selector,
-  )
-}
-
-/**
- * Types into a text of the page the way a hand does: the caret goes in, the text is typed, and
- * the caret stays there until `leave` takes it out — which is when a text edited in place, a
- * section of the Spec, is handed over.
- */
-export async function typeIn(label: string, text: string): Promise<void> {
-  const typed = await browser.execute(
-    (name: string, said: string) => {
-      const field = document.querySelector(`textarea[aria-label="${name}"]`)
-      if (!(field instanceof HTMLTextAreaElement)) return false
-      field.focus()
-      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set?.call(
-        field,
-        said,
-      )
-      field.dispatchEvent(new Event('input', { bubbles: true }))
-      return document.activeElement === field
-    },
-    label,
-    text,
-  )
-  expect(typed).toBe(true)
-  await browser.pause(150)
-}
-
-/** Takes the caret out of the text of this label, which hands an edited text over. */
-export async function leave(label: string): Promise<void> {
-  const left = await browser.execute((name: string) => {
-    const field = document.querySelector(`textarea[aria-label="${name}"]`)
-    if (!(field instanceof HTMLTextAreaElement)) return false
-    field.blur()
-    return true
-  }, label)
-  expect(left).toBe(true)
-  await browser.pause(1200)
-}
-
-/** What the text of this label holds, or null when the page has none. */
-export async function textOf(label: string): Promise<string | null> {
-  return await browser.execute(
-    (name: string) =>
-      document.querySelector<HTMLTextAreaElement>(`textarea[aria-label="${name}"]`)?.value ?? null,
-    label,
   )
 }

@@ -13,7 +13,21 @@
     </script>
   </head>
   <body>
-    <div id="root"></div>
+    <div id="root">
+      <!-- The start screen of @hemera/ui (shell/start-screen.tsx), written out so it is on the
+           first frame: the application draws the same one until its first page is ready. The
+           rules it is drawn with before the theme arrives are written into the head by the
+           renderer bundle (@hemera/ui/start-style). -->
+      <div class="flex h-screen items-center justify-center bg-background text-muted-foreground">
+        <span role="status" aria-label="Starting Hemera" class="relative size-icon-lg">
+          <span class="absolute inset-0 flex items-center justify-center motion-safe:animate-turn">
+            <span class="absolute rounded-full bg-current size-1.5 orbit-0"></span>
+            <span class="absolute rounded-full bg-current size-1.5 orbit-1"></span>
+            <span class="absolute rounded-full bg-current size-1.5 orbit-2"></span>
+          </span>
+        </span>
+      </div>
+    </div>
     <script type="module" src="./main.tsx"></script>
   </body>
 </html>

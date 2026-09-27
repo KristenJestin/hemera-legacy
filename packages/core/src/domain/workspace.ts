@@ -15,6 +15,7 @@
 
 import { lineFor } from './lines.ts'
 import { MAIN_WORKSPACE } from './project.ts'
+import { MAX_SLUG_LENGTH } from './spec.ts'
 
 /** Where a Workspace stands: being prepared, ready to work in, stopped by a step, or cleaned. */
 export const WORKSPACE_STATES = ['preparing', 'ready', 'failed', 'cleaned'] as const
@@ -150,6 +151,37 @@ export function slugify(text: string): string {
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '')
+}
+
+/**
+ * The words a title carries that say nothing of what it is about, in English and in French:
+ * articles, prepositions, conjunctions and the like. A Workspace's name leaves them out (#136).
+ */
+const EMPTY_WORDS: ReadonlySet<string> = new Set([
+  ...['a', 'an', 'and', 'are', 'as', 'at', 'be', 'by', 'for', 'from', 'in', 'into', 'is', 'it'],
+  ...['its', 'of', 'on', 'or', 'the', 'this', 'that', 'to', 'with'],
+  ...['au', 'aux', 'avec', 'ce', 'ces', 'cet', 'cette', 'dans', 'de', 'des', 'du', 'en', 'est'],
+  ...['et', 'la', 'le', 'les', 'ne', 'ou', 'par', 'pas', 'pour', 'qu', 'que', 'qui', 'sa', 'se'],
+  ...['ses', 'son', 'sont', 'sur', 'un', 'une'],
+])
+
+/** How many words of a Spec's title the name of its Workspace keeps, at most (#136). */
+const WORKSPACE_NAME_WORDS = 4
+
+/**
+ * The name proposed for a Spec's Workspace (#136): the Spec's key, then at most four meaningful
+ * words of its title read from its slug — `aaa-1-progress-bar-atomes`, where the whole title cut at
+ * a length made a name nobody reads. A word of one letter, and a word that says nothing (`des`,
+ * `the`), is left out; a slug cut at its full length may end on part of a word, and that part is
+ * not a word of the title. It stays a proposal: the dialog lets the user write another.
+ */
+export function specWorkspaceName(key: string, slug: string): string {
+  const words = slug.split('-').filter((word) => word !== '')
+  const whole = slug.length >= MAX_SLUG_LENGTH ? words.slice(0, -1) : words
+  const meaningful = whole
+    .filter((word) => word.length > 1 && !EMPTY_WORDS.has(word))
+    .slice(0, WORKSPACE_NAME_WORDS)
+  return [slugify(key), ...meaningful].filter((part) => part !== '').join('-')
 }
 
 /** The prefix of a Project's branches when it sets none: its name as a slug (D8-04). */

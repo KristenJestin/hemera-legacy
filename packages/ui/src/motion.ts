@@ -404,6 +404,8 @@ export function onTheBeat(transition: Transition): Transition {
  *   first frame is.
  * - `change`: how long each change of state lasts, by what it says. Going from one kind of work
  *   to another is a glance and a flinch is quick; falling asleep and waking up are not.
+ * - `spin`: one turn of the loading orbit, on the same beat the loading indicator turns on, so a
+ *   face that stands in for one goes round as fast.
  * - `fade`: the one thing a reader asking for less movement is still given — a soft cross-fade
  *   from one still expression to the next, in opacity alone, so the face never jumps at them.
  */
@@ -422,7 +424,10 @@ export const face = {
     recover: 0.9,
     drift: 2.4,
     wake: 1.4,
+    boot: 1,
+    gather: 0.8,
   },
+  spin: durations.turn,
   fade: durations.slow,
 } as const
 
@@ -437,6 +442,16 @@ export const face = {
 export function faceArrive(k: number): number {
   const q = Math.min(1, Math.max(0, k))
   return q * q * (3 - 2 * q)
+}
+
+/**
+ * How far a number of the face coasts at a share `k` of a change, in lengths of it and for a speed
+ * of one: the speed dies away evenly and is spent at the end. How the loading orbit stops when a
+ * change that does not know it takes it over.
+ */
+export function faceCoast(k: number): number {
+  const q = Math.min(1, Math.max(0, k))
+  return (q * (2 - q)) / 2
 }
 
 /**

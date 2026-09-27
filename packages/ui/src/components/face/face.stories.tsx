@@ -201,7 +201,7 @@ function Replay({ from, to }: { from: FaceState; to: FaceState }): ReactNode {
 export const Transitions: Story = {
   parameters: { controls: { disable: true }, layout: 'padded' },
   render: () => (
-    <div className="grid grid-cols-12 gap-1 text-xs text-muted-foreground">
+    <div className="grid grid-cols-13 gap-1 text-xs text-muted-foreground">
       <span />
       {FACE_STATES.map((to) => (
         <span key={to} className="truncate text-center">

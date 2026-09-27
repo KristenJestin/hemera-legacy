@@ -52,9 +52,36 @@ function drawing(frame: FaceFrame, detail: FaceDetail = DETAILS.full): number[] 
   return numbers
 }
 
-/** The furthest any number of the drawing went from one frame to the next. */
+/** The three ways of pairing three strokes with three others, and the rest of the six. */
+const ORDERS = [
+  [0, 1, 2],
+  [0, 2, 1],
+  [1, 0, 2],
+  [1, 2, 0],
+  [2, 0, 1],
+  [2, 1, 0],
+]
+
+/**
+ * The furthest any number of the drawing went from one frame to the next, whichever stroke is
+ * which: out of loading the three dots are alike, and which one becomes the mouth is chosen when
+ * the change comes — the same picture, told with its strokes in another order.
+ */
 function travel(before: number[], after: number[]): number {
-  return before.reduce((most, value, index) => Math.max(most, Math.abs(value - after[index]!)), 0)
+  const strokes = before.length / 7
+  const furthest = (order: readonly number[]): number => {
+    let most = 0
+    for (let stroke = 0; stroke < strokes; stroke += 1) {
+      for (let at = 0; at < 7; at += 1) {
+        const was = before[stroke * 7 + at]!
+        const now = after[order[stroke]! * 7 + at]!
+        most = Math.max(most, Math.abs(was - now))
+      }
+    }
+    return most
+  }
+  if (strokes !== 3) return furthest([0, 1, 2, 3, 4, 5].slice(0, strokes))
+  return Math.min(...ORDERS.map(furthest))
 }
 
 interface Played {
@@ -322,7 +349,7 @@ describe('Animations played on demand', () => {
 })
 
 describe('Falling asleep', () => {
-  test.each(FACE_STATES.filter((state) => state !== 'asleep'))(
+  test.each(FACE_STATES.filter((state) => state !== 'asleep' && state !== 'loading'))(
     '%s falls asleep without a yawn: the mouth never opens on the way',
     (from) => {
       const frameAt = told({ seed: 6, start: from, changes: [{ state: 'asleep', at: 1 }] })
@@ -354,7 +381,9 @@ describe('Sizes', () => {
         pose.map((value, index) => (index >= AT.yaw && index < AT.tones ? 0 : value)),
         detail,
       )
-      return travel([...moved.left.points], [...still.left.points])
+      return Math.max(
+        ...moved.left.points.map((value, index) => Math.abs(value - still.left.points[index]!)),
+      )
     }
     expect(reach(DETAILS.icon)).toBeGreaterThan(reach(DETAILS.full))
   })

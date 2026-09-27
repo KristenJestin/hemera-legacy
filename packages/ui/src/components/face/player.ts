@@ -82,6 +82,8 @@ export interface FaceTuning {
   readonly life: FaceLife
   /** Plays the state's flourish back to back, so it can be judged without waiting for it. */
   readonly loop: boolean
+  /** Multiplies the wait between two flourishes, drawn inside each flourish's own bounds. */
+  readonly rest: number
 }
 
 export const TUNING: FaceTuning = {
@@ -91,6 +93,7 @@ export const TUNING: FaceTuning = {
   pace: 1,
   life: { blink: true, motion: true, aside: true, flourish: true },
   loop: false,
+  rest: 1,
 }
 
 /**
@@ -431,7 +434,7 @@ export function createFace(options: FaceOptions): FacePlayer {
         const drawn = repertoire[Math.floor(random() * repertoire.length)] ?? 'hmm'
         const piece = FLOURISHES[drawn]
         const wait = between(random(), piece.every[0], piece.every[1])
-        const start = (previous?.end ?? t0) + (tuning.loop ? 0.7 : wait)
+        const start = (previous?.end ?? t0) + (tuning.loop ? 0.7 : wait * tuning.rest)
         const length = between(random(), piece.length[0], piece.length[1])
         return { start, end: start + length, name: drawn, side: random() < 0.5 ? -1 : 1 }
       }),

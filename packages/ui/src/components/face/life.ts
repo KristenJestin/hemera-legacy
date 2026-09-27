@@ -443,7 +443,7 @@ export const FLOURISHES: Record<FlourishName, Flourish> = {
     length: [1.2, 1.8],
     every: [3, 7],
     mouthless: true,
-    play: (q) => ({ w: arc(q, 0.3, 0.35, 0.35), beat: beat({ reach: -0.55 }) }),
+    play: (q) => ({ w: arc(q, 0.3, 0.35, 0.35), beat: beat({ reach: -0.3 }) }),
   },
   /** Loading, let out: the dots spread wider, and come back in. */
   spread: {

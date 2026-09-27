@@ -81,6 +81,11 @@ export const NoWorkspace: Story = {
       pointerEventsCheck: 0,
     })
     await expect(args.onPrepareOnly).toHaveBeenCalled()
+    // The menu is gone before it is opened again: still leaving, it is the menu the next look
+    // finds, and an item of it pressed on its way out chooses nothing.
+    await waitFor(() => {
+      expect(body.queryByRole('menu')).toBeNull()
+    })
 
     await userEvent.click(canvas.getByRole('button', { name: 'Use an existing Workspace' }))
     await userEvent.click(await body.findByRole('menuitem', { name: 'spike' }), {

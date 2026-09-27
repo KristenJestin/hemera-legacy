@@ -1,8 +1,10 @@
 import { Dialog as BaseDialog } from '@base-ui/react/dialog'
 import { cn } from 'cn'
-import type { ReactNode } from 'react'
+import { motion } from 'motion/react'
+import { type ReactNode, useLayoutEffect, useRef, useState } from 'react'
 
 import { IconX } from '../../icons.ts'
+import { instant, morph, useTransition } from '../../motion.ts'
 import { useOverlayContainer } from '../../overlay.ts'
 import { Button, IconButton } from '../button/button.tsx'
 
@@ -48,7 +50,20 @@ const SIZE: Record<DialogSize, string> = {
  * widest body a dialog may have — so a hover never widens what holds it. Nothing is ever
  * scrolled sideways either: what a dialog is asked to hold wider than itself is cut, not slid.
  */
-const BODY = '-mx-2 -my-1 min-h-0 overflow-x-clip overflow-y-auto px-2 py-1'
+const BODY = '-mx-2 -my-1 min-h-0 overflow-x-clip'
+
+/** The body at rest: it scrolls what the dialog cannot show. */
+const SCROLLS = 'overflow-y-auto'
+
+/**
+ * The body while it grows or folds to what it holds: cut, because what is taller than the body
+ * for the length of a spring is not something to scroll, and a scrollbar that came for that
+ * long would be one more thing appearing at once.
+ */
+const CLIPPED = 'overflow-y-hidden'
+
+/** What the body holds, with the room around it the body scrolls with. */
+const CONTENT = 'px-2 py-1'
 
 /** The footer: the buttons, at the same place in every dialog, under a rule that parts it. */
 const FOOTER = 'flex shrink-0 justify-end gap-2 border-t border-border pt-4'
@@ -114,11 +129,95 @@ export function Dialog({
               }
             />
           </div>
-          {children !== undefined && <div className={BODY}>{children}</div>}
+          {children !== undefined && <Body>{children}</Body>}
           {actions !== undefined && <div className={FOOTER}>{actions}</div>}
         </BaseDialog.Popup>
       </BaseDialog.Portal>
     </BaseDialog.Root>
+  )
+}
+
+/** A height the body read off what it holds, and whether it is taken without a journey. */
+interface Reading {
+  readonly value: number
+  readonly atOnce: boolean
+}
+
+/**
+ * The body of a dialog, as tall as what it holds and never jumping to it (issue #183).
+ *
+ * What a dialog holds changes while it is open: a choice brings fields in or takes them away, a
+ * tab shows another panel. The body follows it on `morph`, the spring made for a dimension, so
+ * the dialog grows or folds as one thing — everything under the change moves with it on the same
+ * beat, instead of some of it gliding and the rest landing at once. What arrives is at its place
+ * from the first frame and is uncovered by the growth; what it is taller than stays cut until
+ * the spring has settled, and only then may the body scroll.
+ *
+ * The height is read off what it holds, whenever that changes size, and two readings are taken
+ * at once rather than played. The first is where the body already is, so a dialog opening does
+ * not grow into place on top of its own rise. And a reading that comes on the frame after the
+ * last one is something inside the body moving on its own — a disclosure unfolding on its own
+ * spring — which the body follows frame by frame: played again, the growth would trail behind
+ * it and cut what it had already uncovered. A reader asking for less movement gets the new
+ * height at once.
+ */
+function Body({ children }: { children: ReactNode }): ReactNode {
+  const transition = useTransition(morph)
+  const content = useRef<HTMLDivElement>(null)
+  const [height, setHeight] = useState<Reading | null>(null)
+  const [moving, setMoving] = useState(false)
+  useLayoutEffect(() => {
+    const node = content.current
+    if (node === null) return undefined
+    // Whether the last reading was taken on the frame before this one: held for two frames, since
+    // a reading is taken after the frame's own callbacks and the next one's would clear it first.
+    let recent = false
+    let clearing = 0
+    // The reading is handed over on the next frame and not from inside the observer: the body it
+    // resizes holds what is observed, and a size changed while the observer is still delivering is
+    // a loop the browser refuses to finish.
+    let writing = 0
+    const observer = new ResizeObserver(() => {
+      const value = node.offsetHeight
+      const following = recent
+      recent = true
+      cancelAnimationFrame(clearing)
+      clearing = requestAnimationFrame(() => {
+        clearing = requestAnimationFrame(() => {
+          recent = false
+        })
+      })
+      cancelAnimationFrame(writing)
+      writing = requestAnimationFrame(() => {
+        setHeight((before) => ({ value, atOnce: before === null || following }))
+      })
+    })
+    observer.observe(node)
+    return () => {
+      cancelAnimationFrame(writing)
+      cancelAnimationFrame(clearing)
+      observer.disconnect()
+    }
+  }, [])
+  // Only a height that is played is cut on its way: one taken at once has no way to be on.
+  const played = height !== null && !height.atOnce && transition !== instant
+  return (
+    <motion.div
+      className={cn(BODY, moving ? CLIPPED : SCROLLS)}
+      initial={false}
+      animate={{ height: height?.value ?? 'auto' }}
+      transition={played ? transition : instant}
+      onAnimationStart={() => {
+        setMoving(played)
+      }}
+      onAnimationComplete={() => {
+        setMoving(false)
+      }}
+    >
+      <div ref={content} className={CONTENT}>
+        {children}
+      </div>
+    </motion.div>
   )
 }
 

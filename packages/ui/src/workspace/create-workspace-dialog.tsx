@@ -302,11 +302,10 @@ export function CreateWorkspaceDialog({
   const reading = rows.some((row) => !row.read)
   const folderRefusal = folder.trim() === '' ? 'A Workspace needs a folder.' : undefined
   const refused =
-    nameRefusal !== undefined ||
-    folderRefusal !== undefined ||
-    reading ||
-    noneIncluded ||
-    incomplete
+    nameRefusal !== undefined || folderRefusal !== undefined || noneIncluded || incomplete
+  // Create waits for the reads, and says so with the loader in it: a button that is only disabled
+  // reads as a field left empty. Without git nothing is being read, only refused.
+  const waiting = reading && !gitMissing
 
   const change = (path: string, next: Partial<Row>) => {
     setRows(rows.map((row) => (row.path === path ? { ...row, ...next } : row)))
@@ -355,8 +354,9 @@ export function CreateWorkspaceDialog({
         <>
           <Button
             variant="primary"
-            state={creating ? 'loading' : 'idle'}
+            state={creating || waiting ? 'loading' : 'idle'}
             disabled={gitMissing || refused}
+            aria-label={waiting ? 'Create, waiting for the repositories to be read' : undefined}
             onClick={() => void create()}
           >
             Create

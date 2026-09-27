@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
 
 import { Button } from '../components/button/button.tsx'
@@ -120,18 +120,37 @@ interface Extra {
    * the dialog twice, before and after the answers, and compare the two.
    */
   answered?: readonly PlanRepositoryLine[] | undefined
+  /**
+   * Whether `answered` arrives while the dialog is open, when a story says Git answered
+   * (`gitAnswers`), rather than at the next opening.
+   */
+  answersWhileOpen?: boolean | undefined
+}
+
+/** Where a story says Git answered the reads of a dialog that is open. */
+const git = new EventTarget()
+
+function gitAnswers(): void {
+  git.dispatchEvent(new Event('answered'))
 }
 
 function Controlled({
   open,
   refusal = null,
   answered,
+  answersWhileOpen = false,
   onOpenChange,
   onCreate,
   ...rest
 }: CreateWorkspaceDialogProps & Extra) {
   const [shown, setShown] = useState(open)
   const [read, setRead] = useState<readonly PlanRepositoryLine[] | undefined>(undefined)
+  useEffect(() => {
+    if (!answersWhileOpen || answered === undefined) return
+    const land = (): void => setRead(answered)
+    git.addEventListener('answered', land)
+    return () => git.removeEventListener('answered', land)
+  }, [answersWhileOpen, answered])
   return (
     <div className="flex h-screen flex-col items-start gap-2 p-6">
       <Button onClick={() => setShown(true)}>New Workspace</Button>
@@ -143,7 +162,7 @@ function Controlled({
           setShown(next)
           // Git answered every location before the dialog was closed (#110): the next opening is
           // the same plan, read.
-          if (!next && answered !== undefined) setRead(answered)
+          if (!next && answered !== undefined && !answersWhileOpen) setRead(answered)
           onOpenChange(next)
         }}
         onCreate={async (draft) => {
@@ -338,8 +357,57 @@ async function aNameIsTypedBeforeThePlanArrives(): Promise<void> {
   await expect(name).toHaveValue('login-form at once')
   // And the folder follows it, before Git has said anything of any repository.
   within(dialog).getByText('/home/kris/.local/share/hemera/workspaces/atlas/login-form at once')
-  // Create waits for the last location to be read.
-  await expect(within(dialog).getByRole('button', { name: 'Create' })).toBeDisabled()
+  // Create waits for the last location to be read, and says so.
+  await expect(
+    within(dialog).getByRole('button', { name: 'Create, waiting for the repositories to be read' }),
+  ).toHaveAttribute('aria-disabled', 'true')
+}
+
+/**
+ * Create while repositories are still being read: disabled, with the loader in it and a name that
+ * says what it waits for, so it reads as loading and not as a field left empty. Once Git has
+ * answered the last of them it is the plain Create button again.
+ */
+export const WaitingForReads: Story = {
+  args: {
+    repositories: [API, { path: './sources/front', read: null }],
+    answered: [API, FRONT],
+    answersWhileOpen: true,
+  },
+  play: createSaysItWaitsForTheReads,
+}
+
+async function createSaysItWaitsForTheReads(): Promise<void> {
+  const dialog = within(document.body).getByRole('dialog')
+  const waiting = within(dialog).getByRole('button', {
+    name: 'Create, waiting for the repositories to be read',
+  })
+  await expect(waiting).toHaveAttribute('aria-disabled', 'true')
+  // The loader of the whole application, inside the button, turning.
+  const loader = waiting.querySelector('[role="status"]')!
+  await expect(getComputedStyle(loader.children[0]!).animationName).toBe('turn')
+  await expect(within(dialog).queryByRole('button', { name: 'Create' })).toBeNull()
+  gitAnswers()
+  // Every read in: the plain button, which nothing holds back, with no loader left in it.
+  const create = await waitFor(() => within(dialog).getByRole('button', { name: 'Create' }))
+  await waitFor(() => {
+    expect(create).toBeEnabled()
+    expect(create.querySelector('[role="status"]')).toBeNull()
+  })
+}
+
+/**
+ * Every read in, and a field still missing: the plain Create button, disabled, and no loader —
+ * what holds it back is the field, which says so.
+ */
+export const ReadsDoneFieldMissing: Story = {
+  args: { defaultName: '' },
+  play: async () => {
+    const dialog = within(document.body).getByRole('dialog')
+    const create = within(dialog).getByRole('button', { name: 'Create' })
+    await expect(create).toBeDisabled()
+    await expect(create.querySelector('[role="status"]')).toBeNull()
+  },
 }
 
 /**

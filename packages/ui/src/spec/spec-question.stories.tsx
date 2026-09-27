@@ -2,6 +2,7 @@ import type { Meta, StoryObj } from '@storybook/react-vite'
 import { type ReactNode, useState } from 'react'
 import { expect, fn, screen, userEvent, waitFor, within } from 'storybook/test'
 
+import { Button } from '../components/button/button.tsx'
 import { Composer } from '../composer/composer.tsx'
 import { AgentText } from '../message/agent-text.tsx'
 import { MessageScroller, type ScrollerEntry } from '../message/scroller/scroller.tsx'
@@ -59,13 +60,19 @@ export const Open: Story = {
   },
 }
 
-/** A question the Spec goes on without: the rim says it can wait. */
+/**
+ * A question the Spec goes on without (issue #209): the card says nothing about it — no rim, no
+ * line saying it can wait — and its name is the question's alone.
+ */
 export const NotBlocking: Story = {
   args: { question: { ...CREDIT_NOTES, blocking: false } },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    await expect(canvas.getByText(/^Not blocking · /)).toBeVisible()
-    await expect(canvas.queryByText(/^Blocking · /)).toBeNull()
+    await expect(canvas.queryByText(/blocking/i)).toBeNull()
+    await expect(canvas.queryByText(/can go on without/)).toBeNull()
+    await expect(
+      canvas.getByRole('group', { name: `Question: ${CREDIT_NOTES.body}` }),
+    ).toBeVisible()
   },
 }
 
@@ -362,7 +369,7 @@ export const Pinned: Story = {
 }
 
 /** What the agent wrote before it asked, enough of it for the thread to overflow its room. */
-const EARLIER = Array.from({ length: 6 }, (_, index) => ({
+const EARLIER = Array.from({ length: 12 }, (_, index) => ({
   id: `earlier-${String(index)}`,
   content: (
     <AgentText
@@ -374,9 +381,15 @@ const EARLIER = Array.from({ length: 6 }, (_, index) => ({
 /**
  * A Session's chat as the page lays it out: the thread, the row of the turn under it, and the
  * composer with the question pinned above its box. Answered, the card leaves the pin and comes
- * back to its place in the thread, and the turn starts thinking again, as the page does.
+ * back to its place in the thread, and the turn starts thinking again, as the page does. Asked
+ * later, the question arrives in the pin on a press of `Ask`, which stands over the page and takes
+ * none of its room.
  */
-function ThreadWithAPinnedQuestion(props: Parameters<typeof SpecQuestion>[0]): ReactNode {
+function ThreadWithAPinnedQuestion({
+  asksLater = false,
+  ...props
+}: Parameters<typeof SpecQuestion>[0] & { asksLater?: boolean }): ReactNode {
+  const [asked, setAsked] = useState(!asksLater)
   const [answer, setAnswer] = useState(props.question.answer)
   const card = (
     <SpecQuestion
@@ -398,7 +411,14 @@ function ThreadWithAPinnedQuestion(props: Parameters<typeof SpecQuestion>[0]): R
     },
   ]
   return (
-    <div className="flex h-screen min-h-0 flex-col bg-background text-foreground">
+    <div className="relative flex h-screen min-h-0 flex-col bg-background text-foreground">
+      {asksLater && (
+        <div className="absolute top-2 right-2 z-1">
+          <Button size="sm" onClick={() => setAsked(true)}>
+            Ask
+          </Button>
+        </div>
+      )}
       <MessageScroller className="flex-1" label="The thread of this Session" entries={entries} />
       <div className="mx-auto flex w-full max-w-3xl flex-col gap-2 px-6 pb-4">
         <TurnLine
@@ -416,7 +436,7 @@ function ThreadWithAPinnedQuestion(props: Parameters<typeof SpecQuestion>[0]): R
           action="Send"
           placeholder="Say something to claude…"
           running={answer !== null}
-          pinned={answer === null ? [{ id: props.question.id, content: card }] : []}
+          pinned={asked && answer === null ? [{ id: props.question.id, content: card }] : []}
         />
       </div>
     </div>
@@ -440,24 +460,12 @@ export const AnsweredFromThePin: Story = {
       expect(thread.scrollHeight - thread.scrollTop - thread.clientHeight).toBeLessThanOrEqual(1),
     )
     const before = thread.scrollTop
-    // Where the thread is scrolled, read on every frame from the press until well after the card
-    // would have finished folding out of the pin.
-    const tops: number[] = []
-    let reading = true
-    const read = (): void => {
-      tops.push(thread.scrollTop)
-      if (reading) requestAnimationFrame(read)
-    }
-    requestAnimationFrame(read)
-    await userEvent.click(within(area).getByRole('button', { name: /Negative rows/ }))
-    await waitFor(() =>
-      expect(within(thread).getByRole('group', { name: /^You answered / })).toBeVisible(),
-    )
-    for (const _ of Array.from({ length: 45 })) {
-      // oxlint-disable-next-line no-await-in-loop -- one frame after the other
-      await nextFrame()
-    }
-    reading = false
+    const tops = await topsThrough(thread, async () => {
+      await userEvent.click(within(area).getByRole('button', { name: /Negative rows/ }))
+      await waitFor(() =>
+        expect(within(thread).getByRole('group', { name: /^You answered / })).toBeVisible(),
+      )
+    })
     // Never scrolled down: the thread did not jump by the card it took back.
     await expect(Math.max(...tops), 'the thread jumped down').toBeLessThanOrEqual(before)
     // And never slid back: from the frame the card is in the thread, the position holds. All the
@@ -468,5 +476,81 @@ export const AnsweredFromThePin: Story = {
       'the thread slid',
     ).toEqual([])
     await expect(thread.scrollHeight - settled - thread.clientHeight).toBeLessThanOrEqual(1)
+  },
+}
+
+/**
+ * Where the thread is scrolled, read on every frame while `act` runs and for 45 frames after it,
+ * longer than any fold or fade of the preset.
+ */
+async function topsThrough(thread: HTMLElement, act: () => Promise<void>): Promise<number[]> {
+  const tops: number[] = []
+  let reading = true
+  const read = (): void => {
+    tops.push(thread.scrollTop)
+    if (reading) requestAnimationFrame(read)
+  }
+  requestAnimationFrame(read)
+  await act()
+  for (const _ of Array.from({ length: 45 })) {
+    // oxlint-disable-next-line no-await-in-loop -- one frame after the other
+    await nextFrame()
+  }
+  reading = false
+  return tops
+}
+
+/**
+ * Asked while the reader follows the thread (issue #209): the question takes its place in the pin
+ * above the composer at once and fades in. The thread keeps its end in sight by moving once, in
+ * the frame the card arrives, and never again: it is not dragged up the height of a card growing
+ * under it frame by frame.
+ */
+export const ArrivesInThePin: Story = {
+  parameters: { layout: 'fullscreen' },
+  render: (args) => <ThreadWithAPinnedQuestion {...args} asksLater />,
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const thread = canvas.getByRole('log', { name: 'The thread of this Session' })
+    await waitFor(() =>
+      expect(thread.scrollHeight - thread.scrollTop - thread.clientHeight).toBeLessThanOrEqual(1),
+    )
+    const before = thread.scrollTop
+    const tops = await topsThrough(thread, async () => {
+      await userEvent.click(canvas.getByRole('button', { name: 'Ask' }))
+      // The pinned area is hidden while it is empty: it is found once the question is in it.
+      const area = await canvas.findByRole('region', { name: 'Waiting for your answer' })
+      await expect(within(area).getByRole('group', { name: /^Question: / })).toBeInTheDocument()
+    })
+    const settled = tops.at(-1)!
+    await expect(
+      tops.filter((top) => top !== before && top !== settled),
+      'the thread was dragged',
+    ).toEqual([])
+    // Still following: the end of the thread is in sight above the card.
+    await expect(thread.scrollHeight - settled - thread.clientHeight).toBeLessThanOrEqual(1)
+  },
+}
+
+/**
+ * Asked while the reader reads further up (issue #209): the card takes its place in the pin, and
+ * what the reader is reading does not move at all.
+ */
+export const ArrivesInThePinScrolledUp: Story = {
+  parameters: { layout: 'fullscreen' },
+  render: (args) => <ThreadWithAPinnedQuestion {...args} asksLater />,
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const thread = canvas.getByRole('log', { name: 'The thread of this Session' })
+    await waitFor(() => expect(thread.scrollHeight).toBeGreaterThan(thread.clientHeight + 200))
+    thread.scrollTop = 100
+    await waitFor(() => expect(thread.scrollTop).toBe(100))
+    const tops = await topsThrough(thread, async () => {
+      await userEvent.click(canvas.getByRole('button', { name: 'Ask' }))
+      // The pinned area is hidden while it is empty: it is found once the question is in it.
+      const area = await canvas.findByRole('region', { name: 'Waiting for your answer' })
+      await expect(within(area).getByRole('group', { name: /^Question: / })).toBeInTheDocument()
+    })
+    await expect(new Set(tops), 'the thread moved').toEqual(new Set([100]))
   },
 }

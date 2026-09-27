@@ -32,10 +32,10 @@ import { WorkspaceActions, type WorkspaceActionsProps } from './workspace-action
  * the window: on its rim the head — the key, the title, the status, the revisions, `Rework` on a
  * ready Spec and the fold chevron — then the body, which is the Spec as one column read from top
  * to bottom, each phase under a heading that sticks while it is read (`spec-column.tsx`), and on
- * the rim again one footer across the panel: `Mark ready` on a draft, quiet until the agent has
- * confirmed the Spec complete and primary from then on, and once the Spec is ready the build's
- * actions in its place, until it is reworked. No readiness is drawn (issue #135): what the draft
- * lacks is the agent's to say, and `Mark ready`'s to refuse with.
+ * the rim again one footer across the panel: on a draft, `Mark ready` as the primary action once
+ * the whole gate passes, and until then one quiet line of how much is left, the list in its
+ * tooltip (issue #205); once the Spec is ready, the build's actions in its place, until it is
+ * reworked.
  *
  * The two trade places by a swap (the `swap` kind of the preset). Opening, the small frame slides
  * out by the window's edge and fades, and a beat later, while it is still going, the panel slides
@@ -106,6 +106,9 @@ const BODY =
 
 /** What `Mark ready` was refused with, beside it in the footer, taking the room it leaves. */
 const REFUSED = 'min-w-0 flex-1 text-sm text-destructive-muted-foreground'
+
+/** How much is left before ready, while `Mark ready` cannot be pressed: quiet, on one line. */
+const LEFT = 'min-w-0 truncate text-sm text-muted-foreground'
 
 /** The footer on the rim, under the body, its actions at its end. */
 const FOOT = 'flex items-center justify-end gap-3 px-1 pt-1.5'
@@ -299,25 +302,31 @@ export function SpecPanel({
   // became of it is said beside `Mark ready`, never in its place, and offers nothing to start.
   const buildable = spec.replacedBy === undefined && spec.status !== 'draft'
   const launch = build?.launch ?? null
-  // `Mark ready` is offered on the current revision of a draft, whatever it holds: never disabled,
-  // what the Spec still lacks is what the engine refuses it with (issue #135). It turns primary
-  // once the whole gate passes — the agent's attestation on the content the Spec is at now among
-  // it (D7-10) — and stays quiet before (issue #150): an attestation given with a phase open or a
-  // blocking question raised is a press the engine refuses.
+  // `Mark ready` is offered on the current revision of a draft once the whole gate passes — the
+  // agent's attestation on the content the Spec is at now among it (D7-10) — as the primary
+  // action. Before, a press could only be refused: the footer says how much is left instead, and
+  // nothing when nothing is named (issue #205).
   const markable =
     spec.status === 'draft' && spec.replacedBy === undefined && spec.provisional !== true
   const confirmed = spec.readiness.checks.every((check) => check.passed)
+  const left = confirmed ? [] : spec.readiness.todo.map((item) => item.label)
+  const draftLaunch =
+    build === undefined || launch === null ? null : { ...build, onRetry: undefined }
   const foot: FootContent | null =
     buildable && build !== undefined
       ? { kind: 'build', build }
-      : markable
+      : markable &&
+          (confirmed ||
+            left.length > 0 ||
+            draftLaunch !== null ||
+            spec.readiness.refused !== undefined)
         ? {
             kind: 'ready',
             confirmed,
+            left,
             refused: spec.readiness.refused,
             onMarkReady,
-            launch:
-              build === undefined || launch === null ? null : { ...build, onRetry: undefined },
+            launch: draftLaunch,
           }
         : null
 
@@ -423,8 +432,10 @@ type FootContent =
   | { kind: 'build'; build: WorkspaceActionsProps }
   | {
       kind: 'ready'
-      /** Whether the whole gate passes, the agent's attestation among it: `Mark ready` primary. */
+      /** Whether the whole gate passes, the agent's attestation among it: `Mark ready` offered. */
       confirmed: boolean
+      /** What is left before ready while it does not, in the order the gate says it. */
+      left: readonly string[]
       /** What the last `Mark ready` was refused with. */
       refused: string | undefined
       onMarkReady: () => void
@@ -433,9 +444,9 @@ type FootContent =
     }
 
 /**
- * The footer of the panel (issues #135, #150): one across the panel, on the rim under the body,
- * what the Spec offers at its end — `Mark ready` on a draft, with what it was refused with beside
- * it; once ready, `Use an existing Workspace` and `Prepare and start the build`, then where the
+ * The footer of the panel (issues #135, #150, #205): one across the panel, on the rim under the
+ * body, what the Spec offers at its end — on a draft, `Mark ready` once it can be pressed and how
+ * much is left until then; once ready, `Use an existing Workspace` and `Prepare and start the build`, then where the
  * launch stands.
  *
  * What it holds arrives and leaves on the `expand` and `collapse` kinds: its height is what makes
@@ -471,14 +482,18 @@ function SpecFoot({ content }: { content: FootContent | null }): ReactNode {
                     {content.refused}
                   </p>
                 )}
-                <Button
-                  variant={content.confirmed ? 'primary' : 'secondary'}
-                  size="sm"
-                  onClick={content.onMarkReady}
-                >
-                  <IconCheck size="sm" aria-hidden="true" />
-                  Mark ready
-                </Button>
+                {content.confirmed ? (
+                  <Button variant="primary" size="sm" onClick={content.onMarkReady}>
+                    <IconCheck size="sm" aria-hidden="true" />
+                    Mark ready
+                  </Button>
+                ) : (
+                  content.left.length > 0 && (
+                    <p className={LEFT} title={['Still to do:', ...content.left].join('\n')}>
+                      {`${content.left.length} ${content.left.length === 1 ? 'thing' : 'things'} left before ready`}
+                    </p>
+                  )
+                )}
               </>
             )}
           </Leaving>

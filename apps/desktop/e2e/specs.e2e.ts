@@ -405,14 +405,13 @@ describe('A second Session reads but does not write', () => {
   })
 })
 
-describe('Mark ready is refused with what is left', () => {
-  it('is offered on the draft, and refused with what it still lacks', async () => {
-    // No readiness is drawn (issue #135): the press is offered, and the refusal says the rest.
+describe('Mark ready waits until the Spec can be marked ready', () => {
+  it('is not offered on a draft that still lacks something, which says how much is left', async () => {
+    // A press could only be refused (issue #205): the footer says how much is left instead.
     expect(await region(PANEL)).not.toContain('checks met')
-    await pressIn(PANEL, 'Mark ready')
-    await browser.pause(1200)
-
-    expect(await region(PANEL)).toContain(`${KEY} is not ready yet. Still to do:`)
+    expect(await control('Mark ready')).toBeNull()
+    expect(await region(PANEL)).toMatch(/\d+ things? left before ready/)
+    expect(await region(PANEL)).not.toContain('is not ready yet')
     const { specId } = await sessionOf(ASKED)
     const status = await browser.execute(async (spec: string) => {
       const read = await window.hemera.invoke('specs.read', { specId: spec })

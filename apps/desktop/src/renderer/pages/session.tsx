@@ -64,6 +64,7 @@ import {
   declineSpecProposal,
   joinSpec,
   markReady,
+  resumeBuildWorkspace,
   retryBuild,
   rework,
   selectRevision,
@@ -724,12 +725,13 @@ export function SessionPage({
         // D8-13): the panel's footer holds it (issue #135), and the whole journey it
         // opens — the plan, the Workspace, the launch — belongs here.
         build={{
-          launch: launchOf(stored.launches),
+          launch: launchOf(stored.launches, defined.spec),
           ...specWorkspacesOf(stored.launches),
           onPrepareAndStart: () => prepareWorkspace(true),
           onPrepareOnly: () => prepareWorkspace(false),
           onUseWorkspace: (id) => void askForBuild(id),
           onStart: () => void startBuild(),
+          onResume: () => void resumeBuildWorkspace(),
           onRetry: () => void retryBuild(),
           onOpen: openBuild,
         }}

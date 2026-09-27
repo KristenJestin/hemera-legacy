@@ -662,6 +662,19 @@ export async function decide(
 }
 
 /**
+ * Hands the agent of a Session what waits for it, after a delivery it did not take: the Retry of
+ * the row that said so (issue #211). The agent is started first if it is not running.
+ */
+export async function handOver(sessionId: string): Promise<void> {
+  try {
+    await window.hemera.invoke('agents.handOver', { sessionId })
+    replace({ ...state, refusal: null })
+  } catch (cause) {
+    replace({ ...state, refusal: message(cause) })
+  }
+}
+
+/**
  * Puts the agent of a Session on another of its own options, and reads back what it is on.
  *
  * A model changed while no effort was chosen in the Session is followed by the effort that model

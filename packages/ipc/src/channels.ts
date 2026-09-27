@@ -125,6 +125,7 @@ export const CHANNELS = {
   'agents.stop': ENGINE_REQUESTS['agents.stop'],
   'agents.decide': ENGINE_REQUESTS['agents.decide'],
   'agents.resume': ENGINE_REQUESTS['agents.resume'],
+  'agents.handOver': ENGINE_REQUESTS['agents.handOver'],
   // The two the Agents section is drawn from: what this machine has, and the one thing that
   // changes it, which happens because somebody pressed a button and not on its own (D5-18).
   'agents.check': ENGINE_REQUESTS['agents.check'],

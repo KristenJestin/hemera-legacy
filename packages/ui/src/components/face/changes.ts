@@ -17,9 +17,10 @@ import { EYES, MOUTHS, type Stroke } from './strokes.ts'
 export type ChangeName = keyof typeof face.change
 
 /** The families of states a change is chosen by. */
-type Family = 'work' | 'needs' | 'done' | 'error' | 'asleep'
+type Family = 'loading' | 'work' | 'needs' | 'done' | 'error' | 'asleep'
 
 const FAMILY: Record<FaceState, Family> = {
+  loading: 'loading',
   thinking: 'work',
   reading: 'work',
   writing: 'work',
@@ -43,6 +44,8 @@ const FAMILY: Record<FaceState, Family> = {
 export function changeBetween(from: FaceState, to: FaceState): ChangeName {
   const was = FAMILY[from]
   const now = FAMILY[to]
+  if (was === 'loading') return 'boot'
+  if (now === 'loading') return 'gather'
   if (was === 'asleep') return 'wake'
   if (now === 'asleep') return 'drift'
   if (now === 'error') return 'flinch'
@@ -71,6 +74,7 @@ const WHOLE: Windows = {
   lid: [0, 1],
   head: [0, 1],
   gaze: [0, 1],
+  orbit: [0, 1],
   tone: [0, 1],
 }
 
@@ -116,6 +120,14 @@ function shake(q: number, from: number, to: number): number {
 const THANKS: Partial<Record<FaceState, number>> = { permission: 0.26, blocked: 0.22 }
 
 export const CHOREOGRAPHIES: Record<ChangeName, Choreography> = {
+  /**
+   * Loading gives way to a face: the dots keep turning, slow down, and each spirals into the
+   * feature it becomes, rounding out into its shape on the way in. The journey is the player's
+   * own, since it is a turn and not a straight line; nothing is said on top of it.
+   */
+  boot: { windows: WHOLE, beat: () => beat({}) },
+  /** A face gives way to loading: its features ball up into dots and are taken round. */
+  gather: { windows: WHOLE, beat: () => beat({}) },
   /**
    * From one kind of work to another: a glance. The eyes jump to where the new work is before
    * the head follows, and a blink comes with the jump nearly half the time, as it does with a

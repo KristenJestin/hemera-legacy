@@ -34,6 +34,14 @@ const PITCH_DEPTH = 0.2
 /** How far the eyes travel inside the face when they look away. */
 const GAZE_X = 1.6
 const GAZE_Y = 1.3
+/**
+ * The orbit the features ride while the face is loading: its radius, and where on it each feature
+ * sits, in turns — the mouth underneath and the eyes a third of a turn either side of it, so that
+ * the three are the three dots of a loading indicator, a third of a turn apart.
+ */
+const ORBIT = 7
+const SLOTS = { left: 0.25 + 1 / 3, right: 0.25 - 1 / 3, mouth: 0.25 } as const
+
 /** The least a feature is squashed to, so the far eye of a full turn is still an eye. */
 const LEAST = 0.2
 
@@ -91,14 +99,31 @@ export function drawnOf(pose: Pose, detail: FaceDetail, gain = 1): Drawn {
     CENTER + (y - CENTER) * detail.scale,
   ]
 
-  const lay = (
-    stroke: Stroke,
+  const orbit = pose[AT.orbit]!
+  const spin = pose[AT.spin]!
+  /** A feature's place, and how it is squashed, moved out onto the orbit as far as it has gone. */
+  const onOrbit = (
+    slot: number,
     x: number,
     y: number,
     sx: number,
     sy: number,
+  ): readonly [number, number, number, number] => {
+    if (orbit <= 0) return [x, y, sx, sy]
+    const angle = 2 * Math.PI * (spin + slot)
+    const ox = CENTER + Math.cos(angle) * ORBIT
+    const oy = CENTER + Math.sin(angle) * ORBIT
+    const at = (a: number, b: number): number => a + (b - a) * orbit
+    return [at(x, ox), at(y, oy), at(sx, 1), at(sy, 1)]
+  }
+
+  const lay = (
+    stroke: Stroke,
+    slot: number,
+    placed: readonly [number, number, number, number],
     width: number,
   ): DrawnStroke => {
+    const [x, y, sx, sy] = onOrbit(slot, ...placed)
     const [ax, ay] = turned(x + stroke[0] * sx, y + stroke[1] * sy)
     const [bx, by] = turned(x + stroke[2] * sx, y + stroke[3] * sy)
     const [cx, cy] = turned(x + stroke[4] * sx, y + stroke[5] * sy)
@@ -114,10 +139,13 @@ export function drawnOf(pose: Pose, detail: FaceDetail, gain = 1): Drawn {
     const stroke = closed(strokeAt(pose, start), lid)
     return lay(
       stroke,
-      at.x + gazeX * GAZE_X * at.squash,
-      eyes.y + gazeY * GAZE_Y,
-      at.squash * eyeDepth,
-      eyes.squash,
+      side < 0 ? SLOTS.left : SLOTS.right,
+      [
+        at.x + gazeX * GAZE_X * at.squash,
+        eyes.y + gazeY * GAZE_Y,
+        at.squash * eyeDepth,
+        eyes.squash,
+      ],
       stroke[6] * detail.weight * detail.scale * Math.sqrt(eyeDepth),
     )
   }
@@ -130,10 +158,8 @@ export function drawnOf(pose: Pose, detail: FaceDetail, gain = 1): Drawn {
     const stroke = strokeAt(pose, AT.mouth)
     mouth = lay(
       stroke,
-      at.x,
-      lips.y,
-      at.squash * mouthDepth,
-      lips.squash,
+      SLOTS.mouth,
+      [at.x, lips.y, at.squash * mouthDepth, lips.squash],
       stroke[6] * detail.weight * detail.scale * Math.sqrt(mouthDepth),
     )
   }

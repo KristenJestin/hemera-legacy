@@ -316,7 +316,12 @@ async function aNameIsTypedBeforeThePlanArrives(): Promise<void> {
   const dialog = within(document.body).getByRole('dialog')
   // The row nothing is known about yet is on screen with the others, and says as much.
   const front = rowOf(dialog, './sources/front')
-  front.getByText('being read')
+  const being = front.getByText('being read')
+  // With the loader of the whole application beside the words, and no icon of its own.
+  expect(being.querySelector('svg')).toBeNull()
+  expect(getComputedStyle(being.querySelector('[role="status"]')!.children[0]!).animationName).toBe(
+    'turn',
+  )
   // And it is already the height of the row it becomes: what Git has not answered for yet is
   // reserved at the size the fields take, so the dialog never moves under the answers (#110).
   await expect(lineOf(dialog, './sources/front').getBoundingClientRect().height).toBeCloseTo(

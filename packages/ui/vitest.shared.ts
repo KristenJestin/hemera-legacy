@@ -85,6 +85,14 @@ export function catalogue(theme: 'light' | 'dark') {
     test: {
       name: `storybook-${theme}`,
       root: import.meta.dirname,
+      // Some of what a story waits on is the browser's to give and not the story's: the preference
+      // for less movement applied to the page, a font the page loads. With both themes run at once
+      // — two dozen pages in one browser — applying the preference alone was measured at up to
+      // eleven seconds, against the fifteen a test is given by default, and handing it back is a
+      // hook that waits on the same. The waits inside a story keep their own patience; this is
+      // the room around them.
+      testTimeout: 30_000,
+      hookTimeout: 30_000,
       browser: {
         enabled: true,
         headless: true,

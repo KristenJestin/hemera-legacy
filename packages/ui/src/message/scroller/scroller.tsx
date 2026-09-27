@@ -226,6 +226,8 @@ export function MessageScroller({ label, entries, className }: MessageScrollerPr
   // size taken off a string: `offsetTop` and a scroll position are the same axis, and the two
   // are what tells the rail where the reader is.
   const anchors = useRef<(HTMLElement | null)[]>([])
+  // The list is as long as the thread drawn now: a thread that got shorter leaves no stale node.
+  anchors.current.length = entries.length
   const [active, setActive] = useState(-1)
   const [overflowing, setOverflowing] = useState(false)
   const [atEdge, setAtEdge] = useState(true)
@@ -255,8 +257,9 @@ export function MessageScroller({ label, entries, className }: MessageScrollerPr
     const middle = node.scrollTop + node.clientHeight / 2
     let mark = -1
     let seen = -1
+    // An entry whose node is not attached yet leaves a hole in the list: the walk passes over it.
     for (const anchor of anchors.current) {
-      if (anchor === null) continue
+      if (anchor === null || anchor === undefined) continue
       seen += 1
       if (anchor.offsetTop < middle) mark = seen
     }

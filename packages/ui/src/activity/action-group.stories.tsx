@@ -59,7 +59,7 @@ function rows(failed = false) {
 }
 
 const meta = {
-  tags: ['autodocs', 'new'],
+  tags: ['autodocs'],
   title: 'Blocks/Activity/ActionGroup',
   component: ActionGroup,
   parameters: { layout: 'padded' },

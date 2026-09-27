@@ -182,7 +182,7 @@ function dockWidth(canvasElement: HTMLElement): number {
 const FOLDED = 56 + 12
 
 /**
- * Folded, as a Session opens it: the small frame at the window's edge, centred on its height — the
+ * Folded, as a Session opens it: the small frame at the window's edge, at the top of the row — the
  * unfold chevron and the three phases' glyphs, each tinted by how far along it is and named with
  * its phase and its state. No head and no column: the chat has the width.
  */
@@ -207,10 +207,10 @@ export const Folded: Story = {
     await expect(plan.querySelector('[data-progress="started"][data-writing]')).not.toBeNull()
     await expect(decompose.querySelector('[data-progress="started"]')).not.toBeNull()
     await expect(canvas.getByRole('button', { name: 'Unfold the Spec' })).toBeVisible()
-    // Centred on the row's height.
-    const row = dockOf(canvasElement).getBoundingClientRect()
+    // At the top of the row, where the open panel's top is (issue #181).
+    const top = panelOf(canvasElement).parentElement!.getBoundingClientRect().top
     const box = frameOf(canvasElement).firstElementChild!.getBoundingClientRect()
-    await expect(box.top - row.top).toBeCloseTo(row.bottom - box.bottom, 0)
+    await expect(box.top).toBeCloseTo(top, 0)
     await expect(canvas.queryByRole('region', { name: 'Contents of ATL-7' })).toBeNull()
     await expect(canvas.queryByRole('heading', { name: 'CSV invoice export' })).toBeNull()
     // The column is there, laid out for the swap, and nothing of it takes the keyboard: neither
@@ -621,6 +621,64 @@ export const TurnsRoundMidWay: Story = {
     await expect(frames.at(-1)!.frame).toBe(1)
     await waitFor(() => expect(isStowed(canvasElement)).toBe(true))
   },
+}
+
+/**
+ * Where a control stands on the screen, to the pixel: its centre, which the hover's growth under
+ * the pointer that just pressed there leaves where it is.
+ */
+function placeOf(button: HTMLElement): string {
+  const box = button.getBoundingClientRect()
+  return [box.left + box.width / 2, box.top + box.height / 2].map(Math.round).join(' ')
+}
+
+/**
+ * Unfolded then folded again, and the pointer's target never moves (issue #181): the fold chevron
+ * of the open panel stands exactly where the unfold chevron of the small frame stood, so the same
+ * spot pressed twice unfolds the Spec and folds it back. Read at rest on both sides of the swap.
+ */
+async function chevronStaysPut(canvasElement: HTMLElement): Promise<void> {
+  const canvas = within(canvasElement)
+  const unfold = canvas.getByRole('button', { name: 'Unfold the Spec' })
+  const folded = placeOf(unfold)
+  await userEvent.click(unfold)
+  await nextFrame()
+  const fold = canvas.getByRole('button', { name: 'Fold the Spec' })
+  await expect(placeOf(fold)).toBe(folded)
+  await userEvent.click(fold)
+  await nextFrame()
+  await expect(placeOf(canvas.getByRole('button', { name: 'Unfold the Spec' }))).toBe(folded)
+}
+
+/** A draft: the fold chevron of its head is where the small frame's unfold chevron was. */
+export const ChevronInPlace: Story = {
+  args: { defaultFolded: true },
+  // Settled at once, so that each side of the swap is read where it lands.
+  decorators: [
+    (Story) => (
+      <MotionConfig reducedMotion="always">
+        <Story />
+      </MotionConfig>
+    ),
+  ],
+  play: async ({ canvasElement }) => chevronStaysPut(canvasElement),
+}
+
+/**
+ * A ready Spec, whose head holds the taller picker of the revisions and `Rework`: the fold chevron
+ * is still where the unfold chevron was.
+ */
+export const ChevronInPlaceWhenReady: Story = {
+  args: { spec: READY, defaultFolded: true },
+  // Settled at once, so that each side of the swap is read where it lands.
+  decorators: [
+    (Story) => (
+      <MotionConfig reducedMotion="always">
+        <Story />
+      </MotionConfig>
+    ),
+  ],
+  play: async ({ canvasElement }) => chevronStaysPut(canvasElement),
 }
 
 /**

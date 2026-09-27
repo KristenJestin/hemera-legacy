@@ -9,7 +9,7 @@
  * behind Hemera's marker (D6-08), never as words of the user's.
  */
 
-import { type SpecType, contextUri } from '@hemera/core'
+import { QUESTION_RULE, type SpecType, contextUri } from '@hemera/core'
 import type { PromptIntent } from '@hemera/ipc'
 
 import type { Provision } from './client.ts'
@@ -30,7 +30,8 @@ The user started this Session from Hemera's "New Spec": they want the message be
 
 - Settle the type first: ask the user, as a question card, whether it is a \`feature\`, a \`bug\` or a \`maintenance\`, with your recommendation. Read what you need to recommend one, and nothing more before asking.
 - Once answered, write the type with \`spec_write\` and \`type\`, and give the Spec a short title with \`spec_write\` and \`title\`.
-- Then work on the phase in focus, as your mission brief says. Do not change any code.`
+- Then work on the phase in focus, as your mission brief says. Do not change any code.
+- ${QUESTION_RULE}`
 
 /** The Spec a New Spec request creates: the first line of the request as its title. */
 export function requestedSpec(text: string) {

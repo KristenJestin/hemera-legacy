@@ -39,13 +39,15 @@ const answerSchema = z.object({
 
 /**
  * What the agent of a `free` Session proposed, through `spec_propose`: a Spec to create, or one
- * that exists, named by its id and its key (issue #198).
+ * that exists, named by its id and its key (issue #198). In a New Spec Session, a Spec to create
+ * is created at once, and the entry carries the key it was given (issue #205).
  */
 const proposalSchema = z.object({
   title: z.string(),
   type: specTypeSchema,
   specId: z.string().optional(),
   key: z.string().optional(),
+  createdKey: z.string().optional(),
 })
 
 function parsed<S extends z.ZodType>(schema: S, payload: string): z.infer<S> | null {
@@ -162,6 +164,8 @@ export interface ProposalView {
   state: ProposalState
   /** The Spec it points to, when it is one that exists rather than one to create (#198). */
   existing?: { specId: string; key: string } | undefined
+  /** The key of the Spec Hemera created from it at once, in a New Spec Session (#205). */
+  createdAtOnce?: string | undefined
 }
 
 /**
@@ -172,9 +176,10 @@ export interface ProposalView {
 function createdFrom(thread: readonly SessionEntry[], spec: DefinedSpec): string | null {
   const proposals = thread.filter((entry) => entry.kind === 'spec_proposal')
   // A proposal that points to an existing Spec never created one.
-  const creating = proposals.filter(
-    (entry) => parsed(proposalSchema, entry.payload)?.specId === undefined,
-  )
+  const creating = proposals.filter((entry) => {
+    const said = parsed(proposalSchema, entry.payload)
+    return said?.specId === undefined && said?.createdKey === undefined
+  })
   const same = creating.find((entry) => {
     const said = parsed(proposalSchema, entry.payload)
     return said?.title === spec.title && said.type === spec.type
@@ -198,6 +203,10 @@ export function proposalOf(
   const proposal = parsed(proposalSchema, entry.payload)
   if (proposal === null) return null
   const { title, type } = proposal
+  // Created at once (issue #205): nothing was asked, and nothing waits for an answer.
+  if (proposal.createdKey !== undefined) {
+    return { title, type, state: 'created', createdAtOnce: proposal.createdKey }
+  }
   const existing =
     proposal.specId === undefined || proposal.key === undefined
       ? undefined
@@ -239,4 +248,25 @@ export function waitsForAnswer(
     return block !== null && block.question.answer === null && !block.cancelled
   }
   return false
+}
+
+/**
+ * The Sessions the list still says are `free` whose thread holds a Spec Hemera created at once
+ * (issue #205): the Session turned `define` during the agent's turn, with nothing pressed on this
+ * side, so the list is read again and the Spec takes the provisional one's place in the panel.
+ */
+export function definedAtOnceOf(
+  sessions: readonly { readonly id: string; readonly mission: string }[],
+  pushed: ReadonlyMap<string, { readonly entries: readonly SessionEntry[] }>,
+): string[] {
+  return sessions
+    .filter((one) => one.mission === 'free')
+    .filter((one) =>
+      (pushed.get(one.id)?.entries ?? []).some(
+        (entry) =>
+          entry.kind === 'spec_proposal' &&
+          parsed(proposalSchema, entry.payload)?.createdKey !== undefined,
+      ),
+    )
+    .map((one) => one.id)
 }

@@ -1,6 +1,7 @@
 import { cn } from 'cn'
 import type { ReactNode } from 'react'
 
+import { Button } from '../components/button/button.tsx'
 import { IconAlertTriangle } from '../icons.ts'
 
 /**
@@ -15,6 +16,9 @@ import { IconAlertTriangle } from '../icons.ts'
  * Quiet on purpose. It is not a message of the agent's and not a failure of the turn — the turn
  * may well go on — so it stands in the muted colour like a stopped turn does, with the warning
  * mark to say it is worth a glance.
+ *
+ * A failure Hemera can try again — a delivery the agent did not take (issue #211) — offers Retry at
+ * the end of the line, a quiet button as the foot of a refused message has.
  */
 const REPORT = 'flex min-w-0 flex-col gap-1'
 
@@ -36,11 +40,19 @@ export interface AgentReportProps {
   detail?: string | undefined
   /** When, already written for the platform. */
   at: string
+  /** Tries again what failed; no Retry is drawn without it. */
+  onRetry?: (() => void) | undefined
   /** Where the line sits; never how it looks. */
   className?: string | undefined
 }
 
-export function AgentReport({ title, detail, at, className }: AgentReportProps): ReactNode {
+export function AgentReport({
+  title,
+  detail,
+  at,
+  onRetry,
+  className,
+}: AgentReportProps): ReactNode {
   return (
     <div className={cn(REPORT, className)}>
       <p className={HEAD}>
@@ -49,6 +61,11 @@ export function AgentReport({ title, detail, at, className }: AgentReportProps):
         </span>
         <span className={TEXT}>{title}</span>
         <span className={AT}>{at}</span>
+        {onRetry !== undefined && (
+          <Button variant="ghost" size="sm" onClick={onRetry}>
+            Retry
+          </Button>
+        )}
       </p>
       {detail === undefined || detail === '' ? null : <p className={DETAIL}>{detail}</p>}
     </div>

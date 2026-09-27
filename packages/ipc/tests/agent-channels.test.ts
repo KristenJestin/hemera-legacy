@@ -49,6 +49,7 @@ describe('The agent channels are declared once', () => {
     expect(relayed.toSorted()).toEqual([
       'agents.check',
       'agents.decide',
+      'agents.handOver',
       'agents.list',
       'agents.offer',
       'agents.offerSet',

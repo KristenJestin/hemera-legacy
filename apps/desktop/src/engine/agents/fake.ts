@@ -275,6 +275,12 @@ export interface FakeScript {
    * ends, which is how a suite holds a build `starting` (#132).
    */
   readonly holdsStart?: () => Promise<void>
+  /**
+   * Awaited before `session/resume` or `session/load` is answered: an agent still taking its
+   * session back, which is how a suite catches a Session whose agent runs but holds no session
+   * yet (#211).
+   */
+  readonly holdsTakeBack?: () => Promise<void>
   /** Called with the text of each prompt as it arrives, for a test that watches the pipe. */
   readonly onPrompt?: (text: string) => void
   /**
@@ -923,6 +929,7 @@ export function fakeAgent(script: Partial<FakeScript> = {}): FakeAgent {
     loadSession: async (request: LoadSessionRequest): Promise<LoadSessionResponse> => {
       answers.loads += 1
       if (script.refusesLoad === true) throw new Error('this agent refuses to load a session')
+      await script.holdsTakeBack?.()
       await handed(request)
       sessionId = request.sessionId
       for (const step of script.history ?? []) {
@@ -934,6 +941,7 @@ export function fakeAgent(script: Partial<FakeScript> = {}): FakeAgent {
     resumeSession: async (request: ResumeSessionRequest): Promise<ResumeSessionResponse> => {
       answers.resumes += 1
       if (script.refusesResume === true) throw new Error('this agent refuses to resume a session')
+      await script.holdsTakeBack?.()
       await handed(request)
       sessionId = request.sessionId
       return takenBack()

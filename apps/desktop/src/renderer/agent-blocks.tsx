@@ -37,9 +37,11 @@ import {
   commandRunOf,
   contextDeliveryOf,
   elsewhereOf,
+  failureNoteOf,
   hemeraPermissionOf,
   hemeraToolCallOf,
   reportedFailureOf,
+  stoppedTurnOf,
   hemeraToolLabelOf,
   nativeSubjectOf,
   questionOpen,
@@ -151,8 +153,6 @@ const decisionSchema = z.object({
   toolCallId: z.string(),
   optionId: z.string().nullable(),
 })
-
-const turnSchema = z.object({ stopReason: z.string() })
 
 const planSchema = z.object({ entries: z.array(planEntrySchema) })
 
@@ -326,6 +326,8 @@ export interface AgentContext {
   onOpenUrl: (url: string) => void
   /** Stops a run and everything it started. */
   onStopRun: (runId: string) => void
+  /** Hands the agent again what waits for it, after a delivery it did not take (issue #211). */
+  onHandOver: () => void
   /**
    * The agent's report of a call, by the identifier the agent gave it: what a question about
    * that call is headed by — the label and the subject of its line (recette 3 of 23 September
@@ -530,18 +532,18 @@ export function drawEntry(entry: SessionEntry, context: AgentContext): ReactNode
   }
 
   if (entry.kind === 'turn') {
-    const read = readPayload(turnSchema, entry.payload)
     // A turn that simply ended is not news: the agent's answer above it is. What is worth a line
     // is a turn that stopped for a reason the reader has to know about (D5-13).
-    if (read === null || read.stopReason === 'end_turn') return null
+    const stopped = stoppedTurnOf(entry)
+    if (stopped === null) return null
     return (
       <StoppedTurn
-        doing={entry.body}
+        reason={stopped.reason}
         at={new Date(entry.createdAt).toLocaleTimeString('en-GB', {
           hour: '2-digit',
           minute: '2-digit',
         })}
-        byTheReader={read.stopReason === 'cancelled'}
+        byTheReader={stopped.byTheReader}
       />
     )
   }
@@ -590,6 +592,21 @@ export function drawEntry(entry: SessionEntry, context: AgentContext): ReactNode
   }
 
   if (entry.kind === 'note') {
+    // An error a turn failed with is a row in words, never the raw error as a line of Hemera's.
+    const failure = failureNoteOf(entry)
+    if (failure !== null) {
+      return (
+        <AgentReport
+          title={failure.title}
+          detail={failure.detail}
+          at={new Date(entry.createdAt).toLocaleTimeString('en-GB', {
+            hour: '2-digit',
+            minute: '2-digit',
+          })}
+          onRetry={failure.retry ? context.onHandOver : undefined}
+        />
+      )
+    }
     const report = agentReportOf(entry)
     if (report !== null) {
       return (
@@ -654,7 +671,13 @@ export function drawEntry(entry: SessionEntry, context: AgentContext): ReactNode
     const drawn = contextDeliveryOf(entry)
     if (drawn === null) return null
     return (
-      <MessageGroup author="hemera" name="Hemera" lines={[{ id: drawn.id, body: drawn.body }]} />
+      <MessageGroup
+        author="hemera"
+        name="Hemera"
+        // What still waits for the agent is a state of Hemera's, said as a quiet row (#211).
+        tone={drawn.waiting ? 'ghost' : undefined}
+        lines={[{ id: drawn.id, body: drawn.body }]}
+      />
     )
   }
 

@@ -11,8 +11,9 @@ import type {
   StopReason,
 } from '@hemera/ipc'
 import { TOOL_LABELS, hemeraToolNamed } from '@hemera/core'
-import type { ActivityState, SpecTarget } from '@hemera/ui'
+import type { ActivityState, FaceState, SpecTarget } from '@hemera/ui'
 
+import { asksAnswer, callFaceOf } from './agent-face.ts'
 import { effortStage, effortToLand, modelStage } from './agent-options.ts'
 import { commandRunOf, specWriteOf } from './agent-tool-payloads.ts'
 
@@ -184,6 +185,11 @@ export interface Activity {
   detail?: string | undefined
   /** What one of Hemera's own tools is doing, said whole: "Writing the Spec" (issue #170). */
   doing?: string | undefined
+  /**
+   * The face the row wears when the state says less than the call does (issue #140): reading or
+   * writing for a tool that reads or writes, where the state only says `running`.
+   */
+  face?: FaceState | undefined
   /** The thought arriving now, which is the last one of the turn that is running. */
   thought?: string | undefined
   /** How long the last turn took, from the user's message to its `turn` entry, once it is over. */
@@ -193,8 +199,11 @@ export interface Activity {
 /** How far a call got, in the two words that mean it has not finished (ipc, `ToolCallStatus`). */
 const UNFINISHED = ['pending', 'in_progress']
 
-/** The three states a turn is in once it is over, which the row keeps until the next message. */
-const ENDED: readonly ActivityState[] = ['done', 'stopped', 'failed']
+/**
+ * The four states a turn is in once it is over, which the row keeps until the next message: a turn
+ * that ended on a question it asked the reader is over too, and waits on them.
+ */
+const ENDED: readonly ActivityState[] = ['question', 'done', 'stopped', 'failed']
 
 /** Whether an activity is the end of a turn rather than something a turn is doing. */
 export function hasEnded(activity: Activity): boolean {
@@ -249,7 +258,8 @@ function lastEnd(entries: readonly SessionEntry[]): number {
  * lasts.
  *
  * A `turn` entry after that message is the turn over: done, stopped or failed, and how long it
- * took from the message to that entry. Otherwise the states answer in this order: a permission
+ * took from the message to that entry — or, when the turn asked a question of the Spec that has
+ * no answer yet, a turn that ended by asking (issue #140), which is what the reader has to do next. Otherwise the states answer in this order: a permission
  * first, because a turn waiting on the reader is not working whatever else the thread holds;
  * then the call it is running, because that is the one thing worth naming; then the answer being
  * written, when the entry the engine wrote last is one; and thinking for everything else, which
@@ -268,6 +278,9 @@ export function activityOf(
   if (end > said) {
     const closing = entries[end]
     const ending = endOf(closing?.state ?? null)
+    if (ending === 'done' && asksAnswer(entries.slice(said + 1, end), entries)) {
+      return { state: 'question' }
+    }
     const asked = entries[said]
     if (ending !== 'done' || closing === undefined || asked === undefined) return { state: ending }
     return { state: ending, elapsedMs: closing.createdAt - asked.createdAt }
@@ -294,8 +307,9 @@ export function activityOf(
     // One of Hemera's own tools says what it is doing in words of its own, never by the agent's
     // word for it, `mcp__hemera__spec_write` (issue #159), nor as "Running Write Spec" (#170).
     const named = hemeraToolNamed(call.body)
-    if (named !== null) return { state: 'running', doing: TOOL_LABELS[named].doing, thought }
-    return { state: 'running', detail: call.body, thought }
+    const face = callFaceOf(call)
+    if (named !== null) return { state: 'running', doing: TOOL_LABELS[named].doing, face, thought }
+    return { state: 'running', detail: call.body, face, thought }
   }
 
   // A message has no state while it is being written — the engine writes the same entry again

@@ -466,6 +466,17 @@ export function faceArrive(k: number): number {
 }
 
 /**
+ * How far a number of the face has gone at a share `k` of a change of speed eased on
+ * `faceArrive`, for a change of one: what a speed that builds and settles has covered, and past
+ * the end of the change, everything it covers at its new speed.
+ */
+export function faceArriveSpan(k: number): number {
+  if (k <= 0) return 0
+  if (k >= 1) return 0.5 + (k - 1)
+  return k ** 3 - k ** 4 / 2
+}
+
+/**
  * How far a number of the face coasts at a share `k` of a change, in lengths of it and for a speed
  * of one: the speed dies away evenly and is spent at the end. How the loading orbit stops when a
  * change that does not know it takes it over.

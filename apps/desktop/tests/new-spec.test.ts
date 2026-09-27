@@ -22,7 +22,7 @@ import { type FakeStep, fakeAgent } from '#engine/agents/fake.ts'
 import { SPEC_REQUEST, SPEC_REQUEST_URI } from '#engine/agents/spec-request.ts'
 import { Specs } from '#engine/specs/specs.ts'
 import { listenToAgents, say } from '#renderer/agent-store.ts'
-import { proposalIdOf } from '#renderer/spec-entries.ts'
+import { proposalIdOf, proposalOf, waitsForAnswer } from '#renderer/spec-entries.ts'
 import {
   archiveSession,
   closeSessions,
@@ -58,6 +58,22 @@ const PROPOSAL = z.object({
   specId: z.string().optional(),
   key: z.string().optional(),
 })
+
+/** Waits until a Session's thread holds what the test waits for. */
+async function untilThread(
+  bridge: OpenWindow['bridge'],
+  sessionId: string,
+  ready: (entries: readonly SessionEntry[]) => boolean,
+): Promise<readonly SessionEntry[]> {
+  for (let look = 0; look < 400; look += 1) {
+    // oxlint-disable-next-line no-await-in-loop -- a poll: each look waits for the one before it
+    const read = await bridge.invoke('sessions.read', { sessionId })
+    if (ready(read.entries)) return read.entries
+    // oxlint-disable-next-line no-await-in-loop -- the same poll, after its pause
+    await new Promise((resolve) => setTimeout(resolve, 25))
+  }
+  throw new Error('the thread never held what the test waited for')
+}
 
 /** The proposal a Session's thread holds, read as the card reads it. */
 function proposalIn(entries: readonly SessionEntry[]) {
@@ -152,6 +168,7 @@ describe('New Spec shows a provisional Spec, and saves none until one is propose
     expect(SPEC_REQUEST).toContain('`project_get`')
     expect(SPEC_REQUEST).toContain('`spec_propose` with kind `spec`')
     expect(SPEC_REQUEST).toContain('`spec_propose` with kind `existing`')
+    expect(SPEC_REQUEST).toContain('is created at once')
     expect(SPEC_REQUEST).toContain(QUESTION_RULE)
     const first = JSON.stringify(agent.answers.blocks[0])
     expect(first).toContain(JSON.stringify(QUESTION_RULE).slice(1, -1))
@@ -194,7 +211,7 @@ describe('New Spec shows a provisional Spec, and saves none until one is propose
     })
   })
 
-  test('accepting the proposal makes the provisional Spec real, with the title and type proposed', async () => {
+  test('a new Spec proposed in a New Spec Session is created at once, with no card to press', async () => {
     const agent = fakeAgent({
       steps: [
         uses('project_get', {}),
@@ -206,26 +223,84 @@ describe('New Spec shows a provisional Spec, and saves none until one is propose
         }),
       ],
     })
-    // Accepted, the agent is started again with the tools of a define Session.
+    // Created, the agent is started again with the tools of a define Session, and briefed.
     const next = fakeAgent({ listsTools: true })
     const { bridge, projectId } = await atlas(agent, next)
     const sessionId = await newSpec(projectId, 'on veut rajouter un outil de lecture de texte')
 
     // It checked the Specs first: the Project has none.
     expect(agent.answers.used[0]?.text).toContain('specs: none')
-    const thread = await bridge.invoke('sessions.read', { sessionId })
-    expect(proposalIn(thread.entries)).toEqual({ title: 'Read a text file aloud', type: 'feature' })
-    expect(await bridge.invoke('specs.list', { projectId })).toEqual([])
-
-    // The card's Create, as the page wires it.
-    expect(await createSpec(sessionId, 'feature', 'Read a text file aloud')).toBe(true)
+    // The user asked for a Spec already: it is created as proposed, and nothing is to be pressed.
     const [spec] = await bridge.invoke('specs.list', { projectId })
     expect(spec).toMatchObject({ title: 'Read a text file aloud', type: 'feature' })
     const [session] = await bridge.invoke('sessions.list', { projectId })
     expect(session).toMatchObject({ mission: 'define', specId: spec?.id })
-    // The panel holds the Spec, keyed, and nothing provisional any more.
-    expect(specSnapshot().snapshot?.spec.key).toBe(spec?.key)
-    expect(provisionalSpecOf(sessionId)).toBeNull()
+    expect(agent.answers.used[1]).toMatchObject({ tool: 'spec_propose', isError: false })
+    expect(agent.answers.used[1]?.text).toContain(`created the feature Spec ${spec?.key}`)
+
+    // The thread keeps a quiet line saying it, and no card waits for an answer.
+    const thread = await bridge.invoke('sessions.read', { sessionId })
+    const entry = thread.entries.find((one) => one.kind === 'spec_proposal')
+    if (entry === undefined || spec === undefined) throw new Error('no proposal in the thread')
+    const defined = { key: spec.key, title: spec.title, type: spec.type }
+    expect(proposalOf(entry, thread.entries, spec.id, defined)).toMatchObject({
+      state: 'created',
+      createdAtOnce: spec.key,
+    })
+    expect(waitsForAnswer(entry, thread.entries, null, null)).toBe(false)
+
+    // The agent is started again with the define tools and handed its brief in a turn of its own.
+    await untilThread(bridge, sessionId, (entries) =>
+      entries.some((one) => one.kind === 'mission_brief'),
+    )
+    expect(next.answers.prompts).toEqual([DELIVERY_MARKER])
+    expect(next.answers.tools.at(-1)).toContain('spec_write')
+  })
+
+  test('a proposal outside a New Spec Session keeps its card, and creates nothing', async () => {
+    const agent = fakeAgent({
+      steps: [
+        uses('spec_propose', { kind: 'spec', title: 'Text reader', type: 'feature', key: 'p-1' }),
+      ],
+    })
+    const { bridge, projectId } = await atlas(agent)
+    const made = await startSession(projectId, 'claude', null)
+    const sessionId = made?.id ?? ''
+    expect(await say(sessionId, 'a text reader')).toBeNull()
+
+    expect(await bridge.invoke('specs.list', { projectId })).toEqual([])
+    const thread = await bridge.invoke('sessions.read', { sessionId })
+    const entry = thread.entries.find((one) => one.kind === 'spec_proposal')
+    if (entry === undefined) throw new Error('no proposal in the thread')
+    expect(proposalOf(entry, thread.entries, null, null)?.state).toBe('proposed')
+    expect(waitsForAnswer(entry, thread.entries, null, null)).toBe(true)
+  })
+
+  test('a New Spec Session that points to an existing Spec still asks with its card', async () => {
+    const steps: FakeStep[] = []
+    const agent = fakeAgent({ listsTools: true, steps })
+    const { bridge, running, projectId } = await atlas(agent)
+    const other = await startSession(projectId, 'claude', null)
+    const existing = await running(
+      Effect.gen(function* () {
+        return yield* (yield* Specs).create({
+          sessionId: other?.id ?? '',
+          type: 'feature',
+          title: 'Read text aloud',
+        })
+      }),
+    )
+    steps.push(
+      uses('spec_propose', { kind: 'existing', spec: existing.snapshot.spec.key, key: 'p-1' }),
+    )
+
+    const sessionId = await newSpec(projectId, 'a tool that reads a text aloud')
+    const thread = await bridge.invoke('sessions.read', { sessionId })
+    const entry = thread.entries.find((one) => one.kind === 'spec_proposal')
+    if (entry === undefined) throw new Error('no proposal in the thread')
+    expect(waitsForAnswer(entry, thread.entries, null, null)).toBe(true)
+    const sessions = await bridge.invoke('sessions.list', { projectId })
+    expect(sessions.find((one) => one.id === sessionId)).toMatchObject({ mission: 'free' })
   })
 
   test('an existing Spec can be chosen instead, and the panel shows that one', async () => {
@@ -280,16 +355,14 @@ describe('New Spec shows a provisional Spec, and saves none until one is propose
     expect(provisionalSpecOf(sessionId)).toBeNull()
   })
 
-  test('nothing is saved when the Session is abandoned before accepting', async () => {
+  test('nothing is saved when the Session is abandoned before the agent proposes', async () => {
     const agent = fakeAgent({
-      steps: [
-        uses('spec_propose', { kind: 'spec', title: 'Text reader', type: 'feature', key: 'p-1' }),
-      ],
+      steps: [uses('project_get', {}), { does: 'says', text: 'Which reader do you mean?' }],
     })
     const { bridge, projectId } = await atlas(agent)
     const sessionId = await newSpec(projectId, 'a text reader')
     const thread = await bridge.invoke('sessions.read', { sessionId })
-    expect(proposalIn(thread.entries)?.title).toBe('Text reader')
+    expect(proposalIn(thread.entries)).toBeNull()
 
     const session = sessionsSnapshot().sessions.find((one) => one.id === sessionId)
     if (session === undefined) throw new Error('the Session is not listed')

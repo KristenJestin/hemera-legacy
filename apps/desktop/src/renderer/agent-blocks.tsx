@@ -575,7 +575,8 @@ export function drawEntry(entry: SessionEntry, context: AgentContext): ReactNode
   // nothing more for it.
   if (entry.kind === 'spec_answer') return null
 
-  // The Spec the agent of a `free` Session proposed, which `Create` accepts (D7-07).
+  // The Spec the agent of a `free` Session proposed, which `Create` accepts (D7-07), or which
+  // Hemera created at once in a Session New Spec started (issue #205).
   if (entry.kind === 'spec_proposal') {
     const { thread, specId, defined } = context.spec
     const proposal = proposalOf(entry, thread, specId, defined)
@@ -585,7 +586,8 @@ export function drawEntry(entry: SessionEntry, context: AgentContext): ReactNode
         title={proposal.title}
         type={proposal.type}
         state={proposal.state}
-        createdKey={defined?.key}
+        createdKey={proposal.createdAtOnce ?? defined?.key}
+        atOnce={proposal.createdAtOnce !== undefined}
         existingKey={proposal.existing?.key}
         onContinue={() => context.spec.onJoin(proposalIdOf(entry))}
         onCreate={context.spec.onCreate}

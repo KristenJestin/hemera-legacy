@@ -36,7 +36,7 @@ import type { ModelChoice } from './agent-model-menu-shared.tsx'
  * of it, and what is left under it is the panel's own surface.
  */
 const meta = {
-  tags: ['autodocs'],
+  tags: ['autodocs', 'updated'],
   title: 'Blocks/Composer/AgentModelMenu',
   component: AgentModelMenu,
   render: (args) => <Controlled {...args} render={(props) => <AgentModelMenu {...props} />} />,
@@ -185,6 +185,46 @@ export const AgentNotAvailableHere: Story = {
     await waitFor(() => {
       expect(screen.getByRole('listbox', { name: 'Agents' })).toBeVisible()
     })
+  },
+}
+
+/**
+ * The machine has not said yet which agents it has: the room of the list says it is looking, with
+ * the indicator in the middle of it, and never shows an empty list in its place — an empty menu
+ * read as a machine with no agent at all. The box is the panel's own, the same as once they are
+ * listed.
+ */
+export const LookingForAgents: Story = {
+  args: { agents: [], listing: 'looking' },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await userEvent.click(canvas.getByRole('button', { name: 'Choose an agent' }))
+
+    const looking = await screen.findByRole('status', { name: 'Looking for agents…' })
+    // Waited out rather than read at once: the panel comes down from its trigger in opacity.
+    await waitFor(() => {
+      expect(looking).toBeVisible()
+    })
+    await expect(screen.queryByRole('listbox', { name: 'Agents' })).toBeNull()
+  },
+}
+
+/**
+ * The machine could not be asked which agents it has, even after the window asked again: the
+ * room of the list says so in words, and offers to ask once more.
+ */
+export const AgentsUnlisted: Story = {
+  args: { agents: [], listing: 'failed', onRetryAgents: fn() },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement)
+    await userEvent.click(canvas.getByRole('button', { name: 'Choose an agent' }))
+
+    const said = await screen.findByRole('alert')
+    await expect(said).toHaveTextContent('Hemera could not list the agents on this machine.')
+    await expect(screen.queryByRole('listbox', { name: 'Agents' })).toBeNull()
+
+    await userEvent.click(within(said).getByRole('button', { name: 'Retry' }))
+    await expect(args.onRetryAgents).toHaveBeenCalledOnce()
   },
 }
 

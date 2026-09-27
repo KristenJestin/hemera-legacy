@@ -7,10 +7,10 @@ import { EYES, MOUTHS, type Stroke, mirrored } from './strokes.ts'
  *
  * Waiting for the user is three states and not one, because it is three things to answer: a
  * question, a permission, and a blocker — which is also what a build that cannot go on is
- * waiting for, so the two share `blocked`.
+ * waiting for, so the two share `blocked`. Nothing running is asleep: there is no face that is
+ * awake and doing nothing, and no face for having heard nothing for a while either.
  */
 export const FACE_STATES = [
-  'idle',
   'thinking',
   'reading',
   'writing',
@@ -21,7 +21,6 @@ export const FACE_STATES = [
   'blocked',
   'done',
   'error',
-  'silent',
   'asleep',
 ] as const
 
@@ -56,7 +55,7 @@ export interface Expression {
   readonly tone: FaceTone
 }
 
-const LEVEL: Head = { yaw: 0, pitch: 0, roll: 0, gazeX: 0, gazeY: 0 }
+const LEVEL: Head = { yaw: 0, pitch: 0, gazeX: 0, gazeY: 0 }
 
 /** A resting head that says only what it is given. */
 function look(said: Partial<Head>): Head {
@@ -72,26 +71,13 @@ function look(said: Partial<Head>): Head {
  * when it is done, a frown when it went wrong.
  */
 export const EXPRESSIONS: Record<FaceState, Expression> = {
-  /** Nothing running: the mark at rest, looking about. */
-  idle: {
-    label: 'Idle',
-    eyes: [EYES.chevron, EYES.chevron],
-    mouth: MOUTHS.line,
-    lid: 0,
-    look: LEVEL,
-    blink: { every: [3.4, 7.5], double: 0.2 },
-    motion: 'wander',
-    aside: null,
-    flourish: 'lookaway',
-    tone: 'ink',
-  },
-  /** Working something out: heavy-lidded, looking up and away, the head leaning into it. */
+  /** Working something out: heavy-lidded, looking up and away. */
   thinking: {
     label: 'Thinking',
     eyes: [EYES.chevron, EYES.chevron],
     mouth: MOUTHS.hmm,
     lid: 0.3,
-    look: look({ roll: -0.08, gazeY: -0.1 }),
+    look: look({ yaw: -0.08, gazeY: -0.1 }),
     blink: { every: [2.8, 6], double: 0.12 },
     motion: 'ponder',
     aside: { motion: 'weigh', chance: 0.3 },
@@ -154,7 +140,7 @@ export const EXPRESSIONS: Record<FaceState, Expression> = {
     tone: 'build',
   },
   /**
-   * A question for you: two cursors stood up, straight at you, the head cocked — and every so
+   * A question for you: two cursors stood up, straight at you, the head turned a little — and every so
    * often the eyes widen, which asks again without saying anything new.
    */
   question: {
@@ -162,7 +148,7 @@ export const EXPRESSIONS: Record<FaceState, Expression> = {
     eyes: [EYES.block, EYES.block],
     mouth: MOUTHS.line,
     lid: 0,
-    look: look({ roll: 0.12, pitch: -0.06 }),
+    look: look({ yaw: 0.1, pitch: -0.06 }),
     blink: { every: [2.2, 4.4], double: 0.4 },
     motion: 'ask',
     aside: null,
@@ -227,20 +213,7 @@ export const EXPRESSIONS: Record<FaceState, Expression> = {
     flourish: null,
     tone: 'bad',
   },
-  /** Nothing heard for too long: `-_-`, nodding off and catching itself. */
-  silent: {
-    label: 'Silent for too long',
-    eyes: [EYES.dash, EYES.dash],
-    mouth: MOUTHS.line,
-    lid: 0.15,
-    look: look({ pitch: 0.1 }),
-    blink: { every: [4.5, 8], double: 0.1 },
-    motion: 'droop',
-    aside: null,
-    flourish: 'yawn',
-    tone: 'quiet',
-  },
-  /** Released after a while idle: eyes closed, breathing, yawning now and then. */
+  /** Nothing running: eyes closed, breathing, yawning now and then. */
   asleep: {
     label: 'Asleep',
     eyes: [EYES.sleep, EYES.sleep],

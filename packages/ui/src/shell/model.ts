@@ -1,3 +1,4 @@
+import type { FaceState } from '../components/face/states.ts'
 import stylesheet from '../theme.css?raw'
 
 /**
@@ -34,6 +35,8 @@ export interface ShellProject {
 export interface ShellSession {
   id: string
   title: string
+  /** What its agent is doing, worn by its face in the list; asleep when left out (issue #140). */
+  agent?: FaceState | undefined
 }
 
 /** The entries of the sidebar that are not Sessions, named so a caller can select them. */

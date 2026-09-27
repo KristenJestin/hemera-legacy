@@ -240,6 +240,7 @@ export function Sidebar({
             key={session.id}
             id={session.id}
             title={session.title}
+            agent={session.agent}
             active={session.id === activeEntryId}
             collapsed={collapsed}
             onSelect={() => onSelectEntry(session.id)}

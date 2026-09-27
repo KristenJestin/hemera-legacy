@@ -323,6 +323,41 @@ export function activityOf(
 }
 
 /**
+ * The face a Session wears in the sidebar (issue #140), from what this window has heard of it.
+ *
+ * At work while its turn runs — thinking, reading, writing, running a command — and asking while
+ * the turn waits on the reader for a permission. Once the turn is over the Session is at rest and
+ * asleep, unless it ended on something the reader has to see: a question left for them, or a
+ * failure. A Session nothing has been heard of since the window opened is asleep too: nothing of
+ * it runs.
+ *
+ * A turn just asked for whose thread still ends on the turn before is thinking, as the row above
+ * the box has it: the end is the last turn's, not this one's.
+ */
+export function sessionFaceOf(agent: AgentSessionState): FaceState {
+  const read = activityOf(agent.entries, agent.latest)
+  if (agent.running) {
+    if (hasEnded(read)) return 'thinking'
+    if (read.face !== undefined) return read.face
+    return RUNNING_FACES[read.state] ?? 'thinking'
+  }
+  if (read.state === 'question') return 'question'
+  if (read.state === 'failed') return 'error'
+  return 'asleep'
+}
+
+/**
+ * The faces of a turn in flight, as the row above the box wears them (`ACTIVITY_FACES` in the
+ * design system, which this module does not import: it reads no component).
+ */
+const RUNNING_FACES: Partial<Record<ActivityState, FaceState>> = {
+  thinking: 'thinking',
+  running: 'running',
+  waiting: 'permission',
+  streaming: 'writing',
+}
+
+/**
  * The part of the Spec the running turn is writing now: the target of a `spec_write` call it has
  * not finished, or null (issue #185). Read off the thread like the row's "Writing the Spec", and
  * over the same entries: a call a dead turn left `in_progress` is not a write that is happening.

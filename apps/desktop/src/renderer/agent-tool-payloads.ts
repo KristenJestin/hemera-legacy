@@ -1,5 +1,5 @@
 import { COMMAND_TYPES, TOOL_LABELS, type ToolMark, hemeraToolNamed } from '@hemera/core'
-import type { CommandRun, SessionEntry } from '@hemera/ipc'
+import { type CommandRun, type SessionEntry, sectionNameSchema } from '@hemera/ipc'
 import type {
   CommandProposalState,
   CommandState,
@@ -9,6 +9,7 @@ import type {
   PortClaim,
   PortConflict,
   Readiness,
+  SpecTarget,
   ToolKind,
   ToolSubject,
 } from '@hemera/ui'
@@ -220,6 +221,29 @@ export function subjectOf(
     case null:
       return undefined
   }
+}
+
+/**
+ * The part of the Spec a `spec_write` call writes, read from its arguments: the section it names,
+ * the stories or the tasks, or the questions for a question (issue #185). Null for anything that
+ * names none of them, and for a section this version does not know.
+ */
+export function specWriteTargetOf(bounded: string): SpecTarget | null {
+  const section = stringArgument(bounded, ['section'])
+  if (section !== undefined) return sectionNameSchema.safeParse(section).data ?? null
+  for (const list of ['stories', 'tasks'] as const) if (bounded.includes(`"${list}"`)) return list
+  return bounded.includes('"question"') ? 'questions' : null
+}
+
+/**
+ * The part of the Spec an agent's report of a `spec_write` call is writing, or null when the
+ * entry is not one. The report arrives before Hemera has answered the call, which is what lets
+ * the panel say a part is being written while it is (issue #185).
+ */
+export function specWriteOf(entry: SessionEntry): SpecTarget | null {
+  if (entry.kind !== 'tool_call' || hemeraToolNamed(entry.body) !== 'spec_write') return null
+  const input = readPayload(reportedInputSchema, entry.payload)?.call.rawInput?.text ?? ''
+  return specWriteTargetOf(input)
 }
 
 /** The keys an agent's own tools name what a call is about under, by the kind of the call. */

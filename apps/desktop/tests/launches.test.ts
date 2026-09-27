@@ -979,6 +979,7 @@ describe('A Spec whose launch was cancelled or never got an agent can be launche
         renameSync(source, away)
         yield* preparation.prepare(workspace.id)
         const failed = yield* launched.one(first.id)
+        const panel = yield* launched.forSpec(specId)
         // Retry has no agent to start again: that launch is refused, and a new request is asked.
         const retried = yield* Effect.flip(launched.retry(first.id))
         renameSync(away, source)
@@ -988,11 +989,13 @@ describe('A Spec whose launch was cancelled or never got an agent can be launche
           launched.one(again.id),
           (one) => one.state === 'started' || one.state === 'failed',
         )
-        return { builds: yield* builds, failed, resumed, retried, started }
+        return { builds: yield* builds, failed, panel, resumed, retried, started }
       }),
     )
     expect(seen.failed.state).toBe('failed')
     expect(seen.failed.sessionId).toBeNull()
+    // The panel reads where the Workspace stands, and offers to resume it rather than to start.
+    expect(seen.panel.workspace?.state).toBe('failed')
     expect(seen.failed.detail).toContain('The Workspace could not be prepared: ')
     expect(seen.retried.message).toBe('only a build whose agent failed is started again.')
     expect(seen.resumed.state).toBe('ready')

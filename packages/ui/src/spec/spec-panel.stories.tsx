@@ -32,6 +32,7 @@ const BUILD: WorkspaceActionsProps = {
   onPrepareOnly: fn(),
   onUseWorkspace: fn(),
   onStart: fn(),
+  onResume: fn(),
   onRetry: fn(),
   onOpen: fn(),
 }

@@ -504,7 +504,7 @@ const NOT_PREPARED = 'The Workspace could not be prepared: '
 
 /**
  * The Workspaces a build may be started in, and the one the Spec is set on (D8-12): `main` first,
- * as the engine orders them, then the ones made by hand. Absent while no Workspace is ready.
+ * as the engine orders them, then the ones made by hand, the first one with where it stands.
  */
 export function specWorkspacesOf(launches: SpecLaunches | null) {
   if (launches === null) return { workspace: undefined, workspaces: [] }

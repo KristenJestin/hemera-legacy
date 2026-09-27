@@ -64,6 +64,7 @@ import {
   declineSpecProposal,
   joinSpec,
   markReady,
+  resumeBuildWorkspace,
   retryBuild,
   rework,
   selectRevision,
@@ -730,6 +731,7 @@ export function SessionPage({
           onPrepareOnly: () => prepareWorkspace(false),
           onUseWorkspace: (id) => void askForBuild(id),
           onStart: () => void startBuild(),
+          onResume: () => void resumeBuildWorkspace(),
           onRetry: () => void retryBuild(),
           onOpen: openBuild,
         }}

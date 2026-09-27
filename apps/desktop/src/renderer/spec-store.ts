@@ -394,6 +394,22 @@ export async function retryBuild(): Promise<boolean> {
   })
 }
 
+/**
+ * Resumes the preparation of the Workspace the Spec is set on, after it failed (D8-05): what is
+ * left of it runs in the engine, and the panel follows the Workspace through its `workspace`
+ * event until it can start the build there.
+ */
+export async function resumeBuildWorkspace(): Promise<boolean> {
+  const workspaceId = state.launches?.workspace?.id
+  if (workspaceId === undefined) return false
+  return await building(RESUME_REFUSED, async () => {
+    await window.hemera.invoke('preparation.resume', { workspaceId })
+  })
+}
+
+/** What a preparation that could not be resumed is said as, before the engine's own words. */
+const RESUME_REFUSED = 'The preparation could not be resumed'
+
 /** What a build that could not be asked for is said as, before the engine's own words. */
 const ASK_REFUSED = 'The build could not be asked for'
 
@@ -439,6 +455,15 @@ export function listenToSpecs(changed: (projectId: string) => void): () => void 
     // The launch of the Spec on screen moved on: asked for, started, refused or taken back
     // (D8-13). Nothing else crosses — the panel reads the whole of it again, as it stands.
     if (event.event === 'launch.changed' && event.specId === shown) void refresh(event.specId)
+    // The Workspace the Spec is set on moved on — resumed, ready, failed again — and what the
+    // panel offers follows where it stands (D8-12).
+    if (
+      event.event === 'workspace' &&
+      shown !== null &&
+      event.workspaceId === state.launches?.workspace?.id
+    ) {
+      void refresh(shown)
+    }
     if (event.event !== 'spec.changed') return
     changed(event.projectId)
     if (event.specId === shown) void refresh(event.specId)

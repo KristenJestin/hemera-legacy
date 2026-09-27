@@ -44,6 +44,7 @@ import {
   hasTrace,
   heardSince,
   openTrace,
+  specWritingOf,
   type Activity,
   type AgentSessionState,
 } from '../agent-store.ts'
@@ -379,6 +380,7 @@ export function SessionPage({
   // keyed by the Session, so this is read once per Session opened.
   const openedFree = useRef(session.mission === 'free')
   const defined = stored.snapshot?.spec.id === session.specId ? stored.snapshot : null
+  const thread = together(entries, agent.entries)
   const spec =
     defined === null
       ? null
@@ -387,6 +389,9 @@ export function SessionPage({
           revisions: stored.revisions,
           journal: stored.journal,
           readyRefused: stored.readyRefused,
+          // The part a `spec_write` of the running turn is writing, as the thread says it: the
+          // section says so at once, and goes back to what it held if the write fails.
+          writing: agent.running ? specWritingOf(thread) : null,
         })
   /** The plan the Workspace dialog is open on, and what it is to leave behind. */
   const [workspacePlan, setWorkspacePlan] = useState<WorkspacePlan | null>(null)
@@ -453,7 +458,6 @@ export function SessionPage({
     return said
   }
 
-  const thread = together(entries, agent.entries)
   const waiting = waitingOf(thread)
 
   // The Workspace the Session works in, on the pill: it can be changed until the agent has

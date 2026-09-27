@@ -5,7 +5,7 @@ import {
   type SessionEntry,
   type SpecType,
 } from '@hemera/ipc'
-import type { MissionBriefProps, ProposalState, SpecAnswer, SpecQuestionView } from '@hemera/ui'
+import type { ProposalState, SpecAnswer, SpecQuestionView } from '@hemera/ui'
 import { z } from 'zod'
 
 /**
@@ -13,13 +13,11 @@ import { z } from 'zod'
  *
  * A `define` step writes four kinds into a Session's thread: the brief a turn rode on, a
  * question of the Spec asked in the chat, the answer given beside it, and — in a `free`
- * Session — the Spec its agent proposes. `agent-blocks.tsx` draws them; this reads them, pure
+ * Session — the Spec its agent proposes. `agent-blocks.tsx` draws the question and the proposal;
+ * this reads them, pure
  * and free of what `@hemera/ui` runs when it loads, so it is tested on Node. A payload that does
  * not parse is an entry this version does not draw, as everywhere in the thread.
  */
-
-/** The brief of a `define` turn, titled with the phase it was composed for. */
-const briefSchema = z.object({ phase: phaseIdSchema.nullable() })
 
 /** A question as its entry carries it: the question view, open when it was asked. */
 const questionSchema = z.object({
@@ -59,25 +57,14 @@ function parsed<S extends z.ZodType>(schema: S, payload: string): z.infer<S> | n
   }
 }
 
-/** When an entry was written, `HH:MM`, as the thread says a time. */
-function timeOf(at: number): string {
-  return new Date(at).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })
-}
-
 /**
- * The folded line of a turn's brief: `What the agent was told · Shape`, its time, and what was
- * handed. Said as the reader would say it: `mission brief` is the engine's word for it.
+ * Whether a Spec entry draws a row in the thread. The brief a turn rode on does not (issue #205):
+ * it is long and of no interest while the conversation is read, and the Session details' Context
+ * tab lists every brief handed to the agent. Nor does an answer, which its question's card draws
+ * where it was given (issue #199).
  */
-export function briefOf(entry: SessionEntry): MissionBriefProps {
-  const phase = parsed(briefSchema, entry.payload)?.phase ?? null
-  return {
-    title:
-      phase === null
-        ? 'What the agent was told'
-        : `What the agent was told · ${phase.charAt(0).toUpperCase()}${phase.slice(1)}`,
-    detail: timeOf(entry.createdAt),
-    brief: entry.body,
-  }
+export function drawnInThread(entry: SessionEntry): boolean {
+  return entry.kind !== 'mission_brief' && entry.kind !== 'spec_answer'
 }
 
 /** A question as its block draws it, and whether it was left behind by a Rework. */

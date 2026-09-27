@@ -60,8 +60,13 @@ import { WorkspaceActions, type WorkspaceActionsProps } from './workspace-action
  * reader reads it and answers, and edits nothing (issue #135).
  */
 
-/** The Spec in the Session's row: its slot, and what is laid over it at the window's edge. */
-const DOCK = 'relative flex h-full min-h-0 shrink-0 py-3 pr-3'
+/**
+ * The Spec in the Session's row: its slot, and what is laid over it at the window's edge. It clips
+ * sideways (issue #181): the small frame leaves by sliding out past the window's edge, and a frame
+ * laid out there made the row scroll sideways for as long as the panel was open. A clip and not
+ * `hidden`, so the dock never becomes a scroller a focus could move.
+ */
+const DOCK = 'relative flex h-full min-h-0 shrink-0 overflow-x-clip py-3 pr-3'
 
 /** The panel's clip, at the window's edge: what the panel slides in and out of. */
 const CLIP =

@@ -1,7 +1,7 @@
 /**
  * The Spec entries of a thread, as their blocks are drawn from them (design D7-01, D7-07, D7-09).
  *
- * `agent-blocks.tsx` draws a `mission_brief` entry as the folded Hemera line, a `spec_question`
+ * `agent-blocks.tsx` draws no `mission_brief` entry (issue #205), a `spec_question`
  * as the question card — its answer marked in it once the `spec_answer` entry written beside it
  * is in the thread — and a `spec_proposal` as the agent's proposal. What each block is handed is
  * read by `spec-entries.ts`, which is what is tested here: the design system is a browser's to
@@ -12,7 +12,8 @@ import { describe, expect, test } from 'vite-plus/test'
 
 import type { SessionEntry } from '@hemera/ipc'
 import {
-  briefOf,
+  definedAtOnceOf,
+  drawnInThread,
   proposalIdOf,
   proposalOf,
   questionEntryOf,
@@ -52,16 +53,16 @@ const QUESTION = entry(
   }),
 )
 
-describe('The brief is part of the turn, never a human message', () => {
-  test('a brief is a folded Hemera line titled with its phase, holding what was handed', () => {
-    expect(briefOf(entry('mission_brief', JSON.stringify({ phase: 'shape' })))).toEqual({
-      title: 'What the agent was told · Shape',
-      detail: '10:44',
-      brief: '# Mission: define',
-    })
-    expect(briefOf(entry('mission_brief', JSON.stringify({ phase: null }))).title).toBe(
-      'What the agent was told',
-    )
+describe('What the agent was told is not in the thread (#205)', () => {
+  test('a brief draws no row in the thread: the Context tab lists it', () => {
+    expect(drawnInThread(entry('mission_brief', JSON.stringify({ phase: 'shape' })))).toBe(false)
+    expect(drawnInThread(entry('mission_brief', JSON.stringify({ phase: null })))).toBe(false)
+  })
+
+  test('an answer draws no row either, and a question and a proposal do', () => {
+    expect(drawnInThread(entry('spec_answer', '{}'))).toBe(false)
+    expect(drawnInThread(QUESTION)).toBe(true)
+    expect(drawnInThread(entry('spec_proposal', '{}'))).toBe(true)
   })
 })
 
@@ -283,5 +284,32 @@ describe('A pending proposal and a pending question are pinned above the compose
   test('nothing else is pinned', () => {
     const brief = entry('mission_brief', JSON.stringify({ phase: 'shape' }))
     expect(waitsForAnswer(brief, [brief], null, null)).toBe(false)
+  })
+})
+
+describe('New Spec creates the proposed Spec at once (#205)', () => {
+  const created = entry(
+    'spec_proposal',
+    JSON.stringify({ title: 'Read aloud', type: 'feature', createdKey: 'XC-2' }),
+    'created',
+  )
+
+  test('a Spec created at once is drawn as the quiet line, and waits for nothing', () => {
+    expect(proposalOf(created, [created], null, null)).toEqual({
+      title: 'Read aloud',
+      type: 'feature',
+      state: 'created',
+      createdAtOnce: 'XC-2',
+    })
+    expect(waitsForAnswer(created, [created], null, null)).toBe(false)
+  })
+
+  test('a Session the list still says is free is read again once its Spec was created at once', () => {
+    const free = { id: 'writer', mission: 'free' as const }
+    const pushed = new Map([['writer', { entries: [created] }]])
+    expect(definedAtOnceOf([free], pushed)).toEqual(['writer'])
+    expect(definedAtOnceOf([{ ...free, mission: 'define' as const }], pushed)).toEqual([])
+    const asked = entry('spec_proposal', JSON.stringify({ title: 'Read aloud', type: 'feature' }))
+    expect(definedAtOnceOf([free], new Map([['writer', { entries: [asked] }]]))).toEqual([])
   })
 })

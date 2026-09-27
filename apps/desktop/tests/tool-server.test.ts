@@ -38,6 +38,7 @@ import { toolCatalogueLayer, type ToolCatalogue } from '#engine/tools/catalogue.
 import { ToolPermissions, type ToolPermissionsService } from '#engine/tools/permissions.ts'
 import { ToolServer, toolServerLayer } from '#engine/tools/server.ts'
 import { variablesLayer } from '#engine/workspaces/variables.ts'
+import { setupPlaces } from './application.ts'
 
 const SHIPPED = join(import.meta.dirname, '..', 'drizzle')
 const VERSION = '0.4.0'
@@ -146,6 +147,7 @@ function engine(
     Layer.provideMerge(Layer.succeed(ToolPermissions, permissions)),
     Layer.provideMerge(commandsLayer),
     Layer.provide(variablesLayer),
+    Layer.provide(setupPlaces(folder)),
     Layer.provideMerge(
       Layer.mergeAll(
         projectsLayer,

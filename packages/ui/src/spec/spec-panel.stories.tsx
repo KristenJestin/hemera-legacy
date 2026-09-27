@@ -434,8 +434,9 @@ export const Arrives: Story = {
 
 /**
  * New Spec's Spec before it exists (issue #198): the panel arrives open on a provisional Spec — no
- * key yet, the request as its title, set apart, nothing written — and says plainly it is not
- * created. It offers nothing to press: there is nothing to mark ready.
+ * key yet, the request as its title, set apart, nothing written. No sentence under the head says it
+ * is not created: the placeholder and the badge do (issue #209). It offers nothing to press: there
+ * is nothing to mark ready.
  */
 export const Provisional: Story = {
   args: { spec: PROVISIONAL, arrives: true, defaultFolded: true },
@@ -445,7 +446,10 @@ export const Provisional: Story = {
     const panel = dock.querySelector<HTMLElement>('[data-spec-panel]')!
     await waitFor(() => expect(panel).not.toHaveAttribute('data-stowed'))
     await expect(canvas.getByText('No key yet')).toBeVisible()
-    await expect(canvas.getByText(/^Not created yet./)).toBeVisible()
+    // The key placeholder and the badge say it is not created; no sentence explains it (#209).
+    await expect(canvas.getByRole('img', { name: 'Not created yet' })).toBeVisible()
+    await expect(canvas.queryByText(/^Not created yet./)).toBeNull()
+    await expect(canvas.queryByText(/checks the Project's Specs/)).toBeNull()
     await expect(canvas.getByRole('heading', { name: /text reading tool/ })).toBeVisible()
     await expect(canvas.queryByRole('button', { name: 'Mark ready' })).toBeNull()
     await expect(within(panel).getAllByText('Nothing written yet.').length).toBeGreaterThan(3)

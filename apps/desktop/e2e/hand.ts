@@ -93,6 +93,15 @@ export async function choose(label: string, option: string): Promise<void> {
  * pointer, not on a click event.
  */
 export async function pressTab(name: string): Promise<void> {
+  // A Dialog still leaving covers the page until it has gone, and a pointer pressed through it
+  // lands on the Dialog: the press waits for the page to be what it presses.
+  await browser.waitUntil(
+    async () =>
+      await browser.execute(
+        () => document.querySelector('[role="dialog"][data-ending-style]') === null,
+      ),
+    { timeout: 10_000, interval: 100, timeoutMsg: 'a Dialog never finished leaving' },
+  )
   const found = await $$('[role="tab"]')
   let pressed = false
   for (const tab of found) {

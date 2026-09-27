@@ -594,7 +594,7 @@ export const Complete: Story = {
     /*
      * What the turn is doing shares the meter's row, at its left end: it is not an entry of the
      * thread any more (trial of 22 September 2026), it stands where the agent's own content
-     * stands, and the loader alone says the turn is alive — no dot beside it.
+     * stands, and the face alone says the turn is alive — no dot beside it.
      */
     const doing = canvas.getByText('Waiting for your permission')
     await expect(doing).toBeVisible()
@@ -678,8 +678,8 @@ export const Complete: Story = {
     await expect(thread.scrollHeight, 'the thread has nothing to scroll').toBeGreaterThan(
       thread.clientHeight,
     )
-    const loader = canvas.getByRole('status', { name: 'Waiting for your permission' })
-    await expect(loader.getBoundingClientRect().left, 'the row above the box is inset').toBe(edge)
+    const face = canvas.getByRole('img', { name: 'Waiting for your permission' })
+    await expect(face.getBoundingClientRect().left, 'the row above the box is inset').toBe(edge)
     // And what the turn has spent is said above the box, not in the row that would have wrapped.
     await expect(canvas.getByLabelText(/12,400 of 200,000 tokens used/)).toBeVisible()
     await expect(canvas.getByText(/could not resume its own session/)).toBeVisible()

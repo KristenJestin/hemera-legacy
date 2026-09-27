@@ -3,8 +3,8 @@ import { type ReactNode, useState } from 'react'
 
 import { Disclosure } from '../activity/disclosure.tsx'
 import { Button } from '../components/button/button.tsx'
-import { Loading } from '../components/loading/loading.tsx'
-import { StatusDot, type StatusTone } from '../components/status-dot/status-dot.tsx'
+import { Face } from '../components/face/face.tsx'
+import type { FaceState } from '../components/face/states.ts'
 
 /**
  * What the turn is doing right now, at the end of the thread (design D17-04, D17-13).
@@ -40,11 +40,15 @@ import { StatusDot, type StatusTone } from '../components/status-dot/status-dot.
  * render on, and a thought arriving while the reader is looking at the row arrives inside it
  * rather than in a second fold built beside the first.
  *
- * No dot beside the indicator: the indicator already says that something is in flight, and two
- * marks of the same fact on one line is one of them saying nothing. The indicator is the design
- * system's own, which stands still under reduced motion — nothing here writes a movement of its
- * own. A turn that has ended has nothing in flight, so it takes the dot in the indicator's place:
- * the mark the thread already uses for where a piece of work stands, settled and still.
+ * The mark at the start of the line is Hemera's face (issue #140), in place of the loader a turn
+ * in flight wore and the dot an ended one did: thinking, reading, writing, running, asking, done,
+ * failed, each its own expression, and every change between two of them a motion rather than a
+ * swap. One mark for the whole life of the turn, so the line never trades one kind of mark for
+ * another as the turn ends. The face is the design system's own, which holds still expressions
+ * under reduced motion — nothing here writes a movement of its own.
+ *
+ * A turn silent for too long (issue #131) falls asleep: the words say how long, and the face says
+ * that nothing is coming.
  */
 
 /**
@@ -59,8 +63,11 @@ const ROW = '-ml-1 flex min-w-0 items-center'
 /** The fold itself, which is as wide as what it holds rather than as wide as the thread. */
 const FOLD = 'w-auto'
 
-/** The line that is read: the dot, the indicator, and what is being done. */
-const SUMMARY = 'flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground'
+/**
+ * The line that is read: the face, and what is being done. The face is drawn past its box at the
+ * size of an icon, so that it reads (issue #140), and the gap leaves it room before the words.
+ */
+const SUMMARY = 'flex min-w-0 items-center gap-2.5 text-xs text-muted-foreground'
 
 const LABEL = 'truncate'
 
@@ -71,14 +78,15 @@ const ACTIONS = 'flex shrink-0 items-center gap-1'
 const THOUGHT = 'max-w-3xl text-sm whitespace-pre-wrap text-muted-foreground'
 
 /**
- * The four things a turn is doing between one block of the thread and the next, and the three
- * ways it can have ended.
+ * The four things a turn is doing between one block of the thread and the next, and the four
+ * ways it can have ended — one of which, `question`, is a turn that ended by asking the reader.
  */
 export type ActivityState =
   | 'thinking'
   | 'running'
   | 'waiting'
   | 'streaming'
+  | 'question'
   | 'done'
   | 'stopped'
   | 'failed'
@@ -89,16 +97,28 @@ const SAID: Record<ActivityState, string> = {
   running: 'Running',
   waiting: 'Waiting for your permission',
   streaming: 'Writing…',
+  question: 'Waiting for your answer',
   done: 'Done',
   stopped: 'Stopped',
   failed: 'Failed',
 }
 
-/** The dot an ended turn is drawn with; a turn still in flight draws the indicator instead. */
-const ENDED: Partial<Record<ActivityState, StatusTone>> = {
-  done: 'success',
-  stopped: 'cancelled',
-  failed: 'failure',
+/**
+ * The face each state wears when the caller says nothing finer (issue #140).
+ *
+ * `running` is a command until the caller knows better: a tool that reads wears `reading`, one
+ * that writes wears `writing`, and only the caller knows which tool is running. A turn the reader
+ * stopped is at rest, and rest is `asleep`.
+ */
+export const ACTIVITY_FACES: Readonly<Record<ActivityState, FaceState>> = {
+  thinking: 'thinking',
+  running: 'running',
+  waiting: 'permission',
+  streaming: 'writing',
+  question: 'question',
+  done: 'done',
+  stopped: 'asleep',
+  failed: 'error',
 }
 
 /** How long a turn took, in the words a reader glances at: `12 s`, `2 min 5 s`. */
@@ -156,6 +176,13 @@ export interface ActivityRowProps {
   /** What the turn is doing, as the engine reports it. */
   state: ActivityState
   /**
+   * The face the line wears, when the caller knows more than the state says: `reading` or
+   * `writing` for a tool call that reads or writes, where the state only says `running`. The
+   * state's own face when left out; `asleep` whatever it is, once the turn has heard nothing
+   * for `QUIET_AFTER_MS`.
+   */
+  face?: FaceState | undefined
+  /**
    * What it is doing it to: the title of the tool call, `cat recap.md`.
    *
    * Only `running` has one to name. "Running" on its own is a row saying a command is going
@@ -194,6 +221,7 @@ export interface ActivityRowProps {
 
 export function ActivityRow({
   state,
+  face,
   detail,
   doing,
   thought,
@@ -208,14 +236,10 @@ export function ActivityRow({
   const saying = sayOf(state, detail, elapsedMs, doing)
   const said = quiet === null ? saying : `${saying} · ${unheard(quiet)}, no answer yet`
   const stuck = quiet !== null && quiet >= STUCK_AFTER_MS
-  const ended = ENDED[state]
+  const worn = quiet === null ? (face ?? ACTIVITY_FACES[state]) : 'asleep'
   const line = (
     <span className={SUMMARY}>
-      {ended === undefined ? (
-        <Loading size="sm" label={said} />
-      ) : (
-        <StatusDot status={ended} size="sm" />
-      )}
+      <Face state={worn} size="icon" label={said} />
       <span className={LABEL}>{said}</span>
     </span>
   )

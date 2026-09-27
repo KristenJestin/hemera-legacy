@@ -7,7 +7,7 @@ import { IconButton } from '../components/button/button.tsx'
 import { Tick } from '../components/checkbox/checkbox.tsx'
 import { Frame, FrameFooter, FrameHeader } from '../components/frame/frame.tsx'
 import { Tooltip } from '../components/tooltip/tooltip.tsx'
-import { IconArrowUp, IconClock, IconLock, IconMessageQuestion, IconSparkles } from '../icons.ts'
+import { IconArrowUp, IconLock, IconMessageQuestion, IconSparkles } from '../icons.ts'
 import { AgentText } from '../message/agent-text.tsx'
 import { CROSSFADE, collapse, crossfade, expand, fold, useTransition } from '../motion.ts'
 import type { SpecAnswer, SpecQuestionView } from './model.ts'
@@ -19,7 +19,8 @@ import { SPEC_PHASE_ICONS } from './spec-icons.ts'
  *
  * A frame like every other surface of the app (issue #199, card B of the exploration of issue
  * #182): the head says the agent asks, with the question's phase at its end; the body holds the
- * question and the choices; the rim below says whether the Spec waits on the answer.
+ * question and the choices; the rim below says the Spec waits on the answer, when it does. A
+ * question the Spec can go on without says nothing about it (issue #209).
  *
  * The choices are Hemera's to label (recette of 26 September 2026, issue #134): each is lettered
  * A, B, C… in the order the agent gave them, and `Other` is always the last one, whatever the
@@ -228,7 +229,7 @@ export function SpecQuestion({
         }
         footer={
           <AnimatePresence initial={false}>
-            {answer === null && (
+            {answer === null && (cancelled || question.blocking) && (
               <motion.div
                 key="says"
                 className={ROOM}
@@ -241,15 +242,10 @@ export function SpecQuestion({
                   <p className={SAYS}>
                     {cancelled ? (
                       'Not answered · the turn was stopped; it stays open in the Spec'
-                    ) : question.blocking ? (
+                    ) : (
                       <>
                         <IconLock size="sm" aria-hidden="true" />
                         Blocking · the Spec cannot be marked ready before this is answered
-                      </>
-                    ) : (
-                      <>
-                        <IconClock size="sm" aria-hidden="true" />
-                        Not blocking · the Spec can go on without it
                       </>
                     )}
                   </p>

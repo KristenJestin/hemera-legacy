@@ -231,7 +231,8 @@ describe('The agent starts the app and the user opens it', () => {
 
     // One process, run by Hemera in the Workspace root: it ends on its own with its exit code,
     // in the thread, and it is on the line.
-    await awaits('Exited 0')
+    // Its dot says it is over, and beside it the code it exited with.
+    await awaits('exit 0')
     await browser.waitUntil(
       async () =>
         await browser.execute(() =>

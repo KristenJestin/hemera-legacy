@@ -176,7 +176,20 @@ export const Checked: Story = {
   play: async ({ canvasElement }) => {
     const box = within(canvasElement).getByRole('checkbox', { name: /portless/i })
     await expect(drawnOf(box)).toBe(0)
-    const { drawn, scales } = await framesAround(box, 1, () => userEvent.click(box))
+    // The give is over in 160 ms while the tick draws for 260 and is most of the way in by then: a
+    // machine busy with the rest of the run can give no frame inside the give and still one inside
+    // the draw. When no frame saw the box under its size, it is unchecked and checked again, up
+    // to five times: a box that never gives is never seen to.
+    const check = (): Promise<{ drawn: number[]; scales: number[] }> =>
+      framesAround(box, 1, () => userEvent.click(box))
+    let seen = await check()
+    for (let tries = 4; tries > 0 && Math.min(...seen.scales) === 1; tries -= 1) {
+      // oxlint-disable-next-line no-await-in-loop -- one gesture at a time: the retry is the point
+      await framesAround(box, 0, () => userEvent.click(box))
+      // oxlint-disable-next-line no-await-in-loop -- one gesture at a time: the retry is the point
+      seen = await check()
+    }
+    const { drawn, scales } = seen
     // Part of the way along on some frame: drawn, and not switched on.
     expect(drawn.some((one) => one > 0 && one < 1)).toBe(true)
     expect(Math.min(...scales)).toBeLessThan(1)

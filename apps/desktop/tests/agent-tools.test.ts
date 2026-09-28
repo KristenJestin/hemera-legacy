@@ -1537,3 +1537,95 @@ describe('A Session torn down with the application writes into an open database'
     expect(written.filter((line) => line.startsWith('sessions: write after release'))).toEqual([])
   })
 })
+
+/** An agent with Claude Code's modes: it opens on `default`, and moves when told or by itself. */
+const withClaudeModes = (steps: Parameters<typeof fakeAgent>[0] = {}) => {
+  let mode = 'default'
+  const now = () => [
+    {
+      id: 'mode',
+      type: 'select' as const,
+      name: 'Mode',
+      category: 'mode' as const,
+      currentValue: mode,
+      options: [
+        { value: 'default', name: 'Manual' },
+        { value: 'auto', name: 'Auto' },
+      ],
+    },
+  ]
+  return fakeAgent({
+    ...steps,
+    configOptions: now(),
+    onChoice: (choice) => {
+      if (choice.id === 'mode') mode = choice.value
+      return now()
+    },
+  })
+}
+
+describe("A one-off follows the Session's mode", () => {
+  test('in Auto chosen in the composer, it runs without a question and says so', async () => {
+    const agent = withClaudeModes({
+      steps: [{ does: 'uses', call: 'commands_run', arguments: { line: ONE_OFF, key: 'auto' } }],
+    })
+
+    const seen = await toolApplication(dataFolder)(agent)(
+      Effect.gen(function* () {
+        const runtime = yield* AgentRuntime
+        const session = yield* aSessionOn(workspace, 'claude')
+        yield* runtime.setOption(session.id, 'mode', 'auto')
+        yield* runtime.prompt(session.id, 'run the check')
+        return yield* until(threadOf(session.id), (read) =>
+          read.some((entry) => entry.kind === 'command_run' && entry.state === 'failed'),
+        )
+      }),
+    )
+
+    expect(questionsIn(seen)).toHaveLength(0)
+    expect(agent.answers.used[0]?.text).toContain('exit code 2')
+    const record = seen.find(
+      (entry) => entry.kind === 'permission_decision' && entry.role === 'hemera',
+    )
+    expect(record?.body).toBe('ran without asking, Auto mode')
+  })
+
+  test('in Auto the agent moved to by itself, the next call runs without a question', async () => {
+    const agent = withClaudeModes({
+      steps: [
+        { does: 'switches', option: 'mode', value: 'auto', as: 'mode' },
+        { does: 'uses', call: 'commands_run', arguments: { line: ONE_OFF, key: 'moved' } },
+      ],
+    })
+
+    const seen = await toolApplication(dataFolder)(agent)(
+      Effect.gen(function* () {
+        const runtime = yield* AgentRuntime
+        const session = yield* aSessionOn(workspace, 'claude')
+        yield* runtime.prompt(session.id, 'run the check')
+        return yield* until(threadOf(session.id), (read) =>
+          read.some((entry) => entry.kind === 'command_run' && entry.state === 'failed'),
+        )
+      }),
+    )
+
+    expect(questionsIn(seen)).toHaveLength(0)
+    expect(agent.answers.used[0]?.text).toContain('exit code 2')
+  })
+
+  test('in Manual, it asks', async () => {
+    const agent = withClaudeModes({
+      steps: [{ does: 'uses', call: 'commands_run', arguments: { line: ONE_OFF, key: 'manual' } }],
+    })
+
+    const seen = await toolApplication(dataFolder)(agent)(
+      Effect.gen(function* () {
+        const session = yield* aSessionOn(workspace, 'claude')
+        yield* answeredTurn(session.id, 'run the check', 'refused')
+        return yield* threadOf(session.id)
+      }),
+    )
+
+    expect(questionsIn(seen)).toHaveLength(1)
+  })
+})

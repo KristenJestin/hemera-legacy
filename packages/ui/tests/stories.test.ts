@@ -482,6 +482,10 @@ describe('Catalogue, coquille et surfaces, et rien d’autre', () => {
       'CommandRun',
       'CommandProposal',
       'CommandsPanel',
+      // Issue #219: what goes on in a Session, as a line under its title — the commands Hemera
+      // runs, those the agent runs in its own shell, its sub-agents — which the Commands tab of
+      // the Session's details gives way to.
+      'GoingOnLine',
       'ContextView',
       'BareModeState',
       'CommandList',

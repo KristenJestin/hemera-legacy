@@ -378,6 +378,14 @@ export {
   type CommandsPanelProps,
 } from './session/commands-panel.tsx'
 export {
+  type GoingOnAgent,
+  type GoingOnItem,
+  type GoingOnRun,
+  type GoingOnShell,
+  type GoingOnState,
+} from './session/going-on.ts'
+export { GoingOnLine, type GoingOnLineProps } from './session/going-on-line.tsx'
+export {
   ContextView,
   type ContextCommand,
   type ContextEntry,

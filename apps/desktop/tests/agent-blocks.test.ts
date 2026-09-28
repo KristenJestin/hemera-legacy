@@ -177,6 +177,34 @@ describe('A one-off command shows and is not promoted', () => {
     // `exited` is what the engine writes; `finished` is the word the block reads it as.
     expect(drawn?.state).toBe('finished')
   })
+
+  test('the block names the repository it runs in, and a plain folder as a folder', () => {
+    const at = (cwd: string) =>
+      entryOf(
+        'command_run',
+        'hemera',
+        'sleep 120',
+        JSON.stringify({
+          name: 'sleep 120',
+          line: 'sleep 120',
+          type: 'script',
+          state: 'running',
+          cwd,
+          oneOff: true,
+        }),
+      )
+    const repositories = [{ path: 'v2', icon: null }]
+    expect(commandRunOf(at('/w/v2'), [], '/w', repositories)).toMatchObject({
+      repository: { path: 'v2', icon: null },
+      folder: '.',
+    })
+    expect(commandRunOf(at('/w/tools'), [], '/w', repositories)).toMatchObject({
+      repository: undefined,
+      folder: 'tools',
+    })
+    // A root not known yet leaves the folder as the run was started in it.
+    expect(commandRunOf(at('/w/v2'))).toMatchObject({ repository: undefined, folder: '/w/v2' })
+  })
 })
 
 describe('A proposal enters the catalogue only when accepted', () => {

@@ -8,6 +8,7 @@ import { StatusDot, type StatusTone } from '../components/status-dot/status-dot.
 import { IconBookmarkPlus, IconPlayerStop } from '../icons.ts'
 import { AgentText } from '../message/agent-text.tsx'
 import { ServiceUrl } from '../workspace/service-list.tsx'
+import { RepositoryGlyph } from './run-place.tsx'
 import {
   type GoingOnItem,
   type GoingOnRun,
@@ -126,11 +127,29 @@ function factsOf(item: GoingOnItem, onOpenUrl: (url: string) => void): Fact[] {
           },
         ]
       : []
+  // A run in one of the Project's repositories is said as that repository, with its mark, and the
+  // folder under it only when it is not the repository itself (issue #239).
+  const place: Fact[] =
+    item.repository === undefined
+      ? [{ term: 'Folder', value: item.folder, mono: true }]
+      : [
+          {
+            term: 'Repository',
+            value: (
+              <span className="flex items-center gap-1.5">
+                <RepositoryGlyph icon={item.repository.icon} />
+                {item.repository.path}
+              </span>
+            ),
+            mono: true,
+          },
+          ...(item.folder === '.' ? [] : [{ term: 'Folder', value: item.folder, mono: true }]),
+        ]
   return [
     { term: 'Line', value: item.command, mono: true },
     { term: 'Type', value: <TypeFact run={item} /> },
     ...address,
-    { term: 'Folder', value: item.folder, mono: true },
+    ...place,
     { term: 'Workspace', value: item.workspace },
     {
       term: 'Started',

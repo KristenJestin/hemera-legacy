@@ -8,10 +8,12 @@ import type {
   GoingOnItem,
   GoingOnRun,
   GoingOnShell,
+  RunRepository,
   SessionDetailsTab,
 } from '@hemera/ui'
 
 import { type AgentShellCall, runFactsOf } from './agent-tool-payloads.ts'
+import { runPlaceOf } from './run-place.ts'
 
 /**
  * What the line under a Session's title and the Session's details draw (design D6-10, D6-12,
@@ -26,23 +28,20 @@ import { type AgentShellCall, runFactsOf } from './agent-tool-payloads.ts'
  * without a theme or a DOM.
  */
 
-/** Where a run ran, relative to the Workspace root when it is inside it and the root is known. */
-function folderOf(cwd: string, root: string | null): string {
-  if (root === null) return cwd
-  const inside = cwd.replaceAll('\\', '/')
-  const base = root.replaceAll('\\', '/').replace(/\/$/, '')
-  if (inside === base) return '.'
-  if (inside.startsWith(`${base}/`)) return inside.slice(base.length + 1)
-  return cwd
-}
-
 /** When something began, `HH:MM`, in the one reading the whole window uses. */
 function clockOf(at: number): string {
   return new Date(at).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })
 }
 
-function runOf(run: CommandRun, root: string | null): GoingOnRun {
+function runOf(
+  run: CommandRun,
+  root: string | null,
+  repositories: readonly RunRepository[],
+): GoingOnRun {
   const facts = runFactsOf(run)
+  // Where it ran, in the Project's words: its repository and the folder under it, or a folder of
+  // the Workspace, relative to the root when it is under it (issue #239).
+  const place = runPlaceOf(run.cwd, root, repositories)
   return {
     kind: 'run',
     id: run.id,
@@ -50,7 +49,8 @@ function runOf(run: CommandRun, root: string | null): GoingOnRun {
     command: run.line,
     type: run.type,
     state: run.state === 'exited' ? 'finished' : run.state,
-    folder: folderOf(run.cwd, root),
+    repository: place.repository,
+    folder: place.folder,
     workspace: run.workspaceName,
     output: run.output,
     url: run.url ?? undefined,
@@ -90,9 +90,13 @@ export function goingOnOf(
   shells: readonly AgentShellCall[],
   root: string | null,
   workspace: string = MAIN_WORKSPACE,
+  repositories: readonly RunRepository[] = [],
 ): GoingOnItem[] {
   const began = [
-    ...runs.map((run) => ({ at: Date.parse(run.startedAt), item: runOf(run, root) })),
+    ...runs.map((run) => ({
+      at: Date.parse(run.startedAt),
+      item: runOf(run, root, repositories),
+    })),
     ...shells.map((call) => ({ at: call.at, item: shellOf(call, workspace) })),
   ]
   return began.toSorted((one, other) => one.at - other.at).map(({ item }) => item)

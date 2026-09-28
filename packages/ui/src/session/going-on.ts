@@ -1,6 +1,7 @@
 import type { CommandState } from '../activity/command-run.tsx'
 import type { CommandType } from '../activity/command-type.ts'
 import type { Readiness } from '../workspace/services-model.ts'
+import type { RunRepository } from './run-place.tsx'
 
 /**
  * What goes on in a Session, as the line under its title says it (issue #219): three kinds of
@@ -27,6 +28,12 @@ export interface GoingOnRun {
   command: string
   type: CommandType
   state: CommandState
+  /**
+   * The Project's repository it runs in, said as one with its mark (issue #239); undefined for a
+   * folder that is none of the Project's repositories.
+   */
+  repository?: RunRepository | undefined
+  /** Under the repository when it is in one, `.` for the repository itself; else the folder. */
   folder: string
   /** The Workspace it runs in, named. */
   workspace: string

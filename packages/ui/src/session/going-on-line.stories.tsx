@@ -100,6 +100,30 @@ export const OneOffDetails: Story = {
   },
 }
 
+/** A run in one of the Project's repositories is said as that repository, never as a folder. */
+export const RepositoryDetails: Story = {
+  args: { items: GOING_ON.places, defaultDetail: 'run-in-repository' },
+  play: async ({ canvasElement }) => {
+    const details = await screen.findByRole('dialog', { name: 'build' })
+    await expect(within(details).getByText('Repository')).toBeVisible()
+    await expect(within(details).getByText('v2')).toBeVisible()
+    await expect(within(details).queryByText('Folder')).toBeNull()
+    // The chip says it the same way: the repository's name, and not a folder.
+    await expect(within(canvasElement).getByText('v2')).toBeInTheDocument()
+  },
+}
+
+/** A folder that is none of the Project's repositories stays a folder. */
+export const FolderDetails: Story = {
+  args: { items: GOING_ON.places, defaultDetail: 'run-in-folder' },
+  play: async () => {
+    const details = await screen.findByRole('dialog', { name: 'seed' })
+    await expect(within(details).getByText('Folder')).toBeVisible()
+    await expect(within(details).getByText('tools')).toBeVisible()
+    await expect(within(details).queryByText('Repository')).toBeNull()
+  },
+}
+
 export const RoundTrip: Story = {
   play: async ({ canvasElement, args }) => {
     const canvas = within(canvasElement)

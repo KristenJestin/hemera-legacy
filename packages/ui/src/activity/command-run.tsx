@@ -5,6 +5,7 @@ import { Badge } from '../components/badge/badge.tsx'
 import { StatusDot, type StatusTone } from '../components/status-dot/status-dot.tsx'
 import { Button } from '../components/button/button.tsx'
 import { IconAlertTriangle, IconBookmarkPlus, IconPlayerStop } from '../icons.ts'
+import { RunPlace, type RunRepository } from '../session/run-place.tsx'
 import { claimOf, conflictOf, ServiceUrl } from '../workspace/service-list.tsx'
 import type { PortClaim, PortConflict, Readiness } from '../workspace/services-model.ts'
 import { COMMAND_TYPE_ICONS, COMMAND_TYPE_LABELS, type CommandType } from './command-type.ts'
@@ -100,7 +101,15 @@ export interface CommandRunProps {
   /** What the command is for, drawn with its fixed icon and its word (D8-07). */
   type: CommandType
   state: CommandState
-  /** The folder it runs in, relative to the Workspace when it is inside it. */
+  /**
+   * The Project's repository it runs in, said as one with its mark (issue #239); undefined for a
+   * folder that is none of the Project's repositories.
+   */
+  repository?: RunRepository | undefined
+  /**
+   * The folder it runs in: under the repository when it is in one, `.` for the repository itself;
+   * relative to the Workspace otherwise, when it is inside it.
+   */
   folder: string
   /** What the process has written so far, exactly as it arrived. */
   output: string
@@ -146,6 +155,7 @@ export function CommandRun({
   command,
   type,
   state,
+  repository,
   folder,
   output,
   url,
@@ -198,7 +208,9 @@ export function CommandRun({
             <Badge tone="neutral">{COMMAND_TYPE_LABELS[type]}</Badge>
             {oneOff && <Badge tone="neutral">One-off</Badge>}
             {workspace !== undefined && <Badge tone="neutral">{`in ${workspace}`}</Badge>}
-            <span className={FOLDER}>{folder}</span>
+            <span className={FOLDER}>
+              <RunPlace repository={repository} folder={folder} />
+            </span>
           </span>
         }
       >

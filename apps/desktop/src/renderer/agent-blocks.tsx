@@ -55,6 +55,7 @@ import {
   questionAnchor,
   questionEntryOf,
 } from './spec-entries.ts'
+import { answersAQuestion } from './agent-store.ts'
 
 /**
  * What each entry of a thread is drawn as (design D5-11, D5-14, D5-16).
@@ -763,7 +764,8 @@ export function waitingOf(entries: readonly SessionEntry[]): SessionEntry | null
   for (let at = entries.length - 1; at >= 0; at -= 1) {
     const entry = entries[at]
     if (entry === undefined) continue
-    if (entry.kind === 'permission_decision') return null
+    // A one-off the mode let through answered nothing: the wait goes on past it (#242).
+    if (answersAQuestion(entry)) return null
     if (entry.kind === 'permission_request') {
       // A question the engine closed — answered, stopped, or left by an agent that died — is not
       // one the agent is waiting on, whatever follows it.

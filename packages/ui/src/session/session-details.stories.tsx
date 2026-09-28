@@ -6,16 +6,15 @@ import { movesLess } from '../../.storybook/reduced-motion.ts'
 import { IconButton } from '../components/button/button.tsx'
 import { Tooltip, TooltipProvider } from '../components/tooltip/tooltip.tsx'
 import { IconInfoCircle } from '../icons.ts'
-import { CommandsPanel } from './commands-panel.tsx'
 import { ContextView } from './context-view.tsx'
 import { SessionDetails, type SessionDetailsProps } from './session-details.tsx'
 
 /**
- * The three things a reader checks on while an agent works, one press away from the thread.
+ * The two things a reader checks on while an agent works, one press away from the thread.
  *
- * The plan and the files are what the turn is doing; the commands are what the Session runs, with
- * the address of a server the moment it has one; the context is what the agent is working from:
- * its instructions and the tools it is lent. A centred dialog the reader opens from the Session's
+ * The plan and the files are what the turn is doing; the context is what the agent is working
+ * from: its instructions and the tools it is lent. What the Session runs is on the line under its
+ * title (issue #219), not in a dialog. A centred dialog the reader opens from the Session's
  * head, never a column beside the thread: nothing the agent does opens it by itself.
  *
  * Each story draws the button the head draws, because what opens the dialog is also what the
@@ -46,7 +45,7 @@ function Harness(props: Omit<SessionDetailsProps, 'open' | 'onOpenChange'>): Rea
 const meta = {
   title: 'Blocks/Session/SessionDetails',
   component: Harness,
-  tags: ['autodocs'],
+  tags: ['autodocs', 'updated'],
   parameters: { layout: 'padded' },
   args: {
     plan: [
@@ -58,36 +57,6 @@ const meta = {
       { path: 'packages/ui/src/session/session-details.tsx', added: 61, removed: 0 },
     ],
     onSelectFile: fn(),
-    commands: (
-      <CommandsPanel
-        runs={[
-          {
-            id: 'run-dev',
-            name: 'dev',
-            command: 'pnpm dev',
-            type: 'serve',
-            state: 'running',
-            folder: './sources/front',
-            output: 'vite v7.1.4\n\n  Local:   http://localhost:5173/',
-            url: 'http://localhost:5173/',
-            readiness: 'ready',
-          },
-          {
-            id: 'run-check',
-            name: 'check',
-            command: 'pnpm check',
-            type: 'test',
-            state: 'finished',
-            folder: '.',
-            output: 'Test Files  155 passed (155)',
-            exitCode: 0,
-          },
-        ]}
-        onStop={fn()}
-        onOpenUrl={fn()}
-        onRun={fn()}
-      />
-    ),
     context: (
       <ContextView
         instructions={[
@@ -103,11 +72,10 @@ const meta = {
   argTypes: {
     plan: { control: 'object', description: 'The plan as the agent last sent it.' },
     files: { control: 'object', description: 'The files the turn has touched.' },
-    commands: { control: false, description: 'The Commands panel of this Session, already drawn.' },
     context: { control: false, description: 'The Context view of this Session, already drawn.' },
     defaultTab: {
       control: 'inline-radio',
-      options: ['activity', 'commands', 'context'],
+      options: ['activity', 'context'],
       description: 'The tab the dialog opens on.',
     },
     onSelectFile: { description: 'Opens a file, when the reader presses its path.' },
@@ -178,7 +146,7 @@ function spare(dialog: HTMLElement): number {
 }
 
 /**
- * Walks the three tabs the way `choose` picks one, and checks the dialog on every one of them: it
+ * Walks the two tabs the way `choose` picks one, and checks the dialog on every one of them: it
  * is as tall as the tab it shows, with nothing left to spare under it. A tab that holds more makes
  * a taller dialog — the size decides the width, and never the height.
  */
@@ -186,7 +154,7 @@ async function hugsTheTab(
   dialog: HTMLElement,
   choose: (tab: string) => Promise<void>,
 ): Promise<void> {
-  for (const tab of ['Activity', 'Commands', 'Context']) {
+  for (const tab of ['Activity', 'Context']) {
     // oxlint-disable-next-line no-await-in-loop -- one tab after the other, as a reader walks them
     await choose(tab)
     // oxlint-disable-next-line no-await-in-loop -- the panel is measured once it has landed
@@ -212,7 +180,7 @@ function clicking(dialog: HTMLElement): (tab: string) => Promise<void> {
  * nothing rather than showing an empty box.
  */
 export const Empty: Story = {
-  args: { plan: [], files: [], commands: undefined, context: undefined, defaultTab: 'context' },
+  args: { plan: [], files: [], context: undefined, defaultTab: 'context' },
   play: async ({ canvasElement }) => {
     // Nothing is drawn until the reader asks: no dialog, no tab.
     expect(within(document.body).queryByRole('dialog')).toBeNull()
@@ -225,8 +193,8 @@ export const Empty: Story = {
     await expect(dialog.getByText('Hemera has nothing to say about it yet.')).toBeVisible()
     await userEvent.click(dialog.getByRole('tab', { name: 'Activity' }))
     await expect(dialog.getByText('No plan and no file touched in this Session yet.')).toBeVisible()
-    await userEvent.click(dialog.getByRole('tab', { name: 'Commands' }))
-    await expect(dialog.getByText('No command has run in this Session.')).toBeVisible()
+    // What the Session runs is on the line under its title, and no tab of these.
+    await expect(dialog.queryByRole('tab', { name: 'Commands' })).toBeNull()
   },
 }
 
@@ -266,24 +234,6 @@ export const Activity: Story = {
     )
     await expect(args.onSelectFile).toHaveBeenCalledWith('packages/ui/src/session/plan-panel.tsx')
     // Whatever a tab holds — an open list of files included — the dialog is as tall as it is.
-    await hugsTheTab(dialog, clicking(dialog))
-  },
-}
-
-/** Scenario « Commande en cours »: what the Session is running, with its address. */
-export const Commands: Story = {
-  args: { defaultTab: 'commands' },
-  play: async ({ canvasElement }) => {
-    const dialog = await opened(canvasElement)
-    const inside = within(dialog)
-    await expect(inside.getByRole('tab', { name: 'Commands' })).toHaveAttribute(
-      'aria-selected',
-      'true',
-    )
-    await expect(inside.getByText('pnpm dev')).toBeVisible()
-    await expect(inside.getByText('1 running')).toBeVisible()
-    await expect(inside.getByRole('button', { name: 'http://localhost:5173/' })).toBeVisible()
-    // A list of runs and their output makes a taller dialog, with nothing to spare under it.
     await hugsTheTab(dialog, clicking(dialog))
   },
 }
@@ -389,7 +339,7 @@ export const TabChange: Story = {
     // frames the runner took to write it.
     const drawn: number[] = []
     const writes = new MutationObserver(() => {
-      const fade = fadeOf(dialog, 'Commands')
+      const fade = fadeOf(dialog, 'Context')
       if (fade !== null) drawn.push(fade)
     })
     writes.observe(dialog, { attributes: true, subtree: true, attributeFilter: ['style'] })
@@ -400,13 +350,13 @@ export const TabChange: Story = {
         heights.push(dialog.getBoundingClientRect().height)
       }
     })()
-    await userEvent.click(within(dialog).getByRole('tab', { name: 'Commands' }))
+    await userEvent.click(within(dialog).getByRole('tab', { name: 'Context' }))
     // The journey is waited out, not counted in frames: the last write is the landing.
-    await waitFor(() => expect(fadeOf(dialog, 'Commands')).toBe(1))
+    await waitFor(() => expect(fadeOf(dialog, 'Context')).toBe(1))
     writes.disconnect()
     await watched
 
-    await expect(within(dialog).getByText('pnpm dev')).toBeVisible()
+    await expect(within(dialog).getByText('Instructions')).toBeVisible()
     if (!movesLess()) {
       // Drawn from transparent: the crossfade wrote a value below opaque on its way up. Where
       // less movement was asked for there is no journey, and the opacity above is the claim.

@@ -62,7 +62,7 @@ const E2E_DATA = e2eDataOf('workspaces.e2e.ts')
  */
 const GO = join(tmpdir(), 'hemera-e2e-workspaces-go')
 
-/** A one-off line, run from the Commands panel; a one-off is named after its first word. */
+/** A one-off line, run from the Run of the line under the title; it is named after its first word. */
 const ONCE = `node -e "console.log('once')"`
 
 /** The port `dev` publishes, free when the suite starts; both instances publish it. */
@@ -318,21 +318,36 @@ async function startSession(workspace: string, said: string): Promise<void> {
   await awaits(ANSWERS[0])
 }
 
-/** Opens the Commands tab of the Session details. */
-async function openCommands(): Promise<void> {
-  await press('Session details')
-  await browser.pause(400)
-  await pressTab('Commands')
-}
+/** The line under a Session's title, which says what goes on in it (issue #219). */
+const LINE = '[aria-label="What goes on in this Session"]'
+
+/** What the Run field offers, under its field. */
+const OFFERED = '[aria-label="What Run can start"]'
 
 /**
- * Runs a line from the Commands panel: a catalogue name runs that command, anything else is a
- * one-off. "Run" is pressed inside the details, where a hand would: the thread behind it draws
- * the same runs, and their summaries say "Running".
+ * Runs a line from the Run at the end of the line under the title: a catalogue name runs that
+ * command, anything else is a one-off. Typed, then Enter, as a hand does once it sees what the
+ * field offers: the catalogue listed, then the line typed among what it offers. The field starts
+ * the first match, and closes.
  */
 async function runLine(line: string): Promise<void> {
-  await fill('Run a line', line)
-  await $('[role="dialog"]').$('button=Run').click()
+  await pressIn(LINE, 'Run')
+  await awaitsIn(OFFERED, 'Catalogue')
+  await fill('Command', line)
+  await awaitsIn(OFFERED, line)
+  await browser.keys('Enter')
+  await browser.waitUntil(
+    async () =>
+      await browser.execute((css: string) => document.querySelector(css) === null, OFFERED),
+    { timeout: 10_000, interval: 200, timeoutMsg: 'the Run field never closed' },
+  )
+}
+
+/** Opens the Details of what the line shows under this label, through its glance's ⓘ. */
+async function detailsOf(label: string): Promise<void> {
+  await pressIn(LINE, label)
+  await browser.pause(400)
+  await pressIn('[role="dialog"]', 'Details of')
   await browser.pause(600)
 }
 
@@ -463,11 +478,9 @@ describe('Resuming re-checks before retrying', () => {
 describe('A URL is ready only after it answers', () => {
   it('runs dev from a Session in main, starting until something listens there, then ready', async () => {
     await startSession('main', 'Serve the app in main.')
-    await openCommands()
     await runLine('dev')
-    await awaitsIn('[role="dialog"]', 'Running')
-    await browser.keys('Escape')
-    await browser.pause(400)
+    // The catalogue's `dev`, with the address it printed: not a line `dev` run once.
+    await awaitsIn(LINE, `localhost:${String(port)}`)
 
     // A Workspace's services are shown with it in the settings (D8-08).
     await settings('Workspaces')
@@ -494,12 +507,9 @@ describe('Two Workspaces run the same command as two instances', () => {
         '[aria-label="Workspace: login-form. The Workspace is fixed once the agent has started."]',
       ).waitForExist(),
     ).toBe(true)
-    await openCommands()
     await runLine('dev')
-    await awaitsIn('[role="dialog"]', 'Running')
+    await awaitsIn(LINE, `localhost:${String(port)}`)
     await runLine('dev')
-    await browser.keys('Escape')
-    await browser.pause(400)
 
     // One instance per Workspace, each in its own folder.
     await settings('Workspaces')
@@ -566,22 +576,25 @@ describe('A proposal enters the catalogue only when accepted', () => {
 })
 
 describe('A one-off execution stays out of the catalogue', () => {
-  it('runs a line from the Commands panel as a one-off, and the catalogue is unchanged', async () => {
+  it('runs a line from Run as a one-off, and the catalogue is unchanged', async () => {
     await press('Serve the app in main.')
     await browser.pause(900)
-    await openCommands()
     const held = await catalogue()
     await runLine(ONCE)
-    await awaitsIn('[role="dialog"]', 'Exited 0')
-    expect(await textOf('[role="dialog"]')).toContain('One-off')
+    // A one-off is named after its first word on the line; its whole line is in its Details, with
+    // the word that it is not in the catalogue, and how it ended.
+    await awaitsIn(LINE, 'node')
+    await detailsOf('node')
+    expect(await textOf('[role="dialog"]')).toContain(ONCE)
+    await awaitsIn('[role="dialog"]', 'exit 0')
+    expect(await textOf('[role="dialog"]')).toContain('One-off, not in the catalogue')
     expect(await catalogue()).toEqual(held)
   })
 })
 
 describe('Add to catalogue', () => {
   it('keeps the one-off in the catalogue on the click, under its first word', async () => {
-    // A one-off that exited 0 is folded, and the offer sits beside its command line, in its body.
-    await $('[role="dialog"]').$('button*=One-off').click()
+    // The Details of the one-off offer to keep it, beside what closes them.
     await $('[role="dialog"]').$('button*=Add to catalogue').click()
     await browser.waitUntil(async () => (await catalogue()).includes('node'), {
       timeout: 10_000,

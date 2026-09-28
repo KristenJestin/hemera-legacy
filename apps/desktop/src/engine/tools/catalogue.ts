@@ -979,6 +979,9 @@ export const toolCatalogueLayer: Layer.Layer<
                     ),
                 )) ?? started)
               : started
+            // What the agent reads here it is not handed again at the next prompt (issue #238):
+            // how it ended, or that it runs — and then its end, once it comes.
+            yield* answered(commands.told(asked.sessionId, [run]))
             const tail = run.output.split('\n').slice(-40).join('\n')
             return {
               ok: run.state !== 'failed',
@@ -1015,6 +1018,7 @@ export const toolCatalogueLayer: Layer.Layer<
               )
             }
             const run = read
+            yield* answered(commands.told(asked.sessionId, [run]))
             const tail = run.output.split('\n').slice(-200).join('\n')
             return {
               ok: true,

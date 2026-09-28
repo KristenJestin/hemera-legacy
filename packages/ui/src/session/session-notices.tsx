@@ -60,12 +60,19 @@ const COUNT = 'font-mono text-foreground'
 
 const PANEL = 'scroll-quiet flex max-h-pinned w-notices flex-col overflow-y-auto'
 
-const GROUP = 'flex flex-col gap-2'
+/**
+ * A group: its items one under the other, with no gap of the list's own — the room between two
+ * items is inside each, so an item folding away takes all of its room with it and the panel never
+ * snaps by a gap once it is gone.
+ */
+const GROUP = 'flex flex-col'
 
 /** A group after the first: a rule between the two, and nothing that names either. */
-const GROUP_APART = 'mt-3 flex flex-col gap-2 border-t border-border pt-3'
+const GROUP_APART = 'mt-2 flex flex-col border-t border-border pt-2'
 
-const FOOT = 'flex items-center justify-end gap-1'
+const ITEM = 'py-1'
+
+const FOOT = 'flex items-center justify-end gap-1 pt-1'
 
 /** What a group of the list and an item of a group arrive and leave on: their height. */
 function Fold({ children }: { children: ReactNode }): ReactNode {
@@ -162,10 +169,20 @@ export function SessionNotices({ groups, defaultOpen = false }: SessionNoticesPr
                       >
                         <AnimatePresence initial={false}>
                           {group.items.map((item) => (
-                            <Fold key={item.id}>{item.content}</Fold>
+                            <Fold key={item.id}>
+                              <div className={ITEM}>{item.content}</div>
+                            </Fold>
                           ))}
                         </AnimatePresence>
-                        {group.actions !== undefined && <div className={FOOT}>{group.actions}</div>}
+                        {/* What answers the group at once comes and goes by its height too:
+                            Accept all leaves with the last but one proposal. */}
+                        <AnimatePresence initial={false}>
+                          {group.actions !== undefined && (
+                            <Fold key="actions">
+                              <div className={FOOT}>{group.actions}</div>
+                            </Fold>
+                          )}
+                        </AnimatePresence>
                       </section>
                     </Fold>
                   ))}

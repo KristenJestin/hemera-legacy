@@ -91,7 +91,7 @@ export function goingOnOf(
   root: string | null,
   workspace: string = MAIN_WORKSPACE,
   repositories: readonly RunRepository[] = [],
-): GoingOnItem[] {
+): (GoingOnRun | GoingOnShell)[] {
   const began = [
     ...runs.map((run) => ({
       at: Date.parse(run.startedAt),

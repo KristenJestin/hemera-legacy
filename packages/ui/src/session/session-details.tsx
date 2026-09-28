@@ -6,7 +6,14 @@ import { Badge } from '../components/badge/badge.tsx'
 import { Button } from '../components/button/button.tsx'
 import { Dialog } from '../components/dialog/dialog.tsx'
 import { Tabs } from '../components/tabs/tabs.tsx'
-import { IconActivity, IconBrain, IconFileText, IconFolderOpen } from '../icons.ts'
+import {
+  IconActivity,
+  IconBook,
+  IconBrain,
+  IconClock,
+  IconFileText,
+  IconFolderOpen,
+} from '../icons.ts'
 import { CROSSFADE, crossfade, useTransition } from '../motion.ts'
 import { PlanPanel, type PlanEntry } from './plan-panel.tsx'
 
@@ -78,7 +85,7 @@ export interface TouchedFile {
 }
 
 /** The tab the details open on, which is the one a reader came back for. */
-export type SessionDetailsTab = 'activity' | 'context'
+export type SessionDetailsTab = 'activity' | 'history' | 'catalogue' | 'context'
 
 export interface SessionDetailsProps {
   /** Whether the dialog is open. The page holds it: only the reader opens it. */
@@ -90,6 +97,16 @@ export interface SessionDetailsProps {
   files: readonly TouchedFile[]
   /** The Context view of this Session, handed over already drawn. */
   context?: ReactNode
+  /**
+   * What the Session ran, handed over already drawn (issue #237): every run and every line of the
+   * agent's own shell, in order. Absent, there is no History tab.
+   */
+  history?: ReactNode
+  /**
+   * The Project's catalogue, handed over already drawn (issue #237): seen, run and edited without
+   * leaving the Session. Absent, there is no Catalogue tab.
+   */
+  catalogue?: ReactNode
   /** The tab it opens on, each time it opens. The plan's, unless the Session says otherwise. */
   defaultTab?: SessionDetailsTab | undefined
   /** Opens one of them, when the reader presses its path. */
@@ -107,6 +124,8 @@ export function SessionDetails({
   plan,
   files,
   context,
+  history,
+  catalogue,
   defaultTab = 'activity',
   onSelectFile,
   onOpenTrace,
@@ -186,6 +205,26 @@ export function SessionDetails({
               </Crossfaded>
             ),
           },
+          ...(history === undefined
+            ? []
+            : [
+                {
+                  value: 'history' as const,
+                  label: 'History',
+                  icon: <IconClock size="sm" />,
+                  panel: <Crossfaded>{history}</Crossfaded>,
+                },
+              ]),
+          ...(catalogue === undefined
+            ? []
+            : [
+                {
+                  value: 'catalogue' as const,
+                  label: 'Catalogue',
+                  icon: <IconBook size="sm" />,
+                  panel: <Crossfaded>{catalogue}</Crossfaded>,
+                },
+              ]),
           {
             value: 'context',
             label: 'Context',

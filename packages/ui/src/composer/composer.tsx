@@ -1,10 +1,8 @@
-import { AnimatePresence, motion } from 'motion/react'
 import { type ReactNode, useEffect, useId, useRef, useState } from 'react'
 
 import { IconButton } from '../components/button/button.tsx'
 import { Frame, FrameFooter } from '../components/frame/frame.tsx'
 import { IconAt, IconPaperclip } from '../icons.ts'
-import { CROSSFADE, crossfade, useTransition } from '../motion.ts'
 import { ComposerActions, ComposerSend } from './composer-actions.tsx'
 import { ComposerAttachments } from './composer-attachments.tsx'
 import { ComposerBox, type ComposerBoxHandle } from './composer-box.tsx'
@@ -144,26 +142,11 @@ export interface ComposerProps {
    */
   blocked?: ReactNode | undefined
   /**
-   * What waits for the reader's answer, pinned above the box for as long as it waits (issue
-   * #130): a proposal of the agent, a question it asked. The thread scrolls on under the agent's
-   * words and would carry them out of sight; here they stay in reach, and once answered the page
-   * draws them back in the thread. Each takes its room at once and fades in on `crossfade`, and
-   * leaves at once: it leaves because the page draws it back in the thread in that same frame
-   * (issue #209).
-   */
-  pinned?: readonly Pinned[] | undefined
-  /**
    * What waits for a human, attached to the top edge of the box (issue #237): the Session's
    * notices. They stand over the page rather than in it, behind the box, so they can rise out
    * from under its edge and go back there, and nothing above the box moves when they do.
    */
   notices?: ReactNode | undefined
-}
-
-/** One thing pinned above the box, under the key it keeps while it waits. */
-export interface Pinned {
-  id: string
-  content: ReactNode
 }
 
 export function Composer({
@@ -189,10 +172,8 @@ export function Composer({
   running = false,
   onStop,
   blocked,
-  pinned = [],
   notices,
 }: ComposerProps): ReactNode {
-  const fading = useTransition(crossfade)
   const box = useRef<ComposerBoxHandle>(null)
   const inSession = variant === 'inline'
 
@@ -381,35 +362,6 @@ export function Composer({
 
   return (
     <div className="flex flex-col gap-2">
-      {/* Bounded, and scrolled on its own past that: however many wait, the thread keeps its
-          room above them and the box stays in reach under them. Empty, it takes no gap.
-
-          A card leaves with no exit (issue #209): what takes it away is its answer, and the page
-          draws it back in the thread in the same frame. Folding here while the thread had already
-          grown by it gave the thread its whole height and its room only frame by frame, so a
-          thread following its end jumped down by the card, then slid back as the fold ended.
-
-          It arrives the same way, at its whole height, and only fades in. Grown on `morph`, it
-          took the thread's room a few pixels a frame, and a thread following its end was dragged
-          up with it for the whole spring while the card unrolled under it. */}
-      <section
-        aria-label="Waiting for your answer"
-        className="scroll-quiet flex max-h-pinned shrink-0 flex-col gap-2 overflow-y-auto empty:hidden"
-      >
-        <AnimatePresence initial={false}>
-          {pinned.map((one) => (
-            <motion.div
-              key={one.id}
-              className="shrink-0"
-              initial={CROSSFADE.from}
-              animate={CROSSFADE.to}
-              transition={fading}
-            >
-              {one.content}
-            </motion.div>
-          ))}
-        </AnimatePresence>
-      </section>
       {blocked}
       {/* The box and what is attached to its top edge: one stacking of their own, the notices
           under the box, so what rises from behind its edge is hidden there until it has. The

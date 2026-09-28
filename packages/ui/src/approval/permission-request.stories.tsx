@@ -2,7 +2,7 @@ import type { Meta, StoryObj } from '@storybook/react-vite'
 import { expect, fn, userEvent, within } from 'storybook/test'
 
 import { DiffBlock } from '../activity/diff-block.tsx'
-import { PermissionRequest } from './permission-request.tsx'
+import { PermissionRecord, PermissionRequest } from './permission-request.tsx'
 
 /**
  * The gate at the size of a thread.
@@ -329,5 +329,53 @@ export const TheWholeLine: Story = {
     await expect(canvas.getByText('api')).toBeVisible()
     const answers = canvas.getAllByRole('button').map((one) => one.textContent)
     await expect(answers).toEqual(['Refuse', 'Allow once'])
+  },
+}
+
+/**
+ * What the thread keeps of a permission answered among the Session's notices (issue #237): one
+ * closed line — the shield, the dot of the answer, the call and its line — and, opened, where it
+ * ran, the whole line and the answer with its time. Nothing in it to press.
+ */
+export const KeptAllowed: Story = {
+  render: () => (
+    <PermissionRecord
+      toolName="commands_run"
+      label="Run command"
+      subject="sleep 120"
+      parameters={[{ label: 'In', value: 'main' }]}
+      command="sleep 120"
+      standing="allowed"
+      decision={{ answer: 'Allow once', at: '10:42' }}
+    />
+  ),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const record = canvas.getByRole('group', { name: 'Permission for Run command, allowed' })
+    await expect(within(record).getByText('sleep 120')).toBeVisible()
+    await expect(within(record).queryByRole('button', { name: 'Allow once' })).toBeNull()
+    await userEvent.click(within(record).getByRole('button'))
+    await expect(await within(record).findByText('10:42')).toBeVisible()
+    await expect(within(record).getByText('main')).toBeVisible()
+  },
+}
+
+/** Still waiting: the same line, its dot waiting; the answer is given in the notices. */
+export const KeptWaiting: Story = {
+  render: () => (
+    <PermissionRecord
+      toolName="commands_run"
+      label="Run command"
+      subject="sleep 120"
+      command="sleep 120"
+      standing="pending"
+    />
+  ),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await expect(
+      canvas.getByRole('group', { name: 'Permission for Run command, waiting' }),
+    ).toBeVisible()
+    await expect(canvas.queryByRole('button', { name: /Allow|Refuse/ })).toBeNull()
   },
 }

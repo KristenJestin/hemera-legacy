@@ -369,6 +369,95 @@ export function reportedFailureOf(entry: SessionEntry): string | undefined {
 }
 
 /**
+ * A command the agent ran in its own shell, through its own tool, as the line under the Session's
+ * title lists it (issue #219): Hemera holds no process for it, and knows only what the tool call
+ * reported — the line it was called with, how it stands, and what it answered.
+ */
+export interface AgentShellCall {
+  readonly id: string
+  readonly command: string
+  readonly state: 'running' | 'finished' | 'failed'
+  readonly output: string
+  /** When the call began, as the thread wrote it. */
+  readonly at: number
+}
+
+/** What a native call says of itself, as far as the line reads it (engine, `agents/runtime.ts`). */
+const shellCallPayloadSchema = z.object({
+  call: z.object({
+    title: z.string(),
+    kind: z.string().nullable(),
+    status: z.string().nullable(),
+    content: z.array(
+      z.object({ type: z.string(), text: z.object({ text: z.string() }).optional() }),
+    ),
+    rawInput: z.object({ text: z.string() }).nullable(),
+    rawOutput: z.object({ text: z.string() }).nullable(),
+  }),
+})
+
+/** The keys an agent's shell tool names its line under, and its output under. */
+const LINE_KEYS = ['command', 'cmd'] as const
+
+const OUTPUT_KEYS = ['output', 'stdout', 'stderr'] as const
+
+/**
+ * What a shell call answered, in its own words: the text it answered with when it is one, the
+ * streams it named when it answered an object, and what it attached when it answered nothing.
+ */
+function shellOutputOf(rawOutput: string | null, attached: readonly string[]): string {
+  if (rawOutput === null) return attached.join('\n\n')
+  const text = readPayload(z.string(), rawOutput)
+  if (text !== null) return text
+  const streams = OUTPUT_KEYS.map((key) => stringArgument(rawOutput, [key])).filter(
+    (stream) => stream !== undefined && stream !== '',
+  )
+  return streams.length > 0 ? streams.join('\n') : rawOutput
+}
+
+/** How a call the agent reported stands, in the line's three states. */
+function shellStateOf(status: string | null): AgentShellCall['state'] {
+  if (status === 'failed') return 'failed'
+  if (status === 'completed') return 'finished'
+  return 'running'
+}
+
+/**
+ * The commands the agent ran in its own shell: the thread's calls of kind `execute` that are not
+ * one of Hemera's tools — a command Hemera runs for the agent is a run of its own already. The line
+ * is what the call was called with, as one line or as its words, or its title when it said none.
+ */
+export function agentShellCallsOf(entries: readonly SessionEntry[]): AgentShellCall[] {
+  return entries.flatMap((entry) => {
+    if (entry.kind !== 'tool_call') return []
+    const read = readPayload(shellCallPayloadSchema, entry.payload)
+    if (read === null) return []
+    const { call } = read
+    if (call.kind !== 'execute' || hemeraToolNamed(call.title) !== null) return []
+    const input = call.rawInput?.text ?? ''
+    const command =
+      stringArgument(input, LINE_KEYS) ??
+      LINE_KEYS.map((key) =>
+        readPayload(z.object({ [key]: z.array(z.string()) }), input)?.[key]?.join(' '),
+      ).find((line) => line !== undefined) ??
+      call.title
+    const attached = call.content
+      .filter((block) => block.type === 'content')
+      .map((block) => block.text?.text ?? '')
+      .filter((text) => text !== '')
+    return [
+      {
+        id: entry.id,
+        command,
+        state: shellStateOf(call.status),
+        output: shellOutputOf(call.rawOutput?.text ?? null, attached),
+        at: entry.createdAt,
+      } satisfies AgentShellCall,
+    ]
+  })
+}
+
+/**
  * `null` when the payload does not parse: the entry is left out rather than drawn from a guess.
  *
  * `runs` are the Session's runs as the window last heard them, which is where the name of the

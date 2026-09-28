@@ -2,6 +2,7 @@ import { Fragment, useEffect, useRef, useState, useSyncExternalStore } from 'rea
 import type { ReactNode } from 'react'
 
 import type {
+  Command,
   CommandRun,
   ConfigOption,
   ContextView as Provided,
@@ -16,7 +17,6 @@ import {
   ActionGroup,
   AgentModelMenu,
   BlockedBanner,
-  CommandsPanel,
   Composer,
   ContextView,
   MessageDaySeparator,
@@ -25,6 +25,8 @@ import {
   MessageText,
   SessionEmpty,
   CreateWorkspaceDialog,
+  GoingOnLine,
+  RunCommand,
   SessionDetails,
   SessionHeader,
   SpecPanel,
@@ -51,9 +53,9 @@ import {
 import { type Grouping, groupActions, groupingOf } from '../action-groups.ts'
 import { effortDefaultOf, effortStage, modeStage, modelStage } from '../agent-options.ts'
 import { drawEntry, planOf, touchedOf, usageOf, waitingOf } from '../agent-blocks.tsx'
-import { elsewhereOf, foldedCallsOf } from '../agent-tool-payloads.ts'
+import { agentShellCallsOf, foldedCallsOf } from '../agent-tool-payloads.ts'
 import { whenOf } from '../journal-lines.ts'
-import { contextListsOf, detailsTabsOf, openingTabOf, panelRunsOf } from '../session-details.ts'
+import { contextListsOf, detailsTabsOf, goingOnOf, openingTabOf } from '../session-details.ts'
 import { openSessions, type OfferedWorkspace, workspaceFixedOf } from '../sessions-store.ts'
 import { selectEntry } from '../shell-store.ts'
 import { type DefinedSpec, questionMarkOf, waitsForAnswer } from '../spec-entries.ts'
@@ -294,8 +296,10 @@ export interface SessionPageProps {
   onHandOver: () => void
   /** The Workspace root, which is what a run's folder is said relative to; null until known. */
   root: string | null
-  /** Runs a line from the Commands panel: a command of the catalogue by name, or a one-off. */
+  /** Runs a line from the Run of the line: a command of the catalogue by name, or a one-off. */
   onRunCommand: (line: string) => void
+  /** The Project's catalogue, which the Run of the line offers. */
+  catalogue: readonly Command[]
   /** What this Session was provided, may consult, and keeps to its agent; null until read. */
   context: Provided | null
   /** The Workspaces the pill lists: `ready`, `main` first, and the Session's own (D8-08). */
@@ -335,6 +339,7 @@ export function SessionPage({
   onPickFiles,
   onOpenFile,
   commandRuns,
+  catalogue,
   onOpenUrl,
   onStopRun,
   onHandOver,
@@ -674,7 +679,7 @@ export function SessionPage({
   const touched = touchedOf(thread)
   const usage = usageOf(thread)
   // Which tabs have something to show, which is what the details open on.
-  const tabs = detailsTabsOf(plan.length, touched.length, commandRuns, context)
+  const tabs = detailsTabsOf(plan.length, touched.length, context)
 
   /**
    * The panel beside the chat, chosen by the Session's mission here and nowhere else. A `define`
@@ -755,6 +760,38 @@ export function SessionPage({
             archiveDisabled={thread.length === 0}
             // The one way to the Session details: nothing the agent does opens them.
             onOpenDetails={() => setDetailsOpen(true)}
+          />
+          {/*
+            What goes on in the Session, right under its title (issue #219): the runs Hemera holds,
+            the commands the agent ran in its own shell, and the Run a command is started from. A
+            Session nothing answers has no agent to lend a command to, and offers no Run.
+          */}
+          <GoingOnLine
+            items={goingOnOf(commandRuns, agentShellCallsOf(thread), root, workspace?.name)}
+            emptyLabel={`Nothing running in ${workspace?.name ?? 'main'}`}
+            onStop={(run) => onStopRun(run.id)}
+            onOpenUrl={onOpenUrl}
+            onAddToCatalogue={(shown) => {
+              const run = commandRuns.find((one) => one.id === shown.id)
+              if (run !== undefined) deciding(onAddToCatalogue(run))
+            }}
+            end={
+              session.provider === null ? undefined : (
+                <RunCommand
+                  catalogue={catalogue.map((command) => ({
+                    name: command.name,
+                    command: command.line,
+                    type: command.type,
+                    running: commandRuns.some(
+                      (run) => run.commandId === command.id && run.state === 'running',
+                    ),
+                  }))}
+                  workspace={workspace?.name ?? 'main'}
+                  onRunCommand={(entry) => onRunCommand(entry.name)}
+                  onRunOnce={onRunCommand}
+                />
+              )
+            }
           />
         </div>
         {/*
@@ -888,28 +925,6 @@ export function SessionPage({
         files={touched}
         onSelectFile={onOpenFile}
         onOpenTrace={traced ? () => void openTrace(session.id) : undefined}
-        // The commands of a Session with an agent, whoever started them (D6-12): the same runs
-        // the thread's blocks read, and the line a one-off is run from. A Session nothing
-        // answers has no agent to lend a command to, and says so on the tab.
-        commands={
-          session.provider === null ? undefined : (
-            <CommandsPanel
-              // A one-off offers "Add to catalogue" here as it does in the thread (D8-11), and a
-              // run in another Workspace names it (D8-08).
-              runs={panelRunsOf(commandRuns, root).map((shown) => {
-                const run = commandRuns.find((one) => one.id === shown.id)
-                if (run !== undefined) {
-                  shown.onAddToCatalogue = () => deciding(onAddToCatalogue(run))
-                  shown.workspace = elsewhereOf(run, workspace?.name)
-                }
-                return shown
-              })}
-              onStop={onStopRun}
-              onOpenUrl={onOpenUrl}
-              onRun={onRunCommand}
-            />
-          )
-        }
         // What the agent works from, its Workspace, instructions and tools (D6-10), once the engine
         // has said it and the Session's Workspace is known: no root is guessed before (D8-08).
         context={
@@ -917,10 +932,10 @@ export function SessionPage({
             <ContextView {...contextListsOf(context, root, workspace?.name)} />
           )
         }
-        // The tab it opens on follows what is happening: a command running opens on Commands,
-        // then the tab that has something, and the Context when no tab has anything (D6-12). It
-        // is read when the dialog opens, so an open dialog never changes tab under the reader.
-        defaultTab={openingTabOf(commandRuns, tabs)}
+        // The tab it opens on is what the turn has done when it has done anything, and the Context
+        // otherwise. It is read when the dialog opens, so an open dialog never changes tab under
+        // the reader.
+        defaultTab={openingTabOf(tabs)}
       />
       {/*
         The panel of the Session's mission, beside the chat: the working surface the thread gave

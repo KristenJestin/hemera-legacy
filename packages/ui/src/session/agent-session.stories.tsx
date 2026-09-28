@@ -8,8 +8,7 @@ import { TerminalOutput } from '../activity/terminal-output.tsx'
 import { ThoughtBlock } from '../activity/thought-block.tsx'
 import { ToolCallCard } from '../activity/tool-call-card.tsx'
 import { DecisionSummary } from '../approval/decision-summary.tsx'
-import { PermissionRequest } from '../approval/permission-request.tsx'
-import { BlockedBanner } from '../composer/blocked-banner.tsx'
+import { PermissionRecord, PermissionRequest } from '../approval/permission-request.tsx'
 import {
   AgentModelMenu,
   type EffortChoice,
@@ -19,6 +18,7 @@ import {
 } from '../composer/agent-model-menu.tsx'
 import { Composer } from '../composer/composer.tsx'
 import { TooltipProvider } from '../components/tooltip/tooltip.tsx'
+import { IconShield } from '../icons.ts'
 import { AgentText } from '../message/agent-text.tsx'
 import { MessageDaySeparator, MessageGroup } from '../message/message.tsx'
 import { MessageScroller, type ScrollerEntry } from '../message/scroller/scroller.tsx'
@@ -34,6 +34,7 @@ import { RunCommand } from './run-command.tsx'
 import { ContextView } from './context-view.tsx'
 import { SessionDetails, type SessionDetailsTab, type TouchedFile } from './session-details.tsx'
 import { StoppedTurn } from './stopped-turn.tsx'
+import { SessionNotices } from './session-notices.tsx'
 import { TurnLine } from './turn-line.tsx'
 
 /**
@@ -110,6 +111,24 @@ const MODES: ModeChoice[] = [
  * something *they* asked, and a tick for every block an agent reported was forty ticks for one
  * question. Everything else is read by scrolling through it, which is how it arrived.
  */
+/** The permission the agent waits on, as the notices draw it (issue #237). */
+const ASKED = (
+  <PermissionRequest
+    toolName="Bash"
+    intent="Run the billing suite to prove the streaming path."
+    parameters={[{ label: 'Project', value: 'repository' }]}
+    command="pnpm test --project=repository"
+    scope="this Project, until the window is closed"
+    options={[
+      { optionId: 'allow-once', kind: 'allow_once', name: 'Allow once' },
+      { optionId: 'allow-always', kind: 'allow_always', name: 'Always allow' },
+      { optionId: 'reject-once', kind: 'reject_once', name: 'Reject once' },
+      { optionId: 'reject-always', kind: 'reject_always', name: 'Never allow' },
+    ]}
+    onDecide={fn()}
+  />
+)
+
 const THREAD: ScrollerEntry[] = [
   { id: 'day', day: true as const, content: <MessageDaySeparator day="Today" /> },
   {
@@ -242,20 +261,13 @@ const THREAD: ScrollerEntry[] = [
   },
   {
     id: 'permission',
+    // Asked among the Session's notices, on the composer's edge; the thread keeps its line.
     content: (
-      <PermissionRequest
+      <PermissionRecord
         toolName="Bash"
-        intent="Run the billing suite to prove the streaming path."
         parameters={[{ label: 'Project', value: 'repository' }]}
         command="pnpm test --project=repository"
-        scope="this Project, until the window is closed"
-        options={[
-          { optionId: 'allow-once', kind: 'allow_once', name: 'Allow once' },
-          { optionId: 'allow-always', kind: 'allow_always', name: 'Always allow' },
-          { optionId: 'reject-once', kind: 'reject_once', name: 'Reject once' },
-          { optionId: 'reject-always', kind: 'reject_always', name: 'Never allow' },
-        ]}
-        onDecide={fn()}
+        standing="pending"
       />
     ),
   },
@@ -423,6 +435,7 @@ function Page({
               <TurnLine
                 activity={{ state: 'waiting' }}
                 usage={{ used: 12400, size: 200000, cost: { amount: 0.42, currency: 'EUR' } }}
+                notched
               />
             )}
             <Composer
@@ -437,9 +450,19 @@ function Page({
               onSend={() => Promise.resolve(null)}
               running={!fresh}
               onStop={fn()}
-              blocked={
+              notices={
                 fresh ? undefined : (
-                  <BlockedBanner waiting="The agent is asking to go on." onStop={fn()} />
+                  <SessionNotices
+                    groups={[
+                      {
+                        kind: 'permission',
+                        label: 'Permissions',
+                        icon: <IconShield size="sm" aria-hidden="true" />,
+                        urgent: true,
+                        items: [{ id: 'permission', content: ASKED }],
+                      },
+                    ]}
+                  />
                 )
               }
               agentMenu={
@@ -585,19 +608,25 @@ export const Complete: Story = {
     await waitFor(() => {
       expect(document.activeElement).toBe(button)
     })
-    // The agent is waiting for an answer, and the turn it is in can be stopped.
-    await expect(canvas.getByRole('button', { name: 'Allow once' })).toBeVisible()
-    // One Stop on the command run, one on the box, and one on the strip that says why the box
-    // is waiting.
+    // The pointer is put back on the box: left where the dialog's tabs were, it would stand over
+    // whatever row of the thread is there now, and that row's hover is not what is checked here.
+    await userEvent.hover(canvas.getByRole('textbox'))
+    // The agent is waiting for an answer, which the notices on the box's edge hold, closed
+    // (issue #237); the turn it is in can be stopped.
+    await expect(
+      await canvas.findByRole('button', { name: 'Waiting for your answer: Permissions 1' }),
+    ).toBeVisible()
+    await expect(canvas.queryByRole('button', { name: 'Allow once' })).toBeNull()
+    // One Stop on the command run and one on the box: no strip says the box is waiting.
     const stops = canvas.getAllByRole('button', { name: 'Stop' })
-    await expect(stops).toHaveLength(3)
+    await expect(stops).toHaveLength(2)
 
     /*
      * What the turn is doing shares the meter's row, at its left end: it is not an entry of the
      * thread any more (trial of 22 September 2026), it stands where the agent's own content
      * stands, and the loader alone says the turn is alive — no dot beside it.
      */
-    const doing = canvas.getByText('Waiting for your permission')
+    const doing = canvas.getByText('Waiting for your answer')
     await expect(doing).toBeVisible()
     const meter = canvas.getByLabelText(/12,400 of 200,000 tokens used/)
     await expect(onOneLine(doing, meter), 'what the turn is doing left the meter’s row').toBe(true)
@@ -684,7 +713,7 @@ export const Complete: Story = {
     await expect(thread.scrollHeight, 'the thread has nothing to scroll').toBeGreaterThan(
       thread.clientHeight,
     )
-    const loader = canvas.getByRole('status', { name: 'Waiting for your permission' })
+    const loader = canvas.getByRole('status', { name: 'Waiting for your answer' })
     await expect(loader.getBoundingClientRect().left, 'the row above the box is inset').toBe(edge)
     // And what the turn has spent is said above the box, not in the row that would have wrapped.
     await expect(canvas.getByLabelText(/12,400 of 200,000 tokens used/)).toBeVisible()

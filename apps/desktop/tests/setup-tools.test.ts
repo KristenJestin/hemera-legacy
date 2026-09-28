@@ -475,6 +475,30 @@ describe('The engine refuses what the settings refuse, with their reasons', () =
     )
     expect(seen.proposals.map((one) => one.state)).toEqual(['pending'])
   })
+
+  test('a call refused for a change of a kind it does not know still hides its value', async () => {
+    const agent = fakeAgent({
+      steps: [proposing('secret', [{ kind: 'secret', name: 'API_KEY', value: SECRET }])],
+    })
+
+    const seen = await toolApplication(dataFolder)(agent)(
+      Effect.gen(function* () {
+        const runtime = yield* AgentRuntime
+        const journal = yield* Journal
+        const session = yield* aProjectSession
+        yield* runtime.prompt(session.id, 'set the key')
+        const read = yield* journal.read({ projectId: session.projectId })
+        return { entries: yield* threadOf(session.id), lines: read.entries }
+      }),
+    )
+
+    expect(agent.answers.used[0]?.isError).toBe(true)
+    // Written like any refused call: Hemera's entry of it, and the agent's report of it.
+    expect(seen.entries.map((entry) => entry.kind)).toEqual(
+      expect.arrayContaining(['hemera_tool_call', 'tool_call']),
+    )
+    expect(everythingWritten(seen.entries, seen.lines)).not.toContain(SECRET)
+  })
 })
 
 describe('Accept all stops at the first refusal', () => {

@@ -385,6 +385,7 @@ export {
   type GoingOnState,
 } from './session/going-on.ts'
 export { GoingOnLine, type GoingOnLineProps } from './session/going-on-line.tsx'
+export { RunCommand, type RunCatalogueEntry, type RunCommandProps } from './session/run-command.tsx'
 export {
   ContextView,
   type ContextCommand,

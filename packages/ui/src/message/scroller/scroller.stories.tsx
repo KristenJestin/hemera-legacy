@@ -4,6 +4,7 @@ import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
 
 import { MotionConfig } from 'motion/react'
 
+import { readEveryFrame } from '../../../.storybook/journey.ts'
 import { AT_ONCE, movesLess, withinFrames } from '../../../.storybook/reduced-motion.ts'
 import { ActionGroup } from '../../activity/action-group.tsx'
 import { ToolCallCard } from '../../activity/tool-call-card.tsx'
@@ -724,6 +725,11 @@ function underTheFold(canvasElement: HTMLElement) {
   return { block, carried: block.parentElement! }
 }
 
+/** Resolves on the next frame. */
+function nextFrame(): Promise<void> {
+  return new Promise((resolve) => requestAnimationFrame(() => resolve()))
+}
+
 /** Where a block sat, frame by frame, for as long as a fold takes to open. */
 function travelOf(block: HTMLElement, frames: number): Promise<number[]> {
   const seen: number[] = []
@@ -804,25 +810,40 @@ export const AFoldWithoutMotion: Story = {
     const canvas = within(canvasElement)
     const { block, carried } = underTheFold(canvasElement)
     const before = block.getBoundingClientRect().top
+    const carriers: string[] = []
+    const watch = readEveryFrame(() => {
+      carriers.push(getComputedStyle(carried).transform)
+      return block.getBoundingClientRect().top
+    })
 
     await userEvent.click(canvas.getByRole('button', { name: /^Read file/ }))
 
+    // Arrived: lower than it was, and resting there from one frame to the next.
+    await waitFor(async () => {
+      const top = block.getBoundingClientRect().top
+      expect(top).toBeGreaterThan(before)
+      await nextFrame()
+      expect(block.getBoundingClientRect().top).toBe(top)
+    })
+    const after = block.getBoundingClientRect().top
+    const readings = watch.stop()
+
     /*
-     * Arrived, and arrived at once. The window is a fifth of a second, which is where the
-     * assertion is: the spring this fold reads takes the better part of one to settle, so a
-     * block already in its new place with nothing carrying it is a block that was given no
-     * journey rather than one that finished the journey quickly.
+     * And arrived at once, told frame by frame rather than against a clock: a window of a fifth
+     * of a second used to be the assertion, and a machine busy with the rest of the run can take
+     * longer than that to draw the press at all. No frame has the block anywhere between where it
+     * was and where it rests, and on no frame is anything carrying it there.
      */
-    await waitFor(
-      () => {
-        expect(block.getBoundingClientRect().top).toBeGreaterThan(before)
-        expect(
-          getComputedStyle(carried).transform,
-          'a reader who asked for less movement was taken on the journey anyway',
-        ).toBe('none')
-      },
-      { timeout: 200, interval: 10 },
-    )
+    expect(
+      readings
+        .map((reading) => reading.value)
+        .filter((top) => Math.abs(top - before) > 1 && Math.abs(top - after) > 1),
+      'the block was caught on its way',
+    ).toEqual([])
+    expect(
+      carriers.filter((transform) => transform !== 'none'),
+      'a reader who asked for less movement was taken on the journey anyway',
+    ).toEqual([])
   },
 }
 

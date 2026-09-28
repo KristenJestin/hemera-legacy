@@ -4,6 +4,7 @@ import { type ReactNode, useState } from 'react'
 
 import { onOneLine } from '../../.storybook/one-line.ts'
 import { emulateReducedMotion } from '../../.storybook/reduced-motion.ts'
+import { Button } from '../components/button/button.tsx'
 import { AgentModelMenu, type ModelChoice, type OfferedAgent } from './agent-model-menu.tsx'
 import { CreateSpecProposal } from '../spec/create-spec-proposal.tsx'
 import { CREDIT_NOTES } from '../spec/spec-fixtures.ts'
@@ -169,7 +170,7 @@ function frameOf(box: HTMLElement): HTMLElement {
 }
 
 const meta = {
-  tags: ['autodocs'],
+  tags: ['autodocs', 'updated'],
   title: 'Blocks/Composer/Composer',
   component: Composer,
   render: (args) => <Controlled {...args} />,
@@ -208,7 +209,8 @@ const meta = {
     variant: {
       control: 'inline-radio',
       options: ['hero', 'inline'],
-      description: 'The shape of the box: the Home greets with a hero, a Session sends inline.',
+      description:
+        'The Home greets with a hero; a Session sends inline, with no foot and the send as an icon.',
       table: { defaultValue: { summary: 'hero' } },
     },
     placeholder: { control: 'text' },
@@ -466,13 +468,108 @@ export const ThreePinnedQuestions: Story = {
   },
 }
 
-/** The other shape: the foot of a Session, where the box gives itself its own two lines. */
+/**
+ * The other shape: the foot of a Session (issue #241). The box gives itself its own two lines,
+ * and there is no foot under it: the Workspace is the Session's details' to say, and the send is
+ * the arrow alone, at the end of the box's own row, right of the agent's menu.
+ */
 export const InASession: Story = {
   args: { variant: 'inline', action: 'Send', value: 'Ask Marie before turning this into a Spec' },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     expect(canvas.getByRole('textbox')).toHaveTextContent('Ask Marie')
-    expect(canvas.getByRole('button', { name: /Send/ })).toBeEnabled()
+    const send = canvas.getByRole('button', { name: 'Send' })
+    expect(send).toBeEnabled()
+    // The arrow alone: no word, no key drawn beside it.
+    expect(send).toHaveTextContent('')
+    expect(canvas.queryByText('Enter')).toBeNull()
+    // No foot: no Workspace, no second row of buttons.
+    expect(canvas.queryByRole('combobox', { name: /^Workspace:/ })).toBeNull()
+    expect(canvas.queryByRole('button', { name: /New Spec/ })).toBeNull()
+    // On the box's own row, right of the agent's menu.
+    const at = canvas.getByRole('button', { name: 'Mention a file of the Project' })
+    const menu = canvas.getByRole('button', { name: /DeepSeek V4\.1 Flash/ })
+    expect(onOneLine(at, send), 'the send left the box’s own row').toBe(true)
+    expect(menu.getBoundingClientRect().right).toBeLessThanOrEqual(
+      send.getBoundingClientRect().left,
+    )
+    // And it is the last thing in the frame: nothing is drawn under the row.
+    const frame = frameOf(canvas.getByRole('textbox'))
+    expect(frame.getBoundingClientRect().bottom - send.getBoundingClientRect().bottom).toBeLessThan(
+      send.getBoundingClientRect().height,
+    )
+  },
+}
+
+/** A Session's box with a long sentence in it: the box grows and scrolls, the row stays one row. */
+export const InASessionWithLongText: Story = {
+  args: {
+    variant: 'inline',
+    action: 'Send',
+    value: Array.from(
+      { length: 12 },
+      (_, index) =>
+        `Line ${String(index + 1)}: the export writes the invoice date in the column of the amount, and the totals no longer match the bank statement.`,
+    ).join(' '),
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const box = canvas.getByRole('textbox')
+    const send = canvas.getByRole('button', { name: 'Send' })
+    const at = canvas.getByRole('button', { name: 'Mention a file of the Project' })
+    const menu = canvas.getByRole('button', { name: /DeepSeek V4\.1 Flash/ })
+    expect(onOneLine(at, send), 'the send left the box’s own row').toBe(true)
+    expect(onOneLine(menu, send), 'the send wrapped under the agent’s menu').toBe(true)
+    // Under the sentence, never beside it.
+    expect(send.getBoundingClientRect().top).toBeGreaterThanOrEqual(
+      box.getBoundingClientRect().bottom,
+    )
+  },
+}
+
+/**
+ * A turn that starts and ends under the hand: the send becomes the Stop and the Stop the send,
+ * in the same place and at the same size, and nothing else in the row moves (issue #241).
+ */
+function Turn(props: ComposerProps): ReactNode {
+  const [running, setRunning] = useState(false)
+  return (
+    <div className="flex flex-col">
+      <div className="mx-auto flex max-w-2xl px-6 pt-6">
+        <Button variant="secondary" size="sm" onClick={() => setRunning(!running)}>
+          {running ? 'End the turn' : 'Start a turn'}
+        </Button>
+      </div>
+      <Controlled {...props} running={running} />
+    </div>
+  )
+}
+
+export const SendAndStopSwap: Story = {
+  args: { variant: 'inline', action: 'Send', value: 'And the credit notes', onStop: fn() },
+  render: (args) => <Turn {...args} />,
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const menu = canvas.getByRole('button', { name: /DeepSeek V4\.1 Flash/ })
+    const send = canvas.getByRole('button', { name: 'Send' })
+    const place = send.getBoundingClientRect()
+    const beside = menu.getBoundingClientRect()
+    const frame = frameOf(canvas.getByRole('textbox')).getBoundingClientRect()
+
+    await userEvent.click(canvas.getByRole('button', { name: 'Start a turn' }))
+    const stop = await canvas.findByRole('button', { name: 'Stop' })
+    // The same control, where the send was, at its size; the row and the frame are as they were.
+    expect(stop).toBe(send)
+    expect(stop.getBoundingClientRect().toJSON()).toEqual(place.toJSON())
+    expect(menu.getBoundingClientRect().toJSON()).toEqual(beside.toJSON())
+    expect(frameOf(canvas.getByRole('textbox')).getBoundingClientRect().toJSON()).toEqual(
+      frame.toJSON(),
+    )
+    expect(stop).toHaveTextContent('')
+
+    await userEvent.click(canvas.getByRole('button', { name: 'End the turn' }))
+    const back = await canvas.findByRole('button', { name: 'Send' })
+    expect(back.getBoundingClientRect().toJSON()).toEqual(place.toJSON())
   },
 }
 

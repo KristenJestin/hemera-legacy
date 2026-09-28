@@ -483,6 +483,7 @@ export const toolCatalogueLayer: Layer.Layer<
           root,
           named,
           place.path,
+          false,
           `${asked.tool} asks to act outside the Workspace: ${place.path}`,
           null,
         )
@@ -501,13 +502,16 @@ export const toolCatalogueLayer: Layer.Layer<
      * The permission block of D5-09, asked about one place, and the human's answer.
      *
      * `line` is the command line a one-off run would start, and null for every other question:
-     * the block shows it, because a line is what the human is deciding on.
+     * the block shows it, because a line is what the human is deciding on. `inside` is whether
+     * `where` is inside the root, which the block says rather than guesses (issue #239): a one-off
+     * is asked about wherever it runs.
      */
     const askHuman = (
       asked: ToolCall,
       root: string,
       named: string,
       where: string,
+      inside: boolean,
       body: string,
       line: string | null,
     ) =>
@@ -529,6 +533,7 @@ export const toolCatalogueLayer: Layer.Layer<
               named,
               resolved: where,
               root,
+              inside,
               line,
             }),
             correlationId: `perm:${id}`,
@@ -916,6 +921,7 @@ export const toolCatalogueLayer: Layer.Layer<
                       root,
                       folder,
                       place.path,
+                      place.inside,
                       place.inside
                         ? `commands_run asks to run ${oneOff} in ${place.path}`
                         : `commands_run asks to run ${oneOff} outside the Workspace, in ${place.path}`,

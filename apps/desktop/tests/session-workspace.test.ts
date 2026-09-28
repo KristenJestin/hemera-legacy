@@ -19,8 +19,13 @@ import { z } from 'zod'
 import { fakeAgent, fakeSupervisorOf } from '#engine/agents/fake.ts'
 import { AgentRuntime } from '#engine/agents/runtime.ts'
 import { InvalidCommandFolderError } from '@hemera/core'
-import { UnknownCommandFolderError, createCommand, runFromPanel } from '#engine/commands/panel.ts'
-import { Commands } from '#engine/commands/service.ts'
+import {
+  UnknownCommandFolderError,
+  createCommand,
+  runAgain,
+  runFromPanel,
+} from '#engine/commands/panel.ts'
+import { Commands, UnknownRunError } from '#engine/commands/service.ts'
 import { Projects } from '#engine/projects.ts'
 import { Sessions, WorkspaceFixedError, WorkspaceNotReadyError } from '#engine/sessions.ts'
 import { Database } from '#engine/storage/database.ts'
@@ -242,6 +247,83 @@ describe("A command's folder resolves under its base inside the Workspace", () =
     expect(seen.stray).toBeInstanceOf(UnknownCommandFolderError)
     expect(seen.stray.message).toContain('./web')
     expect(seen.catalogue).toEqual([])
+  })
+})
+
+describe('A run is run again from its chip, as it ran (#237)', () => {
+  /** `where`, as the settings send it, in `./sources/api/src`. */
+  const where = (projectId: string) => ({
+    projectId,
+    name: 'where',
+    line: `"${process.execPath}" -e "console.log(process.cwd())"`,
+    lineWindows: null,
+    lineLinux: null,
+    type: 'script' as const,
+    folderBase: './sources/api',
+    folder: './src',
+    scope: 'workspace' as const,
+    portless: false,
+    portlessName: null,
+    runAtOpen: false,
+  })
+
+  test('a catalogue command runs again as the command, in its folder, by the reader', async () => {
+    mkdirSync(join(loginForm, 'sources', 'api', 'src'))
+    const seen = await toolApplication(dataFolder)(fakeAgent())(
+      Effect.gen(function* () {
+        const commands = yield* Commands
+        const { session } = yield* inLoginForm
+        yield* createCommand(where(session.projectId))
+        const first = yield* runFromPanel(session.id, 'where', undefined)
+        yield* commands.awaited(session.id, first.id, 10_000)
+        const again = yield* runAgain(session.id, first.id)
+        return { first, again: yield* commands.awaited(session.id, again.id, 10_000) }
+      }).pipe(Effect.provide(variablesLayer)),
+    )
+
+    expect(seen.again.id).not.toBe(seen.first.id)
+    expect(seen.again.commandId).toBe(seen.first.commandId)
+    expect(seen.again.name).toBe('where')
+    expect(seen.again.cwd).toBe(join(loginForm, 'sources', 'api', 'src'))
+    expect(seen.again.startedBy).toBe('user')
+    expect(seen.again.state).toBe('exited')
+  })
+
+  test('a one-off runs again as a one-off: the same line, in the same folder, kept out of the catalogue', async () => {
+    const line = `"${process.execPath}" -e "console.log('again')"`
+    const seen = await toolApplication(dataFolder)(fakeAgent())(
+      Effect.gen(function* () {
+        const commands = yield* Commands
+        const { session } = yield* inLoginForm
+        const first = yield* runFromPanel(session.id, undefined, line)
+        yield* commands.awaited(session.id, first.id, 10_000)
+        const again = yield* runAgain(session.id, first.id)
+        return {
+          first,
+          again: yield* commands.awaited(session.id, again.id, 10_000),
+          catalogue: yield* commands.list(session.projectId),
+        }
+      }).pipe(Effect.provide(variablesLayer)),
+    )
+
+    expect(seen.again.id).not.toBe(seen.first.id)
+    expect(seen.again.commandId).toBeNull()
+    expect(seen.again.line).toBe(line)
+    expect(seen.again.cwd).toBe(seen.first.cwd)
+    expect(seen.again.workspaceId).toBe(seen.first.workspaceId)
+    expect(seen.again.output).toContain('again')
+    expect(seen.catalogue).toEqual([])
+  })
+
+  test('a run the Session never had is refused', async () => {
+    const refused = await toolApplication(dataFolder)(fakeAgent())(
+      Effect.gen(function* () {
+        const { session } = yield* inLoginForm
+        return yield* Effect.flip(runAgain(session.id, 'no-such-run'))
+      }).pipe(Effect.provide(variablesLayer)),
+    )
+
+    expect(refused).toBeInstanceOf(UnknownRunError)
   })
 })
 

@@ -3,7 +3,7 @@ import type { ReactNode } from 'react'
 import { expect, fn, screen, userEvent, waitFor, within } from 'storybook/test'
 
 import { TooltipProvider } from '../components/tooltip/tooltip.tsx'
-import { GOING_ON } from './going-on-fixtures.ts'
+import { GOING_ON, ONE_OFF_DONE } from './going-on-fixtures.ts'
 import { GoingOnLine, type GoingOnLineProps } from './going-on-line.tsx'
 
 /**
@@ -28,7 +28,7 @@ function Line(props: GoingOnLineProps): ReactNode {
 const meta = {
   title: 'Blocks/Session/GoingOnLine',
   component: Line,
-  tags: ['autodocs', 'new'],
+  tags: ['autodocs', 'updated'],
   parameters: {
     layout: 'fullscreen',
     docs: { story: { inline: false, height: '32rem' } },
@@ -39,6 +39,9 @@ const meta = {
     onStop: fn(),
     onOpenUrl: fn(),
     onAddToCatalogue: fn(),
+    onRunAgain: fn(),
+    onRemove: fn(),
+    onSeen: fn(),
   },
 } satisfies Meta<typeof Line>
 
@@ -160,5 +163,56 @@ export const ManyRoundTrip: Story = {
     await expect(within(details).getByText(/No row is written twice/)).toBeVisible()
     await userEvent.keyboard('{Escape}')
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+  },
+}
+
+/**
+ * A glance's head (issue #237): Stop while it runs, Run again once it is over, the one-off's
+ * `Add to catalogue`, then the ⓘ and the ✕ that takes the chip out of the line — icons named by
+ * their tooltips, in that order. Closing the glance of something over is having seen it.
+ */
+export const GlanceActs: Story = {
+  args: {
+    items: [ONE_OFF_DONE],
+  },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement)
+    const chip = canvas.getByRole('button', { name: /done$/ })
+    await userEvent.click(chip)
+    const glanced = await screen.findByRole('dialog', { name: /done$/ })
+    const acts = within(glanced)
+      .getAllByRole('button')
+      .map((one) => one.getAttribute('aria-label') ?? '')
+    await expect(acts.map((one) => one.split(' ')[0])).toEqual(['Run', 'Add', 'Details', 'Remove'])
+    await expect(within(glanced).queryByRole('button', { name: /^Stop/ })).toBeNull()
+    await userEvent.click(
+      within(glanced).getByRole('button', { name: /^Add .* to the catalogue$/ }),
+    )
+    await expect(args.onAddToCatalogue).toHaveBeenCalledTimes(1)
+    await userEvent.keyboard('{Escape}')
+    await waitFor(() => {
+      expect(args.onSeen).toHaveBeenCalledTimes(1)
+    })
+    await userEvent.click(chip)
+    const again = await screen.findByRole('dialog', { name: /done$/ })
+    await userEvent.click(within(again).getByRole('button', { name: /again$/ }))
+    await expect(args.onRunAgain).toHaveBeenCalledTimes(1)
+  },
+}
+
+/** The ✕ of a glance takes the chip out of the line; the page decides what the line holds. */
+export const RemovedByHand: Story = {
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement)
+    await userEvent.click(canvas.getByRole('button', { name: 'test, running' }))
+    const glanced = await screen.findByRole('dialog', { name: 'test, running' })
+    // What runs is stopped from here, not run again.
+    await expect(within(glanced).queryByRole('button', { name: /again$/ })).toBeNull()
+    await userEvent.click(
+      within(glanced).getByRole('button', { name: 'Remove test from the line' }),
+    )
+    await expect(args.onRemove).toHaveBeenCalledWith(expect.objectContaining({ id: 'run-test' }))
+    // Something running closed is not something seen: it is not over.
+    await expect(args.onSeen).not.toHaveBeenCalled()
   },
 }

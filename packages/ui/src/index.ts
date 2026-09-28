@@ -373,11 +373,6 @@ export {
   type TouchedFile,
 } from './session/session-details.tsx'
 export {
-  CommandsPanel,
-  type CommandPanelRun,
-  type CommandsPanelProps,
-} from './session/commands-panel.tsx'
-export {
   type GoingOnAgent,
   type GoingOnItem,
   type GoingOnRun,

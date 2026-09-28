@@ -166,3 +166,91 @@ function Switching({ activeProjectId, onSelectProject, ...rest }: ChromeBarProps
     />
   )
 }
+
+/**
+ * The window made wider and narrower under a mark at rest, on one Project and then on another.
+ *
+ * The mark is a sheet the width of the strip cut down to its tab, and the strip is what grows
+ * with the window while the tab stays where it is. On every width the mark covers its tab and
+ * nothing else, and the button that adds a Project is after it, whole.
+ */
+export const WindowResized: Story = {
+  parameters: { controls: { disable: true } },
+  render: (args) => <Switching {...args} />,
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    // The bar is as wide as the window, which is the one thing a story cannot resize: it is
+    // given the widths a window would give it instead.
+    const bar = canvasElement.querySelector('header')!
+    await expectMarkOnItsTab(canvasElement)
+
+    await resizeTo(bar, '760px')
+    await resizeTo(bar, '1400px')
+    await resizeTo(bar, '680px')
+    await resizeTo(bar, '1600px')
+
+    await userEvent.click(canvas.getByRole('button', { name: /Notes/ }))
+    await resizeTo(bar, '760px')
+    await resizeTo(bar, '1400px')
+    bar.style.removeProperty('width')
+  },
+}
+
+/**
+ * The active tab growing with nothing rendered: a font arriving late, or a label set larger. The
+ * mark follows the tab, and the button that adds a Project is pushed along after it.
+ */
+export const TabResized: Story = {
+  parameters: { controls: { disable: true } },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await expectMarkOnItsTab(canvasElement)
+    const label = canvas.getByRole('button', { name: /Atlas/ })
+    label.style.setProperty('font-size', '2em')
+    await expectMarkOnItsTab(canvasElement)
+    label.style.removeProperty('font-size')
+    await expectMarkOnItsTab(canvasElement)
+  },
+}
+
+/** Gives the bar the width a window would, and looks at the mark once the bar has it. */
+async function resizeTo(bar: HTMLElement, width: string): Promise<void> {
+  bar.style.setProperty('width', width)
+  await expectMarkOnItsTab(bar)
+}
+
+/**
+ * Where the mark is drawn, on screen: what the cut leaves of the sheet it is made of, read from
+ * the clip the browser resolved, which is what is painted.
+ */
+function markEdges(canvasElement: HTMLElement) {
+  const cut = canvasElement.querySelector<HTMLElement>('[data-mark-shape]')!
+  const sheet = cut.getBoundingClientRect()
+  const inset = /inset\(\S+ (\S+)px \S+ (\S+)px/.exec(getComputedStyle(cut).clipPath)
+  expect(inset).not.toBeNull()
+  return {
+    left: sheet.left + Number.parseFloat(inset![2]!),
+    right: sheet.right - Number.parseFloat(inset![1]!),
+  }
+}
+
+/** The mark covers the active tab exactly, and the button that adds a Project is after it, whole. */
+async function expectMarkOnItsTab(canvasElement: HTMLElement): Promise<void> {
+  const canvas = within(canvasElement)
+  await waitFor(
+    () => {
+      const tab = canvas
+        .getByRole('button', { current: 'page' })
+        .closest('[data-mark]')!
+        .getBoundingClientRect()
+      const mark = markEdges(canvasElement)
+      expect(Math.round(mark.left)).toBe(Math.round(tab.left))
+      expect(Math.round(mark.right)).toBe(Math.round(tab.right))
+      const add = canvas.getByRole('button', { name: 'Add a Project' })
+      const box = add.getBoundingClientRect()
+      expect(box.left).toBeGreaterThanOrEqual(mark.right)
+      expect(box.width).toBe(add.offsetHeight)
+    },
+    { timeout: 3000 },
+  )
+}

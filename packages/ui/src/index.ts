@@ -408,6 +408,12 @@ export {
 /** The row above the box: what the turn is doing, and what it has spent. */
 export { TurnLine, type TurnLineProps } from './session/turn-line.tsx'
 export {
+  SessionNotices,
+  type NoticeGroup,
+  type NoticeItem,
+  type SessionNoticesProps,
+} from './session/session-notices.tsx'
+export {
   ResumeFallbackBanner,
   type ResumeFallbackBannerProps,
 } from './session/resume-fallback-banner.tsx'

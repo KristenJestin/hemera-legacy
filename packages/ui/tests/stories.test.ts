@@ -469,6 +469,8 @@ describe('Catalogue, coquille et surfaces, et rien d’autre', () => {
       // Issue #134: the two share the row above the box, and the meter stands at its foot.
       'TurnLine',
       'SessionNotices',
+      'SessionHistory',
+      'SessionCatalogue',
       'BlockedBanner',
       'AgentsSection',
       'PlanPanel',

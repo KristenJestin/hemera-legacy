@@ -153,7 +153,7 @@ function nextFrame(): Promise<void> {
 const meta = {
   title: 'Blocks/Spec/SpecPanel',
   component: LiveSpecPanel,
-  tags: ['autodocs', 'updated'],
+  tags: ['autodocs'],
   parameters: { layout: 'fullscreen' },
   decorators: [
     (Story) => (

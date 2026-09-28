@@ -12,7 +12,7 @@ import { StartScreen } from './start-screen.tsx'
 const meta = {
   title: 'Shell/StartScreen',
   component: StartScreen,
-  tags: ['autodocs', 'new'],
+  tags: ['autodocs'],
   parameters: { layout: 'fullscreen' },
 } satisfies Meta<typeof StartScreen>
 

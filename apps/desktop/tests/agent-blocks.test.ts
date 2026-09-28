@@ -23,6 +23,7 @@ import {
   failureNoteOf,
   foldedCallsOf,
   hemeraPermissionOf,
+  hemeraPlaceOf,
   hemeraToolCallOf,
   nativeSubjectOf,
   plainRefusal,
@@ -715,7 +716,94 @@ describe('Every tool shows its subject', () => {
         resolved: '/w/app',
         line: 'pnpm test',
       }),
-    ).toEqual({ label: 'Run command', subject: 'pnpm test', intent: 'asks to run in /w/app' })
+    ).toEqual({
+      label: 'Run command',
+      subject: 'pnpm test',
+      intent: 'asks to run a line the agent wrote',
+    })
+  })
+})
+
+describe('A one-off says truly where it runs', () => {
+  const repositories = [{ path: 'v2', icon: null }]
+
+  test('an inside one-off is said in its Workspace, never outside it', () => {
+    const asked = {
+      named: '.',
+      resolved: '/home/kris/music-manager',
+      root: '/home/kris/music-manager',
+      inside: true,
+      line: 'sleep 120',
+    }
+    // The card says in its head why it asks: the line is one the agent wrote.
+    expect(
+      hemeraPermissionOf(
+        'commands_run',
+        'commands_run asks to run sleep 120 in /home/kris/music-manager',
+        asked,
+      ).intent,
+    ).toBe('asks to run a line the agent wrote')
+    // In the Workspace, and no path repeating its root; nothing says Outside.
+    expect(hemeraPlaceOf(asked, 'main', repositories)).toEqual([{ label: 'In', value: 'main' }])
+  })
+
+  test('an inside one-off in a repository names the repository and the path under it', () => {
+    expect(
+      hemeraPlaceOf(
+        {
+          resolved: '/home/kris/music-manager/v2/scripts',
+          root: '/home/kris/music-manager',
+          inside: true,
+          line: 'sleep 120',
+        },
+        'main',
+        repositories,
+      ),
+    ).toEqual([
+      { label: 'In', value: 'v2', repository: { path: 'v2', icon: null } },
+      { label: 'Path', value: 'scripts' },
+    ])
+  })
+
+  test('an outside one-off is said outside the Workspace, because the engine says so', () => {
+    const asked = {
+      resolved: '/home/kris/elsewhere',
+      root: '/home/kris/music-manager',
+      inside: false,
+      line: 'sleep 120',
+    }
+    expect(
+      hemeraPermissionOf(
+        'commands_run',
+        'commands_run asks to run sleep 120 outside the Workspace, in /home/kris/elsewhere',
+        asked,
+      ).intent,
+    ).toBe('asks to run a line the agent wrote, outside the Workspace')
+    expect(hemeraPlaceOf(asked, 'main', repositories)).toEqual([
+      { label: 'Outside the Workspace', value: 'main' },
+      { label: 'Path', value: '/home/kris/elsewhere' },
+    ])
+  })
+
+  test('a file tool outside the root does not repeat the path its card already shows', () => {
+    expect(
+      hemeraPlaceOf(
+        { resolved: '/tmp/outside.txt', root: '/w', inside: false, line: null },
+        'main',
+        repositories,
+      ),
+    ).toEqual([{ label: 'Outside the Workspace', value: 'main' }])
+  })
+
+  test('a question written before the engine said where is read from its paths', () => {
+    // An inside one-off of an older thread: no `inside`, its place under the root.
+    expect(
+      hemeraPlaceOf({ resolved: '/w/v2', root: '/w', line: 'sleep 120' }, 'main', repositories),
+    ).toEqual([{ label: 'In', value: 'v2', repository: { path: 'v2', icon: null } }])
+    // A file tool is only ever asked outside.
+    expect(
+      hemeraPlaceOf({ resolved: '/w/notes.md', root: '/w', line: null }, 'main', repositories),
+    ).toEqual([{ label: 'Outside the Workspace', value: 'main' }])
   })
 })
 

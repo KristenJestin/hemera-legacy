@@ -255,7 +255,6 @@ const THREAD: ScrollerEntry[] = [
         readiness="ready"
         output={'vite v7.1.4  ready in 412 ms\n\n  Local:   http://localhost:5173/\n'}
         onOpenUrl={fn()}
-        onStop={fn()}
       />
     ),
   },
@@ -617,9 +616,9 @@ export const Complete: Story = {
       await canvas.findByRole('button', { name: 'Waiting for your answer: Permissions 1' }),
     ).toBeVisible()
     await expect(canvas.queryByRole('button', { name: 'Allow once' })).toBeNull()
-    // One Stop on the command run and one on the box: no strip says the box is waiting.
+    // One Stop, the box's: none beside a run of the thread (#237), no strip saying the box waits.
     const stops = canvas.getAllByRole('button', { name: 'Stop' })
-    await expect(stops).toHaveLength(2)
+    await expect(stops).toHaveLength(1)
 
     /*
      * What the turn is doing shares the meter's row, at its left end: it is not an entry of the

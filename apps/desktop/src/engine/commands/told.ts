@@ -49,7 +49,7 @@ function howItStands(run: RunView): string {
 export function runText(run: RunView, latest: boolean): string {
   const { shown, cut } = run.output === '' ? { shown: '', cut: 0 } : tailOf(run.output)
   const folder = run.folder === null ? 'the Workspace root' : run.folder
-  const read = `read the whole of what was kept with commands_output, run ${run.id}`
+  const read = `read them with commands_output, run: ${run.id}, from: 1`
   const marks = [
     ...(run.dropped > 0 ? [`[${run.dropped} bytes printed first were not kept]`] : []),
     ...(cut > 0 ? [`[${cut} earlier line${cut === 1 ? '' : 's'} not shown: ${read}]`] : []),

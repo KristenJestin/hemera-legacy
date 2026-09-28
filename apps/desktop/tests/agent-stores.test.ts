@@ -41,6 +41,7 @@ import {
   setOffered,
   specWritingOf,
   turnRowOf,
+  answersAQuestion,
 } from '#renderer/agent-store.ts'
 import {
   archiveSession,
@@ -1011,5 +1012,27 @@ describe('A section says it is being written (issue #185)', () => {
     const read = reported('e2', 'tool_call', 'mcp__hemera__spec_read', 'in_progress')
 
     expect(specWritingOf([said, read])).toBeNull()
+  })
+})
+
+describe('A one-off run without asking answers no other question', () => {
+  test('the Session still waits on a question asked before a one-off ran unasked', () => {
+    const request = {
+      ...reported('e2', 'permission_request', 'fs_write asks to act outside the Workspace'),
+      role: 'hemera' as const,
+      state: 'pending',
+      payload: JSON.stringify({ toolCallId: 'q-1', options: [] }),
+    }
+    const unasked = {
+      ...reported('e3', 'permission_decision', 'ran without asking, Auto mode', 'completed'),
+      role: 'hemera' as const,
+      payload: JSON.stringify({ toolCallId: 'u-1', optionId: 'allowed', unasked: true }),
+    }
+
+    expect(activityOf([entry('e1', 'user', 'Go'), request, unasked]).state).toBe('waiting')
+    // The Session page asks the same of each decision it walks back over.
+    expect(answersAQuestion(unasked)).toBe(false)
+    const answered = reported('e4', 'permission_decision', 'you allowed fs_write', 'completed')
+    expect(answersAQuestion(answered)).toBe(true)
   })
 })

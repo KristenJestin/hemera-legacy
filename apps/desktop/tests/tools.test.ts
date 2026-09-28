@@ -1172,7 +1172,11 @@ describe('A one-off inside the Workspace in Auto runs without a question', () =>
     const record = seen.entries.find((entry) => entry.kind === 'permission_decision')
     expect(record?.body).toBe('ran without asking, Auto mode')
     expect(record?.role).toBe('hemera')
-    expect(JSON.parse(record?.payload ?? '{}')).toMatchObject({ inside: true, mode: 'Auto' })
+    expect(JSON.parse(record?.payload ?? '{}')).toMatchObject({
+      inside: true,
+      mode: 'Auto',
+      unasked: true,
+    })
   })
 })
 

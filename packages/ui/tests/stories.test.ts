@@ -453,6 +453,7 @@ describe('Catalogue, coquille et surfaces, et rien d’autre', () => {
       // #149: the calls of a turn between two things the agent said, folded into one row.
       'ActionGroup',
       'PermissionRequest',
+      'PermissionRecord',
       'DecisionSummary',
       // The agent, its model and its effort are one control since the trial of 22 September
       // 2026: three selectors in the foot of the composer, plus the agent's own at the far end
@@ -467,6 +468,7 @@ describe('Catalogue, coquille et surfaces, et rien d’autre', () => {
       'UsageMeter',
       // Issue #134: the two share the row above the box, and the meter stands at its foot.
       'TurnLine',
+      'SessionNotices',
       'BlockedBanner',
       'AgentsSection',
       'PlanPanel',
@@ -481,6 +483,8 @@ describe('Catalogue, coquille et surfaces, et rien d’autre', () => {
       'HemeraToolCall',
       'CommandRun',
       'CommandProposal',
+      'CommandProposalRecord',
+      'NoticeRecord',
       // Issue #219: what goes on in a Session, as a line under its title — the commands Hemera
       // runs, those the agent runs in its own shell, its sub-agents — which the Commands tab of
       // the Session's details, and its panel, gave way to.
@@ -518,7 +522,9 @@ describe('Catalogue, coquille et surfaces, et rien d’autre', () => {
       'ReworkDialog',
       'MissionBrief',
       'SpecQuestion',
+      'SpecQuestionRecord',
       'CreateSpecProposal',
+      'SpecProposalRecord',
       // The build of a frozen Spec: what it is launched in, and where that launch stands
       // (D8-12, D8-13).
       'WorkspaceActions',

@@ -367,26 +367,27 @@ function Page({
               archiveDisabled={fresh}
               // What the turn has done and what the agent works from.
               onOpenDetails={() => setDetails(true)}
-            />
-            {/* What goes on in the Session, right under its title (issue #219). */}
-            <GoingOnLine
-              items={goingOn}
-              emptyLabel="Nothing running in main"
-              onStop={fn()}
-              onOpenUrl={fn()}
-              onAddToCatalogue={fn()}
-              end={
-                <RunCommand
-                  catalogue={[
-                    { name: 'dev', command: 'pnpm dev', type: 'serve', running: true },
-                    { name: 'check', command: 'pnpm check', type: 'test', running: false },
-                  ]}
-                  workspace="main"
-                  onRunCommand={fn()}
-                  onRunOnce={fn()}
-                />
-              }
-            />
+            >
+              {/* What goes on in the Session, on the head's own row (issues #219, #241). */}
+              <GoingOnLine
+                items={goingOn}
+                emptyLabel="Nothing running in main"
+                onStop={fn()}
+                onOpenUrl={fn()}
+                onAddToCatalogue={fn()}
+                end={
+                  <RunCommand
+                    catalogue={[
+                      { name: 'dev', command: 'pnpm dev', type: 'serve', running: true },
+                      { name: 'check', command: 'pnpm check', type: 'test', running: false },
+                    ]}
+                    workspace="main"
+                    onRunCommand={fn()}
+                    onRunOnce={fn()}
+                  />
+                }
+              />
+            </SessionHeader>
           </div>
           {fresh ? (
             <div className="mx-auto flex min-h-0 w-full max-w-3xl flex-1 flex-col px-6">
@@ -540,14 +541,16 @@ export const Complete: Story = {
     await expect(
       canvas.getAllByRole('button', { name: 'http://localhost:5173/' }).length,
     ).toBeGreaterThan(0)
-    // What goes on is on the line under the title: the server with its address, the test.
+    // What goes on is on the head's own row, where the title was (issue #241): the server with
+    // its address, the test, and the ⓘ and the `…` at the end of the same row.
+    await expect(canvas.queryByRole('heading', { name: 'CSV invoice export' })).toBeNull()
     const line = within(canvas.getByRole('group', { name: 'What goes on in this Session' }))
-    await expect(
-      line.getByRole('button', { name: 'dev, running on localhost:5173/' }),
-    ).toBeVisible()
+    const dev = line.getByRole('button', { name: 'dev, running on localhost:5173/' })
+    await expect(dev).toBeVisible()
     await expect(line.getByRole('button', { name: 'Run' })).toBeVisible()
     // The head's button opens the details, on what the turn has done.
     const button = canvas.getByRole('button', { name: 'Session details' })
+    await expect(onOneLine(dev, button), 'the line left the head’s row').toBe(true)
     await userEvent.click(button)
     const dialog = await waitFor(() =>
       within(document.body).getByRole('dialog', { name: 'Session details' }),
@@ -565,6 +568,8 @@ export const Complete: Story = {
     // What the agent works from, on its own tab.
     await userEvent.click(details.getByRole('tab', { name: 'Context' }))
     await expect(details.getByText('Instructions')).toBeVisible()
+    // The Workspace the composer no longer says is said here, first (issue #241).
+    await expect(details.getByRole('region', { name: 'Workspace' })).toHaveTextContent('main')
     await expect(details.getByText('Last change')).toBeVisible()
     // The plan the agent works to, and the files the turn touched.
     await userEvent.click(details.getByRole('tab', { name: 'Activity' }))
@@ -612,18 +617,23 @@ export const Complete: Story = {
     await expect(marked).toHaveLength(1)
 
     /*
-     * The foot of the page, as the trial of 22 September 2026 settled it: the agent, its model,
-     * its effort and its mode are one control at the end of the box's own row, and the frame's
-     * foot is the Workspace and the send alone — no Spec in a Session. Nothing wraps, which is
-     * the whole point, and the only way to ask it is of the boxes the browser laid out.
+     * The foot of the page (trial of 22 September 2026, issue #241): the agent, its model, its
+     * effort and its mode are one control on the box's own row, and the Stop — the send, while a
+     * turn runs — is the icon right of it on the same row. The frame has no foot: no Workspace,
+     * no Spec in a Session. Nothing wraps, and the only way to ask it is of the boxes the browser
+     * laid out.
      */
     const menu = canvas.getByRole('button', { name: /Sonnet 4\.5 · High · Accept edits/ })
     const at = canvas.getByRole('button', { name: 'Mention a file of the Project' })
     await expect(onOneLine(at, menu), 'the agent menu left the box’s own row').toBe(true)
     await expect(canvas.queryByRole('combobox', { name: 'Mode' })).toBeNull()
     await expect(canvas.queryByRole('button', { name: /New Spec/ })).toBeNull()
-    const pill = canvas.getByRole('combobox', { name: /^Workspace:/ })
-    await expect(onOneLine(pill, stops[2]!), 'the foot of the composer wrapped').toBe(true)
+    await expect(canvas.queryByRole('combobox', { name: /^Workspace:/ })).toBeNull()
+    const boxStop = stops.find((one) => one.getAttribute('aria-keyshortcuts') === 'Escape')!
+    await expect(onOneLine(menu, boxStop), 'the Stop left the box’s own row').toBe(true)
+    await expect(menu.getBoundingClientRect().right).toBeLessThanOrEqual(
+      boxStop.getBoundingClientRect().left,
+    )
 
     /*
      * The thread is the column the composer is written in, to the pixel, on both edges (trial of

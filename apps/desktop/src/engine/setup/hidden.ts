@@ -21,13 +21,16 @@ export const HIDDEN_VALUE = '(hidden)'
 /** What a list of changes that does not read is shown as. */
 const HIDDEN_CHANGES = '(the changes are hidden: they may hold the value of a variable)'
 
-/** A list of changes as sent, each read only as far as its kind and its value. */
+/** A list of changes as sent, each read only as far as its value. */
 const CHANGES_SENT = z.array(z.record(z.string(), z.json()))
 
 /** The arguments of a call as the agent reports them, `changes` read as the text it was sent as. */
 const ARGUMENTS_SENT = z.record(z.string(), z.json())
 
-/** The `changes` of a proposal, each variable's value replaced. */
+/**
+ * The `changes` of a proposal, every value replaced: a variable's, and one sent under a kind the
+ * tool does not know, since a call refused for its kind still shows what it was sent with.
+ */
 export function changesShown(changes: string): string {
   const read = z
     .string()
@@ -44,9 +47,7 @@ export function changesShown(changes: string): string {
   if (!read.success) return HIDDEN_CHANGES
   return JSON.stringify(
     read.data.map((change) =>
-      change['kind'] === 'variable' && change['value'] !== undefined
-        ? Object.assign(change, { value: HIDDEN_VALUE })
-        : change,
+      change['value'] === undefined ? change : Object.assign(change, { value: HIDDEN_VALUE }),
     ),
   )
 }

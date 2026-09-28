@@ -56,7 +56,7 @@ import { drawEntry, planOf, touchedOf, usageOf, waitingOf } from '../agent-block
 import { agentShellCallsOf, foldedCallsOf } from '../agent-tool-payloads.ts'
 import { whenOf } from '../journal-lines.ts'
 import { contextListsOf, detailsTabsOf, goingOnOf, openingTabOf } from '../session-details.ts'
-import { openSessions, type OfferedWorkspace, workspaceFixedOf } from '../sessions-store.ts'
+import { openSessions, type OfferedWorkspace } from '../sessions-store.ts'
 import { selectEntry } from '../shell-store.ts'
 import { type DefinedSpec, questionMarkOf, waitsForAnswer } from '../spec-entries.ts'
 import {
@@ -302,10 +302,11 @@ export interface SessionPageProps {
   catalogue: readonly Command[]
   /** What this Session was provided, may consult, and keeps to its agent; null until read. */
   context: Provided | null
-  /** The Workspaces the pill lists: `ready`, `main` first, and the Session's own (D8-08). */
+  /**
+   * The Workspaces of the Project, the Session's own among them (D8-08): what its Workspace is
+   * named by. The Session's composer offers no choice of it since issue #241.
+   */
   workspaces: readonly OfferedWorkspace[]
-  /** Moves the Session to another Workspace, null for `main`, before its agent has started. */
-  onChooseWorkspace: (workspaceId: string | null) => void
   /** Accepts a command the agent proposed; answers the engine's refusal, or null (D8-11). */
   onAcceptProposal: (proposalId: string) => Promise<string | null>
   /** Declines it; answers the engine's refusal, or null. */
@@ -347,7 +348,6 @@ export function SessionPage({
   onRunCommand,
   context,
   workspaces,
-  onChooseWorkspace,
   onAcceptProposal,
   onDeclineProposal,
   onAddToCatalogue,
@@ -814,8 +814,8 @@ export function SessionPage({
           />
         )}
         {/*
-          What the turn has spent stands above the box rather than in its foot: the foot is the
-          Workspace and the send alone, and a figure read at a glance is a figure that must not be
+          What the turn has spent stands above the box: the box has no foot (issue #241), its send
+          is an icon on its own row, and a figure read at a glance is a figure that must not be
           what makes a row wrap. A Session no agent has accounted for yet shows no meter at all —
           a meter drawn at zero is a figure that says nothing (D5-20).
 
@@ -861,15 +861,6 @@ export function SessionPage({
                 : `Say something to ${session.provider}…`
             }
             onSend={write}
-            workspaces={[...workspaces]}
-            workspace={workspace?.name}
-            workspaceFixed={workspaceFixedOf(session, agent.running)}
-            onWorkspaceChange={(name) => {
-              const chosen = workspaces.find((one) => one.name === name)
-              if (chosen !== undefined && chosen.id !== session.workspaceId) {
-                onChooseWorkspace(chosen.id)
-              }
-            }}
             // Nothing is handed over here: a refusal of this page is not a reason not to write,
             // and a write that is refused answers `write` itself — which is what the composer
             // shows under the box, on the sentence that was not written (D4b-02).

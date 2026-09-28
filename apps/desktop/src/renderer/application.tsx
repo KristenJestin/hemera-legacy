@@ -131,7 +131,6 @@ import {
 import {
   archivedSessions,
   archiveSession,
-  chooseWorkspace,
   closeSessions,
   endedTurnsOf,
   listenToWorkspaces as listenToOfferedWorkspaces,
@@ -1351,7 +1350,6 @@ export function Application() {
           }}
           catalogue={tools.catalogues.get(open.projectId) ?? []}
           workspaces={offeredWorkspacesOf(sessions.workspaces, open.workspaceId)}
-          onChooseWorkspace={(workspaceId) => void chooseWorkspace(open, workspaceId)}
           onAcceptProposal={async (proposalId) => await acceptProposal(open.id, proposalId)}
           onDeclineProposal={async (proposalId) => await declineProposal(open.id, proposalId)}
           onAddToCatalogue={addToCatalogue}

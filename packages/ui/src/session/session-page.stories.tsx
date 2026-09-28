@@ -169,7 +169,7 @@ const THREAD = [
 ]
 
 const meta = {
-  tags: ['autodocs'],
+  tags: ['autodocs', 'updated'],
   title: 'Surfaces/Session',
   component: Page,
   parameters: { layout: 'fullscreen' },
@@ -199,7 +199,9 @@ type Story = StoryObj<typeof meta>
 export const Playground: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    expect(canvas.getByRole('heading', { name: 'CSV invoice export' })).toBeInTheDocument()
+    // No title on the page (issue #241): the sidebar says it, and the room is the thread's.
+    expect(canvas.queryByRole('heading')).toBeNull()
+    expect(canvas.getByRole('button', { name: 'Commands for CSV invoice export' })).toBeVisible()
     expect(canvas.getByRole('log', { name: 'The thread of this Session' })).toBeInTheDocument()
     // Every line is in the thread, in the order it was written, and the days break it.
     const thread = canvas.getByRole('log', { name: 'The thread of this Session' })
@@ -212,8 +214,8 @@ export const Playground: Story = {
 /**
  * The two pages a Session is: one with a thread, and one that has nothing in it yet.
  *
- * A new Session is a real page and not an empty column: the head says what it is called and
- * what can be done to it, the middle says the thread is empty rather than showing an invented
+ * A new Session is a real page and not an empty column: the head opens the field its name is
+ * typed in and says what can be done to it, the middle says the thread is empty rather than showing an invented
  * first message, and the foot is ready.
  */
 export const Variants: Story = {
@@ -320,7 +322,7 @@ export const AThreadThatDoesNotFit: Story = {
     thread: [
       {
         day: 'last week',
-        lines: Array.from({ length: 12 }, (_, index) => ({
+        lines: Array.from({ length: 24 }, (_, index) => ({
           id: `long-${index}`,
           body: `Line ${index + 1} of a thread that is taller than the window it is read in.`,
         })),

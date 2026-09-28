@@ -5,7 +5,7 @@ import { IconButton } from '../components/button/button.tsx'
 import { Frame, FrameFooter } from '../components/frame/frame.tsx'
 import { IconAt, IconPaperclip } from '../icons.ts'
 import { CROSSFADE, crossfade, useTransition } from '../motion.ts'
-import { ComposerActions } from './composer-actions.tsx'
+import { ComposerActions, ComposerSend } from './composer-actions.tsx'
 import { ComposerAttachments } from './composer-attachments.tsx'
 import { ComposerBox, type ComposerBoxHandle } from './composer-box.tsx'
 import { MentionMenu, mentionOptionId } from './mention-menu.tsx'
@@ -81,7 +81,13 @@ export interface ComposerProps {
    * is told why and nothing moves at all.
    */
   sendDisabledReason?: string | undefined
-  /** The shape of the box: the Home's greeting, or the foot of a Session. */
+  /**
+   * The shape of the box: the Home's greeting, or the foot of a Session.
+   *
+   * A Session's composer has no foot (issue #241): the send is the arrow alone at the end of the
+   * box's own row, the Stop in its place during a turn, and the Workspace is the Session details'
+   * to say. The Workspace props and `onSpec` are the Home's, and `inline` does not draw them.
+   */
   variant?: PromptShape | undefined
   placeholder?: string | undefined
   /** Writes the text, and answers why it could not be written, or nothing when it was. */
@@ -181,6 +187,7 @@ export function Composer({
 }: ComposerProps): ReactNode {
   const fading = useTransition(crossfade)
   const box = useRef<ComposerBoxHandle>(null)
+  const inSession = variant === 'inline'
 
   // The caret, where the page asked for it: once per request, after the box is on screen.
   useEffect(() => {
@@ -408,28 +415,30 @@ export function Composer({
           />
         }
         footer={
-          <FrameFooter>
-            <ComposerActions
-              workspaces={workspaces}
-              workspace={current}
-              workspaceFixed={workspaceFixed}
-              onWorkspaceChange={(next) => {
-                setChosen(next)
-                onWorkspaceChange?.(next)
-              }}
-              ready={ready}
-              sending={sending}
-              running={running}
-              forcing={stopPressed}
-              // The same write as the send, handed to the page's other door: what is written
-              // leaves the box, or stays with the reason, exactly as it does for a send.
-              onSpec={onSpec === undefined ? undefined : () => void send(onSpec)}
-              action={action}
-              onSend={() => void send()}
-              onStop={stop}
-              sendDisabledReason={sendDisabledReason}
-            />
-          </FrameFooter>
+          inSession ? undefined : (
+            <FrameFooter>
+              <ComposerActions
+                workspaces={workspaces}
+                workspace={current}
+                workspaceFixed={workspaceFixed}
+                onWorkspaceChange={(next) => {
+                  setChosen(next)
+                  onWorkspaceChange?.(next)
+                }}
+                ready={ready}
+                sending={sending}
+                running={running}
+                forcing={stopPressed}
+                // The same write as the send, handed to the page's other door: what is written
+                // leaves the box, or stays with the reason, exactly as it does for a send.
+                onSpec={onSpec === undefined ? undefined : () => void send(onSpec)}
+                action={action}
+                onSend={() => void send()}
+                onStop={stop}
+                sendDisabledReason={sendDisabledReason}
+              />
+            </FrameFooter>
+          )
         }
       >
         <PromptInput
@@ -482,8 +491,24 @@ export function Composer({
                   and the foot below is the Workspace and the send alone. Pushed to the end
                   rather than wrapped to a line of their own — the height of the frame must not
                   change when a choice is made. */}
-              {agentMenu !== undefined && (
-                <span className="ml-auto flex min-w-0 items-center gap-1">{agentMenu}</span>
+              {(agentMenu !== undefined || inSession) && (
+                <span className="ml-auto flex min-w-0 items-center gap-1">
+                  {agentMenu}
+                  {/* A Session's send, right of the agent's menu on this same row (issue #241):
+                      the Stop takes its place and its size during a turn, so nothing moves. */}
+                  {inSession && (
+                    <ComposerSend
+                      ready={ready}
+                      sending={sending}
+                      running={running}
+                      forcing={stopPressed}
+                      action={action}
+                      onSend={() => void send()}
+                      onStop={stop}
+                      sendDisabledReason={sendDisabledReason}
+                    />
+                  )}
+                </span>
               )}
             </>
           }

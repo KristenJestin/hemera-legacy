@@ -57,7 +57,7 @@ import { drawEntry, planOf, touchedOf, usageOf, waitingOf } from '../agent-block
 import { agentShellCallsOf, foldedCallsOf } from '../agent-tool-payloads.ts'
 import { whenOf } from '../journal-lines.ts'
 import { contextListsOf, detailsTabsOf, goingOnOf, openingTabOf } from '../session-details.ts'
-import { openSessions, type OfferedWorkspace, workspaceFixedOf } from '../sessions-store.ts'
+import { openSessions, type OfferedWorkspace } from '../sessions-store.ts'
 import { selectEntry } from '../shell-store.ts'
 import { type DefinedSpec, questionMarkOf, waitsForAnswer } from '../spec-entries.ts'
 import {
@@ -305,10 +305,11 @@ export interface SessionPageProps {
   catalogue: readonly Command[]
   /** What this Session was provided, may consult, and keeps to its agent; null until read. */
   context: Provided | null
-  /** The Workspaces the pill lists: `ready`, `main` first, and the Session's own (D8-08). */
+  /**
+   * The Workspaces of the Project, the Session's own among them (D8-08): what its Workspace is
+   * named by. The Session's composer offers no choice of it since issue #241.
+   */
   workspaces: readonly OfferedWorkspace[]
-  /** Moves the Session to another Workspace, null for `main`, before its agent has started. */
-  onChooseWorkspace: (workspaceId: string | null) => void
   /** Accepts a command the agent proposed; answers the engine's refusal, or null (D8-11). */
   onAcceptProposal: (proposalId: string) => Promise<string | null>
   /** Declines it; answers the engine's refusal, or null. */
@@ -351,7 +352,6 @@ export function SessionPage({
   onRunCommand,
   context,
   workspaces,
-  onChooseWorkspace,
   onAcceptProposal,
   onDeclineProposal,
   onAddToCatalogue,
@@ -752,7 +752,13 @@ export function SessionPage({
     */
     <div className="@container flex h-full min-h-0">
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-        <div className="mx-auto flex w-full max-w-3xl flex-col gap-4 px-6 pt-6 pb-4">
+        <div className="mx-auto w-full max-w-3xl px-6 pt-6 pb-4">
+          {/*
+            One row (issue #241): what goes on in the Session — the runs Hemera holds, the commands
+            the agent ran in its own shell, and the Run a command is started from (issue #219) — and
+            the head's ⓘ and `…` at its end. No title: the sidebar says it. A Session nothing
+            answers has no agent to lend a command to, and offers no Run.
+          */}
           <SessionHeader
             title={session.title}
             onRename={onRename}
@@ -766,45 +772,41 @@ export function SessionPage({
             archiveDisabled={thread.length === 0}
             // The one way to the Session details: nothing the agent does opens them.
             onOpenDetails={() => setDetailsOpen(true)}
-          />
-          {/*
-            What goes on in the Session, right under its title (issue #219): the runs Hemera holds,
-            the commands the agent ran in its own shell, and the Run a command is started from. A
-            Session nothing answers has no agent to lend a command to, and offers no Run.
-          */}
-          <GoingOnLine
-            items={goingOnOf(
-              commandRuns,
-              agentShellCallsOf(thread),
-              root,
-              workspace?.name,
-              repositories,
-            )}
-            emptyLabel={`Nothing running in ${workspace?.name ?? 'main'}`}
-            onStop={(run) => onStopRun(run.id)}
-            onOpenUrl={onOpenUrl}
-            onAddToCatalogue={(shown) => {
-              const run = commandRuns.find((one) => one.id === shown.id)
-              if (run !== undefined) deciding(onAddToCatalogue(run))
-            }}
-            end={
-              session.provider === null ? undefined : (
-                <RunCommand
-                  catalogue={catalogue.map((command) => ({
-                    name: command.name,
-                    command: command.line,
-                    type: command.type,
-                    running: commandRuns.some(
-                      (run) => run.commandId === command.id && run.state === 'running',
-                    ),
-                  }))}
-                  workspace={workspace?.name ?? 'main'}
-                  onRunCommand={(entry) => onRunCommand(entry.name)}
-                  onRunOnce={onRunCommand}
-                />
-              )
-            }
-          />
+          >
+            <GoingOnLine
+              items={goingOnOf(
+                commandRuns,
+                agentShellCallsOf(thread),
+                root,
+                workspace?.name,
+                repositories,
+              )}
+              emptyLabel={`Nothing running in ${workspace?.name ?? 'main'}`}
+              onStop={(run) => onStopRun(run.id)}
+              onOpenUrl={onOpenUrl}
+              onAddToCatalogue={(shown) => {
+                const run = commandRuns.find((one) => one.id === shown.id)
+                if (run !== undefined) deciding(onAddToCatalogue(run))
+              }}
+              end={
+                session.provider === null ? undefined : (
+                  <RunCommand
+                    catalogue={catalogue.map((command) => ({
+                      name: command.name,
+                      command: command.line,
+                      type: command.type,
+                      running: commandRuns.some(
+                        (run) => run.commandId === command.id && run.state === 'running',
+                      ),
+                    }))}
+                    workspace={workspace?.name ?? 'main'}
+                    onRunCommand={(entry) => onRunCommand(entry.name)}
+                    onRunOnce={onRunCommand}
+                  />
+                )
+              }
+            />
+          </SessionHeader>
         </div>
         {/*
           The thread is given the whole width under the head, and lays its own column on the one
@@ -824,8 +826,8 @@ export function SessionPage({
           />
         )}
         {/*
-          What the turn has spent stands above the box rather than in its foot: the foot is the
-          Workspace and the send alone, and a figure read at a glance is a figure that must not be
+          What the turn has spent stands above the box: the box has no foot (issue #241), its send
+          is an icon on its own row, and a figure read at a glance is a figure that must not be
           what makes a row wrap. A Session no agent has accounted for yet shows no meter at all —
           a meter drawn at zero is a figure that says nothing (D5-20).
 
@@ -871,15 +873,6 @@ export function SessionPage({
                 : `Say something to ${session.provider}…`
             }
             onSend={write}
-            workspaces={[...workspaces]}
-            workspace={workspace?.name}
-            workspaceFixed={workspaceFixedOf(session, agent.running)}
-            onWorkspaceChange={(name) => {
-              const chosen = workspaces.find((one) => one.name === name)
-              if (chosen !== undefined && chosen.id !== session.workspaceId) {
-                onChooseWorkspace(chosen.id)
-              }
-            }}
             // Nothing is handed over here: a refusal of this page is not a reason not to write,
             // and a write that is refused answers `write` itself — which is what the composer
             // shows under the box, on the sentence that was not written (D4b-02).

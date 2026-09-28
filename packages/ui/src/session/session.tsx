@@ -34,32 +34,20 @@ import { LABEL_DELAY, LABEL_TRAVEL, instant, morph, useTransition } from '../mot
  * them, never inside them.
  */
 
-/** What the head of a Session says, and what it offers to do with it. */
+/** What the head of a Session holds, and what it offers to do with it: one row. */
 const HEAD = 'flex items-center gap-3'
 
 /**
- * The title, taking the room the menu leaves. The Project it lives in is not said beside it: the
- * tab above already says it (issue #159).
+ * What goes on in the Session, taking the room the commands leave (issue #241). The title is not
+ * drawn: the sidebar already says it, and the height is the thread's.
  */
-const COLUMN = 'flex min-w-0 flex-1 items-baseline gap-3'
-
-/** The title, which truncates rather than pushing the menu out of the line. */
-const TITLE = 'min-w-0 truncate text-2xl font-medium'
-
-/**
- * The title as a control, which is what opens Rename.
- *
- * It is drawn as the title it is and not as a button beside it: the words are already on the
- * line, and the hand that wants the name changed is on them. The pencil inside the menu says the
- * same thing for whoever reads the menu before touching anything.
- */
-const TITLE_ACTION = 'focus-ring -mx-1 min-w-0 truncate rounded-md px-1 text-left hover:bg-accent'
+const COLUMN = 'flex min-w-0 flex-1 items-center'
 
 /** The commands of the head, at the end of the line rather than under it. */
 const ACTIONS = 'ml-auto flex shrink-0 items-center gap-2'
 
-/** The field and the words that say how it ends, on the line the title was on. */
-const EDIT = 'flex min-w-0 items-center gap-3'
+/** The field and the words that say how it ends, where the line was. */
+const EDIT = 'flex min-w-0 flex-1 items-center gap-3'
 
 /**
  * The title while it is being typed: the same line, its own underline saying so.
@@ -71,20 +59,24 @@ const EDIT = 'flex min-w-0 items-center gap-3'
 const FIELD = 'focus-ring flex min-w-0 flex-1'
 
 const INPUT =
-  'w-full min-w-0 border-b-2 border-primary bg-transparent text-2xl font-medium text-foreground outline-none'
+  'w-full min-w-0 border-b-2 border-primary bg-transparent text-sm font-medium text-foreground outline-none'
 
 /** How the field ends, said where the keystrokes are read rather than in a tooltip. */
 const HINT = 'text-xs text-muted-foreground'
 
 export interface SessionHeaderProps {
   /**
-   * What the Session is called.
+   * What the Session is called: what the `…` is named after, and what the field opens on.
    *
-   * The page names a new one — the prototype's `Untitled` — and this file never invents one:
-   * a title derived from the first message is a proposal the domain makes, not a word the
-   * design system decides on.
+   * It is not drawn (issue #241): the sidebar says it already. The page names a new one — the
+   * prototype's `Untitled` — and this file never invents one.
    */
   title: string
+  /**
+   * What goes on in the Session, on the head's own row (issue #241): the page's `GoingOnLine`.
+   * The field takes its place while the name is typed.
+   */
+  children?: ReactNode
   /**
    * What the title becomes, once it is saved.
    *
@@ -94,10 +86,10 @@ export interface SessionHeaderProps {
    */
   onRename: (title: string) => void
   /**
-   * Whether the title is being typed right now.
+   * Whether the name is being typed right now.
    *
-   * The page opens it: a Session that has just been created opens on it, because the title is
-   * the one thing a new Session has to say about itself. The Rename control opens it too.
+   * The page opens it: a Session that has just been created opens on it, because the name is
+   * the one thing a new Session has to say about itself. The Rename command opens it too.
    */
   editing?: boolean | undefined
   /** Opens the field, which is what the Rename control does. */
@@ -124,12 +116,11 @@ export interface SessionHeaderProps {
 }
 
 /**
- * The head of a Session: what it is called, where it lives, and what can be done to it.
+ * The head of a Session: what goes on in it, and what can be done to it.
  *
- * One line (review of #40, defect 4): the title and the commands at the end of the same line. The title is the page's first line and the only editable one, so it
- * is edited where it stands — a dialog over the page to change a line of it would hide the thread
- * being named — and the title is itself the control that opens the field, because that is where
- * the hand already is.
+ * One row (issue #241): what goes on — the page's line of chips and its Run — and the ⓘ and the
+ * `…` at the end of the same row. The title is not drawn, since the sidebar says it; Rename opens
+ * a field in the line's place, on the same row, and the line comes back once it is done.
  *
  * Rename and Archive sit behind one `…` menu instead of standing open at the end of the line: two
  * words at the top of every thread are two words to read on the way to the content, and a command
@@ -141,6 +132,7 @@ export interface SessionHeaderProps {
  */
 export function SessionHeader({
   title,
+  children,
   onRename,
   editing = false,
   onStartEditing,
@@ -149,14 +141,13 @@ export function SessionHeader({
   archiveDisabled = false,
   onOpenDetails,
 }: SessionHeaderProps): ReactNode {
-  const titleControl = useRef<HTMLButtonElement>(null)
+  const commandsAt = useRef<HTMLSpanElement>(null)
   const wasEditing = useRef(false)
-  // Where the keyboard goes when the field closes. It goes back to the control that opened it
+  // Where the keyboard goes when the field closes. It goes back to the `…` whose Rename opened it
   // and not to the top of the page: a field that takes the caret and then drops it on `<body>`
-  // is a page the keyboard has to walk again from its first control. On a new Session the page
-  // opened the field itself, and the answer is the same — the head is where the title is.
+  // is a page the keyboard has to walk again from its first control.
   useEffect(() => {
-    if (wasEditing.current && !editing) titleControl.current?.focus()
+    if (wasEditing.current && !editing) commandsAt.current?.querySelector('button')?.focus()
     wasEditing.current = editing
   }, [editing])
   // What the menu holds, in the order it is read. While the title is being typed there is no
@@ -180,20 +171,7 @@ export function SessionHeader({
         {editing ? (
           <TitleField initial={title} onCommit={onRename} onCancel={onCancelEditing} />
         ) : (
-          <h1 className={TITLE}>
-            {onStartEditing === undefined ? (
-              title
-            ) : (
-              <button
-                type="button"
-                ref={titleControl}
-                className={TITLE_ACTION}
-                onClick={onStartEditing}
-              >
-                {title}
-              </button>
-            )}
-          </h1>
+          children
         )}
       </div>
       <div className={ACTIONS}>
@@ -209,7 +187,13 @@ export function SessionHeader({
           </Tooltip>
         )}
         {commands.length > 0 && (
-          <Menu label={`Commands for ${title}`} icon={<IconDots size="sm" />} groups={[commands]} />
+          <span ref={commandsAt} className="inline-flex">
+            <Menu
+              label={`Commands for ${title}`}
+              icon={<IconDots size="sm" />}
+              groups={[commands]}
+            />
+          </span>
         )}
       </div>
     </div>

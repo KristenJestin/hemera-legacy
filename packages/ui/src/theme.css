@@ -446,6 +446,11 @@
      for the reason a wide dialog is one: it is the thread above that has to keep its room. */
   --spacing-pinned: 40vh;
 
+  /* How wide the Session's notices open above the composer (issue #237): wide enough for a
+     one-off's whole line to wrap over a few rows rather than one row a word, narrower than the
+     thread's column so the panel still reads as the pill's and not as a page of its own. */
+  --spacing-notices: 36rem;
+
   /* The Spec open: a share of the Session's row, the container it is asked of. A length of the
      row rather than a fraction of the panel's own box, because the panel's box is what slides in
      while it opens: what the panel holds is laid at this width from the first frame, so nothing

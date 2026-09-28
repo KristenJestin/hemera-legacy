@@ -486,6 +486,9 @@ describe('Catalogue, coquille et surfaces, et rien d’autre', () => {
       // runs, those the agent runs in its own shell, its sub-agents — which the Commands tab of
       // the Session's details gives way to.
       'GoingOnLine',
+      // The Run at the end of that line: the catalogue matched as it is typed, and any other line
+      // run once.
+      'RunCommand',
       'ContextView',
       'BareModeState',
       'CommandList',

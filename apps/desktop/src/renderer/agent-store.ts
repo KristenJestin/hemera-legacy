@@ -12,6 +12,7 @@ import type {
 } from '@hemera/ipc'
 import { TOOL_LABELS, hemeraToolNamed } from '@hemera/core'
 import type { ActivityState, AgentListing, SpecTarget } from '@hemera/ui'
+import { z } from 'zod'
 
 import { effortStage, effortToLand, modelStage } from './agent-options.ts'
 import { commandRunOf, specWriteOf } from './agent-tool-payloads.ts'
@@ -370,12 +371,27 @@ function waitsOnHemera(entries: readonly SessionEntry[]): boolean {
   })
 }
 
+/**
+ * Whether a decision closes a question: every one does but the line a one-off leaves when the
+ * Session's mode let it run without asking (#242), which answers nothing another call asked.
+ */
+export function answersAQuestion(entry: SessionEntry): boolean {
+  if (entry.kind !== 'permission_decision') return false
+  try {
+    return !UNASKED_DECISION.safeParse(JSON.parse(entry.payload)).success
+  } catch {
+    return true
+  }
+}
+
+const UNASKED_DECISION = z.object({ unasked: z.literal(true) })
+
 /** Whether the agent is waiting on an answer: a request with no decision written after it. */
 function waiting(entries: readonly SessionEntry[]): boolean {
   for (let at = entries.length - 1; at >= 0; at -= 1) {
     const entry = entries[at]
     if (entry === undefined) continue
-    if (entry.kind === 'permission_decision') return false
+    if (answersAQuestion(entry)) return false
     if (entry.kind === 'permission_request') return true
   }
   return false

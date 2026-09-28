@@ -635,6 +635,9 @@ export const toolCatalogueLayer: Layer.Layer<
           inside: true,
           line,
           mode,
+          // No question was asked, so this answers none: a window waiting on another call's
+          // question keeps waiting past it.
+          unasked: true,
           answer: 'allowed',
         }),
         correlationId: `decision:${id}`,

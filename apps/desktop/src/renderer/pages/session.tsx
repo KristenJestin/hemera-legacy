@@ -746,7 +746,13 @@ export function SessionPage({
     */
     <div className="@container flex h-full min-h-0">
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-        <div className="mx-auto flex w-full max-w-3xl flex-col gap-4 px-6 pt-6 pb-4">
+        <div className="mx-auto w-full max-w-3xl px-6 pt-6 pb-4">
+          {/*
+            One row (issue #241): what goes on in the Session — the runs Hemera holds, the commands
+            the agent ran in its own shell, and the Run a command is started from (issue #219) — and
+            the head's ⓘ and `…` at its end. No title: the sidebar says it. A Session nothing
+            answers has no agent to lend a command to, and offers no Run.
+          */}
           <SessionHeader
             title={session.title}
             onRename={onRename}
@@ -760,39 +766,35 @@ export function SessionPage({
             archiveDisabled={thread.length === 0}
             // The one way to the Session details: nothing the agent does opens them.
             onOpenDetails={() => setDetailsOpen(true)}
-          />
-          {/*
-            What goes on in the Session, right under its title (issue #219): the runs Hemera holds,
-            the commands the agent ran in its own shell, and the Run a command is started from. A
-            Session nothing answers has no agent to lend a command to, and offers no Run.
-          */}
-          <GoingOnLine
-            items={goingOnOf(commandRuns, agentShellCallsOf(thread), root, workspace?.name)}
-            emptyLabel={`Nothing running in ${workspace?.name ?? 'main'}`}
-            onStop={(run) => onStopRun(run.id)}
-            onOpenUrl={onOpenUrl}
-            onAddToCatalogue={(shown) => {
-              const run = commandRuns.find((one) => one.id === shown.id)
-              if (run !== undefined) deciding(onAddToCatalogue(run))
-            }}
-            end={
-              session.provider === null ? undefined : (
-                <RunCommand
-                  catalogue={catalogue.map((command) => ({
-                    name: command.name,
-                    command: command.line,
-                    type: command.type,
-                    running: commandRuns.some(
-                      (run) => run.commandId === command.id && run.state === 'running',
-                    ),
-                  }))}
-                  workspace={workspace?.name ?? 'main'}
-                  onRunCommand={(entry) => onRunCommand(entry.name)}
-                  onRunOnce={onRunCommand}
-                />
-              )
-            }
-          />
+          >
+            <GoingOnLine
+              items={goingOnOf(commandRuns, agentShellCallsOf(thread), root, workspace?.name)}
+              emptyLabel={`Nothing running in ${workspace?.name ?? 'main'}`}
+              onStop={(run) => onStopRun(run.id)}
+              onOpenUrl={onOpenUrl}
+              onAddToCatalogue={(shown) => {
+                const run = commandRuns.find((one) => one.id === shown.id)
+                if (run !== undefined) deciding(onAddToCatalogue(run))
+              }}
+              end={
+                session.provider === null ? undefined : (
+                  <RunCommand
+                    catalogue={catalogue.map((command) => ({
+                      name: command.name,
+                      command: command.line,
+                      type: command.type,
+                      running: commandRuns.some(
+                        (run) => run.commandId === command.id && run.state === 'running',
+                      ),
+                    }))}
+                    workspace={workspace?.name ?? 'main'}
+                    onRunCommand={(entry) => onRunCommand(entry.name)}
+                    onRunOnce={onRunCommand}
+                  />
+                )
+              }
+            />
+          </SessionHeader>
         </div>
         {/*
           The thread is given the whole width under the head, and lays its own column on the one

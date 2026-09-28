@@ -175,6 +175,19 @@ export async function readContext(sessionId: string): Promise<void> {
   }
 }
 
+/**
+ * Runs again a run of the Session, from its chip or its row in the history (issue #237): a
+ * command of the catalogue as the command, a one-off as the same line in the same folder.
+ */
+export async function runAgain(sessionId: string, runId: string): Promise<void> {
+  try {
+    const run = await window.hemera.invoke('commands.runAgain', { sessionId, runId })
+    holding(sessionId, withRun(runsOf(sessionId), run))
+  } catch (cause) {
+    replace({ ...state, refusal: message(cause) })
+  }
+}
+
 /** Stops a run and everything it started: the reader's one act on a run (D6-12). */
 export async function stopRun(sessionId: string, runId: string): Promise<void> {
   try {

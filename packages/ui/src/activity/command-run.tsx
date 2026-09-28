@@ -122,6 +122,8 @@ export interface CommandRunProps {
   defaultOpen?: boolean | undefined
   /** Opens the address the command published, which this block cannot do. */
   onOpenUrl?: ((url: string) => void) | undefined
+  /** Said when the reader opens or folds it: opened on a run that is over, it has been seen. */
+  onOpenChange?: ((open: boolean) => void) | undefined
   /** Where the block sits; never how it looks. */
   className?: string | undefined
 }
@@ -144,6 +146,7 @@ export function CommandRun({
   workspace,
   defaultOpen = false,
   onOpenUrl,
+  onOpenChange,
   className,
 }: CommandRunProps): ReactNode {
   const shown = STATE[state]
@@ -161,6 +164,7 @@ export function CommandRun({
     <Disclosure
       className={className}
       defaultOpen={defaultOpen}
+      onOpenChange={onOpenChange}
       summary={
         <span className={SUMMARY}>
           <span className={TYPE_ICON}>

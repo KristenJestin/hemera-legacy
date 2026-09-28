@@ -83,9 +83,16 @@ export function rawInputShown(tool: string, raw: string): string {
     .pipe(ARGUMENTS_SENT)
     .safeParse(raw)
   if (!read.success) return JSON.stringify(HIDDEN_CHANGES)
-  const changes = z.string().safeParse(read.data['changes'])
-  return JSON.stringify({
-    ...read.data,
-    changes: changes.success ? changesShown(changes.data) : HIDDEN_CHANGES,
-  })
+  return JSON.stringify(reportShown(read.data))
+}
+
+/**
+ * The arguments of a report, `changes` hidden where the agent put them: at the top as most agents
+ * report a call, or under `arguments` as codex-acp reports a dynamic tool's call.
+ */
+function reportShown(report: z.infer<typeof ARGUMENTS_SENT>): z.infer<typeof ARGUMENTS_SENT> {
+  const nested = ARGUMENTS_SENT.safeParse(report['arguments'])
+  if (nested.success) return { ...report, arguments: reportShown(nested.data) }
+  const changes = z.string().safeParse(report['changes'])
+  return { ...report, changes: changes.success ? changesShown(changes.data) : HIDDEN_CHANGES }
 }

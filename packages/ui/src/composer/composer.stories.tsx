@@ -926,32 +926,28 @@ export const TakesTheFocus: Story = {
 /** Scenario « Mouvement réduit » of `specs/shell-navigation/spec.md`. */
 export const ReducedMotion: Story = {
   play: async ({ canvasElement }) => {
-    const restore = await emulateReducedMotion()
-    try {
-      const canvas = within(canvasElement)
+    await emulateReducedMotion()
+    const canvas = within(canvasElement)
 
-      await userEvent.click(canvas.getByRole('button', { name: 'Attach a file' }))
-      const menu = await within(document.body).findByRole('listbox', {
-        name: 'Files of the Project',
-      })
-      await userEvent.click(within(menu).getAllByRole('option')[0]!)
+    await userEvent.click(canvas.getByRole('button', { name: 'Attach a file' }))
+    const menu = await within(document.body).findByRole('listbox', {
+      name: 'Files of the Project',
+    })
+    await userEvent.click(within(menu).getAllByRole('option')[0]!)
 
-      // In their end state, with nothing in between: the chip is opaque and in place the
-      // moment it exists.
-      await waitFor(() => {
-        const chip = canvas.getByTitle('AGENTS.md')
-        expect(chip).toHaveStyle({ opacity: '1', transform: 'none' })
-        expect(chip.parentElement).toHaveStyle({ opacity: '1', transform: 'none' })
-      })
-      // The send leaves the quiet it was in the same way, which is to say at once.
-      await waitFor(() => {
-        expect(canvas.getByRole('button', { name: /Start chat/ })).toHaveStyle({ opacity: '1' })
-      })
+    // In their end state, with nothing in between: the chip is opaque and in place the
+    // moment it exists.
+    await waitFor(() => {
+      const chip = canvas.getByTitle('AGENTS.md')
+      expect(chip).toHaveStyle({ opacity: '1', transform: 'none' })
+      expect(chip.parentElement).toHaveStyle({ opacity: '1', transform: 'none' })
+    })
+    // The send leaves the quiet it was in the same way, which is to say at once.
+    await waitFor(() => {
+      expect(canvas.getByRole('button', { name: /Start chat/ })).toHaveStyle({ opacity: '1' })
+    })
 
-      await menuGone()
-    } finally {
-      await restore?.()
-    }
+    await menuGone()
   },
 }
 

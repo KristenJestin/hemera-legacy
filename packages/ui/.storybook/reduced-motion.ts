@@ -6,26 +6,33 @@
  * The stylesheet answers the same query on its own (`motion-safe`, the popup utilities), so
  * the one way to test both at once is to ask the browser to say what the system prefers.
  *
- * Answers `null` where nobody is driving the browser, which is the catalogue opened by hand:
+ * Answers `false` where nobody is driving the browser, which is the catalogue opened by hand:
  * the reader sees what their own system asked for, and the story says so.
+ *
+ * The preference is the page's, and the page outlives the story: the runner opens the next story
+ * file in the same page. So it is handed back by the test itself, once the test is over however
+ * it ended — a story that failed, or ran out of time before a `finally` of its own, used to leave
+ * every story after it on that page asking for less movement, and failing for a reason not its
+ * own — and handing it back is not spent out of the story's own time.
  */
-export async function emulateReducedMotion(): Promise<(() => Promise<void>) | null> {
+export async function emulateReducedMotion(): Promise<boolean> {
   const runner = await import('vitest/browser').catch(() => null)
-  if (runner === null) return null
-  const session = runner.cdp()
-  const set = async (preference: string): Promise<void> => {
-    await session.send('Emulation.setEmulatedMedia', {
-      features: [{ name: 'prefers-reduced-motion', value: preference }],
-    })
-  }
-  await set('reduce')
-  // The emulation travels over the protocol and the page answers when it arrives; a story that
-  // acted before then would be testing the preference it was trying to change.
-  await until(() => globalThis.matchMedia('(prefers-reduced-motion: reduce)').matches)
-  return async () => {
-    await set('no-preference')
+  if (runner === null) return false
+  const { onTestFinished } = await import('vitest')
+  const asked = runner.commands.prefersReducedMotion('reduce')
+  // As soon as the preference is asked for, so that a test that runs out of time while it is on
+  // its way still ends by taking it back — after it has landed, whatever became of it, so the two
+  // cannot arrive the wrong way round.
+  onTestFinished(async () => {
+    await asked.catch(() => undefined)
+    await runner.commands.prefersReducedMotion('no-preference')
     await until(() => !globalThis.matchMedia('(prefers-reduced-motion: reduce)').matches)
-  }
+  })
+  await asked
+  // The page answers once the preference has arrived; a story that acted before then would be
+  // testing the preference it was trying to change.
+  await until(() => globalThis.matchMedia('(prefers-reduced-motion: reduce)').matches)
+  return true
 }
 
 /** Waits for the page to agree, a frame at a time. */
@@ -83,3 +90,10 @@ export function withinFrames(reached: () => boolean, frames: number): Promise<bo
  * of the journey the slowest fold of the preset takes, so a fold still travelling fails it.
  */
 export const AT_ONCE = 5
+
+declare module 'vitest/browser' {
+  interface BrowserCommands {
+    /** Declared in `vitest.shared.ts`: what the page is told the system prefers. */
+    prefersReducedMotion: (preference: 'reduce' | 'no-preference') => Promise<void>
+  }
+}

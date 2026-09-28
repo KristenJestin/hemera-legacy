@@ -558,11 +558,11 @@ export const Complete: Story = {
     await expect(canvas.getByRole('button', { name: /^Hemera Read file/ })).toBeVisible()
     // Folded, it reads its label and its file; the code name waits in the body (recette 5).
     await expect(canvas.queryByText('fs_read')).toBeNull()
-    // The command the agent started is a block of the thread, with the address one press away.
-    await expect(canvas.getByText('pnpm dev')).toBeVisible()
-    await expect(
-      canvas.getAllByRole('button', { name: 'http://localhost:5173/' }).length,
-    ).toBeGreaterThan(0)
+    // The command the agent started is one closed line of the thread (issue #237), its address
+    // beside its name; what it offers is its chip's, in the head.
+    const run = canvas.getByRole('button', { name: /^Running dev/ })
+    await expect(run).toHaveAttribute('aria-expanded', 'false')
+    await expect(within(run).getByText('localhost:5173/')).toBeVisible()
     // What goes on is on the head's own row, where the title was (issue #241): the server with
     // its address, the test, and the ⓘ and the `…` at the end of the same row.
     await expect(canvas.queryByRole('heading', { name: 'CSV invoice export' })).toBeNull()

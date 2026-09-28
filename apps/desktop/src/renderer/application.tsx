@@ -96,6 +96,7 @@ import {
   saveCommand,
   readRuns,
   runCommand,
+  runAgain,
   stopRun,
   subscribeToTools,
   toolsSnapshot,
@@ -1338,6 +1339,7 @@ export function Application() {
             window.open(url, '_blank', 'noopener')
           }}
           onStopRun={(runId) => void stopRun(open.id, runId)}
+          onRunAgain={(runId) => void runAgain(open.id, runId)}
           onHandOver={() => void handOver(open.id)}
           root={root}
           repositories={repositoriesOf(current)}

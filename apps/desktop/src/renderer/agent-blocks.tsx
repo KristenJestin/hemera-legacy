@@ -339,6 +339,8 @@ export interface AgentContext {
   onOpenUrl: (url: string) => void
   /** Hands the agent again what waits for it, after a delivery it did not take (issue #211). */
   onHandOver: () => void
+  /** The reader opened a run of the thread that is over: it has been seen, and may leave the line. */
+  onSeenRun: (runId: string) => void
   /**
    * The agent's report of a call, by the identifier the agent gave it: what a question about
    * that call is headed by — the label and the subject of its line (recette 3 of 23 September
@@ -598,6 +600,9 @@ export function drawEntry(entry: SessionEntry, context: AgentContext): ReactNode
         {...shown}
         onOpenUrl={context.onOpenUrl}
         workspace={heard === undefined ? undefined : elsewhereOf(heard, context.workspace)}
+        onOpenChange={(open) => {
+          if (open && runId !== null && shown.state !== 'running') context.onSeenRun(runId)
+        }}
       />
     )
   }

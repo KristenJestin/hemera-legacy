@@ -666,6 +666,8 @@ function waitingWords(kind: string | undefined): string {
       return 'The new instructions of the Workspace will be handed over when the agent is ready.'
     case 'notice':
       return 'What Hemera had to tell the agent will be handed over when it is ready.'
+    case 'run':
+      return 'The run will be handed over with your next message.'
     default:
       return 'What Hemera had for the agent will be handed over when it is ready.'
   }

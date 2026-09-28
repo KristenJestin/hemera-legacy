@@ -285,6 +285,7 @@ describe("Hemera's internal notes are said in words (#211)", () => {
         'The new instructions of the Workspace will be handed over when the agent is ready.',
       ],
       ['notice', 'What Hemera had to tell the agent will be handed over when it is ready.'],
+      ['run', 'The run will be handed over with your next message.'],
     ]
     for (const [kind, words] of said) {
       const drawn = contextDeliveryOf(notHanded(kind ?? '', 'Not handed over, waiting: x.'))

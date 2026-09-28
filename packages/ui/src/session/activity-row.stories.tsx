@@ -262,14 +262,9 @@ export const ReducedMotion: Story = {
   parameters: { controls: { disable: true } },
   args: { state: 'running', detail: 'cat recap.md' },
   play: async ({ canvasElement }) => {
-    const restore = await emulateReducedMotion()
-    if (restore === null) return
-    try {
-      const canvas = within(canvasElement)
-      const ring = canvas.getByRole('status').children[0]!
-      await expect(getComputedStyle(ring).animationName).toBe('none')
-    } finally {
-      await restore()
-    }
+    if (!(await emulateReducedMotion())) return
+    const canvas = within(canvasElement)
+    const ring = canvas.getByRole('status').children[0]!
+    await expect(getComputedStyle(ring).animationName).toBe('none')
   },
 }

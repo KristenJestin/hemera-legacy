@@ -7,7 +7,8 @@ import { IconButton } from '../components/button/button.tsx'
 import { Tick } from '../components/checkbox/checkbox.tsx'
 import { Frame, FrameFooter, FrameHeader } from '../components/frame/frame.tsx'
 import { Tooltip } from '../components/tooltip/tooltip.tsx'
-import { IconArrowUp, IconLock, IconMessageQuestion, IconSparkles } from '../icons.ts'
+import { NoticeRecord } from '../activity/notice-record.tsx'
+import { IconArrowUp, IconCheck, IconLock, IconMessageQuestion, IconSparkles } from '../icons.ts'
 import { AgentText } from '../message/agent-text.tsx'
 import { CROSSFADE, collapse, crossfade, expand, fold, useTransition } from '../motion.ts'
 import type { SpecAnswer, SpecQuestionView } from './model.ts'
@@ -383,5 +384,81 @@ export function SpecQuestion({
         </ul>
       </Frame>
     </div>
+  )
+}
+
+/** What an answer says after its question: `A, The issue date`, or `C, Other: …`. */
+function saidOf(question: SpecQuestionView, answer: SpecAnswer): string {
+  const index = question.options.findIndex((option) => option.id === answer.optionId)
+  const option = question.options[index]
+  if (option !== undefined) return `${letterOf(index)}, ${option.label}`
+  return `${letterOf(question.options.length)}, Other: ${answer.text ?? ''}`
+}
+
+const KEPT = 'flex flex-col gap-1 text-sm'
+
+const KEPT_CHOICE = 'flex items-center gap-2 text-muted-foreground'
+
+const KEPT_CHOSEN = 'flex items-center gap-2 text-foreground'
+
+const KEPT_CHECK = 'flex size-icon-sm shrink-0 text-primary'
+
+export interface SpecQuestionRecordProps {
+  question: SpecQuestionView
+  /** The turn was stopped before it was answered. */
+  cancelled?: boolean | undefined
+}
+
+/**
+ * A question of the Spec as the thread keeps it (issue #237): one closed line — the question's
+ * mark, a dot, the question and, once answered, what was chosen — and, opened, every choice it
+ * offered, the one taken checked. It is answered among the Session's notices, never here. It is
+ * named after its answer, as the card was (issue #199).
+ */
+export function SpecQuestionRecord({
+  question,
+  cancelled = false,
+}: SpecQuestionRecordProps): ReactNode {
+  const { answer } = question
+  const plain = plainQuestion(question.body)
+  const standing =
+    answer !== null
+      ? { answer: 'accepted' as const, word: 'answered' }
+      : cancelled
+        ? { answer: 'left' as const, word: 'not answered' }
+        : { answer: 'pending' as const, word: 'waiting' }
+  return (
+    <NoticeRecord
+      icon={<IconMessageQuestion size="sm" aria-hidden="true" />}
+      answer={standing.answer}
+      answerLabel={standing.word}
+      subject={plain}
+      said={answer === null ? undefined : saidOf(question, answer)}
+      name={
+        answer === null ? `Question: ${plain}, ${standing.word}` : answeredLabel(question, answer)
+      }
+    >
+      <ul aria-label="Answers" className={KEPT}>
+        {question.options.map((option, index) => {
+          const chosen = answer?.optionId === option.id
+          return (
+            <li key={option.id} className={chosen ? KEPT_CHOSEN : KEPT_CHOICE}>
+              <span className={KEPT_CHECK}>
+                {chosen && <IconCheck size="sm" aria-label="chosen" />}
+              </span>
+              {`${letterOf(index)}, ${option.label}`}
+            </li>
+          )
+        })}
+        {answer !== null && answer.optionId === undefined && (
+          <li className={KEPT_CHOSEN}>
+            <span className={KEPT_CHECK}>
+              <IconCheck size="sm" aria-label="chosen" />
+            </span>
+            {saidOf(question, answer)}
+          </li>
+        )}
+      </ul>
+    </NoticeRecord>
   )
 }

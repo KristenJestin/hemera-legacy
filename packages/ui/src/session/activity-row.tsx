@@ -28,7 +28,7 @@ import { StatusDot, type StatusTone } from '../components/status-dot/status-dot.
  * wondering whether it had ended or died; the quiet line answers that, and goes when the next
  * message is sent. The page is what knows which of the two to draw.
  *
- * Collapsed it is one line: "Thinking…", "Running cat recap.md", "Waiting for your permission",
+ * Collapsed it is one line: "Thinking…", "Running cat recap.md", "Waiting for your answer",
  * "Writing…". The chevron opens the thought that is arriving *now*, and only that one: the
  * thoughts already in the thread are blocks of their own and stay where they are, because a row
  * that swallowed them would be a second copy of the turn.
@@ -87,7 +87,7 @@ export type ActivityState =
 const SAID: Record<ActivityState, string> = {
   thinking: 'Thinking…',
   running: 'Running',
-  waiting: 'Waiting for your permission',
+  waiting: 'Waiting for your answer',
   streaming: 'Writing…',
   done: 'Done',
   stopped: 'Stopped',

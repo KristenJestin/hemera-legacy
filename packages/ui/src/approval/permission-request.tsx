@@ -2,8 +2,10 @@ import { cn } from 'cn'
 import { type KeyboardEvent, type ReactNode, useRef, useState } from 'react'
 
 import { Button } from '../components/button/button.tsx'
+import { type NoticeAnswer, NoticeRecord } from '../activity/notice-record.tsx'
 import { IconShield } from '../icons.ts'
 import { RepositoryGlyph, type RunRepository } from '../session/run-place.tsx'
+import { DecisionSummary } from './decision-summary.tsx'
 
 /**
  * The gate: the turn is stopped, and it does not go on until someone answers (design D17-09).
@@ -220,23 +222,7 @@ export function PermissionRequest({
         )}
       </div>
       {label === undefined && intent !== undefined && <p className={INTENT}>{intent}</p>}
-      {parameters === undefined || parameters.length === 0 ? null : (
-        <dl className={PARAMETERS}>
-          {parameters.map((parameter) => (
-            <div key={parameter.label} className={PARAMETER}>
-              <dt className={LABEL}>{parameter.label}</dt>
-              {parameter.repository === undefined ? (
-                <dd className={VALUE}>{parameter.value}</dd>
-              ) : (
-                <dd className={REPOSITORY_VALUE}>
-                  <RepositoryGlyph icon={parameter.repository.icon} />
-                  <span className="min-w-0 truncate">{parameter.value}</span>
-                </dd>
-              )}
-            </div>
-          ))}
-        </dl>
-      )}
+      <PermissionParameters parameters={parameters} />
       {command === undefined ? null : <pre className={COMMAND}>{command}</pre>}
       {diff}
       <div className={OPTIONS}>
@@ -265,5 +251,93 @@ export function PermissionRequest({
         ))}
       </div>
     </div>
+  )
+}
+
+/** The parameters that decide the answer, a label and its value each; a repository with its mark. */
+export function PermissionParameters({
+  parameters,
+}: {
+  parameters?: readonly PermissionParameter[] | undefined
+}): ReactNode {
+  if (parameters === undefined || parameters.length === 0) return null
+  return (
+    <dl className={PARAMETERS}>
+      {parameters.map((parameter) => (
+        <div key={parameter.label} className={PARAMETER}>
+          <dt className={LABEL}>{parameter.label}</dt>
+          {parameter.repository === undefined ? (
+            <dd className={VALUE}>{parameter.value}</dd>
+          ) : (
+            <dd className={REPOSITORY_VALUE}>
+              <RepositoryGlyph icon={parameter.repository.icon} />
+              <span className="min-w-0 truncate">{parameter.value}</span>
+            </dd>
+          )}
+        </div>
+      ))}
+    </dl>
+  )
+}
+
+/** How a permission stands in the thread: still asked, allowed, refused, or left by a stop. */
+export type PermissionStanding = 'pending' | 'allowed' | 'refused' | 'stopped'
+
+const STANDINGS: Record<PermissionStanding, { answer: NoticeAnswer; word: string }> = {
+  pending: { answer: 'pending', word: 'waiting' },
+  allowed: { answer: 'accepted', word: 'allowed' },
+  refused: { answer: 'refused', word: 'refused' },
+  stopped: { answer: 'left', word: 'stopped' },
+}
+
+export interface PermissionRecordProps {
+  /** The tool the agent asked for, as it names it: the line's words when there is no label. */
+  toolName: string
+  label?: string | undefined
+  subject?: string | undefined
+  parameters?: readonly PermissionParameter[] | undefined
+  command?: string | undefined
+  standing: PermissionStanding
+  /** What was answered and when, once it was: the decision's own line. */
+  decision?: { answer: string; at: string } | undefined
+}
+
+/**
+ * A permission as the thread keeps it (issue #237): one closed line — the shield, a dot for how it
+ * was answered, what the call is and what it is about — and, opened, where it would run, the whole
+ * line, and the answer given. It is asked among the Session's notices, never here.
+ */
+export function PermissionRecord({
+  toolName,
+  label,
+  subject,
+  parameters,
+  command,
+  standing,
+  decision,
+}: PermissionRecordProps): ReactNode {
+  const { answer, word } = STANDINGS[standing]
+  return (
+    <NoticeRecord
+      icon={<IconShield size="sm" aria-hidden="true" />}
+      answer={answer}
+      answerLabel={word}
+      label={label ?? toolName}
+      subject={subject ?? command ?? ''}
+      mono
+      name={`Permission for ${label ?? toolName}, ${word}`}
+    >
+      <div className="flex flex-col gap-2">
+        <PermissionParameters parameters={parameters} />
+        {command !== undefined && <pre className={COMMAND}>{command}</pre>}
+        {decision !== undefined && (
+          <DecisionSummary
+            answer={decision.answer}
+            at={decision.at}
+            refused={standing !== 'allowed'}
+          />
+        )}
+      </div>
+    </NoticeRecord>
   )
 }

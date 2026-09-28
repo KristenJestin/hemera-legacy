@@ -327,13 +327,22 @@ const THINKING: Activity = { state: 'thinking' }
  * A Session is never running on a thread that ends on a `turn` entry it just heard: that entry
  * ends the turn in the same state (issue #223). So an end read while running is the turn before
  * the message just said, which the engine has not echoed yet: the turn asked for is thinking.
+ *
+ * `waitsForYou` is whether the Session's notices hold anything (issue #237): the row then says the
+ * Session waits for the reader, and keeps saying it until nothing does.
  */
 export function turnRowOf(
   thread: readonly SessionEntry[],
   running: boolean,
   latest: string | null = null,
+  waitsForYou = false,
 ): Activity | null {
   const read = activityOf(thread, latest)
+  // Whatever waits for the reader in the Session's notices — a permission, a proposal, a question
+  // — is what the row says for as long as anything does, a turn running or not (issue #237).
+  if (waitsForYou) {
+    return { state: 'waiting', thought: running && !hasEnded(read) ? read.thought : undefined }
+  }
   if (running) return hasEnded(read) ? THINKING : read
   return hasEnded(read) ? read : null
 }

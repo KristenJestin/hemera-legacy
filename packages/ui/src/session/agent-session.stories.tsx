@@ -367,26 +367,27 @@ function Page({
               archiveDisabled={fresh}
               // What the turn has done and what the agent works from.
               onOpenDetails={() => setDetails(true)}
-            />
-            {/* What goes on in the Session, right under its title (issue #219). */}
-            <GoingOnLine
-              items={goingOn}
-              emptyLabel="Nothing running in main"
-              onStop={fn()}
-              onOpenUrl={fn()}
-              onAddToCatalogue={fn()}
-              end={
-                <RunCommand
-                  catalogue={[
-                    { name: 'dev', command: 'pnpm dev', type: 'serve', running: true },
-                    { name: 'check', command: 'pnpm check', type: 'test', running: false },
-                  ]}
-                  workspace="main"
-                  onRunCommand={fn()}
-                  onRunOnce={fn()}
-                />
-              }
-            />
+            >
+              {/* What goes on in the Session, on the head's own row (issues #219, #241). */}
+              <GoingOnLine
+                items={goingOn}
+                emptyLabel="Nothing running in main"
+                onStop={fn()}
+                onOpenUrl={fn()}
+                onAddToCatalogue={fn()}
+                end={
+                  <RunCommand
+                    catalogue={[
+                      { name: 'dev', command: 'pnpm dev', type: 'serve', running: true },
+                      { name: 'check', command: 'pnpm check', type: 'test', running: false },
+                    ]}
+                    workspace="main"
+                    onRunCommand={fn()}
+                    onRunOnce={fn()}
+                  />
+                }
+              />
+            </SessionHeader>
           </div>
           {fresh ? (
             <div className="mx-auto flex min-h-0 w-full max-w-3xl flex-1 flex-col px-6">
@@ -540,14 +541,16 @@ export const Complete: Story = {
     await expect(
       canvas.getAllByRole('button', { name: 'http://localhost:5173/' }).length,
     ).toBeGreaterThan(0)
-    // What goes on is on the line under the title: the server with its address, the test.
+    // What goes on is on the head's own row, where the title was (issue #241): the server with
+    // its address, the test, and the ⓘ and the `…` at the end of the same row.
+    await expect(canvas.queryByRole('heading', { name: 'CSV invoice export' })).toBeNull()
     const line = within(canvas.getByRole('group', { name: 'What goes on in this Session' }))
-    await expect(
-      line.getByRole('button', { name: 'dev, running on localhost:5173/' }),
-    ).toBeVisible()
+    const dev = line.getByRole('button', { name: 'dev, running on localhost:5173/' })
+    await expect(dev).toBeVisible()
     await expect(line.getByRole('button', { name: 'Run' })).toBeVisible()
     // The head's button opens the details, on what the turn has done.
     const button = canvas.getByRole('button', { name: 'Session details' })
+    await expect(onOneLine(dev, button), 'the line left the head’s row').toBe(true)
     await userEvent.click(button)
     const dialog = await waitFor(() =>
       within(document.body).getByRole('dialog', { name: 'Session details' }),

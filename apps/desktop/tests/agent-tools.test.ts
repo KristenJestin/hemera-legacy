@@ -345,6 +345,10 @@ describe('A one-off command shows and is not promoted', () => {
     const runs = seen.entries.filter((entry) => entry.kind === 'command_run')
     expect(runs).toHaveLength(1)
     expect(JSON.parse(runs[0]?.payload ?? '{}')).toMatchObject({ exitCode: 2, oneOff: true })
+    // Asked about in the Workspace, and said to be inside it: nothing about it is outside.
+    const asked = questionsIn(seen.entries)
+    expect(asked).toHaveLength(1)
+    expect(JSON.parse(asked[0]?.payload ?? '{}')).toMatchObject({ inside: true, line: ONE_OFF })
     // And the catalogue is the user's: nothing was promoted into it.
     expect(seen.catalogue).toHaveLength(0)
   })
@@ -488,6 +492,7 @@ describe('A write outside the root asks the human', () => {
       expect(asked).toHaveLength(1)
       const where = z.object({ resolved: z.string() }).parse(JSON.parse(asked[0]?.payload ?? '{}'))
       expect(where.resolved.startsWith(realpathSync.native(outside))).toBe(true)
+      expect(JSON.parse(asked[0]?.payload ?? '{}')).toMatchObject({ inside: false })
       expect(existsSync(join(outside, 'notes.md'))).toBe(false)
     } finally {
       rmSync(join(workspace, 'elsewhere'), { recursive: true, force: true })

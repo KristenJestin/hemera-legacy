@@ -103,6 +103,68 @@ export function goingOnOf(
 }
 
 /**
+ * What the reader did to the line of a Session (issue #237): what they have seen — a glance read
+ * and closed, an entry of the thread opened, the details read — and the chips they took out by
+ * hand; and what was already over when the Session was opened.
+ */
+export interface LineMarks {
+  readonly seen: ReadonlySet<string>
+  readonly removed: ReadonlySet<string>
+  readonly before: ReadonlySet<string>
+}
+
+/** How an item stands, as its dot says it: a run the reader stopped is over. */
+function standingOf(item: GoingOnItem): 'running' | 'finished' | 'failed' {
+  if (item.kind !== 'run') return item.state
+  if (item.state === 'running') return 'running'
+  return item.state === 'failed' ? 'failed' : 'finished'
+}
+
+/** Where an item sits on the line: a command of the catalogue by its name, anything else alone. */
+function slotOf(item: GoingOnItem): string {
+  return item.kind === 'run' && item.oneOff !== true ? `command:${item.name}` : item.id
+}
+
+/**
+ * The line's lifecycle (issue #237): what runs is a chip; what failed stays until it is seen; a
+ * command of the catalogue that ran stays, as the shortcut to run it again, one chip for its
+ * newest run; a one-off — and a command of the agent's own shell, a sub-agent — leaves once it is
+ * over and seen, or when the Session is opened again. Whatever the reader took out by hand is gone,
+ * and stays in the history; a command of the catalogue taken out comes back when it runs again.
+ */
+export function lineOf(items: readonly GoingOnItem[], marks: LineMarks): GoingOnItem[] {
+  const newest = new Map<string, GoingOnItem>()
+  for (const item of items) {
+    const slot = slotOf(item)
+    newest.delete(slot)
+    newest.set(slot, item)
+  }
+  return [...newest.values()].filter((item) => {
+    if (marks.removed.has(item.id)) return false
+    const standing = standingOf(item)
+    if (standing === 'running') return true
+    const seen = marks.seen.has(item.id)
+    if (standing === 'failed') return !seen
+    if (item.kind === 'run' && item.oneOff !== true) return true
+    return !seen && !marks.before.has(item.id)
+  })
+}
+
+/** What was over when the Session was opened: its runs ended, and its shell commands done. */
+export function overBefore(
+  runs: readonly CommandRun[],
+  shells: readonly AgentShellCall[],
+  opened: number,
+): ReadonlySet<string> {
+  return new Set([
+    ...runs
+      .filter((run) => run.endedAt !== null && Date.parse(run.endedAt) < opened)
+      .map((run) => run.id),
+    ...shells.filter((call) => call.state !== 'running' && call.at < opened).map((call) => call.id),
+  ])
+}
+
+/**
  * Which of the two tabs has something to show (D6-10), which is what the details open on.
  *
  * Activity has a plan or a file the turn touched; Context has a delivery — a change of `AGENTS.md`

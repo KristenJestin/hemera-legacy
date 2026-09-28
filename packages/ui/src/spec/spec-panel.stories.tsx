@@ -714,10 +714,11 @@ export const SwapReplayed: Story = {
  *
  * The fold has to land while the panel is still on its way, and the panel comes in on a spring
  * that is most of the way in within a quarter of a second. On a machine busy with the rest of the
- * run the press can take longer than that, and land on a panel already in: nothing was left to
- * turn round, so the chat was, rightly, the whole panel narrower. So the chat is read at the
- * moment the fold lands, and when less than a tenth of the way was left by then, the Spec is
- * folded back and the gesture done again, up to five times.
+ * run a pointer's press can take longer than that, and land on a panel already in: nothing was
+ * left to turn round, so the chat was, rightly, the whole panel narrower. So the fold is pressed
+ * on the first frame the panel is part of the way in, the chat is read at the moment it lands,
+ * and when less than a tenth of the way was left by then, the Spec is folded back and the gesture
+ * done again, up to five times.
  */
 export const TurnsRoundMidWay: Story = {
   args: { defaultFolded: true },
@@ -731,17 +732,26 @@ export const TurnsRoundMidWay: Story = {
       let reached = Number.NaN
       const frames = await framesOf(canvasElement, async () => {
         await userEvent.click(canvas.getByRole('button', { name: 'Unfold the Spec' }))
-        // Part of the way in, and no further.
-        await waitFor(() => expect(measure(canvasElement).panel).toBeGreaterThan(40), {
-          interval: 5,
-        })
         const fold = canvas.getByRole('button', { name: 'Fold the Spec' })
         // The chat as it stands when the fold lands, before anything answers it.
         const read = (): void => {
           reached = measure(canvasElement).chat
         }
         fold.addEventListener('click', read, { capture: true, once: true })
-        await userEvent.click(fold)
+        // Part of the way in, and no further: pressed on the first frame the panel is 40 pixels
+        // in, rather than after a pointer's whole journey to the button, which a busy runner can
+        // stretch past the panel's own.
+        await new Promise<void>((resolve) => {
+          const look = (): void => {
+            if (measure(canvasElement).panel <= 40) {
+              requestAnimationFrame(look)
+              return
+            }
+            fold.click()
+            resolve()
+          }
+          requestAnimationFrame(look)
+        })
       })
       await waitFor(() => expect(isStowed(canvasElement)).toBe(true))
       if (reached - full > (start - full) / 10 || tries === 1) return { frames, reached }

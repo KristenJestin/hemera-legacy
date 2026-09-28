@@ -50,7 +50,7 @@ const COMMANDS = [
 ]
 
 const meta = {
-  tags: ['autodocs', 'updated'],
+  tags: ['autodocs'],
   title: 'Blocks/Session/ContextView',
   component: ContextView,
   parameters: { layout: 'padded' },

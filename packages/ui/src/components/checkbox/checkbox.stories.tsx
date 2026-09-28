@@ -31,7 +31,7 @@ function Kept({
 }
 
 const meta = {
-  tags: ['autodocs', 'updated'],
+  tags: ['autodocs'],
   title: 'Components/Checkbox',
   component: Checkbox,
   parameters: { layout: 'centered' },

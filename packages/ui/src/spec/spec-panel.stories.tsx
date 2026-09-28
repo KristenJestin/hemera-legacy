@@ -692,11 +692,29 @@ export const SwapReplayed: Story = {
     await expect(opening.filter((frame) => frame.panelLeft < frame.chatRight - 0.5)).toEqual([])
     await expect(opening.at(-1)!.frame).toBe(0)
 
-    const closing = await framesOf(canvasElement, () =>
-      userEvent.click(canvas.getByRole('button', { name: 'Fold the Spec' })),
-    )
+    // Folding, the frame is back on the beat while the panel still has most of its way to go: a
+    // window of a couple of hundred milliseconds, which a machine busy with the rest of the run can
+    // step over between two frames. When no frame saw both, the Spec is unfolded and folded again,
+    // up to five times: a fold that never overlaps is never seen to.
+    const fold = (): Promise<Frame[]> =>
+      framesOf(canvasElement, () =>
+        userEvent.click(canvas.getByRole('button', { name: 'Fold the Spec' })),
+      )
+    const overlaps = (frames: Frame[]): boolean =>
+      frames.some((frame) => frame.frame > 0 && frame.panel > 0)
+    let closing = await fold()
+    for (let tries = 4; tries > 0 && !overlaps(closing); tries -= 1) {
+      // oxlint-disable-next-line no-await-in-loop -- one fold at a time: the retry is the point
+      await waitFor(() => expect(isStowed(canvasElement)).toBe(true))
+      // oxlint-disable-next-line no-await-in-loop -- one fold at a time: the retry is the point
+      await framesOf(canvasElement, () =>
+        userEvent.click(canvas.getByRole('button', { name: 'Unfold the Spec' })),
+      )
+      // oxlint-disable-next-line no-await-in-loop -- one fold at a time: the retry is the point
+      closing = await fold()
+    }
     await expect(closing.filter((frame) => frame.frame === 0 && frame.panel === 0)).toEqual([])
-    await expect(closing.some((frame) => frame.frame > 0 && frame.panel > 0)).toBe(true)
+    await expect(overlaps(closing)).toBe(true)
     const widening = moved(closing)
     const widest = widening.at(-1)!
     await expect(widest).toBeGreaterThan(widening[0]!)

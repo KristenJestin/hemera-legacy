@@ -14,7 +14,6 @@ import { tmpdir } from 'node:os'
 import { basename, dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-import { RUN_FOLDER } from './e2e/run-folder.ts'
 import { installFakeAgent } from './e2e/agent/install.ts'
 import { QUALIFIED_VARIABLE } from './src/engine/agents/bare.ts'
 
@@ -116,7 +115,5 @@ export const config: WebdriverIO.Config = {
   },
   onComplete() {
     for (const spec of SPECS) rmSync(e2eDataOf(spec), { recursive: true, force: true })
-    // And the run's own temporary folder with them, once whatever the run started has let go of it.
-    rmSync(RUN_FOLDER, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 })
   },
 }

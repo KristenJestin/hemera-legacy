@@ -299,9 +299,17 @@ export { CommandRun, type CommandRunProps, type CommandState } from './activity/
 /** A command the agent proposes for the catalogue, and the human's answer (D8-11). */
 export {
   CommandProposal,
+  CommandProposalRecord,
   type CommandProposalProps,
+  type CommandProposalRecordProps,
   type CommandProposalState,
 } from './activity/command-proposal.tsx'
+/** What stays in the thread of something that waited for a human (issue #237). */
+export {
+  NoticeRecord,
+  type NoticeAnswer,
+  type NoticeRecordProps,
+} from './activity/notice-record.tsx'
 /** The seven types of a command and the icon the design system fixes for each (D8-07). */
 export {
   COMMAND_SCOPES,
@@ -314,7 +322,10 @@ export {
 
 /** The gate a turn stops at, and the one line the answer leaves behind. */
 export {
+  PermissionRecord,
   PermissionRequest,
+  type PermissionRecordProps,
+  type PermissionStanding,
   type PermissionOption,
   type PermissionOptionKind,
   type PermissionParameter,
@@ -472,12 +483,19 @@ export { QuestionsPart, type QuestionsPartProps } from './spec/questions-part.ts
 export { ReaderBar, type ReaderBarProps } from './spec/reader-bar.tsx'
 export { ReworkDialog, type ReworkDialogProps } from './spec/rework-dialog.tsx'
 export { MissionBrief, type MissionBriefProps } from './spec/mission-brief.tsx'
-export { SpecQuestion, type SpecQuestionProps } from './spec/spec-question.tsx'
+export {
+  SpecQuestion,
+  SpecQuestionRecord,
+  type SpecQuestionProps,
+  type SpecQuestionRecordProps,
+} from './spec/spec-question.tsx'
 export { WorkspaceActions, type WorkspaceActionsProps } from './spec/workspace-actions.tsx'
 export {
   CreateSpecProposal,
+  SpecProposalRecord,
   type CreateSpecProposalProps,
   type ProposalState,
+  type SpecProposalRecordProps,
 } from './spec/create-spec-proposal.tsx'
 export type {
   Author,

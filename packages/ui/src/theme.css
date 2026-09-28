@@ -83,7 +83,9 @@
 
   --success: #16a34a;
   --success-muted: #ecfdf3;
-  --success-muted-foreground: #15803d;
+  /* A shade under green-700: its own counts (a diff's +N) are read on the page itself, where
+     green-700 made 4.29:1 on the background and the catalogue asks 4.5:1 of small text. */
+  --success-muted-foreground: #157a3a;
   --warning: #d97706;
   --warning-muted: #fffbeb;
   --warning-muted-foreground: #b45309;

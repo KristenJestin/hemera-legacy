@@ -68,7 +68,21 @@ import {
 import { agentShellCallsOf, commandProposalOf, foldedCallsOf } from '../agent-tool-payloads.ts'
 import { whenOf } from '../journal-lines.ts'
 import { NOTICE_KINDS, type NoticeKind, waitingAs } from '../notices.ts'
-import { contextListsOf, detailsTabsOf, goingOnOf, openingTabOf } from '../session-details.ts'
+import {
+  contextListsOf,
+  detailsTabsOf,
+  goingOnOf,
+  lineOf,
+  openingTabOf,
+  overBefore,
+} from '../session-details.ts'
+import {
+  linesSnapshot,
+  markSeen,
+  marksOf,
+  removeFromLine,
+  subscribeToLines,
+} from '../line-store.ts'
 import { openSessions, type OfferedWorkspace } from '../sessions-store.ts'
 import { selectEntry } from '../shell-store.ts'
 import { type DefinedSpec, questionMarkOf } from '../spec-entries.ts'
@@ -309,6 +323,8 @@ export interface SessionPageProps {
   onOpenUrl: (url: string) => void
   /** Stops a run and everything it started. */
   onStopRun: (runId: string) => void
+  /** Runs a run of the Session again, from its chip or the history (issue #237). */
+  onRunAgain: (runId: string) => void
   /** Hands the agent again what waits for it, after a delivery it did not take (issue #211). */
   onHandOver: () => void
   /** The Workspace root, which is what a run's folder is said relative to; null until known. */
@@ -362,6 +378,7 @@ export function SessionPage({
   catalogue,
   onOpenUrl,
   onStopRun,
+  onRunAgain,
   onHandOver,
   root,
   repositories,
@@ -392,6 +409,10 @@ export function SessionPage({
     void decision.then(setRefused)
   }
   const stored = useSyncExternalStore(subscribeToSpec, specSnapshot, specSnapshot)
+  // What the reader did to the line of this Session, and when the Session was opened: a one-off
+  // over by then is not news (issue #237).
+  const lines = useSyncExternalStore(subscribeToLines, linesSnapshot, linesSnapshot)
+  const opened = useRef(Date.now())
   // Whether this Session was free when the page opened it: its Spec panel, once there, is one the
   // proposal just made, and it arrives rather than standing there (issue #130). The page is
   // keyed by the Session, so this is read once per Session opened.
@@ -555,6 +576,7 @@ export function SessionPage({
       repositories,
       onOpenUrl,
       onHandOver,
+      onSeenRun: (runId) => markSeen(session.id, runId),
       reportedCall: (toolCallId) => reported.get(toolCallId),
       onAcceptProposal: (proposalId) => deciding(onAcceptProposal(proposalId)),
       onDeclineProposal: (proposalId) => deciding(onDeclineProposal(proposalId)),
@@ -746,6 +768,8 @@ export function SessionPage({
   // touched. Both are states rather than events, and they are read here because the meter above
   // the box and the details are two readings of the same turn.
   const plan = planOf(thread)
+  // The commands the agent ran in its own shell, which the line and the history list (#219, #237).
+  const shells = agentShellCallsOf(thread)
   const touched = touchedOf(thread)
   const usage = usageOf(thread)
   // Which tabs have something to show, which is what the details open on.
@@ -838,15 +862,15 @@ export function SessionPage({
             onOpenDetails={() => setDetailsOpen(true)}
           >
             <GoingOnLine
-              items={goingOnOf(
-                commandRuns,
-                agentShellCallsOf(thread),
-                root,
-                workspace?.name,
-                repositories,
-              )}
+              items={lineOf(goingOnOf(commandRuns, shells, root, workspace?.name, repositories), {
+                ...marksOf(session.id, lines),
+                before: overBefore(commandRuns, shells, opened.current),
+              })}
               emptyLabel={`Nothing running in ${workspace?.name ?? 'main'}`}
               onStop={(run) => onStopRun(run.id)}
+              onRunAgain={(run) => onRunAgain(run.id)}
+              onRemove={(item) => removeFromLine(session.id, item.id)}
+              onSeen={(item) => markSeen(session.id, item.id)}
               onOpenUrl={onOpenUrl}
               onAddToCatalogue={(shown) => {
                 const run = commandRuns.find((one) => one.id === shown.id)

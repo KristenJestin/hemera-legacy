@@ -1,3 +1,4 @@
+import { AnimatePresence, motion } from 'motion/react'
 import { type ReactNode, useState } from 'react'
 
 import { COMMAND_TYPE_ICONS } from '../activity/command-type.ts'
@@ -5,8 +6,17 @@ import { IconButton } from '../components/button/button.tsx'
 import { Popover } from '../components/popover/popover.tsx'
 import { StatusDot } from '../components/status-dot/status-dot.tsx'
 import { Tooltip } from '../components/tooltip/tooltip.tsx'
-import { IconInfoCircle, IconPlayerStop, IconRobot, IconTerminal2 } from '../icons.ts'
+import {
+  IconBookmarkPlus,
+  IconInfoCircle,
+  IconPlayerStop,
+  IconRefresh,
+  IconRobot,
+  IconTerminal2,
+  IconX,
+} from '../icons.ts'
 import { AgentText } from '../message/agent-text.tsx'
+import { fold, useTransition } from '../motion.ts'
 import { ServiceUrl } from '../workspace/service-list.tsx'
 import {
   GOING_ON_SHOWN,
@@ -38,6 +48,12 @@ import { RunPlace } from './run-place.tsx'
  * process, and the ⓘ of its Details — and what it printed under it. The Details are a dialog laid
  * the same way for every kind (`GoingOnDetails`). The line ends on `end`, where the page puts the
  * way to start a command.
+ *
+ * What the line holds is the page's to decide (issue #237: what runs, what failed and is not seen
+ * yet, the catalogue's shortcuts); the glance is where the reader acts on it — Run again, or Stop
+ * while it runs, the one-off's `Add to catalogue`, the ⓘ, and the ✕ that takes the chip out of the
+ * line — and closing a glance on something over is having seen it. A chip arrives and leaves by its
+ * width, pushing the chips after it.
  */
 
 export interface GoingOnLineProps {
@@ -49,13 +65,19 @@ export interface GoingOnLineProps {
   onStop: (run: GoingOnRun) => void
   onOpenUrl: (url: string) => void
   onAddToCatalogue: (run: GoingOnRun) => void
+  /** Runs it again: a command of the catalogue as itself, a one-off as the one-off it was. */
+  onRunAgain?: ((run: GoingOnRun) => void) | undefined
+  /** Takes the chip out of the line; what it was stays in the history. */
+  onRemove?: ((item: GoingOnItem) => void) | undefined
+  /** Says the reader has read how it ended: its glance closed, or its details. */
+  onSeen?: ((item: GoingOnItem) => void) | undefined
   /** The glance open as the line is drawn: an item's id, `more` for the list, or none. */
   defaultOpen?: string | null | undefined
   /** The item whose Details are open as the line is drawn. */
   defaultDetail?: string | null | undefined
 }
 
-const LINE = 'flex min-w-0 flex-wrap items-center gap-1.5'
+const LINE = 'flex min-w-0 flex-wrap items-center gap-y-1.5'
 
 const CHIP =
   'inline-flex h-control-sm max-w-menu-side min-w-0 items-center gap-1.5 rounded-md border border-border bg-card px-2 text-xs outline-none hover:bg-accent focus-ring data-popup-open:bg-accent'
@@ -165,17 +187,65 @@ function whereOf(item: GoingOnItem): ReactNode {
   return `${String(item.steps.length)} steps`
 }
 
+/** An icon action of a glance, named by its tooltip: never a word-button beside a run. */
+function Act({
+  label,
+  tip,
+  onPress,
+  children,
+}: {
+  label: string
+  tip: string
+  onPress: () => void
+  children: ReactNode
+}): ReactNode {
+  return (
+    <Tooltip label={tip}>
+      <IconButton variant="ghost" size="sm" icon={children} aria-label={label} onClick={onPress} />
+    </Tooltip>
+  )
+}
+
+/** The room a chip takes on the line, which is what grows and folds: its right edge is the gap. */
+const SLOT = 'flex shrink-0 overflow-hidden pr-1.5'
+
+const SHOWN = { width: 'auto', filter: 'opacity(1)' } as const
+
+const HIDDEN = { width: 0, filter: 'opacity(0)' } as const
+
+/** A place on the line that arrives and leaves by its width, pushing the chips after it. */
+function Slot({ children }: { children: ReactNode }): ReactNode {
+  const transition = useTransition(fold)
+  return (
+    <motion.span
+      className={SLOT}
+      initial={HIDDEN}
+      animate={SHOWN}
+      exit={HIDDEN}
+      transition={transition}
+    >
+      {children}
+    </motion.span>
+  )
+}
+
 /** A glance at one item: one line with its tools, and what it printed or last said under it. */
 function Glance({
   item,
   onStop,
   onOpenUrl,
   onDetails,
+  onRunAgain,
+  onAddToCatalogue,
+  onRemove,
 }: {
   item: GoingOnItem
   onStop: (run: GoingOnRun) => void
   onOpenUrl: (url: string) => void
   onDetails: () => void
+  onRunAgain?: ((run: GoingOnRun) => void) | undefined
+  onAddToCatalogue: (run: GoingOnRun) => void
+  onRemove?: ((item: GoingOnItem) => void) | undefined
 }): ReactNode {
   const face = faceOf(item)
   const state = goingOnStateOf(item)
@@ -188,25 +258,36 @@ function Glance({
         <span className={WHERE}>{whereOf(item)}</span>
         <span className={TOOLS}>
           {item.kind === 'run' && item.state === 'running' && (
-            <Tooltip label="Stop">
-              <IconButton
-                variant="ghost"
-                size="sm"
-                icon={<IconPlayerStop size="sm" />}
-                aria-label={`Stop ${item.name}`}
-                onClick={() => onStop(item)}
-              />
-            </Tooltip>
+            <Act label={`Stop ${item.name}`} tip="Stop" onPress={() => onStop(item)}>
+              <IconPlayerStop size="sm" />
+            </Act>
           )}
-          <Tooltip label="Details">
-            <IconButton
-              variant="ghost"
-              size="sm"
-              icon={<IconInfoCircle size="sm" />}
-              aria-label={`Details of ${face.label}`}
-              onClick={onDetails}
-            />
-          </Tooltip>
+          {item.kind === 'run' && item.state !== 'running' && onRunAgain !== undefined && (
+            <Act label={`Run ${item.name} again`} tip="Run again" onPress={() => onRunAgain(item)}>
+              <IconRefresh size="sm" />
+            </Act>
+          )}
+          {item.kind === 'run' && item.oneOff === true && (
+            <Act
+              label={`Add ${item.name} to the catalogue`}
+              tip="Add to catalogue"
+              onPress={() => onAddToCatalogue(item)}
+            >
+              <IconBookmarkPlus size="sm" />
+            </Act>
+          )}
+          <Act label={`Details of ${face.label}`} tip="Details" onPress={onDetails}>
+            <IconInfoCircle size="sm" />
+          </Act>
+          {onRemove !== undefined && (
+            <Act
+              label={`Remove ${face.label} from the line`}
+              tip="Remove from the line"
+              onPress={() => onRemove(item)}
+            >
+              <IconX size="sm" />
+            </Act>
+          )}
         </span>
       </div>
       {item.kind === 'run' && item.url !== undefined && item.state === 'running' && (
@@ -233,6 +314,9 @@ export function GoingOnLine({
   onStop,
   onOpenUrl,
   onAddToCatalogue,
+  onRunAgain,
+  onRemove,
+  onSeen,
   defaultOpen = null,
   defaultDetail = null,
 }: GoingOnLineProps): ReactNode {
@@ -248,77 +332,110 @@ export function GoingOnLine({
     setDetail(id)
   }
 
+  /** Something over, read and put away, is something seen: it may leave the line then. */
+  function seen(item: GoingOnItem | undefined): void {
+    if (item !== undefined && goingOnStateOf(item) !== 'running') onSeen?.(item)
+  }
+
   return (
     <div role="group" aria-label="What goes on in this Session" className={LINE}>
       {items.length === 0 && <span className={QUIET}>{emptyLabel}</span>}
-      {chips.map((item) => (
-        <Popover
-          key={item.id}
-          side="bottom"
-          align="start"
-          label={nameOf(item)}
-          open={open === item.id}
-          onOpenChange={(next) => setOpen(next ? item.id : null)}
-          trigger={
-            <button
-              type="button"
-              className={item.kind === 'shell' ? SHELL_CHIP : CHIP}
-              aria-label={nameOf(item)}
+      <AnimatePresence initial={false}>
+        {chips.map((item) => (
+          <Slot key={item.id}>
+            <Popover
+              side="bottom"
+              align="start"
+              label={nameOf(item)}
+              open={open === item.id}
+              onOpenChange={(next) => {
+                setOpen(next ? item.id : null)
+                if (!next) seen(item)
+              }}
+              trigger={
+                <button
+                  type="button"
+                  className={item.kind === 'shell' ? SHELL_CHIP : CHIP}
+                  aria-label={nameOf(item)}
+                >
+                  <ItemLine item={item} />
+                </button>
+              }
             >
-              <ItemLine item={item} />
-            </button>
-          }
-        >
-          <Glance
-            item={item}
-            onStop={onStop}
-            onOpenUrl={onOpenUrl}
-            onDetails={() => details(item.id)}
-          />
-        </Popover>
-      ))}
+              <Glance
+                item={item}
+                onStop={onStop}
+                onOpenUrl={onOpenUrl}
+                onDetails={() => details(item.id)}
+                onRunAgain={
+                  onRunAgain === undefined
+                    ? undefined
+                    : (run) => {
+                        setOpen(null)
+                        onRunAgain(run)
+                      }
+                }
+                onAddToCatalogue={onAddToCatalogue}
+                onRemove={
+                  onRemove === undefined
+                    ? undefined
+                    : (gone) => {
+                        setOpen(null)
+                        onRemove(gone)
+                      }
+                }
+              />
+            </Popover>
+          </Slot>
+        ))}
+      </AnimatePresence>
       {rest > 0 && (
-        <Popover
-          side="bottom"
-          align="start"
-          title="Everything in this Session"
-          open={open === 'more'}
-          onOpenChange={(next) => setOpen(next ? 'more' : null)}
-          trigger={
-            <button type="button" className={MORE} aria-label={`${String(rest)} more`}>
-              {`+${String(rest)}`}
-            </button>
-          }
-        >
-          <div className="flex w-menu-panel flex-col gap-3">
-            {(['run', 'shell', 'agent'] as const).map((kind) => {
-              const ofKind = ranked.filter((item) => item.kind === kind)
-              if (ofKind.length === 0) return null
-              return (
-                <div key={kind} className="flex flex-col gap-0.5">
-                  <p className={GROUP}>{KINDS[kind]}</p>
-                  {ofKind.map((item) => (
-                    <button
-                      key={item.id}
-                      type="button"
-                      className={ROW}
-                      aria-label={`${nameOf(item)}, details`}
-                      onClick={() => details(item.id)}
-                    >
-                      <ItemLine item={item} />
-                    </button>
-                  ))}
-                </div>
-              )
-            })}
-          </div>
-        </Popover>
+        <span className={SLOT}>
+          <Popover
+            side="bottom"
+            align="start"
+            title="Everything in this Session"
+            open={open === 'more'}
+            onOpenChange={(next) => setOpen(next ? 'more' : null)}
+            trigger={
+              <button type="button" className={MORE} aria-label={`${String(rest)} more`}>
+                {`+${String(rest)}`}
+              </button>
+            }
+          >
+            <div className="flex w-menu-panel flex-col gap-3">
+              {(['run', 'shell', 'agent'] as const).map((kind) => {
+                const ofKind = ranked.filter((item) => item.kind === kind)
+                if (ofKind.length === 0) return null
+                return (
+                  <div key={kind} className="flex flex-col gap-0.5">
+                    <p className={GROUP}>{KINDS[kind]}</p>
+                    {ofKind.map((item) => (
+                      <button
+                        key={item.id}
+                        type="button"
+                        className={ROW}
+                        aria-label={`${nameOf(item)}, details`}
+                        onClick={() => details(item.id)}
+                      >
+                        <ItemLine item={item} />
+                      </button>
+                    ))}
+                  </div>
+                )
+              })}
+            </div>
+          </Popover>
+        </span>
       )}
       {end}
       {detailed !== undefined && (
         <GoingOnDetails
           item={detailed}
-          onClose={() => setDetail(null)}
+          onClose={() => {
+            setDetail(null)
+            seen(detailed)
+          }}
           onStop={onStop}
           onOpenUrl={onOpenUrl}
           onAddToCatalogue={onAddToCatalogue}

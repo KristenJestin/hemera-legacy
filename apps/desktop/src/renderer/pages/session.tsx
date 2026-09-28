@@ -39,12 +39,12 @@ import {
 } from '@hemera/ui'
 
 import {
-  activityOf,
   hasEnded,
   hasTrace,
   heardSince,
   openTrace,
   specWritingOf,
+  turnRowOf,
   type Activity,
   type AgentSessionState,
 } from '../agent-store.ts'
@@ -133,9 +133,6 @@ function together(read: readonly SessionEntry[], live: readonly SessionEntry[]):
     ...live.filter((entry) => !known.has(entry.id)),
   ]
 }
-
-/** What a turn that has just been asked for is doing, before anything of it has arrived. */
-const THINKING: Activity = { state: 'thinking' }
 
 /** How often a running turn's silence is measured again: the line counts it by fives. */
 const QUIET_TICK_MS = 5_000
@@ -659,21 +656,10 @@ export function SessionPage({
    *
    * Once the turn is over the row stays, quiet, and says how it ended — "Done in 12 s",
    * "Stopped", "Failed" — for as long as that end is the last thing that happened: the next
-   * message sets a turn running again, and the row goes back to saying what that one is doing.
-   * Until the engine has echoed that message the thread still ends on the previous turn's end,
-   * which is not what a turn just asked for is doing: it is thinking. The end is believed while
-   * running only when it is the very entry the engine pushed last, the few instants between the
-   * `turn` entry and the `turn` event that follows it.
+   * message sets a turn running again, and the row goes back to saying what that one is doing
+   * (`turnRowOf`).
    */
-  const read = activityOf(thread, agent.latest)
-  const endedNow = thread.find((entry) => entry.id === agent.latest)?.kind === 'turn'
-  const activity = agent.running
-    ? hasEnded(read) && !endedNow
-      ? THINKING
-      : read
-    : hasEnded(read)
-      ? read
-      : null
+  const activity = turnRowOf(thread, agent.running, agent.latest)
 
   // What the agent is on is the agent's own answer, read back after every change: this page
   // draws what it was told and never a value it remembers (D5-13).

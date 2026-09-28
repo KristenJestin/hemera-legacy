@@ -40,6 +40,7 @@ import {
   say,
   setOffered,
   specWritingOf,
+  turnRowOf,
 } from '#renderer/agent-store.ts'
 import {
   archiveSession,
@@ -464,6 +465,30 @@ describe('Le tour tourne dès que la question est écrite', () => {
     await asking
     expect(agentOf('session-6').running).toBe(false)
     expect(agentOf('session-6').stopReason).toBe('end_turn')
+  })
+
+  test('the turn entry pushed ends the turn, in the same state that holds it', () => {
+    push({ event: 'turn_start', sessionId: 'session-7', entry: null })
+    push({ event: 'entry', sessionId: 'session-7', entry: entry('e1', 'user', 'test') })
+    const done = reported('e2', 'turn', 'The agent finished its turn.', 'end_turn')
+    push({ event: 'entry', sessionId: 'session-7', entry: done })
+
+    // The row reads "Done" off this entry, and the composer draws Send from this flag: the
+    // `turn` event that follows is a second message, and a frame drawn between the two had both.
+    const held = agentOf('session-7')
+    expect(held.running).toBe(false)
+    expect(turnRowOf(held.entries, held.running, held.latest)?.state).toBe('done')
+  })
+
+  test('a message said after a turn ended is thinking, never the last turn done', () => {
+    const said = entry('e1', 'user', 'test')
+    const done = reported('e2', 'turn', 'The agent finished its turn.', 'end_turn')
+
+    // The next message is said: the Session runs before the engine has echoed it, and the thread
+    // still ends on the turn before, which is the entry pushed last. That end is not what the
+    // turn just asked for is doing.
+    expect(turnRowOf([said, done], true, 'e2')).toEqual({ state: 'thinking' })
+    expect(turnRowOf([said], false)).toBeNull()
   })
 
   test('a prompt refused before any turn began leaves nothing running', async () => {

@@ -1,23 +1,26 @@
 import { MAIN_WORKSPACE, PHASE_IDS } from '@hemera/core'
 import type { CommandRun, ContextView, Provided } from '@hemera/ipc'
 import type {
-  CommandPanelRun,
   ContextCommand,
   ContextEntry,
   ContextTool,
   ContextWorkspace,
+  GoingOnItem,
+  GoingOnRun,
+  GoingOnShell,
   SessionDetailsTab,
 } from '@hemera/ui'
 
-import { runFactsOf } from './agent-tool-payloads.ts'
+import { type AgentShellCall, runFactsOf } from './agent-tool-payloads.ts'
 
 /**
- * What the details of a Session draw from the tools store (design D6-10, D6-12).
+ * What the line under a Session's title and the Session's details draw (design D6-10, D6-12,
+ * issue #219).
  *
- * The Commands tab is the runs of the Session, the same runs the thread's blocks read; the
- * Context tab is its instructions and its tools, as the engine answered them. Both are read as
- * they came: nothing here decides what a run is or what was provided, it only says it in the
- * words the blocks take.
+ * The line is what goes on in the Session: its runs, the same runs the thread's blocks read, and
+ * the commands the agent ran in its own shell, as its calls reported them. The details are what
+ * the agent has been doing and what it works from. All of it is read as it came: nothing here
+ * decides what a run is or what was provided, it only says it in the words the blocks take.
  *
  * Kept apart from the page, which imports the design system's components, so a test can read it
  * without a theme or a DOM.
@@ -33,64 +36,97 @@ function folderOf(cwd: string, root: string | null): string {
   return cwd
 }
 
-/** The runs of a Session as the Commands panel lists them, oldest first. */
-export function panelRunsOf(runs: readonly CommandRun[], root: string | null): CommandPanelRun[] {
-  return runs.map((run) => ({
+/** When something began, `HH:MM`, in the one reading the whole window uses. */
+function clockOf(at: number): string {
+  return new Date(at).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })
+}
+
+function runOf(run: CommandRun, root: string | null): GoingOnRun {
+  const facts = runFactsOf(run)
+  return {
+    kind: 'run',
     id: run.id,
     name: run.name,
     command: run.line,
     type: run.type,
     state: run.state === 'exited' ? 'finished' : run.state,
     folder: folderOf(run.cwd, root),
+    workspace: run.workspaceName,
     output: run.output,
     url: run.url ?? undefined,
+    readiness: facts.readiness,
     exitCode: run.exitCode ?? undefined,
     oneOff: run.commandId === null,
-    // Its address as it stands, its variables and its conflict, as the thread's block shows them.
-    ...runFactsOf(run),
-  }))
+    startedBy: run.startedBy,
+    environment: facts.environment,
+    at: clockOf(Date.parse(run.startedAt)),
+  }
 }
 
 /**
- * Which of the three tabs has something to show (D6-10, D6-12), which is what the details open on.
+ * A command of the agent's own shell: it runs where the agent runs, at the Workspace's root, which
+ * its call does not say and which the Session's Workspace names.
+ */
+function shellOf(call: AgentShellCall, workspace: string): GoingOnShell {
+  return {
+    kind: 'shell',
+    id: call.id,
+    command: call.command,
+    folder: '.',
+    workspace,
+    state: call.state,
+    output: call.output,
+    exitCode: undefined,
+    at: clockOf(call.at),
+  }
+}
+
+/**
+ * What goes on in a Session, as the line under its title lists it: its runs and the agent's own
+ * shell commands, in the order they began, which is the order the line ranks from.
+ */
+export function goingOnOf(
+  runs: readonly CommandRun[],
+  shells: readonly AgentShellCall[],
+  root: string | null,
+  workspace: string = MAIN_WORKSPACE,
+): GoingOnItem[] {
+  const began = [
+    ...runs.map((run) => ({ at: Date.parse(run.startedAt), item: runOf(run, root) })),
+    ...shells.map((call) => ({ at: call.at, item: shellOf(call, workspace) })),
+  ]
+  return began.toSorted((one, other) => one.at - other.at).map(({ item }) => item)
+}
+
+/**
+ * Which of the two tabs has something to show (D6-10), which is what the details open on.
  *
- * Activity has a plan or a file the turn touched; Commands has a run of this Session or a
- * catalogue to run from; Context has a delivery — a change of `AGENTS.md` handed to the agent
- * between two turns. The base, the file given at the start and the tools are there in every
- * Session its agent has been asked anything, so they make no tab one to open on by themselves.
+ * Activity has a plan or a file the turn touched; Context has a delivery — a change of `AGENTS.md`
+ * handed to the agent between two turns. The base, the file given at the start and the tools are
+ * there in every Session its agent has been asked anything, so they make no tab one to open on by
+ * themselves. What the Session runs is on the line under its title, and no tab of the details.
  *
  * Nothing here opens the details: they are a dialog only the reader opens, from the Session's head
  * (second review of #18). What arrives while they are open changes what a tab holds.
  */
 export interface DetailsTabs {
   activity: boolean
-  commands: boolean
   context: boolean
 }
 
-export function detailsTabsOf(
-  plan: number,
-  files: number,
-  runs: readonly CommandRun[],
-  view: ContextView | null,
-): DetailsTabs {
+export function detailsTabsOf(plan: number, files: number, view: ContextView | null): DetailsTabs {
   return {
     activity: plan > 0 || files > 0,
-    commands: runs.length > 0 || (view?.commands.length ?? 0) > 0,
     context: view?.provided.some((one) => one.kind === 'instructions') ?? false,
   }
 }
 
 /**
- * The tab the details open on, which follows what is happening in the Session (D6-12): a command
- * running opens on its commands, then what the agent has been doing, then whichever tab has
- * something. With nothing in any tab they open on the Context, which is what the agent works from.
+ * The tab the details open on: what the agent has been doing when it has done anything, and the
+ * Context otherwise, which is what the agent works from.
  */
-export function openingTabOf(runs: readonly CommandRun[], tabs: DetailsTabs): SessionDetailsTab {
-  if (runs.some((run) => run.state === 'running')) return 'commands'
-  if (tabs.activity) return 'activity'
-  if (tabs.commands) return 'commands'
-  return 'context'
+export function openingTabOf(tabs: DetailsTabs): SessionDetailsTab {
+  return tabs.activity ? 'activity' : 'context'
 }
 
 /** How a source reached the agent, in the words the Context view says it with. */

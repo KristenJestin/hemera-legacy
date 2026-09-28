@@ -660,6 +660,14 @@ export function Application() {
     void readRuns(openId)
   }, [openId])
 
+  // The catalogue of the Session's Project, which the Run of its line offers (issue #219): read
+  // when the Session becomes the one the window is on, as its runs are.
+  const openProjectId = open?.projectId ?? null
+  useEffect(() => {
+    if (openProjectId === null) return
+    void readCatalogue(openProjectId)
+  }, [openProjectId])
+
   // The catalogue of the Project whose settings are open, read when they are opened: the agent
   // may have been told of a command the page has not heard of, and the list is the engine's.
   const settingsOf = shell.activeEntryId === PROJECT_SETTINGS_ENTRY ? (current?.id ?? null) : null
@@ -1336,9 +1344,10 @@ export function Application() {
           // A line that names a command of the catalogue runs that command, in its folder; any
           // other line is a one-off, run in the Workspace root and not added to the catalogue.
           onRunCommand={(line) => {
-            const known = tools.contexts.get(open.id)?.commands.some((one) => one.name === line)
+            const known = tools.catalogues.get(open.projectId)?.some((one) => one.name === line)
             void runCommand(open.id, known === true ? { name: line } : { line })
           }}
+          catalogue={tools.catalogues.get(open.projectId) ?? []}
           workspaces={offeredWorkspacesOf(sessions.workspaces, open.workspaceId)}
           onChooseWorkspace={(workspaceId) => void chooseWorkspace(open, workspaceId)}
           onAcceptProposal={async (proposalId) => await acceptProposal(open.id, proposalId)}

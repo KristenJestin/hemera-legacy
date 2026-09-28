@@ -481,10 +481,9 @@ describe('Catalogue, coquille et surfaces, et rien d’autre', () => {
       'HemeraToolCall',
       'CommandRun',
       'CommandProposal',
-      'CommandsPanel',
       // Issue #219: what goes on in a Session, as a line under its title — the commands Hemera
       // runs, those the agent runs in its own shell, its sub-agents — which the Commands tab of
-      // the Session's details gives way to.
+      // the Session's details, and its panel, gave way to.
       'GoingOnLine',
       // The Run at the end of that line: the catalogue matched as it is typed, and any other line
       // run once.

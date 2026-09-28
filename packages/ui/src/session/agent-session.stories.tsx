@@ -27,7 +27,10 @@ import { ResumeFallbackBanner } from './resume-fallback-banner.tsx'
 import { SessionEmpty, SessionHeader } from './session.tsx'
 import { CommandRun } from '../activity/command-run.tsx'
 import { HemeraToolCall } from '../activity/hemera-tool-call.tsx'
-import { CommandsPanel } from './commands-panel.tsx'
+import { GOING_ON } from './going-on-fixtures.ts'
+import type { GoingOnItem } from './going-on.ts'
+import { GoingOnLine } from './going-on-line.tsx'
+import { RunCommand } from './run-command.tsx'
 import { ContextView } from './context-view.tsx'
 import { SessionDetails, type SessionDetailsTab, type TouchedFile } from './session-details.tsx'
 import { StoppedTurn } from './stopped-turn.tsx'
@@ -266,38 +269,6 @@ const THREAD: ScrollerEntry[] = [
   },
 ]
 
-/** What the details of this Session hold: the runs it has made, and what it works from. */
-const COMMANDS = (
-  <CommandsPanel
-    runs={[
-      {
-        id: 'run-dev',
-        name: 'dev',
-        command: 'pnpm dev',
-        type: 'serve',
-        state: 'running',
-        folder: './sources/front',
-        url: 'http://localhost:5173/',
-        readiness: 'ready',
-        output: 'vite v7.1.4  ready in 412 ms',
-      },
-      {
-        id: 'run-check',
-        name: 'check',
-        command: 'pnpm check',
-        type: 'test',
-        state: 'failed',
-        folder: '.',
-        exitCode: 1,
-        output: 'Test Files  154 passed | 1 failed (155)',
-      },
-    ]}
-    onStop={fn()}
-    onOpenUrl={fn()}
-    onRun={fn()}
-  />
-)
-
 const CONTEXT = (
   <ContextView
     workspace={{ name: 'main', path: '/home/someone/projects/atlas' }}
@@ -341,8 +312,9 @@ interface PageProps {
   /** The plan the agent works to, and the files the turn has touched. */
   plan?: PlanEntry[] | undefined
   touched?: TouchedFile[] | undefined
+  /** What goes on in the Session, which the line under its title lists. */
+  goingOn?: readonly GoingOnItem[] | undefined
   /** What the details hold beside them, handed over already drawn. */
-  commands?: ReactNode
   context?: ReactNode
   /** The tab the details open on, which the renderer reads from what is happening. */
   openOn?: SessionDetailsTab | undefined
@@ -361,9 +333,9 @@ interface PageProps {
 function Page({
   plan = PLAN,
   touched = TOUCHED,
-  commands = COMMANDS,
+  goingOn = GOING_ON.few,
   context = CONTEXT,
-  openOn = 'commands',
+  openOn = 'activity',
   fresh = false,
 }: PageProps): ReactNode {
   // Whether the reader has the details open: the same state the renderer's page holds, and only
@@ -393,8 +365,27 @@ function Page({
               onCancelEditing={fn()}
               onArchive={fn()}
               archiveDisabled={fresh}
-              // What the turn has done, what the Session runs and what the agent works from.
+              // What the turn has done and what the agent works from.
               onOpenDetails={() => setDetails(true)}
+            />
+            {/* What goes on in the Session, right under its title (issue #219). */}
+            <GoingOnLine
+              items={goingOn}
+              emptyLabel="Nothing running in main"
+              onStop={fn()}
+              onOpenUrl={fn()}
+              onAddToCatalogue={fn()}
+              end={
+                <RunCommand
+                  catalogue={[
+                    { name: 'dev', command: 'pnpm dev', type: 'serve', running: true },
+                    { name: 'check', command: 'pnpm check', type: 'test', running: false },
+                  ]}
+                  workspace="main"
+                  onRunCommand={fn()}
+                  onRunOnce={fn()}
+                />
+              }
             />
           </div>
           {fresh ? (
@@ -484,7 +475,6 @@ function Page({
           plan={plan}
           files={touched}
           onSelectFile={fn()}
-          commands={commands}
           context={context}
           defaultTab={openOn}
         />
@@ -494,7 +484,7 @@ function Page({
 }
 
 const meta = {
-  tags: ['autodocs'],
+  tags: ['autodocs', 'updated'],
   title: 'Surfaces/Session',
   component: Page,
   parameters: { layout: 'fullscreen' },
@@ -550,7 +540,13 @@ export const Complete: Story = {
     await expect(
       canvas.getAllByRole('button', { name: 'http://localhost:5173/' }).length,
     ).toBeGreaterThan(0)
-    // The head's button opens the details, on the Commands tab since a command is running.
+    // What goes on is on the line under the title: the server with its address, the test.
+    const line = within(canvas.getByRole('group', { name: 'What goes on in this Session' }))
+    await expect(
+      line.getByRole('button', { name: 'dev, running on localhost:5173/' }),
+    ).toBeVisible()
+    await expect(line.getByRole('button', { name: 'Run' })).toBeVisible()
+    // The head's button opens the details, on what the turn has done.
     const button = canvas.getByRole('button', { name: 'Session details' })
     await userEvent.click(button)
     const dialog = await waitFor(() =>
@@ -561,11 +557,11 @@ export const Complete: Story = {
       expect(getComputedStyle(dialog).opacity).toBe('1')
     })
     const details = within(dialog)
-    await expect(details.getByRole('tab', { name: 'Commands' })).toHaveAttribute(
+    await expect(details.getByRole('tab', { name: 'Activity' })).toHaveAttribute(
       'aria-selected',
       'true',
     )
-    await expect(details.getByText('1 running')).toBeVisible()
+    await expect(details.queryByRole('tab', { name: 'Commands' })).toBeNull()
     // What the agent works from, on its own tab.
     await userEvent.click(details.getByRole('tab', { name: 'Context' }))
     await expect(details.getByText('Instructions')).toBeVisible()
@@ -708,14 +704,7 @@ export const Complete: Story = {
  */
 export const Empty: Story = {
   render: () => (
-    <Page
-      fresh
-      plan={[]}
-      touched={[]}
-      commands={<CommandsPanel runs={[]} onStop={fn()} onOpenUrl={fn()} onRun={fn()} />}
-      context={FRESH_CONTEXT}
-      openOn="context"
-    />
+    <Page fresh plan={[]} touched={[]} goingOn={[]} context={FRESH_CONTEXT} openOn="context" />
   ),
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
@@ -739,13 +728,11 @@ export const Empty: Story = {
     )
     await expect(details.getByText('Nothing has gone to the agent yet.')).toBeVisible()
     await expect(details.getByRole('button', { name: 'Tools · 2' })).toBeVisible()
-    // The two other tabs say they have nothing yet, rather than showing an empty panel.
+    // The other tab says it has nothing yet, rather than showing an empty panel.
     await userEvent.click(details.getByRole('tab', { name: 'Activity' }))
     await expect(
       details.getByText('No plan and no file touched in this Session yet.'),
     ).toBeVisible()
-    await userEvent.click(details.getByRole('tab', { name: 'Commands' }))
-    await expect(details.getByText('No command has run in this Session.')).toBeVisible()
     // The close button closes them, and the head's button is still there.
     await userEvent.click(details.getByRole('button', { name: 'Close' }))
     await waitFor(() => {

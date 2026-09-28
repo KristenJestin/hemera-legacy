@@ -208,6 +208,16 @@ async function textOf(selector: string): Promise<string> {
   )
 }
 
+/** How many things in this region stand running, by their dot, which the word names. */
+async function runningIn(selector: string): Promise<number> {
+  return await browser.execute(
+    (css: string) =>
+      document.querySelector(css)?.querySelectorAll('[role="img"][aria-label="Running"]').length ??
+      0,
+    selector,
+  )
+}
+
 /** What each item of a list of the page says, in order. */
 async function itemsOf(selector: string): Promise<string[]> {
   return await browser.execute(
@@ -493,7 +503,14 @@ describe('A URL is ready only after it answers', () => {
     expect(await textOf(SERVICES)).not.toContain('ready')
 
     writeFileSync(GO, '')
-    await awaitsIn(SERVICES, 'ready')
+    // Answering is the address becoming a link: the word it waited under goes, and no other
+    // word takes its place.
+    await browser.waitUntil(async () => !(await textOf(SERVICES)).includes('starting'), {
+      timeout: 20_000,
+      interval: 200,
+      timeoutMsg: 'the address never answered',
+    })
+    expect(await textOf(SERVICES)).not.toContain('ready')
   })
 })
 
@@ -517,13 +534,13 @@ describe('Two Workspaces run the same command as two instances', () => {
     await awaitsIn(SERVICES, 'dev')
     const here = await itemsOf(`${SERVICES} > li`)
     expect(here).toHaveLength(1)
-    expect(here[0]).toContain('Running')
+    expect(await runningIn(SERVICES)).toBe(1)
     expect(here[0]).toContain(loginForm.path)
 
     await show('main')
     const there = await itemsOf(`${SERVICES} > li`)
     expect(there).toHaveLength(1)
-    expect(there[0]).toContain('Running')
+    expect(await runningIn(SERVICES)).toBe(1)
     expect(there[0]).toContain(MAIN)
   })
 })
@@ -546,7 +563,7 @@ describe('Stopping one instance leaves the other running', () => {
     await show('main')
     const left = await itemsOf(`${SERVICES} > li`)
     expect(left).toHaveLength(1)
-    expect(left[0]).toContain('Running')
+    expect(await runningIn(SERVICES)).toBe(1)
 
     // Put away, so the port is free again once the suite ends.
     await press('Stop dev in main')

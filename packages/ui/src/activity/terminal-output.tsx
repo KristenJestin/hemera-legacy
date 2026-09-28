@@ -1,6 +1,6 @@
 import { type ReactNode, useEffect, useRef } from 'react'
 
-import { Badge } from '../components/badge/badge.tsx'
+import { StatusDot } from '../components/status-dot/status-dot.tsx'
 import { IconCommand } from '../icons.ts'
 import { Disclosure } from './disclosure.tsx'
 
@@ -77,7 +77,12 @@ export function TerminalOutput({
             <IconCommand size="sm" aria-hidden="true" />
           </span>
           <span className="truncate font-mono text-foreground">{terminalId}</span>
-          <Badge tone={released ? 'neutral' : 'info'}>{released ? 'Released' : 'Running'}</Badge>
+          <StatusDot
+            status={released ? 'cancelled' : 'running'}
+            size="sm"
+            label={released ? 'Released' : 'Running'}
+            title={released ? 'Released' : 'Running'}
+          />
         </span>
       }
     >

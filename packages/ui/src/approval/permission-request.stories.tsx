@@ -12,7 +12,7 @@ import { PermissionRequest } from './permission-request.tsx'
 const meta = {
   title: 'Blocks/Session/PermissionRequest',
   component: PermissionRequest,
-  tags: ['autodocs'],
+  tags: ['autodocs', 'updated'],
   parameters: { layout: 'padded' },
   args: {
     toolName: 'Edit',
@@ -173,10 +173,8 @@ export const HemeraToolOutsideTheRoot: Story = {
     label: 'Write file',
     subject: '../notes/todo.md',
     intent: 'asks to act outside the Workspace',
-    parameters: [
-      { label: 'Resolved path', value: '/home/ana/notes/todo.md' },
-      { label: 'Outside', value: '/home/ana/atlas' },
-    ],
+    // The path is what the card is about, so it is not said a second time as a parameter.
+    parameters: [{ label: 'Outside the Workspace', value: 'main' }],
     command: '/home/ana/notes/todo.md',
     options: [
       { optionId: 'allowed', kind: 'allow_once', name: 'Allow once' },
@@ -197,7 +195,7 @@ export const HemeraToolOutsideTheRoot: Story = {
       /mono|Fira/i,
     )
     await expect(canvas.getByRole('group', { name: 'Permission for Write file' })).toBeVisible()
-    await expect(canvas.getAllByText('/home/ana/notes/todo.md').length).toBeGreaterThan(0)
+    await expect(canvas.getAllByText('/home/ana/notes/todo.md')).toHaveLength(1)
     // No "always": the two answers are about this call.
     await expect(canvas.queryByText(/always/i)).toBeNull()
     await userEvent.click(canvas.getByRole('button', { name: 'Allow once' }))
@@ -224,5 +222,72 @@ export const AgentCallWithItsSubject: Story = {
     await expect(canvas.getByText('src/session/session.tsx')).toBeVisible()
     await expect(canvas.getByText('asks for your permission')).toBeVisible()
     await expect(canvas.queryByText('Edit session.tsx')).toBeNull()
+  },
+}
+
+/** The two answers of a question of Hemera's own tools: this call only, nothing remembered. */
+const ONCE = [
+  { optionId: 'allowed', kind: 'allow_once' as const, name: 'Allow once' },
+  { optionId: 'refused', kind: 'reject_once' as const, name: 'Refuse' },
+]
+
+/**
+ * A one-off in the Workspace (issue #239): asked about because the agent wrote the line, which the
+ * head says, and said to run in the Workspace — nothing about it is outside anything.
+ */
+export const OneOffInside: Story = {
+  args: {
+    toolName: 'commands_run',
+    label: 'Run command',
+    subject: 'sleep 120',
+    intent: 'asks to run a line the agent wrote',
+    parameters: [{ label: 'In', value: 'main' }],
+    command: 'sleep 120',
+    options: ONCE,
+    scope: undefined,
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await expect(canvas.getByText('asks to run a line the agent wrote')).toBeVisible()
+    await expect(canvas.getByText('In')).toBeVisible()
+    await expect(canvas.getByText('main')).toBeVisible()
+    await expect(canvas.queryByText(/outside/i)).toBeNull()
+    await expect(canvas.queryByText(/resolved/i)).toBeNull()
+  },
+}
+
+/** A one-off in one of the Project's repositories: the repository with its mark, then the path. */
+export const OneOffInARepository: Story = {
+  args: {
+    ...OneOffInside.args,
+    parameters: [
+      { label: 'In', value: 'v2', repository: { path: 'v2', icon: 'server' } },
+      { label: 'Path', value: 'scripts' },
+    ],
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const repository = canvas.getByText('v2').closest('dd')
+    // The repository wears its icon, as it does in the Project's settings.
+    await expect(repository?.querySelector('svg')).not.toBeNull()
+    await expect(canvas.getByText('scripts')).toBeVisible()
+    await expect(canvas.queryByText(/outside/i)).toBeNull()
+  },
+}
+
+/** A one-off the engine found outside the Workspace: said so, and where it would run. */
+export const OneOffOutside: Story = {
+  args: {
+    ...OneOffInside.args,
+    intent: 'asks to run a line the agent wrote, outside the Workspace',
+    parameters: [
+      { label: 'Outside the Workspace', value: 'main' },
+      { label: 'Path', value: '/home/ana/notes' },
+    ],
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await expect(canvas.getByText('Outside the Workspace')).toBeVisible()
+    await expect(canvas.getByText('/home/ana/notes')).toBeVisible()
   },
 }

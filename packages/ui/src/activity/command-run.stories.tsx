@@ -362,6 +362,20 @@ export const InAnotherWorkspace: Story = {
   play: aProjectScopedServiceIsOneInstanceForAll,
 }
 
+/** A run in one of the Project's repositories: its mark and its name, not a folder (#239). */
+export const InARepository: Story = {
+  args: {
+    name: 'build',
+    command: 'pnpm build',
+    repository: { path: 'v2', icon: null },
+    folder: '.',
+    output: '> v2@0.0.0 build',
+  },
+  play: async ({ canvasElement }) => {
+    await expect(within(canvasElement).getByText('v2')).toBeVisible()
+  },
+}
+
 /** A process the reader stopped: nothing exited, and the line says so. */
 export const Stopped: Story = {
   args: {

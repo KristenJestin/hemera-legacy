@@ -1,7 +1,8 @@
 import { cn } from 'cn'
 import type { ReactNode } from 'react'
 
-import { Badge, type BadgeProps } from '../components/badge/badge.tsx'
+import { Badge } from '../components/badge/badge.tsx'
+import { StatusDot, type StatusTone } from '../components/status-dot/status-dot.tsx'
 import { Button } from '../components/button/button.tsx'
 import { IconAlertTriangle, IconBookmarkPlus, IconPlayerStop } from '../icons.ts'
 import { claimOf, conflictOf, ServiceUrl } from '../workspace/service-list.tsx'
@@ -38,13 +39,20 @@ import { TerminalOutput } from './terminal-output.tsx'
  * and the variables Hemera gave it. The rest of a run is `RunDetails`' to show.
  */
 
-/** How a run is read at a glance: the state is the word, and the exit code is the proof. */
-const STATE: Record<CommandState, { word: string; tone: NonNullable<BadgeProps['tone']> }> = {
-  running: { word: 'Running', tone: 'info' },
+/**
+ * How a run is read at a glance: the dot says how it stands, in the tones every state of the
+ * application is said in, and beside it only what the dot cannot say — the code it exited with.
+ * Its word is the dot's name, heard by a screen reader and shown under the pointer.
+ */
+const STATE: Record<CommandState, { word: string; tone: StatusTone }> = {
+  running: { word: 'Running', tone: 'running' },
   finished: { word: 'Exited', tone: 'success' },
-  failed: { word: 'Exited', tone: 'destructive' },
-  stopped: { word: 'Stopped', tone: 'neutral' },
+  failed: { word: 'Exited', tone: 'failure' },
+  stopped: { word: 'Stopped', tone: 'cancelled' },
 }
+
+/** The code a run exited with, beside its dot, in the terminal's letters. */
+const EXIT = 'shrink-0 font-mono text-xs text-muted-foreground'
 
 /** The row: the fold, and the two controls a run has of its own. */
 const ROW = 'flex w-full min-w-0 items-start gap-2'
@@ -182,10 +190,11 @@ export function CommandRun({
             <span className={TYPE_ICON}>
               <TypeIcon size="sm" aria-hidden="true" />
             </span>
+            <StatusDot status={shown.tone} size="sm" label={shown.word} title={shown.word} />
             <span className={NAME}>{name}</span>
-            <Badge tone={shown.tone}>
-              {exitCode === undefined || running ? shown.word : `${shown.word} ${exitCode}`}
-            </Badge>
+            {exitCode !== undefined && !running && state !== 'stopped' && (
+              <span className={EXIT}>{`exit ${String(exitCode)}`}</span>
+            )}
             <Badge tone="neutral">{COMMAND_TYPE_LABELS[type]}</Badge>
             {oneOff && <Badge tone="neutral">One-off</Badge>}
             {workspace !== undefined && <Badge tone="neutral">{`in ${workspace}`}</Badge>}

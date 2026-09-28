@@ -34,7 +34,7 @@ const CHECK_OUTPUT = [
 ].join('\n')
 
 const meta = {
-  tags: ['autodocs'],
+  tags: ['autodocs', 'updated'],
   title: 'Blocks/Activity/CommandRun',
   component: CommandRun,
   parameters: { layout: 'padded' },
@@ -108,7 +108,8 @@ async function oneHeader(canvasElement: HTMLElement, word: string, name?: string
   await expect(folds + closed, 'more than one fold in the run').toBe(1)
   // The name is counted where it is not also the type or the command line.
   if (name !== undefined) await expect(canvas.getAllByText(name, { exact: true })).toHaveLength(1)
-  await expect(canvas.getAllByText(new RegExp(`^${word}`))).toHaveLength(1)
+  // How it stands is its dot, named by the word, and there is one.
+  await expect(canvas.getAllByRole('img', { name: word })).toHaveLength(1)
 }
 
 /** A server that is up: the address is on the line, and one press opens it. */
@@ -119,7 +120,7 @@ export const AppRunning: Story = {
     await oneHeader(canvasElement, 'Running', 'dev')
     // A running process is what the reader is waiting on: the run's line is open, and the output
     // is on the page without a press, as the log of that one line.
-    await expect(canvas.getByRole('button', { name: /^dev Running/ })).toHaveAttribute(
+    await expect(canvas.getByRole('button', { name: /^Running dev/ })).toHaveAttribute(
       'aria-expanded',
       'true',
     )
@@ -155,7 +156,7 @@ export const AddressUnanswered: Story = {
   args: { readiness: 'unanswered' },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    await expect(canvas.getByText('No answer after a minute; still starting')).toBeVisible()
+    await expect(canvas.getByText('no answer after a minute; still starting')).toBeVisible()
     await expect(canvas.queryByRole('button', { name: 'http://localhost:5173/' })).toBeNull()
   },
 }
@@ -189,9 +190,9 @@ export const PortConflict: Story = {
  */
 async function aRunShowsWhatItRan({ canvasElement }: StoryContext): Promise<void> {
   const canvas = within(canvasElement)
-  await expect(canvas.getByText('Exited 0')).toBeVisible()
+  await expect(canvas.getByText('exit 0')).toBeVisible()
   await expect(canvas.getByText('sources/api')).toBeVisible()
-  await userEvent.click(canvas.getByRole('button', { name: /Exited 0/ }))
+  await userEvent.click(canvas.getByRole('button', { name: /exit 0/ }))
   await expect(canvas.getByText('pnpm vitest run')).toBeVisible()
   const variables = canvas.getByRole('list', { name: 'Variables given' })
   await expect(within(variables).getByText('PORT')).toBeVisible()
@@ -231,8 +232,8 @@ export const CheckExitedClean: Story = {
   },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    await expect(canvas.getByText('Exited 0')).toBeVisible()
-    const row = canvas.getByRole('button', { name: /Exited 0/ })
+    await expect(canvas.getByText('exit 0')).toBeVisible()
+    const row = canvas.getByRole('button', { name: /exit 0/ })
     await expect(row).toHaveAttribute('aria-expanded', 'false')
     await oneHeader(canvasElement, 'Exited')
     // Opened, the output is right under the run's line: no second fold to open inside it.
@@ -256,7 +257,7 @@ export const CheckFailed: Story = {
   },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    await expect(canvas.getByText('Exited 1')).toBeVisible()
+    await expect(canvas.getByText('exit 1')).toBeVisible()
     // The run's line is open on a failure, and what it holds is the log itself.
     await oneHeader(canvasElement, 'Exited', 'test')
     await expect(canvas.getByText(/3 failed/)).toBeVisible()
@@ -280,7 +281,7 @@ export const OneOff: Story = {
     const canvas = within(canvasElement)
     await expect(canvas.getByText('One-off')).toBeVisible()
     await expect(canvas.getByText('Script')).toBeVisible()
-    await userEvent.click(canvas.getByRole('button', { name: /Exited 0/ }))
+    await userEvent.click(canvas.getByRole('button', { name: /exit 0/ }))
     await expect(canvas.getByText(/project_commands 1ms/)).toBeVisible()
     await oneHeader(canvasElement, 'Exited')
   },
@@ -299,10 +300,10 @@ async function aOneOffExecutionStaysOutOfTheCatalogue({
   // "A one-off execution stays out of the catalogue"
   const canvas = within(canvasElement)
   await expect(canvas.getByText('One-off')).toBeVisible()
-  await expect(canvas.getByText('Exited 0')).toBeVisible()
+  await expect(canvas.getByText('exit 0')).toBeVisible()
   // The offer sits beside the command line it is about, the first line of the run's body.
   await expect(canvas.queryByRole('button', { name: 'Add to catalogue' })).toBeNull()
-  await userEvent.click(canvas.getByRole('button', { name: /Exited 0/ }))
+  await userEvent.click(canvas.getByRole('button', { name: /exit 0/ }))
   const add = canvas.getByRole('button', { name: 'Add to catalogue' })
   await expect(add.parentElement).toContainElement(
     canvas.getByText('npx vitest run src/login.test.ts', { selector: 'p' }),
@@ -311,8 +312,8 @@ async function aOneOffExecutionStaysOutOfTheCatalogue({
   await expect(args.onAddToCatalogue).toHaveBeenCalledTimes(1)
   // Nothing else moved: still a one-off, still exited, still open, and nothing was stopped.
   await expect(canvas.getByText('One-off')).toBeVisible()
-  await expect(canvas.getByText('Exited 0')).toBeVisible()
-  await expect(canvas.getByRole('button', { name: /Exited 0/ })).toHaveAttribute(
+  await expect(canvas.getByText('exit 0')).toBeVisible()
+  await expect(canvas.getByRole('button', { name: /exit 0/ })).toHaveAttribute(
     'aria-expanded',
     'true',
   )
@@ -370,11 +371,11 @@ export const Stopped: Story = {
   },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    await expect(canvas.getByText('Stopped')).toBeVisible()
+    await expect(canvas.getByRole('img', { name: 'Stopped' })).toBeVisible()
     // The name is exact: the fold's own line carries the word "Stopped", and what is asked for
     // is the press that would end a process that is already over.
     await expect(canvas.queryByRole('button', { name: 'Stop' })).toBeNull()
-    await userEvent.click(canvas.getByRole('button', { name: /^dev Stopped/ }))
+    await userEvent.click(canvas.getByRole('button', { name: /^Stopped dev/ }))
     await expect(canvas.getByText(/\^C/)).toBeVisible()
     await oneHeader(canvasElement, 'Stopped', 'dev')
     // The console was released with the process: nothing says it again, not even as "Released".
@@ -412,7 +413,7 @@ export const AFailedRunFolds: Story = {
   },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    const row = canvas.getByRole('button', { name: /^bun Exited 1/ })
+    const row = canvas.getByRole('button', { name: /^Exited bun exit 1/ })
     await expect(row).toHaveAttribute('aria-expanded', 'true')
     await userEvent.click(row)
     await expect(row).toHaveAttribute('aria-expanded', 'false')
@@ -426,7 +427,7 @@ export const AFailedRunFolds: Story = {
 export const ARunningRunStaysOpen: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    const row = canvas.getByRole('button', { name: /^dev Running/ })
+    const row = canvas.getByRole('button', { name: /^Running dev/ })
     await userEvent.click(row)
     await expect(row).toHaveAttribute('aria-expanded', 'true')
     await expect(canvas.getByRole('log', { name: 'Output of dev' })).toBeVisible()
@@ -467,10 +468,10 @@ export const ARunThatEndsFolds: Story = {
   render: () => <EndingRun exitCode={0} />,
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    const row = canvas.getByRole('button', { name: /^check Running/ })
+    const row = canvas.getByRole('button', { name: /^Running check/ })
     await expect(row).toHaveAttribute('aria-expanded', 'true')
     await userEvent.click(canvas.getByRole('button', { name: 'End the run' }))
-    await expect(canvas.getByText('Exited 0')).toBeVisible()
+    await expect(canvas.getByText('exit 0')).toBeVisible()
     await expect(row).toHaveAttribute('aria-expanded', 'false')
     if (!movesLess()) {
       // Mid-exit: the line already says it is folded, and the output is still in the page
@@ -494,10 +495,10 @@ export const AFailedRunStaysOpen: Story = {
   render: () => <EndingRun exitCode={1} />,
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    const row = canvas.getByRole('button', { name: /^check Running/ })
+    const row = canvas.getByRole('button', { name: /^Running check/ })
     await expect(row).toHaveAttribute('aria-expanded', 'true')
     await userEvent.click(canvas.getByRole('button', { name: 'End the run' }))
-    await expect(canvas.getByText('Exited 1')).toBeVisible()
+    await expect(canvas.getByText('exit 1')).toBeVisible()
     await expect(row).toHaveAttribute('aria-expanded', 'true')
     await expect(canvas.getByText(/3 failed/)).toBeVisible()
     await userEvent.click(row)

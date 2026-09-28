@@ -50,6 +50,7 @@ import { Variables } from '../workspaces/variables.ts'
 import { mutate } from '../transaction.ts'
 import { ToolAccess } from './access.ts'
 import {
+  OUTPUT_PAGE_LINES,
   RUN_WAIT_MS,
   THREAD_TAIL,
   type ToolArguments,
@@ -1019,7 +1020,16 @@ export const toolCatalogueLayer: Layer.Layer<
             }
             const run = read
             yield* answered(commands.told(asked.sessionId, [run]))
-            const tail = run.output.split('\n').slice(-200).join('\n')
+            // A page of lines, the last by default or from the line asked for, and which of how
+            // many it is, so the lines before it can be asked for too (issue #238).
+            const lines = run.output.replace(/\n$/, '').split('\n')
+            const first =
+              call.arguments.from === undefined
+                ? Math.max(1, lines.length - OUTPUT_PAGE_LINES + 1)
+                : Math.min(call.arguments.from, lines.length)
+            const page = lines.slice(first - 1, first - 1 + OUTPUT_PAGE_LINES)
+            const shown = page.join('\n')
+            const whole = first === 1 && page.length === lines.length
             return {
               ok: true,
               summary: `${run.name} is ${run.state}${run.dropped === 0 ? '' : ` (${run.dropped} bytes dropped)`}`,
@@ -1027,7 +1037,10 @@ export const toolCatalogueLayer: Layer.Layer<
                 `run ${run.id}: ${run.name} — ${run.state}${run.pid === null ? '' : ` (pid ${run.pid})`}`,
                 run.url === null ? 'no address published' : `address: ${run.url}`,
                 run.exitCode === null ? 'still running' : `exit code ${run.exitCode}`,
-                tail === '' ? 'nothing printed' : `output:\n${tail}`,
+                ...(run.output === '' || whole
+                  ? []
+                  : [`lines ${first} to ${first + page.length - 1} of ${lines.length}`]),
+                run.output === '' ? 'nothing printed' : `output:\n${shown}`,
               ].join('\n'),
               paths: [],
             }

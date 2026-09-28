@@ -38,6 +38,7 @@ import { mkdir, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/p
 import { basename, dirname, join, relative } from 'node:path'
 
 import { HeldWords } from '../agents/held.ts'
+import { SessionModes, modeAsks } from '../agents/modes.ts'
 import { AgentNotices } from '../agents/notices.ts'
 import { Commands } from '../commands/service.ts'
 import { Projects } from '../projects.ts'
@@ -269,6 +270,7 @@ export const toolCatalogueLayer: Layer.Layer<
   | ToolAccess
   | ToolPermissions
   | HeldWords
+  | SessionModes
   | AgentNotices
   | Specs
   | Database
@@ -283,6 +285,7 @@ export const toolCatalogueLayer: Layer.Layer<
     const database = yield* Database
     const access = yield* ToolAccess
     const held = yield* HeldWords
+    const modes = yield* SessionModes
     const notices = yield* AgentNotices
     const variables = yield* Variables
     const specs = yield* Specs
@@ -616,6 +619,35 @@ export const toolCatalogueLayer: Layer.Layer<
         return { allowed: true as const, path: where }
       })
 
+    /**
+     * The line a one-off leaves when it ran without a question, the mode it followed said: one
+     * quiet decision, where an asked one leaves a block and its answer (#242).
+     */
+    const unasked = (asked: ToolCall, root: string, where: string, line: string, mode: string) => {
+      const id = crypto.randomUUID()
+      return inThread(asked.sessionId, {
+        role: 'hemera',
+        kind: 'permission_decision',
+        body: `ran without asking, ${mode} mode`,
+        payload: JSON.stringify({
+          toolCallId: id,
+          optionId: 'allowed',
+          tool: asked.tool,
+          named: where,
+          resolved: where,
+          root,
+          // Where it ran, as an asked question says it (#239): a mode only ever skips the
+          // question inside the root.
+          inside: true,
+          line,
+          mode,
+          answer: 'allowed',
+        }),
+        correlationId: `decision:${id}`,
+        state: 'completed',
+      }).pipe(Effect.catch(() => Effect.void))
+    }
+
     /** Which run a call means, when it named none: the only one this Session has going. */
     /**
      * Which run a call is about: the one it names, else the only one running, else — when the
@@ -904,8 +936,9 @@ export const toolCatalogueLayer: Layer.Layer<
               return failed("could not read the Project's main", 'the Workspace main did not read')
             }
             // A catalogue command is the user's own line, and inside the root it runs on its own.
-            // A one-off is a line the agent wrote: whatever folder it names, the human sees the
-            // line and decides before anything runs (D5-09) — one question, not one per rule.
+            // A one-off is a line the agent wrote: the human sees the line and decides before
+            // anything runs (D5-09) — one question, not one per rule — unless it stays inside the
+            // root and the Session's mode is one where the agent's own tools do not ask (#242).
             const inside =
               entry !== undefined
                 ? folder === '.'
@@ -917,6 +950,13 @@ export const toolCatalogueLayer: Layer.Layer<
                       return { allowed: false as const, reason: place.reason }
                     }
                     const oneOff = line ?? ''
+                    if (place.inside) {
+                      const standing = yield* modes.standing(asked.sessionId)
+                      if (standing !== null && !modeAsks(standing)) {
+                        yield* unasked(asked, root, place.path, oneOff, standing.name)
+                        return { allowed: true as const, path: place.path }
+                      }
+                    }
                     return yield* askHuman(
                       asked,
                       root,

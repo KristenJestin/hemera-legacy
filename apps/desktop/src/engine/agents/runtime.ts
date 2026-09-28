@@ -67,6 +67,7 @@ import {
 import { AgentDirectories, bareModeOf, bareOptionsOf, writtenFiles } from './bare.ts'
 import { Discovery, type ResolvedAgent, type UnusableAgentError } from './discovery.ts'
 import { HeldWords } from './held.ts'
+import { SessionModes } from './modes.ts'
 import { AgentNotices } from './notices.ts'
 import { Pool, SWEEP_EVERY } from './pool.ts'
 import { rebuiltContext } from './resume.ts'
@@ -433,6 +434,8 @@ function rankOf(category: string | null): number {
 /** One running agent, as the runtime keeps it. */
 interface Live {
   readonly connection: AgentConnection
+  /** Whose agent this is, which is what its modes are read against (#242). */
+  readonly provider: AgentProvider
   readonly process: SupervisedProcess
   /**
    * The agent's events, waiting to be written.
@@ -714,6 +717,7 @@ export const runtimeLayer = Layer.effect(
     const commands = yield* Commands
     const permissions = yield* ToolPermissions
     const heldWords = yield* HeldWords
+    const sessionModes = yield* SessionModes
     const pool = yield* Pool
     // The variables of a Session's Workspace, which its agent is started with (D8-06).
     const variables = yield* Variables
@@ -860,6 +864,19 @@ export const runtimeLayer = Layer.effect(
         if (held !== undefined) yield* flush(sessionId, held, true).pipe(Effect.ignore)
       }),
     )
+
+    // Hemera's own tools follow the mode the agent stands on (#242): what it last reported, which
+    // a `current_mode_update` and a choice in the composer both move, read at every call.
+    sessionModes.heldBy((sessionId) => {
+      const held = live.get(sessionId)
+      if (held === undefined) return null
+      const mode = held.connection
+        .options()
+        .find((option) => option.category === 'mode' || option.id === 'mode')
+      if (mode === undefined) return null
+      const name = mode.values.find((value) => value.id === mode.value)?.name ?? mode.value
+      return { agent: held.provider, mode: mode.value, name }
+    })
 
     /** One line, written as a `note`: what Hemera did that the agent did not say. */
     const note = (sessionId: string, turn: Turn | undefined, body: string, reason: string) =>
@@ -1864,6 +1881,7 @@ export const runtimeLayer = Layer.effect(
 
         const started: Live = {
           connection,
+          provider,
           process,
           queue,
           cwd,

@@ -337,8 +337,6 @@ export interface AgentContext {
   repositories: readonly RunRepository[]
   /** Opens the address a run published, in the browser: this window is not one. */
   onOpenUrl: (url: string) => void
-  /** Stops a run and everything it started. */
-  onStopRun: (runId: string) => void
   /** Hands the agent again what waits for it, after a delivery it did not take (issue #211). */
   onHandOver: () => void
   /**
@@ -351,8 +349,6 @@ export interface AgentContext {
   onAcceptProposal: (proposalId: string) => void
   /** Leaves it out of the catalogue, and says so on the proposal. */
   onDeclineProposal: (proposalId: string) => void
-  /** Keeps a one-off run in the catalogue, which is the human's to do (D8-11). */
-  onAddToCatalogue: (run: Run) => void
   /** What the Spec entries of the thread are drawn with. */
   spec: SpecContext
 }
@@ -591,20 +587,17 @@ export function drawEntry(entry: SessionEntry, context: AgentContext): ReactNode
 
   if (entry.kind === 'command_run') {
     // The run as the window last heard it, where it has: its address and what it printed arrive
-    // between the two writes of its entry, and the panel beside the thread reads the same run.
+    // between the two writes of its entry, and the line in the head reads the same run. One quiet
+    // line of the thread (issue #237): what it offers — Stop, Run again, keep it — is its chip's.
     const drawn = commandRunOf(entry, context.runs, context.root, context.repositories)
     if (drawn === null) return null
     const { runId, ...shown } = drawn
-    // What is kept is the run as it ran — its line and its folder — so only a run the window has
-    // heard of can be added; the block offers it on a one-off alone.
     const heard = context.runs.find((one) => one.id === runId)
     return (
       <CommandRun
         {...shown}
         onOpenUrl={context.onOpenUrl}
-        onStop={runId === null ? undefined : () => context.onStopRun(runId)}
         workspace={heard === undefined ? undefined : elsewhereOf(heard, context.workspace)}
-        onAddToCatalogue={heard === undefined ? undefined : () => context.onAddToCatalogue(heard)}
       />
     )
   }

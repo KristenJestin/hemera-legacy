@@ -554,12 +554,10 @@ export function SessionPage({
       root,
       repositories,
       onOpenUrl,
-      onStopRun,
       onHandOver,
       reportedCall: (toolCallId) => reported.get(toolCallId),
       onAcceptProposal: (proposalId) => deciding(onAcceptProposal(proposalId)),
       onDeclineProposal: (proposalId) => deciding(onDeclineProposal(proposalId)),
-      onAddToCatalogue: (run) => deciding(onAddToCatalogue(run)),
       spec: {
         thread,
         specId: session.specId,

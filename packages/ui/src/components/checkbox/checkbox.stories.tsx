@@ -215,14 +215,9 @@ export const ReducedMotion: Story = {
     const unchecked = await framesUntil(box, 0)
     expect(unchecked.drawn.filter((one) => one > 0 && one < 1)).toEqual([])
     expect(unchecked.drawn.at(-1)).toBe(0)
-    const restore = await emulateReducedMotion()
-    if (restore === null) return
-    try {
-      await waitFor(() => {
-        expect(getComputedStyle(box).transitionProperty).toBe('none')
-      })
-    } finally {
-      await restore()
-    }
+    if (!(await emulateReducedMotion())) return
+    await waitFor(() => {
+      expect(getComputedStyle(box).transitionProperty).toBe('none')
+    })
   },
 }

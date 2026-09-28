@@ -20,6 +20,7 @@ import { registryLayer, updaterLayer } from './agents/installer.ts'
 import { QUALIFIED_VARIABLE, agentDirectoriesLayer, qualifiedBySuite } from './agents/bare.ts'
 import { acpTracesLayer } from './agents/trace.ts'
 import { heldWordsLayer } from './agents/held.ts'
+import { sessionModesLayer } from './agents/modes.ts'
 import { AgentNotices } from './agents/notices.ts'
 import type { Notice } from './agents/notices.ts'
 import { clockLayer, poolLayer } from './agents/pool.ts'
@@ -262,6 +263,7 @@ function servicesOf(
     // What an agent holds in memory, written before a call or a run is: the runtime hands its
     // flush to this very instance, which is why the same layer is given to both.
     Layer.provide(heldWordsLayer),
+    Layer.provide(sessionModesLayer),
   )
   // What a Session is provided with, and the book of which agents are live (D6-07, D5-05).
   // The context names each repository's branch, read through the machine's `git` (D8-08).
@@ -289,6 +291,7 @@ function servicesOf(
     Layer.provide(processes),
     Layer.provide(agents),
     Layer.provide(heldWordsLayer),
+    Layer.provide(sessionModesLayer),
     // A directory of Hemera's per agent, inside the data folder, where its bare means is written.
     Layer.provide(agentDirectoriesLayer(start.directory)),
     // What an agent and Hemera said to each other, beside the diagnostic, when asked (#131).

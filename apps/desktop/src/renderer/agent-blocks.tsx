@@ -326,6 +326,8 @@ export interface AgentContext {
   runs: readonly Run[]
   /** The name of the Session's Workspace, which a run elsewhere is told apart from (D8-08). */
   workspace: string | undefined
+  /** The Workspace root, which a run's folder is said relative to; null until known. */
+  root: string | null
   /** The Project's repositories, which a place is said as rather than as a folder (#239). */
   repositories: readonly RunRepository[]
   /** Opens the address a run published, in the browser: this window is not one. */
@@ -642,7 +644,7 @@ export function drawEntry(entry: SessionEntry, context: AgentContext): ReactNode
   if (entry.kind === 'command_run') {
     // The run as the window last heard it, where it has: its address and what it printed arrive
     // between the two writes of its entry, and the panel beside the thread reads the same run.
-    const drawn = commandRunOf(entry, context.runs)
+    const drawn = commandRunOf(entry, context.runs, context.root, context.repositories)
     if (drawn === null) return null
     const { runId, ...shown } = drawn
     // What is kept is the run as it ran — its line and its folder — so only a run the window has

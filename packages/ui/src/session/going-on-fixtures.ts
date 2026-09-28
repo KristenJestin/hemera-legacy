@@ -88,6 +88,39 @@ const ONE_OFF: GoingOnRun = {
   at: '10:46',
 }
 
+/** A run in `v2`, which the Project declares as one of its repositories, at its base (#239). */
+const IN_REPOSITORY: GoingOnRun = {
+  kind: 'run',
+  id: 'run-in-repository',
+  name: 'build',
+  command: 'pnpm build',
+  type: 'build',
+  state: 'running',
+  repository: { path: 'v2', icon: null },
+  folder: '.',
+  workspace: 'csv-export',
+  output: '> v2@0.0.0 build\n> vite build',
+  startedBy: 'user',
+  environment: {},
+  at: '10:47',
+}
+
+/** A run in `tools`, a folder of the Workspace that is none of the Project's repositories. */
+const IN_FOLDER: GoingOnRun = {
+  kind: 'run',
+  id: 'run-in-folder',
+  name: 'seed',
+  command: 'node seed.ts',
+  type: 'script',
+  state: 'running',
+  folder: 'tools',
+  workspace: 'csv-export',
+  output: 'Seeding 120 invoices…',
+  startedBy: 'user',
+  environment: {},
+  at: '10:48',
+}
+
 const VITEST: GoingOnShell = {
   kind: 'shell',
   id: 'shell-vitest',
@@ -154,9 +187,13 @@ const REVIEW: GoingOnAgent = {
 }
 
 /** The cases the line is drawn in, each in the order its items began. */
-export const GOING_ON: Record<'few' | 'many' | 'failed' | 'oneOff', readonly GoingOnItem[]> = {
+export const GOING_ON: Record<
+  'few' | 'many' | 'failed' | 'oneOff' | 'places',
+  readonly GoingOnItem[]
+> = {
   few: [DEV, TEST, VITEST],
   many: [DEV, TEST, LINT, VITEST, RG, GIT, EXPLORE, REVIEW],
   failed: [DEV, TYPECHECK, VITEST, EXPLORE],
   oneOff: [DEV, ONE_OFF],
+  places: [IN_REPOSITORY, IN_FOLDER],
 }

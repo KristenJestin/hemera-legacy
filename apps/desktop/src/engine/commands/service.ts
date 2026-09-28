@@ -832,9 +832,10 @@ export const commandsLayer = Layer.effect(
               .where(eq(commandRuns.id, id))
               .pipe(Effect.mapError(failed('reading the run')))
             if (existing.length === 0) {
+              // Its agent was told nothing of it yet (issue #238); a rewrite leaves that alone.
               yield* transaction
                 .insert(commandRuns)
-                .values(row)
+                .values({ ...row, told: 'none' })
                 .pipe(Effect.mapError(failed('writing the run')))
             } else {
               yield* transaction

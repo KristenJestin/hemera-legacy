@@ -14,7 +14,7 @@ import { mkdtempSync, realpathSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
-import { Effect } from 'effect'
+import { Effect, Fiber } from 'effect'
 import { z } from 'zod'
 import type { ContentBlock } from '@agentclientprotocol/sdk'
 
@@ -24,7 +24,7 @@ import { fakeAgent } from '#engine/agents/fake.ts'
 import { AgentRuntime } from '#engine/agents/runtime.ts'
 import { runFromPanel } from '#engine/commands/panel.ts'
 import { Commands } from '#engine/commands/service.ts'
-import { aSessionOn, threadOf, toolApplication, until } from './application.ts'
+import { aSessionOn, gated, pause, threadOf, toolApplication, until } from './application.ts'
 
 let dataFolder: string
 let workspace: string
@@ -189,6 +189,103 @@ describe('A run the user started from the line reaches the agent with the next p
     expect(text).toMatch(/\d+ earlier lines? not shown/)
     expect(text).toContain(`commands_output`)
     expect(text).toContain(run.id)
+  })
+})
+
+describe('A run the user started from a chip reaches the agent with the next prompt', () => {
+  test('a command of the catalogue, by its name, goes as a run from the line does', async () => {
+    const agent = answering()
+
+    const run = await toolApplication(dataFolder)(agent)(
+      Effect.gen(function* () {
+        const runtime = yield* AgentRuntime
+        const commands = yield* Commands
+        const session = yield* aSessionOn(workspace, 'claude')
+        yield* inCatalogue(session.projectId, 'check', FAILS, 'test')
+        yield* runtime.prompt(session.id, 'hello')
+        const started = yield* runFromPanel(session.id, 'check', undefined)
+        const ended = yield* commands.awaited(session.id, started.id, 5_000)
+        yield* runtime.prompt(session.id, 'did the check pass?')
+        return ended
+      }),
+    )
+
+    const texts = allRuns(agent.answers.blocks)
+    expect(texts).toHaveLength(1)
+    expect(texts[0]).toContain(run.id)
+    expect(texts[0]).toContain('name: check')
+    expect(texts[0]).toContain('the user')
+    expect(texts[0]).toContain('exit code 1')
+    expect(texts[0]).toContain('uv not found')
+  })
+})
+
+describe('A run that ends during a turn arrives with the next prompt', () => {
+  test('nothing is pushed into the turn nor sent alone after it; the next prompt carries it once', async () => {
+    const gate = gated(1)
+    const agent = fakeAgent({
+      steps: [
+        { does: 'says', text: 'working' },
+        { does: 'says', text: 'done' },
+      ],
+      between: gate.between,
+    })
+
+    const seen = await toolApplication(dataFolder)(agent)(
+      Effect.gen(function* () {
+        const runtime = yield* AgentRuntime
+        const session = yield* aSessionOn(workspace, 'claude')
+        const turn = yield* Effect.forkScoped(runtime.prompt(session.id, 'start'))
+        yield* until(threadOf(session.id), (entries) =>
+          entries.some((entry) => entry.body.includes('working')),
+        )
+        // The user runs a line while the agent works, and it ends before the turn does.
+        const run = yield* ranFromTheLine(session.id, FAILS)
+        gate.carryOn()
+        yield* Fiber.join(turn)
+        // Its end is a safe point: a run is no reason for a turn of its own.
+        yield* pause(200)
+        const afterTheTurn = agent.answers.prompts.length
+        yield* runtime.prompt(session.id, 'what happened?')
+        return { run, afterTheTurn }
+      }),
+    )
+
+    expect(seen.afterTheTurn).toBe(1)
+    expect(runsIn(agent.answers.blocks[0])).toEqual([])
+    const texts = allRuns(agent.answers.blocks)
+    expect(texts).toHaveLength(1)
+    expect(texts[0]).toContain(seen.run.id)
+    expect(agent.answers.prompts.at(-1)).toBe('what happened?')
+  })
+})
+
+describe('The rest of a long output can be read', () => {
+  test('the lines left out of the delivery are read with commands_output from the first', async () => {
+    const agent = fakeAgent({
+      turns: [
+        [{ does: 'says', text: 'hello' }],
+        [{ does: 'uses', call: 'commands_output', arguments: { from: 1 } }],
+      ],
+    })
+
+    await toolApplication(dataFolder)(agent)(
+      Effect.gen(function* () {
+        const runtime = yield* AgentRuntime
+        const session = yield* aSessionOn(workspace, 'claude')
+        yield* runtime.prompt(session.id, 'hello')
+        yield* ranFromTheLine(session.id, VERBOSE)
+        yield* runtime.prompt(session.id, 'what did it print first?')
+      }),
+    )
+
+    const [text = ''] = allRuns(agent.answers.blocks)
+    expect(text).toContain('commands_output')
+    expect(text).toContain('from: 1')
+    const read = agent.answers.used[0]?.text ?? ''
+    expect(read).toContain('line 1\n')
+    expect(read).toContain('lines 1 to 200 of 500')
+    expect(read).not.toContain('line 201')
   })
 })
 

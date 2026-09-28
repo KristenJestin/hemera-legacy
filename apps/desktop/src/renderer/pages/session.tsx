@@ -37,6 +37,10 @@ import {
   type MessageState,
   type NoticeGroup,
   type NoticeItem,
+  type RepositoryLine,
+  SessionCatalogue,
+  type SessionCatalogueProps,
+  SessionHistory,
   type OfferedAgent,
   type PermissionOption,
   type RunRepository,
@@ -67,6 +71,7 @@ import {
 } from '../agent-blocks.tsx'
 import { agentShellCallsOf, commandProposalOf, foldedCallsOf } from '../agent-tool-payloads.ts'
 import { whenOf } from '../journal-lines.ts'
+import { type CommandWrite, commandLineOf, commandWriteOf } from '../project-lines.ts'
 import { NOTICE_KINDS, type NoticeKind, waitingAs } from '../notices.ts'
 import {
   contextListsOf,
@@ -348,6 +353,22 @@ export interface SessionPageProps {
   onDeclineProposal: (proposalId: string) => Promise<string | null>
   /** Keeps a one-off run in the catalogue; answers the engine's refusal, or null (D8-11). */
   onAddToCatalogue: (run: CommandRun) => Promise<string | null>
+  /**
+   * The catalogue as the Session's details edit it (issue #237): the Project's repositories a
+   * command may run from, whether Portless is here, the Project's name, and the writes.
+   */
+  catalogueEditing: CatalogueEditing
+}
+
+/** What the Catalogue tab of the details needs to edit the Project's catalogue (issue #237). */
+export interface CatalogueEditing {
+  repositories: readonly RepositoryLine[]
+  portlessInstalled: boolean
+  projectName: string
+  /** Writes a command, new or of the same name; answers the engine's refusal, or null. */
+  onSave: (command: CommandWrite, existing: boolean) => Promise<string | null>
+  onRemove: (name: string) => void
+  onListFolder: NonNullable<SessionCatalogueProps['onListFolder']>
 }
 
 export function SessionPage({
@@ -388,6 +409,7 @@ export function SessionPage({
   onAcceptProposal,
   onDeclineProposal,
   onAddToCatalogue,
+  catalogueEditing,
 }: SessionPageProps): ReactNode {
   const [value, setValue] = useState('')
   const [files, setFiles] = useState<string[]>([])
@@ -770,6 +792,8 @@ export function SessionPage({
   const plan = planOf(thread)
   // The commands the agent ran in its own shell, which the line and the history list (#219, #237).
   const shells = agentShellCallsOf(thread)
+  // Everything the Session ran, in the order it began: the line's and the history's (issue #237).
+  const goingOn = goingOnOf(commandRuns, shells, root, workspace?.name, repositories)
   const touched = touchedOf(thread)
   const usage = usageOf(thread)
   // Which tabs have something to show, which is what the details open on.
@@ -862,7 +886,7 @@ export function SessionPage({
             onOpenDetails={() => setDetailsOpen(true)}
           >
             <GoingOnLine
-              items={lineOf(goingOnOf(commandRuns, shells, root, workspace?.name, repositories), {
+              items={lineOf(goingOn, {
                 ...marksOf(session.id, lines),
                 before: overBefore(commandRuns, shells, opened.current),
               })}
@@ -1016,6 +1040,38 @@ export function SessionPage({
         files={touched}
         onSelectFile={onOpenFile}
         onOpenTrace={traced ? () => void openTrace(session.id) : undefined}
+        // Everything the Session ran, whoever started it, in order (issue #237): the line keeps
+        // what matters now, and this keeps the whole trace.
+        history={
+          <SessionHistory
+            items={goingOn}
+            onRunAgain={(run) => onRunAgain(run.id)}
+            onStop={(run) => onStopRun(run.id)}
+          />
+        }
+        // The Project's catalogue, seen, run and edited without leaving the Session (issue #237).
+        catalogue={
+          session.provider === null ? undefined : (
+            <SessionCatalogue
+              commands={catalogue.map(commandLineOf)}
+              running={catalogue
+                .filter((command) =>
+                  commandRuns.some(
+                    (run) => run.commandId === command.id && run.state === 'running',
+                  ),
+                )
+                .map((command) => command.name)}
+              repositories={catalogueEditing.repositories}
+              portlessInstalled={catalogueEditing.portlessInstalled}
+              projectName={catalogueEditing.projectName}
+              onRun={(command) => onRunCommand(command.name)}
+              onAdd={async (line) => await catalogueEditing.onSave(commandWriteOf(line), false)}
+              onUpdate={async (line) => await catalogueEditing.onSave(commandWriteOf(line), true)}
+              onRemove={(command) => catalogueEditing.onRemove(command.name)}
+              onListFolder={catalogueEditing.onListFolder}
+            />
+          )
+        }
         // What the agent works from, its Workspace, instructions and tools (D6-10), once the engine
         // has said it and the Session's Workspace is known: no root is guessed before (D8-08).
         context={

@@ -316,6 +316,27 @@ export function activityOf(
   return { state: 'thinking', thought }
 }
 
+/** What a turn that has just been asked for is doing, before anything of it has arrived. */
+const THINKING: Activity = { state: 'thinking' }
+
+/**
+ * What the row beside the meter says (design D17-04): what the running turn is doing, or how the
+ * last one ended, or nothing in a thread no turn has ended in yet.
+ *
+ * A Session is never running on a thread that ends on a `turn` entry it just heard: that entry
+ * ends the turn in the same state (issue #223). So an end read while running is the turn before
+ * the message just said, which the engine has not echoed yet: the turn asked for is thinking.
+ */
+export function turnRowOf(
+  thread: readonly SessionEntry[],
+  running: boolean,
+  latest: string | null = null,
+): Activity | null {
+  const read = activityOf(thread, latest)
+  if (running) return hasEnded(read) ? THINKING : read
+  return hasEnded(read) ? read : null
+}
+
 /**
  * The part of the Spec the running turn is writing now: the target of a `spec_write` call it has
  * not finished, or null (issue #185). Read off the thread like the row's "Writing the Spec", and
@@ -429,10 +450,15 @@ export function listenToAgents(): () => void {
   const stop = window.hemera.on((event: EngineEvent) => {
     if (event.event === 'entry' && event.entry !== null) {
       const held = state.sessions.get(event.sessionId) ?? QUIET
+      // A `turn` entry is the turn over, and the row says "Done" from it: the Stop goes in the
+      // same state, never one message later with the `turn` event that follows it (issue #223).
+      const ended = event.entry.kind === 'turn'
+      if (ended) announced.delete(event.sessionId)
       changed(event.sessionId, {
         entries: withEntry(held.entries, event.entry),
         latest: event.entry.id,
         heardAt: Date.now(),
+        running: held.running && !ended,
       })
       return
     }

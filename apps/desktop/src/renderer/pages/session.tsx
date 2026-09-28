@@ -539,6 +539,7 @@ export function SessionPage({
       onDecide,
       runs: commandRuns,
       workspace: workspace?.name,
+      root,
       repositories,
       onOpenUrl,
       onStopRun,
@@ -772,7 +773,13 @@ export function SessionPage({
             Session nothing answers has no agent to lend a command to, and offers no Run.
           */}
           <GoingOnLine
-            items={goingOnOf(commandRuns, agentShellCallsOf(thread), root, workspace?.name)}
+            items={goingOnOf(
+              commandRuns,
+              agentShellCallsOf(thread),
+              root,
+              workspace?.name,
+              repositories,
+            )}
             emptyLabel={`Nothing running in ${workspace?.name ?? 'main'}`}
             onStop={(run) => onStopRun(run.id)}
             onOpenUrl={onOpenUrl}

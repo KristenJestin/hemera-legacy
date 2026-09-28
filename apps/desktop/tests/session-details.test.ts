@@ -675,3 +675,44 @@ describe('The agent runs a command in its own shell, and the line shows it', () 
     ])
   })
 })
+
+describe('A run is said in the repository it runs in', () => {
+  const repositories = [
+    { path: 'v2', icon: null },
+    { path: 'sources/api', icon: 'server' as const },
+  ]
+
+  test('a run in a repository names the repository, and a folder under it relative to it', () => {
+    const items = goingOnOf(
+      [
+        aRun('r1', '/home/kris/music-manager/v2', 'running', 'c1'),
+        aRun('r2', '/home/kris/music-manager/sources/api/scripts', 'exited', null),
+      ],
+      [],
+      '/home/kris/music-manager',
+      'main',
+      repositories,
+    )
+    expect(items[0]).toMatchObject({ repository: { path: 'v2', icon: null }, folder: '.' })
+    expect(items[1]).toMatchObject({
+      repository: { path: 'sources/api', icon: 'server' },
+      folder: 'scripts',
+    })
+  })
+
+  test('a run in a plain folder is said as a folder, and no repository', () => {
+    const items = goingOnOf(
+      [
+        aRun('r1', '/home/kris/music-manager/tools', 'running', 'c1'),
+        // A folder whose name only begins like a repository's is not in it.
+        aRun('r2', '/home/kris/music-manager/v2-old', 'running', 'c1'),
+      ],
+      [],
+      '/home/kris/music-manager',
+      'main',
+      repositories,
+    )
+    expect(items[0]).toMatchObject({ repository: undefined, folder: 'tools' })
+    expect(items[1]).toMatchObject({ repository: undefined, folder: 'v2-old' })
+  })
+})

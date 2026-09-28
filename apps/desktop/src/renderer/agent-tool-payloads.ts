@@ -575,6 +575,9 @@ export interface CommandRunDrawn extends RunFacts {
   readonly command: string
   readonly type: CommandType
   readonly state: CommandState
+  /** The Project's repository it runs in, or undefined for a folder that is none of them. */
+  readonly repository: RunRepository | undefined
+  /** Under the repository when it is in one, under the root otherwise, or as it ran. */
   readonly folder: string
   readonly url: string | undefined
   readonly exitCode: number | undefined
@@ -594,6 +597,8 @@ export interface CommandRunDrawn extends RunFacts {
 export function commandRunOf(
   entry: SessionEntry,
   live: readonly CommandRun[] = [],
+  root: string | null = null,
+  repositories: readonly RunRepository[] = [],
 ): CommandRunDrawn | null {
   const read = readPayload(commandRunPayloadSchema, entry.payload)
   if (read === null) return null
@@ -602,13 +607,16 @@ export function commandRunOf(
   const state = heard?.state ?? read.state
   const url = heard === undefined ? read.url : heard.url
   const exitCode = heard === undefined ? read.exitCode : heard.exitCode
+  // Said in the Project's words: its repository, or a folder under the root (issue #239).
+  const { repository, folder } = runPlaceOf(cwd, root, repositories)
   return {
     runId: runId ?? null,
     name,
     command: line,
     type,
     state: state === 'exited' ? 'finished' : state,
-    folder: cwd,
+    repository,
+    folder,
     url: url ?? undefined,
     exitCode: exitCode ?? undefined,
     oneOff,

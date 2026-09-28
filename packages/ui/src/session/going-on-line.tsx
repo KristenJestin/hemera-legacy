@@ -21,6 +21,7 @@ import {
   GoingOnDetails,
   GoingOnOutput,
 } from './going-on-details.tsx'
+import { RunPlace } from './run-place.tsx'
 
 /**
  * What goes on in a Session, as a line right under its title (issue #219): the commands Hemera
@@ -154,9 +155,12 @@ function ItemLine({ item }: { item: GoingOnItem }): ReactNode {
   )
 }
 
-/** Where the item runs, or how far a sub-agent got: the quiet words after its name. */
-function whereOf(item: GoingOnItem): string {
-  if (item.kind === 'run') return item.folder
+/**
+ * Where the item runs, or how far a sub-agent got: the quiet words after its name. A run in one of
+ * the Project's repositories is said as it, with its mark (issue #239).
+ */
+function whereOf(item: GoingOnItem): ReactNode {
+  if (item.kind === 'run') return <RunPlace repository={item.repository} folder={item.folder} />
   if (item.kind === 'shell') return `${item.folder} · the agent’s shell`
   return `${String(item.steps.length)} steps`
 }

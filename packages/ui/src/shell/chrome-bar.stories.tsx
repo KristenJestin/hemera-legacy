@@ -184,16 +184,14 @@ export const WindowResized: Story = {
     const bar = canvasElement.querySelector('header')!
     await expectMarkOnItsTab(canvasElement)
 
-    for (const width of ['760px', '1400px', '680px', '1600px']) {
-      bar.style.setProperty('width', width)
-      await expectMarkOnItsTab(canvasElement)
-    }
+    await resizeTo(bar, '760px')
+    await resizeTo(bar, '1400px')
+    await resizeTo(bar, '680px')
+    await resizeTo(bar, '1600px')
 
     await userEvent.click(canvas.getByRole('button', { name: /Notes/ }))
-    for (const width of ['760px', '1400px']) {
-      bar.style.setProperty('width', width)
-      await expectMarkOnItsTab(canvasElement)
-    }
+    await resizeTo(bar, '760px')
+    await resizeTo(bar, '1400px')
     bar.style.removeProperty('width')
   },
 }
@@ -215,11 +213,17 @@ export const TabResized: Story = {
   },
 }
 
+/** Gives the bar the width a window would, and looks at the mark once the bar has it. */
+async function resizeTo(bar: HTMLElement, width: string): Promise<void> {
+  bar.style.setProperty('width', width)
+  await expectMarkOnItsTab(bar)
+}
+
 /**
  * Where the mark is drawn, on screen: what the cut leaves of the sheet it is made of, read from
  * the clip the browser resolved, which is what is painted.
  */
-function markEdges(canvasElement: HTMLElement): { left: number; right: number } {
+function markEdges(canvasElement: HTMLElement) {
   const cut = canvasElement.querySelector<HTMLElement>('[data-mark-shape]')!
   const sheet = cut.getBoundingClientRect()
   const inset = /inset\(\S+ (\S+)px \S+ (\S+)px/.exec(getComputedStyle(cut).clipPath)

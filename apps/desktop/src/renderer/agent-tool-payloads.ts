@@ -6,14 +6,18 @@ import type {
   CommandType,
   HemeraToolArgument,
   HemeraToolStatus,
+  PermissionParameter,
   PortClaim,
   PortConflict,
   Readiness,
+  RunRepository,
   SpecTarget,
   ToolKind,
   ToolSubject,
 } from '@hemera/ui'
 import { z } from 'zod'
+
+import { runPlaceOf } from './run-place.ts'
 
 /**
  * The kinds Hemera writes into a thread, read out of their payload (design D6-06, D6-12, D6-10,
@@ -893,6 +897,8 @@ export function hemeraPermissionOf(
     readonly named?: string | undefined
     readonly resolved?: string | undefined
     readonly line?: string | null | undefined
+    /** Whether the engine found the place inside the Workspace; absent from an older question. */
+    readonly inside?: boolean | undefined
   },
 ): PermissionHead {
   const named = hemeraToolNamed(tool)
@@ -901,14 +907,56 @@ export function hemeraPermissionOf(
   const line = asked.line ?? null
   const subject = line ?? asked.named
   let intent = body.startsWith(`${tool} `) ? body.slice(tool.length + 1) : body
-  if (line !== null && intent.startsWith(`asks to run ${line} `)) {
-    intent = `asks to run ${intent.slice(`asks to run ${line} `.length)}`
+  if (line !== null) {
+    // Why a one-off is asked about wherever it runs (issue #239): the line is the agent's own, so
+    // the human decides before it runs. Where it runs is the card's parameters, not its head.
+    const outside =
+      asked.inside === false ||
+      (asked.inside === undefined && intent.includes('outside the Workspace'))
+    return {
+      label,
+      subject,
+      intent: `asks to run a line the agent wrote${outside ? ', outside the Workspace' : ''}`,
+    }
   }
   const resolved = asked.resolved
   if (resolved !== undefined && intent.endsWith(`: ${resolved}`)) {
     intent = intent.slice(0, -(resolved.length + 2))
   }
   return { label, subject, intent }
+}
+
+/**
+ * Where a question of Hemera's tools is about, as the card's parameters say it (issue #239).
+ *
+ * Inside, the Workspace or the Project's repository it runs in, and the path under it when it is
+ * not the base itself. Outside, and only when the engine says so, the Workspace it leaves and the
+ * resolved path — unless the card already shows that path as what it is about, which a file
+ * tool's does. A question written before the engine said where is read from its paths: a one-off
+ * under the root is inside, and a file tool is only ever asked about a place outside it.
+ */
+export function hemeraPlaceOf(
+  asked: {
+    readonly resolved: string
+    readonly root?: string | undefined
+    readonly inside?: boolean | undefined
+    readonly line?: string | null | undefined
+  },
+  workspace: string,
+  repositories: readonly RunRepository[],
+): PermissionParameter[] {
+  const line = asked.line ?? null
+  const place = runPlaceOf(asked.resolved, asked.root ?? null, repositories)
+  const inside = asked.inside ?? (line !== null && place.inside)
+  if (inside) {
+    const where: PermissionParameter =
+      place.repository === undefined
+        ? { label: 'In', value: workspace }
+        : { label: 'In', value: place.repository.path, repository: place.repository }
+    return place.folder === '.' ? [where] : [where, { label: 'Path', value: place.folder }]
+  }
+  const left: PermissionParameter = { label: 'Outside the Workspace', value: workspace }
+  return line === null ? [left] : [left, { label: 'Path', value: asked.resolved }]
 }
 
 /**

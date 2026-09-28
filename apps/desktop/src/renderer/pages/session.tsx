@@ -36,6 +36,7 @@ import {
   type MessageState,
   type OfferedAgent,
   type PermissionOption,
+  type RunRepository,
   type ScrollerEntry,
   type UsageMeterProps,
 } from '@hemera/ui'
@@ -296,6 +297,8 @@ export interface SessionPageProps {
   onHandOver: () => void
   /** The Workspace root, which is what a run's folder is said relative to; null until known. */
   root: string | null
+  /** The Project's repositories, which a place is said as rather than as a folder (#239). */
+  repositories: readonly RunRepository[]
   /** Runs a line from the Run of the line: a command of the catalogue by name, or a one-off. */
   onRunCommand: (line: string) => void
   /** The Project's catalogue, which the Run of the line offers. */
@@ -344,6 +347,7 @@ export function SessionPage({
   onStopRun,
   onHandOver,
   root,
+  repositories,
   onRunCommand,
   context,
   workspaces,
@@ -535,6 +539,7 @@ export function SessionPage({
       onDecide,
       runs: commandRuns,
       workspace: workspace?.name,
+      repositories,
       onOpenUrl,
       onStopRun,
       onHandOver,

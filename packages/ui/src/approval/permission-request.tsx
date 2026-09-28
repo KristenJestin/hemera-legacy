@@ -4,6 +4,7 @@ import { type KeyboardEvent, type ReactNode, useRef, useState } from 'react'
 import { Badge } from '../components/badge/badge.tsx'
 import { Button } from '../components/button/button.tsx'
 import { IconAlertTriangle } from '../icons.ts'
+import { RepositoryGlyph, type RunRepository } from '../session/run-place.tsx'
 
 /**
  * The gate: the turn is stopped, and it does not go on until someone answers (design D17-09).
@@ -54,6 +55,9 @@ const LABEL = 'shrink-0 text-xs text-muted-foreground'
 
 const VALUE = 'min-w-0 truncate font-mono text-foreground'
 
+/** A value that is one of the Project's repositories: its mark, then its name. */
+const REPOSITORY_VALUE = 'flex min-w-0 items-center gap-1 font-mono text-foreground'
+
 /** The command or the path the decision is about, in the font that reads as an instruction. */
 const COMMAND =
   'overflow-x-auto rounded-md border border-border bg-card px-2 py-1 font-mono text-xs whitespace-pre text-foreground'
@@ -77,6 +81,11 @@ export interface PermissionOption {
 export interface PermissionParameter {
   label: string
   value: string
+  /**
+   * The repository of the Project the value names, drawn with its mark (issue #239): a place that
+   * is a repository is said as one, and never as a plain folder.
+   */
+  repository?: RunRepository | undefined
 }
 
 export interface PermissionRequestProps {
@@ -214,7 +223,14 @@ export function PermissionRequest({
           {parameters.map((parameter) => (
             <div key={parameter.label} className={PARAMETER}>
               <dt className={LABEL}>{parameter.label}</dt>
-              <dd className={VALUE}>{parameter.value}</dd>
+              {parameter.repository === undefined ? (
+                <dd className={VALUE}>{parameter.value}</dd>
+              ) : (
+                <dd className={REPOSITORY_VALUE}>
+                  <RepositoryGlyph icon={parameter.repository.icon} />
+                  <span className="min-w-0 truncate">{parameter.value}</span>
+                </dd>
+              )}
             </div>
           ))}
         </dl>

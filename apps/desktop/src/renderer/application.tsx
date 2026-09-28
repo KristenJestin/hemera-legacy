@@ -102,6 +102,7 @@ import {
 } from './tools-store.ts'
 import { lineOf, linesOf, whenOf } from './journal-lines.ts'
 import { repositoryLinesOf } from './project-lines.ts'
+import { repositoriesOf } from './run-place.ts'
 import {
   addRecipeStep,
   cleanUp,
@@ -1340,6 +1341,7 @@ export function Application() {
           onStopRun={(runId) => void stopRun(open.id, runId)}
           onHandOver={() => void handOver(open.id)}
           root={root}
+          repositories={repositoriesOf(current)}
           context={tools.contexts.get(open.id) ?? null}
           // A line that names a command of the catalogue runs that command, in its folder; any
           // other line is a one-off, run in the Workspace root and not added to the catalogue.

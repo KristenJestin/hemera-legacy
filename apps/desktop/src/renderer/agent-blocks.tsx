@@ -1,4 +1,4 @@
-import { hemeraToolNamed } from '@hemera/core'
+import { MAIN_WORKSPACE, hemeraToolNamed } from '@hemera/core'
 import type { CommandRun as Run, SessionEntry, SpecType } from '@hemera/ipc'
 import {
   AgentReport,
@@ -22,6 +22,7 @@ import {
   type PlanEntry,
   type PlanPriority,
   type PlanStatus,
+  type RunRepository,
   type SpecAnswer,
   type ToolKind,
   type ToolStatus,
@@ -39,6 +40,7 @@ import {
   elsewhereOf,
   failureNoteOf,
   hemeraPermissionOf,
+  hemeraPlaceOf,
   hemeraToolCallOf,
   reportedFailureOf,
   stoppedTurnOf,
@@ -147,6 +149,8 @@ const permissionSchema = z.object({
   resolved: z.string().optional(),
   root: z.string().optional(),
   line: z.string().nullable().optional(),
+  /** Whether the place is inside the Workspace, as the engine found it (issue #239). */
+  inside: z.boolean().optional(),
 })
 
 const decisionSchema = z.object({
@@ -322,6 +326,8 @@ export interface AgentContext {
   runs: readonly Run[]
   /** The name of the Session's Workspace, which a run elsewhere is told apart from (D8-08). */
   workspace: string | undefined
+  /** The Project's repositories, which a place is said as rather than as a folder (#239). */
+  repositories: readonly RunRepository[]
   /** Opens the address a run published, in the browser: this window is not one. */
   onOpenUrl: (url: string) => void
   /** Stops a run and everything it started. */
@@ -463,18 +469,20 @@ export function drawEntry(entry: SessionEntry, context: AgentContext): ReactNode
     if (!questionOpen(entry)) return null
     const read = readPayload(permissionSchema, entry.payload)
     if (read === null) return null
-    // A question of Hemera's own tools (D6-05): the tool by its name, the place it would act on
-    // as the path resolves and the root it leaves, the line a one-off would run. Its two options
-    // are this call's only — nothing is remembered, so there is no "always" to offer.
+    // A question of Hemera's own tools (D6-05): the tool by its name, where it would act — in the
+    // Workspace or one of its repositories, or outside when the engine says so (#239) — and the
+    // line a one-off would run. Its two options are this call's only — nothing is remembered, so
+    // there is no "always" to offer.
     if (read.tool !== undefined && read.resolved !== undefined) {
       return (
         <PermissionRequest
           toolName={read.tool}
           {...hemeraPermissionOf(read.tool, entry.body, read)}
-          parameters={[
-            { label: 'Resolved path', value: read.resolved },
-            { label: 'Outside', value: read.root ?? 'the Workspace root' },
-          ]}
+          parameters={hemeraPlaceOf(
+            { ...read, resolved: read.resolved },
+            context.workspace ?? MAIN_WORKSPACE,
+            context.repositories,
+          )}
           command={read.line ?? read.resolved}
           options={read.options.map((option) => ({
             optionId: option.optionId,

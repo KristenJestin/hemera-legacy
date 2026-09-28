@@ -91,17 +91,12 @@ export const ReducedMotion: Story = {
   // offering to change them would only be offering something that does not happen.
   parameters: { controls: { disable: true } },
   play: async ({ canvasElement }) => {
-    const restore = await emulateReducedMotion()
-    if (restore === null) return
-    try {
-      const ring = within(canvasElement).getByRole('status').children[0]!
-      await waitFor(() => {
-        expect(getComputedStyle(ring).animationName).toBe('none')
-      })
-      // Still turning nothing, and still three dots to read.
-      expect(ring.children).toHaveLength(3)
-    } finally {
-      await restore()
-    }
+    if (!(await emulateReducedMotion())) return
+    const ring = within(canvasElement).getByRole('status').children[0]!
+    await waitFor(() => {
+      expect(getComputedStyle(ring).animationName).toBe('none')
+    })
+    // Still turning nothing, and still three dots to read.
+    expect(ring.children).toHaveLength(3)
   },
 }

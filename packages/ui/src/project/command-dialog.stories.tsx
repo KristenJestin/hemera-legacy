@@ -2,6 +2,7 @@ import type { Meta, StoryObj } from '@storybook/react-vite'
 import { useState } from 'react'
 import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
 
+import { type Journey, journeyOf, readEveryFrame } from '../../.storybook/journey.ts'
 import { movesLess } from '../../.storybook/reduced-motion.ts'
 
 import { Button } from '../components/button/button.tsx'
@@ -135,6 +136,11 @@ type Story = StoryObj<typeof meta>
 
 function dialog() {
   return within(within(document.body).getByRole('dialog'))
+}
+
+/** Resolves on the next frame. */
+function nextFrame(): Promise<void> {
+  return new Promise((resolve) => requestAnimationFrame(() => resolve()))
 }
 
 /** Opens a select of the dialog by its name and chooses one of its items, then waits it out. */
@@ -514,40 +520,72 @@ export const PortlessArrives: Story = {
     const inside = dialog()
     const box = inside.getByRole('checkbox', { name: /Serve through Portless/ })
     const frame = within(document.body).getByRole('dialog')
-    const from = frame.getBoundingClientRect().height
+    const height = (): number => frame.getBoundingClientRect().height
+    const from = height()
 
-    const heights: number[] = []
-    let watching = true
-    const watch = (): void => {
-      heights.push(frame.getBoundingClientRect().height)
-      if (watching) requestAnimationFrame(watch)
+    const untick = async (): Promise<void> => {
+      await userEvent.click(box)
+      await waitFor(() => {
+        expect(inside.queryByRole('textbox', { name: 'Portless name' })).toBeNull()
+      })
+      await waitFor(() => {
+        expect(height()).toBeCloseTo(from, 0)
+      })
     }
-    watch()
-    await userEvent.click(box)
-    const name = await waitFor(() => inside.getByRole('textbox', { name: 'Portless name' }))
-    // It lands in full: the room as tall as what it holds, faded all the way in.
-    await waitFor(() => {
-      expect(getComputedStyle(name.closest('[data-reveal]')!).filter).toBe('opacity(1)')
-    })
-    await waitFor(() => {
-      expect(frame.getBoundingClientRect().height).toBe(heights.at(-1))
-      expect(frame.getBoundingClientRect().height).toBeGreaterThan(from + 1)
-    })
-    watching = false
-    const to = frame.getBoundingClientRect().height
+
+    /**
+     * Ticks the box and watches, on every frame, the room the name arrives in and the dialog
+     * around it.
+     *
+     * The room is what travels, from none of what it holds to all of it, and whether it travelled
+     * or was drawn open is told by the clock (see `journey.ts`): a machine that gave no frame while
+     * the spring played has seen nothing either way, and the box is unticked and ticked again, up
+     * to five times. The dialog is what follows. It stops at the tallest a dialog may be after the
+     * first twenty pixels of the way, which a spring covers between two frames of a busy machine,
+     * so what is asked of it is to keep the room's beat: on no frame taller than the room has made
+     * room for. A dialog that jumped to the name's height would be, while the room is opening.
+     */
+    const arrive = async (tries: number): Promise<{ room: Journey; ahead: number[] }> => {
+      const rooms = new Set(frame.querySelectorAll('[data-reveal]'))
+      const arriving = (): Element | undefined =>
+        [...frame.querySelectorAll('[data-reveal]')].find((one) => !rooms.has(one))
+      const ahead: number[] = []
+      // How much of what it holds the room shows, in hundredths — a little over a hundred once
+      // open, the room keeping a little space around what it holds.
+      const watch = readEveryFrame(() => {
+        const room = arriving()
+        const open = room?.getBoundingClientRect().height ?? 0
+        const grown = height() - from
+        if (grown > open + 1) ahead.push(grown - open)
+        const held = room?.firstElementChild?.getBoundingClientRect().height ?? 0
+        return held === 0 ? 0 : (100 * open) / held
+      })
+      await userEvent.click(box)
+      const name = await waitFor(() => inside.getByRole('textbox', { name: 'Portless name' }))
+      // It lands in full: the room as tall as what it holds, faded all the way in, and the dialog
+      // the same height from one frame to the next.
+      await waitFor(() => {
+        expect(getComputedStyle(name.closest('[data-reveal]')!).filter).toBe('opacity(1)')
+      })
+      await waitFor(async () => {
+        const before = height()
+        await nextFrame()
+        expect(height()).toBe(before)
+        expect(before).toBeGreaterThan(from + 1)
+      })
+      const readings = watch.stop()
+      const room = journeyOf(readings, 0, readings.at(-1)?.value ?? 0)
+      if (room !== 'unseen' || tries === 1) return { room, ahead }
+      await untick()
+      return arrive(tries - 1)
+    }
+
+    const { room, ahead } = await arrive(movesLess() ? 1 : 5)
+    expect(ahead, 'the dialog grew ahead of the room the Portless name arrives in').toEqual([])
     if (!movesLess()) {
-      expect(
-        heights.some((height) => height > from + 1 && height < to - 1),
-        'the dialog jumped to the height of the Portless name',
-      ).toBe(true)
+      expect(room, 'the room of the Portless name was drawn open, with no way').toBe('travelled')
     }
 
-    await userEvent.click(box)
-    await waitFor(() => {
-      expect(inside.queryByRole('textbox', { name: 'Portless name' })).toBeNull()
-    })
-    await waitFor(() => {
-      expect(frame.getBoundingClientRect().height).toBeCloseTo(from, 0)
-    })
+    await untick()
   },
 }

@@ -84,7 +84,7 @@ export const NothingButACommand: Story = {
     await expect(canvas.getByRole('button', { name: 'Allow once' })).toBeVisible()
     await expect(canvas.getByRole('button', { name: 'Reject once' })).toBeVisible()
     // No standing answer was offered, so nothing promises to remember one.
-    await expect(canvas.queryByText(/remembered for/)).toBeNull()
+    await expect(canvas.getByRole('button', { name: 'Allow once' })).not.toHaveAttribute('title')
     canvas.getByRole('button', { name: 'Allow once' }).click()
     await expect(args.onDecide).toHaveBeenCalledWith({
       optionId: '',
@@ -185,11 +185,9 @@ export const HemeraToolOutsideTheRoot: Story = {
   },
   play: async ({ canvasElement, args }) => {
     const canvas = within(canvasElement)
-    // One line: the label, what it is about, and what it asks; no code name, no second sentence.
+    // One line: the label and what it is about; no code name, no sentence, no badge (#237).
     const head = canvas.getByText('Write file').parentElement
-    await expect(head?.textContent).toBe(
-      'Write file../notes/todo.mdasks to act outside the WorkspaceWaiting for you',
-    )
+    await expect(head?.textContent).toBe('Write file../notes/todo.md')
     await expect(canvas.queryByText('fs_write')).toBeNull()
     await expect(getComputedStyle(canvas.getByText('../notes/todo.md')).fontFamily).toMatch(
       /mono|Fira/i,
@@ -220,7 +218,8 @@ export const AgentCallWithItsSubject: Story = {
     const canvas = within(canvasElement)
     await expect(canvas.getByText('Edit file')).toBeVisible()
     await expect(canvas.getByText('src/session/session.tsx')).toBeVisible()
-    await expect(canvas.getByText('asks for your permission')).toBeVisible()
+    // What it asks is what the card is: no sentence says it again (#237).
+    await expect(canvas.queryByText('asks for your permission')).toBeNull()
     await expect(canvas.queryByText('Edit session.tsx')).toBeNull()
   },
 }
@@ -248,7 +247,7 @@ export const OneOffInside: Story = {
   },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    await expect(canvas.getByText('asks to run a line the agent wrote')).toBeVisible()
+    await expect(canvas.queryByText(/asks to/)).toBeNull()
     await expect(canvas.getByText('In')).toBeVisible()
     await expect(canvas.getByText('main')).toBeVisible()
     await expect(canvas.queryByText(/outside/i)).toBeNull()
@@ -289,5 +288,46 @@ export const OneOffOutside: Story = {
     const canvas = within(canvasElement)
     await expect(canvas.getByText('Outside the Workspace')).toBeVisible()
     await expect(canvas.getByText('/home/ana/notes')).toBeVisible()
+  },
+}
+
+/**
+ * A one-off whose line is longer than the card (issue #237): the whole line, wrapped in the
+ * terminal's letters rather than cut, where it would run, and the two answers — said once each,
+ * with no badge, no heading and no sentence around them.
+ */
+export const TheWholeLine: Story = {
+  args: {
+    toolName: 'commands_run',
+    label: 'Run command',
+    subject:
+      'pnpm --filter @atlas/api vitest run src/invoices/csv.stream.spec.ts --reporter=verbose --coverage.enabled=false',
+    intent: 'asks to run a line the agent wrote',
+    parameters: [{ label: 'In', value: 'api', repository: { path: 'api', icon: 'server' } }],
+    command:
+      'pnpm --filter @atlas/api vitest run src/invoices/csv.stream.spec.ts --reporter=verbose --coverage.enabled=false',
+    options: ONCE,
+    scope: undefined,
+  },
+  decorators: [
+    (Story) => (
+      <div className="w-notices">
+        <Story />
+      </div>
+    ),
+  ],
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement)
+    const line = canvas.getByText(args.command ?? '')
+    // Whole: wrapped over several rows, nothing scrolled or cut.
+    await expect(line.scrollWidth).toBeLessThanOrEqual(line.clientWidth)
+    await expect(line.getBoundingClientRect().height).toBeGreaterThan(20)
+    // Said once: the line is not on the head too.
+    await expect(canvas.getAllByText(args.command ?? '')).toHaveLength(1)
+    await expect(canvas.queryByText(/Waiting/)).toBeNull()
+    await expect(canvas.queryByText(/asks/)).toBeNull()
+    await expect(canvas.getByText('api')).toBeVisible()
+    const answers = canvas.getAllByRole('button').map((one) => one.textContent)
+    await expect(answers).toEqual(['Refuse', 'Allow once'])
   },
 }

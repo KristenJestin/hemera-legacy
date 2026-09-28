@@ -102,7 +102,7 @@ import {
   toolsSnapshot,
 } from './tools-store.ts'
 import { lineOf, linesOf, whenOf } from './journal-lines.ts'
-import { repositoryLinesOf } from './project-lines.ts'
+import { folderBasePath, repositoryLinesOf } from './project-lines.ts'
 import { repositoriesOf } from './run-place.ts'
 import {
   addRecipeStep,
@@ -1355,6 +1355,22 @@ export function Application() {
           onAcceptProposal={async (proposalId) => await acceptProposal(open.id, proposalId)}
           onDeclineProposal={async (proposalId) => await declineProposal(open.id, proposalId)}
           onAddToCatalogue={addToCatalogue}
+          catalogueEditing={{
+            // What the Project declares of its repositories, which is all a command's base needs.
+            repositories: repositoryLinesOf(
+              current?.repositories.map((path) => ({ path, git: null, exists: true })) ?? [],
+              current ?? { included: [], repositoryIcons: {} },
+            ),
+            portlessInstalled: tools.portlessInstalled,
+            projectName: current?.name ?? '',
+            onSave: async (command, existing) =>
+              await saveCommand({ projectId: open.projectId, ...command }, existing),
+            onRemove: (name) => void removeCommand(open.projectId, name),
+            onListFolder: async ({ base, relative, kinds }) =>
+              current === null
+                ? []
+                : await listEntries(folderBasePath(current.mainPath, base), relative, kinds),
+          }}
         />
       )
     }

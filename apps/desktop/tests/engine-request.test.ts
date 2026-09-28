@@ -25,6 +25,7 @@ import { StderrSink } from '#engine/agents/supervisor.ts'
 import { agentDirectoriesLayer } from '#engine/agents/bare.ts'
 import { acpTracesLayer } from '#engine/agents/trace.ts'
 import { heldWordsLayer } from '#engine/agents/held.ts'
+import { sessionModesLayer } from '#engine/agents/modes.ts'
 import { type Proposals, proposalsLayer } from '#engine/commands/proposals.ts'
 import { type Commands, UnknownRunError, commandsLayer } from '#engine/commands/service.ts'
 import { type Context, contextLayer } from '#engine/context/service.ts'
@@ -158,7 +159,12 @@ function running<A, E>(
     check: () => Effect.succeed([]),
     update: () => Effect.die('nothing in this file updates an agent'),
   })
-  const lent = tools.pipe(Layer.provide(rows), Layer.provide(agents), Layer.provide(heldWordsLayer))
+  const lent = tools.pipe(
+    Layer.provide(rows),
+    Layer.provide(agents),
+    Layer.provide(heldWordsLayer),
+    Layer.provide(sessionModesLayer),
+  )
   const runtime = runtimeLayer.pipe(
     Layer.provideMerge(discoveryLayer),
     Layer.provide(rows),
@@ -169,6 +175,7 @@ function running<A, E>(
     Layer.provide(poolLayer.pipe(Layer.provide(clockLayer))),
     Layer.provide(agents),
     Layer.provide(heldWordsLayer),
+    Layer.provide(sessionModesLayer),
     Layer.provide(agentDirectoriesLayer(dataFolder)),
     Layer.provide(acpTracesLayer(dataFolder)),
   )

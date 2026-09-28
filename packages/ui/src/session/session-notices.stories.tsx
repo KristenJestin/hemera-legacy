@@ -3,10 +3,17 @@ import { type ReactNode, useEffect, useState } from 'react'
 import { expect, fn, screen, userEvent, waitFor, within } from 'storybook/test'
 
 import { Composer } from '../composer/composer.tsx'
+import { CommandProposal } from '../activity/command-proposal.tsx'
+import type { CommandType } from '../activity/command-type.ts'
+import { PermissionRequest } from '../approval/permission-request.tsx'
 import { Button } from '../components/button/button.tsx'
 import { TooltipProvider } from '../components/tooltip/tooltip.tsx'
-import { IconBookmarkPlus, IconShield } from '../icons.ts'
+import { IconBookmarkPlus, IconFlag, IconMessageQuestion, IconShield } from '../icons.ts'
 import { AgentText } from '../message/agent-text.tsx'
+import { CreateSpecProposal } from '../spec/create-spec-proposal.tsx'
+import type { SpecQuestionView } from '../spec/model.ts'
+import { CREDIT_NOTES } from '../spec/spec-fixtures.ts'
+import { SpecQuestion } from '../spec/spec-question.tsx'
 import { type NoticeGroup, SessionNotices } from './session-notices.tsx'
 import { TurnLine } from './turn-line.tsx'
 
@@ -19,45 +26,105 @@ import { TurnLine } from './turn-line.tsx'
  * the states.
  */
 
-/** Something waiting, as the page would hand it: a line and its answer. */
-interface Waiting {
-  id: string
-  kind: 'permission' | 'proposal'
-  line: string
+/** Something waiting, as the page would hand it: its kind and what it is about. */
+type Waiting =
+  | { id: string; kind: 'permission'; line: string }
+  | { id: string; kind: 'proposal'; name: string; line: string; type: CommandType }
+  | { id: string; kind: 'spec'; title: string }
+  | { id: string; kind: 'question'; question: SpecQuestionView }
+
+const ASK: Waiting = {
+  id: 'ask',
+  kind: 'permission',
+  line: 'pnpm --filter @atlas/api vitest run src/invoices/csv.stream.spec.ts --reporter=verbose',
 }
 
-const ASK: Waiting = { id: 'ask', kind: 'permission', line: 'pnpm vitest run csv.stream' }
-
 const PROPOSED: Waiting[] = [
-  { id: 'dev', kind: 'proposal', line: 'pnpm dev' },
-  { id: 'test', kind: 'proposal', line: 'pnpm test' },
+  { id: 'dev', kind: 'proposal', name: 'dev', line: 'pnpm dev', type: 'serve' },
+  { id: 'test', kind: 'proposal', name: 'test', line: 'pnpm test', type: 'test' },
 ]
 
-function Item({
+const SIX: Waiting[] = [
+  ...PROPOSED,
+  { id: 'lint', kind: 'proposal', name: 'lint', line: 'pnpm lint', type: 'lint' },
+  { id: 'typecheck', kind: 'proposal', name: 'typecheck', line: 'pnpm typecheck', type: 'lint' },
+  { id: 'build', kind: 'proposal', name: 'build', line: 'pnpm build', type: 'build' },
+  {
+    id: 'migrate',
+    kind: 'proposal',
+    name: 'migrate',
+    line: 'pnpm --filter api db:migrate',
+    type: 'configure',
+  },
+]
+
+const SPEC: Waiting = { id: 'spec', kind: 'spec', title: 'Export the invoices as CSV' }
+
+const QUESTION: Waiting = { id: 'question', kind: 'question', question: CREDIT_NOTES }
+
+const ONCE = [
+  { optionId: 'refused', kind: 'reject_once' as const, name: 'Refuse' },
+  { optionId: 'allowed', kind: 'allow_once' as const, name: 'Allow once' },
+]
+
+/** What answers one thing that waits, as the page draws it for the notices. */
+function Answer({
   waiting,
   onAnswer,
 }: {
   waiting: Waiting
   onAnswer: (id: string) => void
 }): ReactNode {
-  return (
-    <div className="flex items-center gap-2">
-      <span className="min-w-0 flex-1 font-mono text-xs">{waiting.line}</span>
-      <Button variant="ghost" size="sm" onClick={() => onAnswer(waiting.id)}>
-        Refuse
-      </Button>
-      <Button variant="primary" size="sm" onClick={() => onAnswer(waiting.id)}>
-        Allow once
-      </Button>
-    </div>
-  )
+  const answer = (): void => onAnswer(waiting.id)
+  switch (waiting.kind) {
+    case 'permission':
+      return (
+        <PermissionRequest
+          toolName="commands_run"
+          label="Run command"
+          subject={waiting.line}
+          parameters={[{ label: 'In', value: 'api', repository: { path: 'api', icon: 'server' } }]}
+          command={waiting.line}
+          options={ONCE}
+          onDecide={answer}
+        />
+      )
+    case 'proposal':
+      return (
+        <CommandProposal
+          name={waiting.name}
+          line={waiting.line}
+          type={waiting.type}
+          folder="."
+          why="The Project's package.json declares it."
+          onAccept={answer}
+          onDecline={answer}
+        />
+      )
+    case 'spec':
+      return (
+        <CreateSpecProposal
+          title={waiting.title}
+          type="feature"
+          onCreate={answer}
+          onDecline={answer}
+        />
+      )
+    case 'question':
+      return <SpecQuestion question={waiting.question} onAnswer={answer} />
+  }
 }
 
-function groupsOf(waiting: readonly Waiting[], onAnswer: (id: string) => void): NoticeGroup[] {
+function groupsOf(
+  waiting: readonly Waiting[],
+  onAnswer: (id: string) => void,
+  onAcceptAll: () => void,
+): NoticeGroup[] {
   const of = (kind: Waiting['kind']) =>
     waiting
       .filter((one) => one.kind === kind)
-      .map((one) => ({ id: one.id, content: <Item waiting={one} onAnswer={onAnswer} /> }))
+      .map((one) => ({ id: one.id, content: <Answer waiting={one} onAnswer={onAnswer} /> }))
+  const proposals = of('proposal')
   return [
     {
       kind: 'permission',
@@ -67,10 +134,28 @@ function groupsOf(waiting: readonly Waiting[], onAnswer: (id: string) => void): 
       items: of('permission'),
     },
     {
+      kind: 'question',
+      label: 'Questions',
+      icon: <IconMessageQuestion size="sm" aria-hidden="true" />,
+      items: of('question'),
+    },
+    {
+      kind: 'spec',
+      label: 'Spec proposed',
+      icon: <IconFlag size="sm" aria-hidden="true" />,
+      items: of('spec'),
+    },
+    {
       kind: 'proposal',
       label: 'Proposed commands',
       icon: <IconBookmarkPlus size="sm" aria-hidden="true" />,
-      items: of('proposal'),
+      items: proposals,
+      actions:
+        proposals.length > 1 ? (
+          <Button variant="primary" size="sm" onClick={onAcceptAll}>
+            Accept all
+          </Button>
+        ) : undefined,
     },
   ]
 }
@@ -107,6 +192,9 @@ function Bench({ waiting: first, script = [], defaultOpen, onAnswer }: BenchProp
     onAnswer(id)
     setWaiting((before) => before.filter((one) => one.id !== id))
   }
+  const acceptAll = (): void => {
+    setWaiting((before) => before.filter((one) => one.kind !== 'proposal'))
+  }
   return (
     <TooltipProvider>
       <div className="flex h-screen flex-col bg-background text-foreground">
@@ -133,7 +221,10 @@ function Bench({ waiting: first, script = [], defaultOpen, onAnswer }: BenchProp
             onSend={() => Promise.resolve(null)}
             running
             notices={
-              <SessionNotices groups={groupsOf(waiting, answer)} defaultOpen={defaultOpen} />
+              <SessionNotices
+                groups={groupsOf(waiting, answer, acceptAll)}
+                defaultOpen={defaultOpen}
+              />
             }
           />
         </div>
@@ -179,7 +270,7 @@ export const Closed: Story = {
       name: 'Waiting for your answer: Permissions 1',
     })
     expect(pill).toHaveTextContent('1')
-    expect(canvas.queryByText(ASK.line)).toBeNull()
+    expect(canvas.queryByText(/csv\.stream/)).toBeNull()
     expect(screen.queryByRole('dialog')).toBeNull()
     // On the top edge of the box, centred on it, once it has risen.
     await waitFor(() => {
@@ -206,7 +297,7 @@ export const Opened: Story = {
       'Proposed commands',
     ])
     await waitFor(() => {
-      expect(within(panel).getByText(ASK.line)).toBeVisible()
+      expect(within(panel).getByText(/csv\.stream/)).toBeVisible()
     })
     // Above the pill, never over it.
     await waitFor(() => {
@@ -272,5 +363,42 @@ export const Arrival: Story = {
       },
       { timeout: 4000 },
     )
+  },
+}
+
+/**
+ * Everything at once (issue #237): a permission, a question, the Spec the agent proposes and six
+ * commands — one mark and one count a kind on the pill, one group a kind inside, the permission
+ * first; Accept all answers the six, and the rest stays.
+ */
+export const EveryKind: Story = {
+  args: { waiting: [ASK, QUESTION, SPEC, ...SIX] },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const pill = await canvas.findByRole('button', {
+      name: 'Waiting for your answer: Permissions 1, Questions 1, Spec proposed 1, Proposed commands 6',
+    })
+    await expect(pill).toHaveTextContent('1116')
+    await userEvent.click(pill)
+    const panel = await screen.findByRole('dialog', { name: 'Waiting for your answer' })
+    await expect(
+      within(panel)
+        .getAllByRole('region')
+        .map((group) => group.getAttribute('aria-label')),
+    ).toEqual(['Permissions', 'Questions', 'Spec proposed', 'Proposed commands'])
+    await expect(within(panel).getAllByRole('group', { name: /^Proposed command / })).toHaveLength(
+      6,
+    )
+    await userEvent.click(within(panel).getByRole('button', { name: 'Accept all' }))
+    await waitFor(() => {
+      expect(within(panel).queryByRole('region', { name: 'Proposed commands' })).toBeNull()
+    })
+    // Still open, on what is left: answering is not dismissing.
+    await expect(screen.getByRole('dialog', { name: 'Waiting for your answer' })).toBeVisible()
+    await expect(
+      canvas.getByRole('button', {
+        name: 'Waiting for your answer: Permissions 1, Questions 1, Spec proposed 1',
+      }),
+    ).toBeVisible()
   },
 }

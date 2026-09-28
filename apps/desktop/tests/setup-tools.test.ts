@@ -477,6 +477,50 @@ describe('The engine refuses what the settings refuse, with their reasons', () =
   })
 })
 
+describe('Accept all stops at the first refusal', () => {
+  test('what comes before is accepted, the refused change and what follows stay pending', async () => {
+    const agent = fakeAgent({
+      steps: [
+        proposing('batch', [
+          { kind: 'repository', path: 'sources/front' },
+          { kind: 'step', step: 'copy', path: 'docs' },
+          { kind: 'variable', name: 'API_KEY', value: SECRET },
+        ]),
+      ],
+    })
+
+    const seen = await toolApplication(dataFolder)(agent)(
+      Effect.gen(function* () {
+        const runtime = yield* AgentRuntime
+        const projects = yield* Projects
+        const recipe = yield* Recipe
+        const variables = yield* Variables
+        const setup = yield* SetupProposals
+        const session = yield* aProjectSession
+        yield* runtime.prompt(session.id, 'set it up')
+        const batchId = proposalsIn(yield* threadOf(session.id))[0]?.batchId ?? ''
+        // The second change's source is gone before the user presses Accept all.
+        rmSync(join(main, 'docs'), { recursive: true })
+        const refused = yield* Effect.flip(setup.acceptAll(session.id, batchId))
+        const project = (yield* projects.list()).find((one) => one.id === session.projectId)
+        return {
+          refused,
+          proposals: proposalsIn(yield* threadOf(session.id)),
+          repositories: project?.repositories ?? [],
+          recipe: yield* recipe.list(session.projectId),
+          variables: yield* variables.list(session.projectId, null),
+        }
+      }).pipe(Effect.provide(deciding)),
+    )
+
+    expect(seen.refused).toBeInstanceOf(SetupRefusedError)
+    expect(seen.proposals.map((one) => one.state)).toEqual(['accepted', 'pending', 'pending'])
+    expect(seen.repositories).toEqual(['./sources/api', './sources/front'])
+    expect(seen.recipe).toEqual([])
+    expect(seen.variables).toEqual([])
+  })
+})
+
 describe('The Context tab lists the setup tools lent', () => {
   test('a free Session is lent both, each with its bound', async () => {
     const agent = fakeAgent({ steps: [] })

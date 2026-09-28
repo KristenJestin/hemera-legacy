@@ -328,7 +328,7 @@ async function startSession(workspace: string, said: string): Promise<void> {
   await awaits(ANSWERS[0])
 }
 
-/** The line under a Session's title, which says what goes on in it (issue #219). */
+/** The line of a Session's head, which says what goes on in it (issues #219, #241). */
 const LINE = '[aria-label="What goes on in this Session"]'
 
 /** What the Run field offers, under its field. */
@@ -533,13 +533,17 @@ describe('A URL is ready only after it answers', () => {
 describe('Two Workspaces run the same command as two instances', () => {
   it('runs dev from a Session in login-form too, where running it again joins it', async () => {
     await startSession('login-form', 'Serve the app in login-form.')
-    // The agent started in login-form: its Workspace is fixed now (D8-08), a plain label whose
-    // tooltip says why (issue #128).
-    expect(
-      await $(
-        '[aria-label="Workspace: login-form. The Workspace is fixed once the agent has started."]',
-      ).waitForExist(),
-    ).toBe(true)
+    // The agent started in login-form. A Session's composer does not say its Workspace any more
+    // (issue #241): the Session details' Context tab does, first.
+    await press('Session details')
+    await pressTab('Context')
+    await browser.waitUntil(
+      async () =>
+        (await region('[role="dialog"] section[aria-label="Workspace"]')).includes('login-form'),
+      { timeout: 10_000, interval: 200, timeoutMsg: 'the details never named login-form' },
+    )
+    await browser.keys('Escape')
+    await browser.pause(400)
     await runLine('dev')
     await awaitsIn(LINE, `localhost:${String(port)}`)
     await runLine('dev')

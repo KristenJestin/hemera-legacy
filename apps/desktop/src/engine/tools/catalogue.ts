@@ -617,7 +617,7 @@ export const toolCatalogueLayer: Layer.Layer<
      * The line a one-off leaves when it ran without a question, the mode it followed said: one
      * quiet decision, where an asked one leaves a block and its answer (#242).
      */
-    const unasked = (asked: ToolCall, where: string, line: string, mode: string) => {
+    const unasked = (asked: ToolCall, root: string, where: string, line: string, mode: string) => {
       const id = crypto.randomUUID()
       return inThread(asked.sessionId, {
         role: 'hemera',
@@ -629,6 +629,10 @@ export const toolCatalogueLayer: Layer.Layer<
           tool: asked.tool,
           named: where,
           resolved: where,
+          root,
+          // Where it ran, as an asked question says it (#239): a mode only ever skips the
+          // question inside the root.
+          inside: true,
           line,
           mode,
           answer: 'allowed',
@@ -943,7 +947,7 @@ export const toolCatalogueLayer: Layer.Layer<
                     if (place.inside) {
                       const standing = yield* modes.standing(asked.sessionId)
                       if (standing !== null && !modeAsks(standing)) {
-                        yield* unasked(asked, place.path, oneOff, standing.name)
+                        yield* unasked(asked, root, place.path, oneOff, standing.name)
                         return { allowed: true as const, path: place.path }
                       }
                     }

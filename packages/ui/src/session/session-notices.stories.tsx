@@ -3,17 +3,17 @@ import { type ReactNode, useEffect, useState } from 'react'
 import { expect, fn, screen, userEvent, waitFor, within } from 'storybook/test'
 
 import { Composer } from '../composer/composer.tsx'
-import { CommandProposal } from '../activity/command-proposal.tsx'
+import { CommandProposal, CommandProposalRecord } from '../activity/command-proposal.tsx'
 import type { CommandType } from '../activity/command-type.ts'
-import { PermissionRequest } from '../approval/permission-request.tsx'
+import { PermissionRecord, PermissionRequest } from '../approval/permission-request.tsx'
 import { Button } from '../components/button/button.tsx'
 import { TooltipProvider } from '../components/tooltip/tooltip.tsx'
 import { IconBookmarkPlus, IconFlag, IconMessageQuestion, IconShield } from '../icons.ts'
 import { AgentText } from '../message/agent-text.tsx'
-import { CreateSpecProposal } from '../spec/create-spec-proposal.tsx'
+import { CreateSpecProposal, SpecProposalRecord } from '../spec/create-spec-proposal.tsx'
 import type { SpecQuestionView } from '../spec/model.ts'
 import { CREDIT_NOTES } from '../spec/spec-fixtures.ts'
-import { SpecQuestion } from '../spec/spec-question.tsx'
+import { SpecQuestion, SpecQuestionRecord } from '../spec/spec-question.tsx'
 import { type NoticeGroup, SessionNotices } from './session-notices.tsx'
 import { TurnLine } from './turn-line.tsx'
 
@@ -115,6 +115,53 @@ function Answer({
   }
 }
 
+/** What the thread keeps of one thing that waited: its record, answered or not. */
+function Kept({ waiting, answered }: { waiting: Waiting; answered: boolean }): ReactNode {
+  switch (waiting.kind) {
+    case 'permission':
+      return (
+        <PermissionRecord
+          toolName="commands_run"
+          label="Run command"
+          subject={waiting.line}
+          command={waiting.line}
+          standing={answered ? 'allowed' : 'pending'}
+          decision={answered ? { answer: 'Allow once', at: '10:42' } : undefined}
+        />
+      )
+    case 'proposal':
+      return (
+        <CommandProposalRecord
+          name={waiting.name}
+          line={waiting.line}
+          type={waiting.type}
+          folder="."
+          why="The Project's package.json declares it."
+          state={answered ? 'accepted' : 'pending'}
+        />
+      )
+    case 'spec':
+      return (
+        <SpecProposalRecord
+          title={waiting.title}
+          type="feature"
+          state={answered ? 'created' : 'proposed'}
+          specKey={answered ? 'ATL-7' : undefined}
+        />
+      )
+    case 'question':
+      return (
+        <SpecQuestionRecord
+          question={
+            answered
+              ? { ...waiting.question, answer: { optionId: waiting.question.options[0]?.id } }
+              : waiting.question
+          }
+        />
+      )
+  }
+}
+
 function groupsOf(
   waiting: readonly Waiting[],
   onAnswer: (id: string) => void,
@@ -184,8 +231,18 @@ interface BenchProps {
 /** The foot of a Session: the thread's end, the row above the box, the box, and the pill. */
 function Bench({ waiting: first, script = [], defaultOpen, onAnswer }: BenchProps): ReactNode {
   const [waiting, setWaiting] = useState(first)
+  // Everything that was ever asked, which the thread keeps a record of, answered or not.
+  const [asked, setAsked] = useState(first)
   useEffect(() => {
-    const timers = script.map((step) => window.setTimeout(() => setWaiting(step.waiting), step.at))
+    const timers = script.map((step) =>
+      window.setTimeout(() => {
+        setWaiting(step.waiting)
+        setAsked((before) => [
+          ...before,
+          ...step.waiting.filter((one) => !before.some((known) => known.id === one.id)),
+        ])
+      }, step.at),
+    )
     return () => timers.forEach((timer) => window.clearTimeout(timer))
   }, [])
   const answer = (id: string): void => {
@@ -202,6 +259,15 @@ function Bench({ waiting: first, script = [], defaultOpen, onAnswer }: BenchProp
           {SAID.map((text) => (
             <AgentText key={text} text={text} />
           ))}
+          <div role="log" aria-label="Records" className="flex flex-col gap-1">
+            {asked.map((one) => (
+              <Kept
+                key={one.id}
+                waiting={one}
+                answered={!waiting.some((still) => still.id === one.id)}
+              />
+            ))}
+          </div>
         </div>
         <div className="mx-auto flex w-full max-w-3xl flex-col gap-2 px-6 pt-4 pb-4">
           <TurnLine
@@ -270,7 +336,9 @@ export const Closed: Story = {
       name: 'Waiting for your answer: Permissions 1',
     })
     expect(pill).toHaveTextContent('1')
-    expect(canvas.queryByText(/csv\.stream/)).toBeNull()
+    // What answers it is not on the page until the pill is pressed; the thread has its record.
+    expect(screen.queryByRole('button', { name: 'Allow once' })).toBeNull()
+    expect(canvas.getByRole('group', { name: 'Permission for Run command, waiting' })).toBeVisible()
     expect(screen.queryByRole('dialog')).toBeNull()
     // On the top edge of the box, centred on it, once it has risen.
     await waitFor(() => {
@@ -400,5 +468,34 @@ export const EveryKind: Story = {
         name: 'Waiting for your answer: Permissions 1, Questions 1, Spec proposed 1',
       }),
     ).toBeVisible()
+  },
+}
+
+/**
+ * What the thread-record motion is judged on: two proposals wait, the notices are open, and one is
+ * accepted — its row folds out of the notices by its height, its record in the thread turns its
+ * dot, and nothing else on the page moves.
+ */
+export const AnsweredInPlace: Story = {
+  args: { waiting: PROPOSED, defaultOpen: true },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement)
+    const panel = await screen.findByRole('dialog', { name: 'Waiting for your answer' })
+    const records = canvas.getByRole('log', { name: 'Records' })
+    const before = records.getBoundingClientRect()
+    await userEvent.click(within(panel).getByRole('button', { name: 'Accept dev' }))
+    expect(args.onAnswer).toHaveBeenCalledWith('dev')
+    await waitFor(() => {
+      expect(within(panel).queryByRole('group', { name: 'Proposed command dev' })).toBeNull()
+    })
+    await expect(
+      canvas.getByRole('group', { name: 'Proposed command dev, added to the catalogue' }),
+    ).toBeVisible()
+    await expect(
+      canvas.getByRole('group', { name: 'Proposed command test, waiting' }),
+    ).toBeVisible()
+    // The records stand where they stood: the answer changed a dot, not the thread.
+    expect(records.getBoundingClientRect().top).toBe(before.top)
+    expect(records.getBoundingClientRect().height).toBe(before.height)
   },
 }

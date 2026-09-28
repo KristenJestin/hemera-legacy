@@ -2574,12 +2574,7 @@ export const runtimeLayer = Layer.effect(
      * it to settle, which is the watcher's to know, and a safe point the Spec asked for does not
      * hand over a file an editor is still writing.
      */
-    const waitingOf = (
-      sessionId: string,
-      held: Live,
-      instructions: boolean,
-      runsAlone: boolean,
-    ) =>
+    const waitingOf = (sessionId: string, held: Live, instructions: boolean, runsAlone: boolean) =>
       Effect.gen(function* () {
         const parcels: Parcel[] = []
         const changed = instructions

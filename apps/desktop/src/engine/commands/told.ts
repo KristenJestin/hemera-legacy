@@ -16,8 +16,14 @@ export const RUN_TAIL_LINES = 40
 /** How many bytes of those lines at most: forty lines of a minified bundle are not forty lines. */
 export const RUN_TAIL_BYTES = 4 * 1024
 
+/** What the agent is shown of an output. */
+interface Tail {
+  readonly shown: string
+  readonly cut: number
+}
+
 /** The tail of an output, and how many of its lines were left out. */
-function tailOf(output: string): { readonly shown: string; readonly cut: number } {
+function tailOf(output: string): Tail {
   const lines = output.replace(/\n$/, '').split('\n')
   let kept = lines.slice(-RUN_TAIL_LINES)
   while (kept.length > 1 && Buffer.byteLength(kept.join('\n'), 'utf8') > RUN_TAIL_BYTES) {

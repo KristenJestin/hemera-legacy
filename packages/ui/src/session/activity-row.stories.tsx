@@ -92,9 +92,9 @@ export const Waiting: Story = {
   args: { state: 'waiting' },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    await expect(canvas.getByText('Waiting for your permission')).toBeVisible()
+    await expect(canvas.getByText('Waiting for your answer')).toBeVisible()
     await expect(
-      canvas.getByRole('status', { name: 'Waiting for your permission' }),
+      canvas.getByRole('status', { name: 'Waiting for your answer' }),
     ).toBeInTheDocument()
   },
 }
@@ -217,7 +217,7 @@ export const WaitingIsNotQuiet: Story = {
   args: { state: 'waiting', quietMs: 600_000, onStop: fn(), onOpenTrace: fn() },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    await expect(canvas.getByText('Waiting for your permission')).toBeVisible()
+    await expect(canvas.getByText('Waiting for your answer')).toBeVisible()
     await expect(canvas.queryByRole('button', { name: 'Stop' })).toBeNull()
   },
 }
@@ -241,7 +241,7 @@ export const States: Story = {
     const said = [
       'Thinking…',
       'Running cat recap.md',
-      'Waiting for your permission',
+      'Waiting for your answer',
       'Writing…',
       'Done in 1 min 12 s',
       'Stopped',

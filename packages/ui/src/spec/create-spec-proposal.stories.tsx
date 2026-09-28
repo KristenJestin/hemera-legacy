@@ -1,7 +1,7 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
 import { expect, fn, userEvent, within } from 'storybook/test'
 
-import { CreateSpecProposal } from './create-spec-proposal.tsx'
+import { CreateSpecProposal, SpecProposalRecord } from './create-spec-proposal.tsx'
 
 /**
  * The agent proposing a Spec in a `free` Session: the title it understood, editable in place,
@@ -10,7 +10,7 @@ import { CreateSpecProposal } from './create-spec-proposal.tsx'
 const meta = {
   title: 'Blocks/Spec/CreateSpecProposal',
   component: CreateSpecProposal,
-  tags: ['autodocs'],
+  tags: ['autodocs', 'updated'],
   parameters: { layout: 'padded' },
   args: {
     title: 'CSV invoice export',
@@ -147,5 +147,23 @@ export const ExistingDeclined: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     await expect(canvas.getByText(/ATL-4 « CSV invoice export » was not continued/)).toBeVisible()
+  },
+}
+
+/**
+ * What the thread keeps of the proposal once the Spec is created (issue #237): a quiet line, the
+ * Spec's key and its title, the dot of the answer. It is answered among the Session's notices.
+ */
+export const KeptCreated: Story = {
+  render: () => (
+    <SpecProposalRecord title="Export the Journal" type="feature" state="created" specKey="ATL-7" />
+  ),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const record = canvas.getByRole('group', {
+      name: 'Spec proposed, ATL-7 «Export the Journal», created',
+    })
+    await expect(within(record).getByText('ATL-7')).toBeVisible()
+    await expect(within(record).queryByRole('button', { name: 'Create' })).toBeNull()
   },
 }

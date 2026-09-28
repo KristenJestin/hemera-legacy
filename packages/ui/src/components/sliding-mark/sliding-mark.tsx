@@ -257,6 +257,19 @@ function Reach({
     }, REACH_HANDOFF * 1000)
   }, [place, still])
 
+  // The right edge is written as what the frame keeps past it, and the frame is as wide as the
+  // list: a list growing under a mark at rest carried that edge with it, and one shrinking cut
+  // the mark away. Written again whenever the frame changes size, which no render says.
+  useEffect(() => {
+    const node = holder.current
+    if (node === null) return
+    const observer = new ResizeObserver(write)
+    observer.observe(node)
+    return () => {
+      observer.disconnect()
+    }
+  }, [])
+
   useEffect(
     () => () => {
       clearTimeout(landing.current)

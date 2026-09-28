@@ -419,6 +419,12 @@ export {
 /** The row above the box: what the turn is doing, and what it has spent. */
 export { TurnLine, type TurnLineProps } from './session/turn-line.tsx'
 export {
+  SessionHistory,
+  type HistoryItem,
+  type SessionHistoryProps,
+} from './session/session-history.tsx'
+export { SessionCatalogue, type SessionCatalogueProps } from './session/session-catalogue.tsx'
+export {
   SessionNotices,
   type NoticeGroup,
   type NoticeItem,

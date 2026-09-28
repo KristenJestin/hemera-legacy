@@ -449,6 +449,11 @@ export const TheHeadCommands: Story = {
       expect(canvas.queryByRole('textbox')).toBeNull()
     })
     expect(args.onRename).not.toHaveBeenCalled()
+    // The menu Rename closed is gone before it is opened again: still leaving, it is the menu the
+    // next look finds, and its Archive is out of the page by the time it is pressed.
+    await waitFor(() => {
+      expect(within(document.body).queryByRole('menu')).toBeNull()
+    })
 
     // Archive is the command that acts, once.
     await userEvent.click(trigger)

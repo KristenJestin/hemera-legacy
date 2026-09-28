@@ -549,6 +549,13 @@ export const commandRuns = sqliteTable(
     portConflict: text('port_conflict'),
     folder: text('folder'),
     scope: text('scope').notNull().default('workspace'),
+    /**
+     * What the Session's agent was last told of the run (issue #238): `none`, `running` or
+     * `ended` — by the answer of its own tool, or by a delivery at the next prompt. A run is
+     * written `none` when it starts; the default is for the runs from before this column, which
+     * were never handed over and are not handed over all at once after an update.
+     */
+    told: text('told').notNull().default('ended'),
   },
   (table) => [
     check('run_state_is_known', sql`${table.state} IN (${sql.raw(oneOf(COMMAND_RUN_STATES))})`),

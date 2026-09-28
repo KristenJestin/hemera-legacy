@@ -322,7 +322,7 @@ export const AThreadThatDoesNotFit: Story = {
     thread: [
       {
         day: 'last week',
-        lines: Array.from({ length: 12 }, (_, index) => ({
+        lines: Array.from({ length: 24 }, (_, index) => ({
           id: `long-${index}`,
           body: `Line ${index + 1} of a thread that is taller than the window it is read in.`,
         })),

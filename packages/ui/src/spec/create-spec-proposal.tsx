@@ -1,6 +1,7 @@
 import { cn } from 'cn'
 import { type ReactNode, useState } from 'react'
 
+import { type NoticeAnswer, NoticeRecord } from '../activity/notice-record.tsx'
 import { Button } from '../components/button/button.tsx'
 import { InPlaceText } from './in-place-text.tsx'
 import type { SpecType } from './model.ts'
@@ -182,4 +183,42 @@ export function CreateSpecProposal({
 function TypeIcon({ type }: { type: SpecType }): ReactNode {
   const Icon = SPEC_TYPE_ICONS[type]
   return <Icon size="sm" aria-hidden="true" />
+}
+
+const STATES: Record<ProposalState, { answer: NoticeAnswer; word: string }> = {
+  proposed: { answer: 'pending', word: 'waiting' },
+  created: { answer: 'accepted', word: 'created' },
+  declined: { answer: 'refused', word: 'not now' },
+}
+
+export interface SpecProposalRecordProps {
+  title: string
+  type: SpecType
+  state: ProposalState
+  /** The key the Spec was given, once created, or the key of the Spec it points to. */
+  specKey?: string | undefined
+}
+
+/**
+ * The agent's proposal of a Spec as the thread keeps it (issue #237): one closed line — the
+ * Spec's type, a dot for the answer, its key once it has one, and its title. It is answered among
+ * the Session's notices, never here.
+ */
+export function SpecProposalRecord({
+  title,
+  type,
+  state,
+  specKey,
+}: SpecProposalRecordProps): ReactNode {
+  const { answer, word } = STATES[state]
+  return (
+    <NoticeRecord
+      icon={<TypeIcon type={type} />}
+      answer={answer}
+      answerLabel={word}
+      label={specKey}
+      subject={title}
+      name={`Spec proposed, ${specKey === undefined ? '' : `${specKey} `}«${title}», ${word}`}
+    />
+  )
 }

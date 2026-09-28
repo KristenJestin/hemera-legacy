@@ -33,10 +33,12 @@ import { fakeWorkspace } from './agent/install.ts'
 import { AGENT, ANSWERS, COMPLETE, COMPLETED, MODELS, PROPOSAL, PROPOSE } from './agent/script.ts'
 import {
   addProject,
+  awaitsRecord,
   awaits,
   choose,
   control,
   fill,
+  openNotices,
   press,
   pressIn,
   pressTab,
@@ -206,9 +208,10 @@ async function writeSpec(asked: string, key: string): Promise<void> {
   await write(asked)
   await press('Start chat')
   await awaits(ANSWERS[0])
-  await awaits('Create the Spec')
+  // The proposal waits among the Session's notices, closed until pressed (issue #237).
+  await openNotices('Spec proposed')
   await pressIn(PROPOSAL_CARD, 'Create')
-  await awaits(`Created ${key}`)
+  await awaitsRecord(`Spec proposed, ${key} `)
 
   await unfoldSpec(key)
   // The `shape` phase cannot finish without these two, and this fake agent writes neither: they

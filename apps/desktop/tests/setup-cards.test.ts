@@ -109,4 +109,16 @@ describe("A variable's value is never shown back", () => {
     // Every other tool is shown as it was sent.
     expect(argumentsShown('fs_write', { changes, key: 'k' })).toEqual({ changes, key: 'k' })
   })
+
+  test("Codex's report of the call, its arguments under `arguments`, hides every value", () => {
+    const changes = JSON.stringify([{ kind: 'variable', name: 'API_KEY', value: 'sk-live' }])
+    const hidden = JSON.stringify([{ kind: 'variable', name: 'API_KEY', value: '(hidden)' }])
+    // codex-acp reports a dynamic tool's call as `{ arguments }`, the arguments as sent inside it.
+    const reported = JSON.stringify({ arguments: { changes, why: 'asked', key: 'k' } })
+
+    const shown = rawInputShown('hemera_setup_propose', reported)
+
+    expect(shown).not.toContain('sk-live')
+    expect(JSON.parse(shown)).toEqual({ arguments: { changes: hidden, why: 'asked', key: 'k' } })
+  })
 })

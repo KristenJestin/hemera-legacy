@@ -372,8 +372,6 @@ function Page({
               title={fresh ? 'Untitled' : 'CSV invoice export'}
 
               onRename={fn()}
-              onStartEditing={fn()}
-              onCancelEditing={fn()}
               onArchive={fn()}
               archiveDisabled={fresh}
               // What the turn has done and what the agent works from.

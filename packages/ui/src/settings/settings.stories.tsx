@@ -18,7 +18,7 @@ import {
  * measures the database nor counts the backups, it says what it was told.
  */
 const FACTS: ProfileFacts = {
-  directory: 'C:\\Users\\someone\\.hemera',
+  directory: 'C:\\Users\\someone\\AppData\\Local\\hemera\\prod',
   database: 'hemera.sqlite · 1.2 MB',
   lastMigration: '20260916_projects_and_journal',
   writtenByVersion: '0.4.0-beta.3',
@@ -198,7 +198,7 @@ export const States: Story = {
 export const NothingWrittenYet: Story = {
   args: {
     facts: {
-      directory: '/home/someone/.hemera-dev/root',
+      directory: '/home/someone/.local/share/hemera/dev',
       database: 'hemera.sqlite · 24 KB',
       lastMigration: null,
       writtenByVersion: null,

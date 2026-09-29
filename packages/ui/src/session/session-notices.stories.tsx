@@ -176,6 +176,7 @@ function groupsOf(
     {
       kind: 'permission',
       label: 'Permissions',
+      title: 'Run once',
       icon: <IconShield size="md" aria-hidden="true" />,
       urgent: true,
       items: of('permission'),
@@ -183,23 +184,26 @@ function groupsOf(
     {
       kind: 'question',
       label: 'Questions',
+      title: 'Questions',
       icon: <IconMessageQuestion size="md" aria-hidden="true" />,
       items: of('question'),
     },
     {
       kind: 'spec',
       label: 'Spec proposed',
+      title: 'Start a Spec',
       icon: <IconFlag size="md" aria-hidden="true" />,
       items: of('spec'),
     },
     {
       kind: 'proposal',
       label: 'Proposed commands',
+      title: 'Add to the catalogue',
       icon: <IconBookmarkPlus size="md" aria-hidden="true" />,
       items: proposals,
       actions:
         proposals.length > 1 ? (
-          <Button variant="secondary" size="sm" onClick={onAcceptAll}>
+          <Button variant="link" size="sm" onClick={onAcceptAll}>
             Add all
           </Button>
         ) : undefined,
@@ -376,6 +380,12 @@ export const Opened: Story = {
         pill.getBoundingClientRect().top,
       )
     })
+    // The focus stays on the pill, and Tab goes on into the panel: nothing is picked for the reader.
+    await expect(pill).toHaveFocus()
+    await userEvent.tab()
+    await waitFor(() => {
+      expect(panel.contains(document.activeElement)).toBe(true)
+    })
   },
 }
 
@@ -519,11 +529,11 @@ export const OpenOnSeveralKinds: Story = {
     const heads = within(panel)
       .getAllByRole('region')
       .map((group) => group.querySelector('header')?.textContent)
-    // A head a kind — its name and how many — and Add all in the proposals' own head.
-    await expect(heads).toEqual(['Permissions1', 'Questions1', 'Proposed commands3Add all'])
-    // Every item is a card with a title; every card that answers yes or no has its two words.
-    await expect(within(panel).getByText('Run once')).toBeVisible()
-    await expect(within(panel).getAllByText('Add to the catalogue')).toHaveLength(3)
+    // A head a kind — what accepting does and how many — and Add all in the proposals' own head.
+    await expect(heads).toEqual(['Run once· 1', 'Questions· 1', 'Add to the catalogue· 3Add all'])
+    // The kind is said once, by its head: no card says it again (review of #250).
+    await expect(within(panel).getAllByText('Add to the catalogue')).toHaveLength(1)
+    await expect(within(panel).getAllByText('Run once')).toHaveLength(1)
     await expect(within(panel).getAllByRole('button', { name: 'Add' })).toHaveLength(3)
     await expect(within(panel).getAllByRole('button', { name: 'Decline' })).toHaveLength(3)
     await expect(within(panel).getByRole('button', { name: 'Add all' })).toBeVisible()

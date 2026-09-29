@@ -133,18 +133,17 @@ export const AnsweredByKeyboard: Story = {
   },
 }
 
-/** Escape takes the refusal, and the refusal only: it never answers with a permission. */
-export const EscapeRefuses: Story = {
+/**
+ * Escape answers nothing (review of #250): among the notices it closes them, and a reader putting
+ * the panel away has not refused anything.
+ */
+export const EscapeAnswersNothing: Story = {
   play: async ({ canvasElement, args }) => {
     const canvas = within(canvasElement)
     canvas.getByRole('button', { name: 'Allow once' }).focus()
 
     await userEvent.keyboard('{Escape}')
-    await expect(args.onDecide).toHaveBeenCalledWith({
-      optionId: 'no',
-      kind: 'reject_once',
-      name: 'Reject once',
-    })
+    await expect(args.onDecide).not.toHaveBeenCalled()
   },
 }
 
@@ -189,9 +188,9 @@ export const HemeraToolOutsideTheRoot: Story = {
   },
   play: async ({ canvasElement, args }) => {
     const canvas = within(canvasElement)
-    // The head is what accepting does; what it is about is under it (#237, review of #250).
+    // What the call is and what it is about, on one line; what accepting does is its group's.
     const head = canvas.getByText('Write file').parentElement
-    await expect(head?.textContent).toBe('Write file')
+    await expect(head?.textContent).toBe('Write file../notes/todo.md')
     await expect(canvas.queryByText('fs_write')).toBeNull()
     await expect(getComputedStyle(canvas.getByText('../notes/todo.md')).fontFamily).toMatch(
       /mono|Fira/i,

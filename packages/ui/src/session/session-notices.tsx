@@ -14,15 +14,19 @@ import { collapse, expand, fold, POP, pop, RISE, rise, useTransition } from '../
  * more. It stands over the page rather than in it: nothing else moves when it comes or goes.
  *
  * Closed, it is an icon a kind and how many wait of it, and nothing else — no sentence says it
- * waits, the pill is that sentence. Pressed, it opens above itself on every item, grouped by kind
- * under a head each — the kind's mark, what accepting its items does, how many, and what answers
- * them all — with the same room and the same rule between every two groups; each item is a
- * `NoticeCard`, one anatomy for every kind, which says the kind no second time (review of #250). Something new arriving while it is closed pops it
- * again, and never opens it: the reader opens it.
+ * waits, the pill is that sentence. Pressed, it opens above itself on a compact list (variant A of
+ * the exploration after #250): one row an item, kind after kind, each after its kind's coloured
+ * tile — the one place the kind is said — and each a `NoticeRow`, the same anatomy and the same
+ * two answers for every kind; a group's `Add all` is a last row of its own. It opens with the focus
+ * left on the pill, and Escape closes it. Something new arriving while it is closed pops it again,
+ * and never opens it: the reader opens it.
  *
  * The kinds are the caller's, handed over as groups: a kind this component has never heard of is
  * one more group, with its icon and its items (the Project setup proposals to come, #222).
  */
+
+/** The tones a kind's tile is drawn in. */
+export type NoticeTone = 'warning' | 'primary' | 'info' | 'success'
 
 /** One thing that waits: what answers it, already drawn, under the key it keeps while it waits. */
 export interface NoticeItem {
@@ -37,16 +41,18 @@ export interface NoticeGroup {
   /** What the kind is called, which is what a screen reader counts it by: `Permissions`. */
   label: string
   /**
-   * What accepting its items does, said once for all of them in the group's head (review of
-   * #250): `Run once`, `Add to the catalogue`, `Start a Spec`; `Questions` for the questions.
+   * What accepting its items does: `Run once`, `Add to the catalogue`, `Start a Spec`;
+   * `Questions` for the questions. Said under the pointer on its tile.
    */
   title: string
-  /** The kind's mark, on the pill beside its count. */
+  /** The kind's mark, on the pill beside its count and on the tile before each of its rows. */
   icon: ReactNode
+  /** The tone of the kind's tile: what tells the kinds apart at a glance. */
+  tone: NoticeTone
   /** Whether the kind holds the turn where it stands, drawn in the warning's tone. */
   urgent?: boolean | undefined
   items: readonly NoticeItem[]
-  /** What answers the whole group at once, in its head: `Add all`. */
+  /** What answers the whole group at once, as a last row of its own: `Add all`. */
   actions?: ReactNode
 }
 
@@ -82,27 +88,31 @@ const COUNT = 'font-mono'
 
 const PANEL = 'scroll-quiet flex max-h-pinned w-notices flex-col overflow-y-auto'
 
+/** The list: a rule between every two rows, whatever their kind. */
+const ROWS = 'flex flex-col divide-y divide-border'
+
+/** A group of rows: a section a kind, with no head — the tiles say the kind. */
+const GROUP = 'flex flex-col divide-y divide-border'
+
 /**
- * A group: its items one under the other, with no gap of the list's own — the room between two
- * items is inside each, so an item folding away takes all of its room with it and the panel never
- * snaps by a gap once it is gone.
+ * A row: the kind's tile, then the row. The room around a row is inside it,
+ * so a row folding away takes all of its room with it.
  */
-const GROUP = 'flex flex-col'
+const ITEM = 'flex min-w-0 items-start gap-2.5 py-2'
 
-/** A group after the first: a rule between the two, the same room on both sides of it. */
-const GROUP_APART = 'mt-3 flex flex-col border-t border-border pt-3'
+/** What answers a whole group, as a last row of its own. */
+const GROUP_ACTIONS = 'flex justify-end py-1.5'
 
-/** A group's head: its kind's mark, its name and how many wait, and what answers them all. */
-const GROUP_HEAD = 'flex h-control-sm items-center gap-2 pb-1 text-sm font-medium text-foreground'
-
-const GROUP_MARK = 'flex text-muted-foreground'
-
-const GROUP_COUNT = 'font-mono text-muted-foreground'
-
-const GROUP_ACTIONS = 'ml-auto flex items-center'
-
-/** The room under an item is its own, so an item folding away takes all of it. */
-const ITEM = 'pb-2'
+/** The kind's tile, in its tone: what tells the kinds apart at a glance. */
+const TILES: Record<NoticeTone, string> = {
+  warning:
+    'flex size-control-sm shrink-0 items-center justify-center rounded-md bg-warning-muted text-warning-muted-foreground',
+  primary:
+    'flex size-control-sm shrink-0 items-center justify-center rounded-md bg-primary-muted text-primary-muted-foreground',
+  info: 'flex size-control-sm shrink-0 items-center justify-center rounded-md bg-info-muted text-info-muted-foreground',
+  success:
+    'flex size-control-sm shrink-0 items-center justify-center rounded-md bg-success-muted text-success-muted-foreground',
+}
 
 /** What a group of the list and an item of a group arrive and leave on: their height. */
 function Fold({ children }: { children: ReactNode }): ReactNode {
@@ -194,34 +204,41 @@ export function SessionNotices({ groups, defaultOpen = false }: SessionNoticesPr
               }
             >
               <div className={PANEL}>
-                <AnimatePresence initial={false}>
-                  {waiting.map((group, index) => (
-                    <Fold key={group.kind}>
-                      <section
-                        aria-label={group.label}
-                        className={index === 0 ? GROUP : GROUP_APART}
-                      >
-                        <header className={GROUP_HEAD}>
-                          <span aria-hidden="true" className={GROUP_MARK}>
-                            {group.icon}
-                          </span>
-                          {group.title}
-                          <span className={GROUP_COUNT}>{`· ${String(group.items.length)}`}</span>
-                          {group.actions !== undefined && (
-                            <span className={GROUP_ACTIONS}>{group.actions}</span>
-                          )}
-                        </header>
-                        <AnimatePresence initial={false}>
-                          {group.items.map((item) => (
-                            <Fold key={item.id}>
-                              <div className={ITEM}>{item.content}</div>
-                            </Fold>
-                          ))}
-                        </AnimatePresence>
-                      </section>
-                    </Fold>
-                  ))}
-                </AnimatePresence>
+                <div className={ROWS}>
+                  <AnimatePresence initial={false}>
+                    {waiting.map((group) => (
+                      <Fold key={group.kind}>
+                        <section aria-label={group.label} className={GROUP}>
+                          <AnimatePresence initial={false}>
+                            {group.items.map((item) => (
+                              <Fold key={item.id}>
+                                <div className={ITEM}>
+                                  <span
+                                    aria-hidden="true"
+                                    className={TILES[group.tone]}
+                                    title={group.title}
+                                  >
+                                    {group.icon}
+                                  </span>
+                                  <div className="min-w-0 flex-1">{item.content}</div>
+                                </div>
+                              </Fold>
+                            ))}
+                          </AnimatePresence>
+                          {/* What answers the group at once comes and goes by its height too:
+                                Add all leaves with the last but one proposal. */}
+                          <AnimatePresence initial={false}>
+                            {group.actions !== undefined && (
+                              <Fold key="actions">
+                                <div className={GROUP_ACTIONS}>{group.actions}</div>
+                              </Fold>
+                            )}
+                          </AnimatePresence>
+                        </section>
+                      </Fold>
+                    ))}
+                  </AnimatePresence>
+                </div>
               </div>
             </Popover>
           </motion.div>

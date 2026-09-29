@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react'
 
 import { IconBookmarkPlus } from '../icons.ts'
-import { NoticeCard } from '../session/notice-card.tsx'
+import { NoticeRow } from '../session/notice-row.tsx'
 import { COMMAND_TYPE_ICONS, type CommandType } from './command-type.ts'
 import { type NoticeAnswer, NoticeRecord } from './notice-record.tsx'
 
@@ -11,9 +11,10 @@ import { type NoticeAnswer, NoticeRecord } from './notice-record.tsx'
  *
  * The agent has no write on the catalogue: `commands_propose` leaves an entry in the thread and
  * nothing else, and the command enters the catalogue only when a human accepts it. It is drawn as
- * every notice is (`NoticeCard`), under its group's "Add to the catalogue": the type with its fixed
- * icon and the name, the line whole, where it would run, and Decline / Add. Why the agent proposes it is under
- * the pointer on the name, and in the thread's record of it, which is also where the answer stays.
+ * every notice is (`NoticeRow`): its name, and Decline / Add, after the tile that says it is to be
+ * added to the catalogue; the chevron unfolds its whole line and where it would run. Its type is
+ * left to the thread's record: a second mark on the row read as a second kind. Why the agent
+ * proposes it is under the pointer on the name, and in the thread's record of it.
  */
 
 /** Where a proposal stands: waiting for the human, or answered. */
@@ -34,31 +35,18 @@ export interface CommandProposalProps {
   onDecline: () => void
 }
 
-const NAME = 'font-medium'
-
 export function CommandProposal({
   name,
   line,
-  type,
   folder,
   why,
   onAccept,
   onDecline,
 }: CommandProposalProps): ReactNode {
-  const TypeIcon = COMMAND_TYPE_ICONS[type]
   return (
-    <NoticeCard
+    <NoticeRow
       name={`Proposed command ${name}`}
-      subject={
-        <>
-          <span className="flex shrink-0 text-muted-foreground">
-            <TypeIcon size="sm" aria-hidden="true" />
-          </span>
-          <span className={NAME} title={why}>
-            {name}
-          </span>
-        </>
-      }
+      head={<span title={why}>{name}</span>}
       line={line}
       // Where it would run, when it is not the Workspace root, where every line runs.
       place={folder === '.' ? undefined : folder}

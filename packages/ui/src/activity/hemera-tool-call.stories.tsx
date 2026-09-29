@@ -47,13 +47,14 @@ const meta = {
     },
     status: {
       control: 'inline-radio',
-      options: ['pending', 'in_progress', 'completed', 'failed', 'refused'],
+      options: ['pending', 'in_progress', 'completed', 'failed', 'refused', 'deferred'],
       description: 'Where the call stands: running and waiting are held open, done folds.',
     },
     summary: { control: 'text', description: 'What the call returned, in one line.' },
     arguments: { control: 'object', description: 'The arguments as they were bounded.' },
     ms: { control: 'number', description: 'How long the call took: the dot’s hover.' },
     error: { control: 'text', description: 'Why the call failed, or why it was refused.' },
+    note: { control: 'text', description: 'How a “not yet” ended, in a few words on its line.' },
     onOpenPath: { control: false, description: 'What a press on a subject that is a path does.' },
     children: { control: false, description: 'What the call returned, already drawn.' },
   },
@@ -72,7 +73,9 @@ const A_FOLD = 30
  * The press on the path sat beside the whole fold and was centred on it, so it slid down the
  * block while the body opened under it. It is on the fold's own line now, the one line that
  * never moves, and pressing it goes to the path without opening the block. Since recette 3 it is
- * the subject itself, where the line is read, and there is no second copy of it at the end.
+ * the subject itself, where the line is read, and there is no second copy of it at the end. The
+ * block is opened from the keyboard in the story: the subject gives under the hand since issue
+ * #108, and a hand on it would be measured with the fold.
  */
 export const AFoldOpening: Story = {
   play: async ({ canvasElement, args }) => {
@@ -96,8 +99,16 @@ export const AFoldOpening: Story = {
       'false',
     )
 
+    // The hand lets go, and the line is read where it rests: since issue #108 a control under the
+    // hand moves, by the same pixels whatever its size. The row is opened from the keyboard, so
+    // the pointer stays away from it and what is measured is the fold and nothing else.
+    await userEvent.unhover(path)
+    await waitFor(() => {
+      expect(path.getBoundingClientRect().width).toBeCloseTo(path.offsetWidth, 0)
+    })
     const closed = path.getBoundingClientRect().top
-    await userEvent.click(row)
+    row.focus()
+    await userEvent.keyboard('{Enter}')
     await expect(row).toHaveAttribute('aria-expanded', 'true')
     const moved = () => Math.abs(path.getBoundingClientRect().top - closed) > 0.5
     await expect(await withinFrames(moved, A_FOLD), 'the path slid while the block opened').toBe(
@@ -329,6 +340,43 @@ export const Refused: Story = {
 }
 
 /**
+ * A phase proposed finished while a question is open (issue #134): Hemera said "not yet". A quiet
+ * folded row like the other calls, the few words of why on its line, the whole reason in the
+ * body in the colour of a caption, not a warning.
+ */
+export const NotYet: Story = {
+  args: {
+    tool: 'spec_propose',
+    label: 'Propose',
+    mark: 'propose-spec',
+    subject: { text: 'shape' },
+    status: 'deferred',
+    note: 'not yet: a question is open',
+    summary:
+      'The shape phase cannot finish: a blocking question is open: Which date decides the month?.',
+    error:
+      'The shape phase cannot finish: a blocking question is open: Which date decides the month?.',
+    arguments: [
+      { label: 'kind', value: 'phase' },
+      { label: 'phase', value: 'shape' },
+    ],
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const row = canvas.getByRole('button', { name: /Propose shape — not yet: a question is open/ })
+    await expect(row).toHaveAttribute('aria-expanded', 'false')
+    await expect(canvas.getByRole('img', { name: 'Not yet' })).toBeVisible()
+    await expect(canvas.queryByText(/Which date decides the month/)).toBeNull()
+    await userEvent.click(row)
+    const reason = await canvas.findByText(/Which date decides the month/)
+    await expect(reason).toBeVisible()
+    // Quiet: the caption's colour, never the warning's.
+    await expect(reason.className).toContain('text-muted-foreground')
+    await expect(reason.className).not.toContain('warning')
+  },
+}
+
+/**
  * A failed call folds (recette 4 of 23 September 2026): it opens on its reason, and once it is
  * over the fold is the reader's. It used to be held open for good, in the way of the thread.
  */
@@ -480,7 +528,10 @@ const CATALOGUE: readonly (readonly [string, string, HemeraToolMark, string | nu
   ['commands_stop', 'Stop command', 'stop-command', 'dev', 'Stopping dev'],
   ['commands_list', 'List commands', 'list-commands', null, 'Reading the catalogue'],
   ['commands_output', 'Command output', 'command-output', 'check', 'Reading the output of check'],
+  ['commands_propose', 'Propose command', 'propose-command', 'test', 'Proposing test'],
   ['project_get', 'Project', 'project', null, 'Reading the Project'],
+  ['setup_read', 'Project setup', 'read-setup', null, 'Reading the Project setup'],
+  ['setup_propose', 'Propose setup', 'propose-setup', null, 'Proposing 3 changes'],
   ['session_get', 'Session', 'session', null, 'Reading this Session'],
   ['spec_read', 'Read Spec', 'read-spec', 'HEM-7', 'Reading HEM-7'],
   ['spec_write', 'Write Spec', 'write-spec', 'scope', 'Writing the scope'],
@@ -488,8 +539,8 @@ const CATALOGUE: readonly (readonly [string, string, HemeraToolMark, string | nu
 ]
 
 /**
- * The catalogue as the thread reads it (recette 3 of 23 September 2026): fourteen tools, fourteen
- * marks and fourteen labels, and what each call is about where it is about something. A mark per
+ * The catalogue as the thread reads it (recette 3 of 23 September 2026): seventeen tools,
+ * seventeen marks and seventeen labels, and what each call is about where it is about something. A mark per
  * kind of tool drew `fs_list` as `fs_read` and the four commands as one.
  */
 export const EveryTool: Story = {

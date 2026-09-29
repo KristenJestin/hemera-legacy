@@ -26,17 +26,22 @@ import type {
 } from '@hemera/ipc'
 
 import { agentDirectoriesLayer } from '#engine/agents/bare.ts'
+import { acpTracesLayer } from '#engine/agents/trace.ts'
 import { discoveryLayer } from '#engine/agents/discovery.ts'
 import type { FakeAgent } from '#engine/agents/fake.ts'
 import { heldWordsLayer } from '#engine/agents/held.ts'
+import { sessionModesLayer } from '#engine/agents/modes.ts'
 import { AgentNotices } from '#engine/agents/notices.ts'
 import { clockLayer, poolLayer } from '#engine/agents/pool.ts'
 import { runtimeLayer } from '#engine/agents/runtime.ts'
 import { Agents } from '#engine/agents/service.ts'
 import { StderrSink, hostProcessesLayer } from '#engine/agents/supervisor.ts'
+import { proposalsLayer } from '#engine/commands/proposals.ts'
+import { setupProposalsLayer } from '#engine/setup/proposals.ts'
 import { commandsLayer } from '#engine/commands/service.ts'
 import { contextLayer } from '#engine/context/service.ts'
-import { PUSHED, named } from '#engine/index.ts'
+import { domainEventsLayer } from '#engine/domain-events.ts'
+import { type EngineServices, PUSHED, named } from '#engine/index.ts'
 import { journalLayer } from '#engine/journal.ts'
 import { openProfile } from '#engine/migrate.ts'
 import { preferencesLayer } from '#engine/preferences.ts'
@@ -51,8 +56,12 @@ import { toolAccessLayer } from '#engine/tools/access.ts'
 import { toolCatalogueLayer } from '#engine/tools/catalogue.ts'
 import { toolPermissionsLayer } from '#engine/tools/permissions.ts'
 import { toolServerLayer } from '#engine/tools/server.ts'
+import { gitLayer } from '#engine/git.ts'
+import { hostLinks, preparationLayer } from '#engine/workspaces/preparation.ts'
+import { launchesLayer } from '#engine/workspaces/launches.ts'
+import { variablesLayer } from '#engine/workspaces/variables.ts'
 
-import { SHIPPED, VERSION, besideTheAgent, machine } from './application.ts'
+import { SHIPPED, VERSION, besideTheAgent, machine, setupPlaces } from './application.ts'
 
 /** A window over one engine: the bridge the stores talk through, and the way to close it. */
 export interface OpenWindow {
@@ -61,6 +70,13 @@ export interface OpenWindow {
   readonly pushed: readonly EngineEvent[]
   /** What the engine wrote to its diagnostic, which is where a refused access is told. */
   readonly written: readonly string[]
+  /**
+   * Runs a program against this window's engine.
+   *
+   * A service the window has no channel for yet — the launches (D8-13) — is asked here, in the
+   * very context the bridge reaches, rather than through a channel nothing declares yet.
+   */
+  readonly running: <A, E>(program: Effect.Effect<A, E, EngineServices>) => Promise<A>
   /** Closes the engine: every process it started goes with its scope. */
   readonly close: () => Promise<void>
 }
@@ -73,6 +89,28 @@ export interface OpenWindow {
  */
 export async function openWindow(
   dataFolder: string,
+  agent: FakeAgent,
+  ...others: readonly FakeAgent[]
+): Promise<OpenWindow> {
+  return openOver(dataFolder, machine, agent, ...others)
+}
+
+/**
+ * The same window over the machine given: a suite about a start that cannot happen hands it one
+ * that holds none of the agents' bare means (D6-02).
+ */
+export async function openWindowOn(
+  dataFolder: string,
+  over: typeof machine,
+  agent: FakeAgent,
+  ...others: readonly FakeAgent[]
+): Promise<OpenWindow> {
+  return openOver(dataFolder, over, agent, ...others)
+}
+
+async function openOver(
+  dataFolder: string,
+  over: typeof machine,
   agent: FakeAgent,
   ...others: readonly FakeAgent[]
 ): Promise<OpenWindow> {
@@ -94,6 +132,9 @@ export async function openWindow(
     wrote: (sessionId, entry) => push({ event: 'entry', sessionId, entry }),
     changed: (sessionId, what) => push({ event: PUSHED[what], sessionId, entry: null }),
     ran: (sessionId, run) => push({ event: 'run', sessionId, run }),
+    workspace: (projectId, workspaceId) => push({ event: 'workspace', projectId, workspaceId }),
+    launched: (specId, projectId) => push({ event: 'launch.changed', specId, projectId }),
+    agents: () => push({ event: 'agents.changed' }),
   })
   // Nothing here asks a registry or updates an agent: the Agents section's own suites do.
   const listed = Layer.succeed(Agents, {
@@ -101,15 +142,21 @@ export async function openWindow(
     check: () => Effect.succeed([]),
     update: () => Effect.die('nothing in this window updates an agent'),
   })
+  const database = databaseLayer(join(dataFolder, 'hemera.sqlite'))
+
   const tools = toolServerLayer.pipe(
     Layer.provideMerge(toolCatalogueLayer),
     Layer.provideMerge(toolAccessLayer),
     Layer.provideMerge(toolPermissionsLayer),
     Layer.provideMerge(commandsLayer),
+    Layer.provideMerge(variablesLayer),
+    // The Workspaces and the recipe, one instance the tools read and the window changes (#218).
+    Layer.provideMerge(setupPlaces(dataFolder, notices)),
   )
-  const services = runtimeLayer.pipe(
+  const runtime = runtimeLayer.pipe(
+    Layer.provideMerge(proposalsLayer),
     Layer.provideMerge(tools),
-    Layer.provideMerge(contextLayer),
+    Layer.provideMerge(contextLayer.pipe(Layer.provide(gitLayer()))),
     Layer.provideMerge(journalLayer),
     Layer.provideMerge(
       Layer.mergeAll(
@@ -120,20 +167,39 @@ export async function openWindow(
         preferencesLayer,
         listed,
         engineStatusLayer({ directory: dataFolder, channel: 'dev', version: VERSION }),
-      ).pipe(Layer.provideMerge(databaseLayer(join(dataFolder, 'hemera.sqlite')))),
+      ).pipe(Layer.provideMerge(Layer.mergeAll(database, domainEventsLayer))),
     ),
-    Layer.provideMerge(discoveryLayer.pipe(Layer.provide(machine))),
-    Layer.provide(
+    Layer.provideMerge(discoveryLayer.pipe(Layer.provide(over))),
+    Layer.provideMerge(
       besideTheAgent([agent, ...others]).pipe(
         Layer.provide(Layer.mergeAll(hostProcessesLayer, lines)),
       ),
     ),
-    Layer.provide(notices),
-    Layer.provide(lines),
+    Layer.provideMerge(notices),
+    Layer.provideMerge(lines),
     Layer.provide(poolLayer.pipe(Layer.provide(clockLayer))),
     Layer.provideMerge(heldWordsLayer),
+    Layer.provideMerge(sessionModesLayer),
     Layer.provide(agentDirectoriesLayer(dataFolder)),
+    Layer.provide(acpTracesLayer(dataFolder)),
   )
+
+  // The launches, which start the builds a ready Workspace was waited for (D8-13).
+  const launches = launchesLayer.pipe(Layer.provide(runtime))
+
+  // The Workspaces of the Projects, made under the data folder, over the machine's `git`.
+  const workspaces = preparationLayer.pipe(
+    Layer.provide(hostLinks),
+    Layer.provide(gitLayer()),
+    Layer.provideMerge(launches),
+    // The runtime, so the preparation runs its commands and tells what changed as it does.
+    Layer.provide(runtime),
+  )
+
+  // What a human decides of the setup changes the agent proposed (#218).
+  const setup = setupProposalsLayer.pipe(Layer.provide(workspaces), Layer.provide(runtime))
+
+  const services = Layer.mergeAll(runtime, workspaces, setup)
 
   mkdirSync(dataFolder, { recursive: true })
   const scope = Effect.runSync(Scope.make())
@@ -163,10 +229,16 @@ export async function openWindow(
     },
   }
 
+  const running = <A, E>(program: Effect.Effect<A, E, EngineServices>) =>
+    // SAFETY: `services` is this harness's whole engine, composed with every tag `EngineServices`
+    // names; a tag missing from it is a defect the suite is meant to see, not a silent fallback.
+    Effect.runPromise(Effect.provide(program, context) as Effect.Effect<A, E>)
+
   return {
     bridge,
     pushed,
     written,
+    running,
     close: () => Effect.runPromise(Scope.close(scope, Exit.void)),
   }
 }

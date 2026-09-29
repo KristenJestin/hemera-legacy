@@ -1,4 +1,5 @@
 import stylesheet from './theme.css?raw'
+import { roleIn } from './tokens.ts'
 
 /**
  * The colours the main process paints the window with, read out of the theme itself (D1-02).
@@ -31,25 +32,11 @@ export interface WindowColors {
   foreground: string
 }
 
-/** The block of a stylesheet a theme's roles are declared in. */
-const BLOCK: Record<Theme, RegExp> = {
-  light: /^:root\s*\{([\s\S]*?)^\}/m,
-  dark: /^\.dark\s*\{([\s\S]*?)^\}/m,
-}
-
-function token(source: string, name: string, theme: Theme): string {
-  const block = BLOCK[theme].exec(source)
-  if (block === null) throw new Error(`the theme declares no ${theme} block`)
-  const found = new RegExp(String.raw`^\s*--${name}\s*:\s*([^;]+);`, 'm').exec(block[1]!)
-  if (found === null) throw new Error(`the ${theme} theme declares no --${name}`)
-  return found[1]!.trim()
-}
-
 /** The window colours a given stylesheet declares for a theme. */
 export function colorsIn(source: string, theme: Theme): WindowColors {
   return {
-    background: token(source, 'background', theme),
-    foreground: token(source, 'foreground', theme),
+    background: roleIn(source, 'background', theme),
+    foreground: roleIn(source, 'foreground', theme),
   }
 }
 

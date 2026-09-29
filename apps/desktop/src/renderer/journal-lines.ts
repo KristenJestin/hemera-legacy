@@ -58,6 +58,14 @@ export function whenOf(when: number, now: number = Date.now()): string {
   return new Date(when).toLocaleDateString()
 }
 
+/** How far a Session's agent is attached to its own session, as the Journal says it. */
+const NATIVE_LINES = new Map([
+  ['attached', 'Agent attached to its own session'],
+  ['lost', 'Agent lost its own session'],
+  ['fallback', 'Agent given a context rebuilt from the thread'],
+  ['none', 'Agent not started yet'],
+])
+
 /** What each type of event says, with what its payload adds to it. */
 function labelOf(entry: JournalEntry): string {
   const payload = entry.payload
@@ -95,6 +103,12 @@ function labelOf(entry: JournalEntry): string {
       return 'Session restored'
     case 'session.mission_set':
       return `Mission set to ${said('mission')}`
+    // What the engine records of a Session's agent while it works: the option it stands on, and
+    // how far the session the agent keeps of its own is still attached (D5-06).
+    case 'session.choice_recorded':
+      return `Agent ${said('optionId')} set to ${said('value')}`
+    case 'session.agent_recorded':
+      return NATIVE_LINES.get(said('nativeState')) ?? 'Agent session recorded'
     // A Spec's steps (D7-13). The phase a step belongs to is a correlation of the event rather
     // than a word of its payload, and it is read from there.
     case 'spec.created':
@@ -103,6 +117,8 @@ function labelOf(entry: JournalEntry): string {
       return payload.writer === true
         ? 'Session opened on the Spec, as its writer'
         : 'Session opened on the Spec, as a reader'
+    case 'spec.heading_written':
+      return `Spec is the ${said('type')} “${said('title')}”`
     case 'spec.section_written':
       return `${said('name')} written by ${said('author')} · v${said('version')}`
     case 'spec.stories_written':
@@ -138,12 +154,21 @@ function labelOf(entry: JournalEntry): string {
   }
 }
 
+/**
+ * The entity a line is drawn under. The Journal tells a Project, a Session, a Spec and the Profile
+ * apart; a Workspace, a command and a launch (D8-16) belong to their Project, and are drawn under
+ * it.
+ */
+function drawnKind(kind: JournalEntry['entityKind']): JournalLine['kind'] {
+  return kind === 'session' || kind === 'profile' || kind === 'spec' ? kind : 'project'
+}
+
 /** One entry, as the Journal and the Activity frame draw one. */
 export function lineOf(entry: JournalEntry, now = new Date()): JournalLine {
   const at = new Date(entry.occurredAt)
   return {
     sequence: entry.sequence,
-    kind: entry.entityKind,
+    kind: drawnKind(entry.entityKind),
     label: labelOf(entry),
     day: dayOf(at, now),
     time: at.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' }),

@@ -944,9 +944,17 @@ export const ReducedMotion: Story = {
     const agents = await screen.findByRole('listbox', { name: 'Agents' })
     await userEvent.click(within(agents).getByRole('option', { name: /Claude Code/ }))
 
-    // One panel to the left inside a frame, where the carousel would be a tenth of the way
-    // across it: the models are simply there.
-    await expect(travelledBy(rail)).toBeCloseTo(-panel, 0)
+    // One panel to the left, and never anywhere between: where the carousel would be a tenth
+    // of the way across, the models are simply there. The frames are watched rather than one
+    // read taken at once, since a loaded runner may not have committed the click yet.
+    const frames = await travelOf(rail, 40)
+    await expect(
+      frames.every((x) => Math.abs(x) < 0.5 || Math.abs(x + panel) < 0.5),
+      'the rail was carried across rather than set down',
+    ).toBe(true)
+    await waitFor(() => {
+      expect(travelledBy(rail)).toBeCloseTo(-panel, 0)
+    })
     await expect(screen.getByRole('listbox', { name: 'Models of this agent' })).toBeInTheDocument()
   },
 }

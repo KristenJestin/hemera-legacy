@@ -11,6 +11,7 @@ import { describe, expect, test } from 'vite-plus/test'
 
 import type { SessionEntry } from '@hemera/ipc'
 import {
+  asksToRunALine,
   decidesARequest,
   NOTICE_KINDS,
   permissionStandingOf,
@@ -142,5 +143,18 @@ describe('The thread keeps a quiet record of each permission', () => {
   test('a decision is said by its request, unless a one-off went through without one', () => {
     expect(decidesARequest(decided('allowed'), [asked('decided'), decided('allowed')])).toBe(true)
     expect(decidesARequest(decided('allowed'), [decided('allowed')])).toBe(false)
+  })
+})
+
+describe("The permissions' group says what accepting does (#250)", () => {
+  test('a one-off line is run once; any other question is allowed once', () => {
+    const line = entry(
+      'permission_request',
+      JSON.stringify({ toolCallId: 'q2', options: OPTIONS, tool: 'commands_run' }),
+      'line',
+      'pending',
+    )
+    expect(asksToRunALine(line)).toBe(true)
+    expect(asksToRunALine(asked('pending'))).toBe(false)
   })
 })

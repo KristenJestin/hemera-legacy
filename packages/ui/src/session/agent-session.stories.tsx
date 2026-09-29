@@ -456,6 +456,7 @@ function Page({
                       {
                         kind: 'permission',
                         label: 'Permissions',
+                        title: 'Run once',
                         icon: <IconShield size="md" aria-hidden="true" />,
                         urgent: true,
                         items: [{ id: 'permission', content: ASKED }],

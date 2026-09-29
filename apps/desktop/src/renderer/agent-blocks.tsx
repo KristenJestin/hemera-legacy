@@ -18,6 +18,7 @@ import {
   PermissionRecord,
   PermissionRequest,
   SetupProposal,
+  SetupProposalRecord,
   SpecProposalRecord,
   SpecQuestion,
   SpecQuestionRecord,
@@ -53,7 +54,6 @@ import {
   hemeraToolCallOf,
   reportedFailureOf,
   setupProposalOf,
-  waitingInBatch,
   stoppedTurnOf,
   hemeraToolLabelOf,
   nativeSubjectOf,
@@ -360,9 +360,7 @@ export interface AgentContext {
   onDeclineProposal: (proposalId: string) => void
   /** Applies a change to the Project's setup the agent proposed: the human's click (#218). */
   onAcceptSetup: (proposalId: string) => void
-  /** Applies every change of a batch still waiting, in the order proposed (Decided 1 of #218). */
-  onAcceptSetupBatch: (batchId: string) => void
-  /** Leaves the setup as it is, and says so on the card. */
+  /** Leaves the setup as it is, and says so on its record. */
   onDeclineSetup: (proposalId: string) => void
   /** What the Spec entries of the thread are drawn with. */
   spec: SpecContext
@@ -628,19 +626,20 @@ export function drawEntry(entry: SessionEntry, context: AgentContext): ReactNode
   }
 
   if (entry.kind === 'setup_proposal') {
-    // A change to the Project's setup the agent proposes, applied only when a human accepts it
-    // (#218): the decision comes back as this same entry in its outcome. The last card of a batch
-    // offers Accept all while more than one of its changes waits.
+    // A change to the Project's setup the agent proposes, answered among the Session's notices
+    // (#218): the call that proposed it carries it, and this quiet line is drawn only when that
+    // call is not in the thread. The decision comes back as this same entry in its outcome.
     const drawn = setupProposalOf(entry)
     if (drawn === null) return null
-    const { proposalId, batchId, ...shown } = drawn
     return (
-      <SetupProposal
-        {...shown}
-        waiting={waitingInBatch(context.spec.thread, entry, drawn)}
-        onAccept={() => context.onAcceptSetup(proposalId)}
-        onDecline={() => context.onDeclineSetup(proposalId)}
-        onAcceptAll={() => context.onAcceptSetupBatch(batchId)}
+      <SetupProposalRecord
+        verb={drawn.verb}
+        subject={drawn.subject}
+        mono={drawn.mono}
+        line={drawn.line}
+        details={drawn.details}
+        why={drawn.why}
+        state={drawn.state}
       />
     )
   }
@@ -688,6 +687,10 @@ function outcomeOf(link: CallLink | undefined, context: AgentContext): Outcome {
       ? null
       : commandRunOf(link.run, context.runs, context.root, context.repositories)
   const proposed = link.proposal === undefined ? null : commandProposalOf(link.proposal)
+  const setup = (link.setup ?? []).flatMap((entry) => {
+    const drawn = setupProposalOf(entry)
+    return drawn === null ? [] : [{ id: entry.id, ...drawn }]
+  })
   const decision = link.decision
   return {
     outcome: (
@@ -695,6 +698,7 @@ function outcomeOf(link: CallLink | undefined, context: AgentContext): Outcome {
         permission={permission}
         run={run === null ? undefined : { state: run.state, exitCode: run.exitCode }}
         proposal={proposed?.state}
+        setup={setup.length === 0 ? undefined : setup.map((one) => one.state)}
       />
     ),
     children: (
@@ -721,6 +725,19 @@ function outcomeOf(link: CallLink | undefined, context: AgentContext): Outcome {
           proposed === null
             ? undefined
             : { line: proposed.line, folder: proposed.folder, why: proposed.why }
+        }
+        setup={
+          setup.length === 0
+            ? undefined
+            : {
+                changes: setup.map((one) => ({
+                  id: one.id,
+                  verb: one.verb,
+                  subject: one.subject,
+                  state: one.state,
+                })),
+                why: setup[0]?.why ?? '',
+              }
         }
       />
     ),
@@ -797,7 +814,7 @@ function permissionOf(entry: SessionEntry, context: AgentContext): Asked | null 
 /**
  * What answers an entry that waits for a human, drawn for the Session's notices (issue #237): the
  * permission with its whole line and its two answers, a proposed command with its marks, the Spec
- * the agent proposes, a question of the Spec with its choices. Null for any other entry.
+ * the agent proposes, a question of the Spec with its choices, a change to the Project's setup. Null for any other entry.
  */
 export function drawNotice(entry: SessionEntry, context: AgentContext): ReactNode | null {
   if (entry.kind === 'permission_request') {
@@ -826,6 +843,22 @@ export function drawNotice(entry: SessionEntry, context: AgentContext): ReactNod
         {...shown}
         onAccept={() => context.onAcceptProposal(proposalId)}
         onDecline={() => context.onDeclineProposal(proposalId)}
+      />
+    )
+  }
+  if (entry.kind === 'setup_proposal') {
+    const drawn = setupProposalOf(entry)
+    if (drawn === null) return null
+    return (
+      <SetupProposal
+        verb={drawn.verb}
+        subject={drawn.subject}
+        mono={drawn.mono}
+        line={drawn.line}
+        details={drawn.details}
+        why={drawn.why}
+        onAccept={() => context.onAcceptSetup(drawn.proposalId)}
+        onDecline={() => context.onDeclineSetup(drawn.proposalId)}
       />
     )
   }

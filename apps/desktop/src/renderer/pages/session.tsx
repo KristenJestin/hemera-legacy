@@ -47,7 +47,13 @@ import {
   type ScrollerEntry,
   type UsageMeterProps,
 } from '@hemera/ui'
-import { IconBookmarkPlus, IconFlag, IconMessageQuestion, IconShield } from '@hemera/ui/icons'
+import {
+  IconBookmarkPlus,
+  IconFlag,
+  IconListCheck,
+  IconMessageQuestion,
+  IconShield,
+} from '@hemera/ui/icons'
 
 import {
   hasEnded,
@@ -73,7 +79,13 @@ import { agentShellCallsOf, commandProposalOf, foldedCallsOf } from '../agent-to
 import { callLinksOf } from '../call-links.ts'
 import { whenOf } from '../journal-lines.ts'
 import { type CommandWrite, commandLineOf, commandWriteOf } from '../project-lines.ts'
-import { asksToRunALine, NOTICE_KINDS, type NoticeKind, waitingAs } from '../notices.ts'
+import {
+  asksToRunALine,
+  NOTICE_KINDS,
+  type NoticeKind,
+  setupBatchesWaiting,
+  waitingAs,
+} from '../notices.ts'
 import {
   contextListsOf,
   detailsTabsOf,
@@ -347,7 +359,10 @@ export interface SessionPageProps {
   onAddToCatalogue: (run: CommandRun) => Promise<string | null>
   /** Applies a change to the Project's setup the agent proposed; answers the refusal, or null. */
   onAcceptSetup: (proposalId: string) => Promise<string | null>
-  /** Applies every change of a batch still waiting (#218); answers the refusal, or null. */
+  /**
+   * Applies every change of a batch still waiting, in the order proposed (#218): what the setup's
+   * Accept all calls for each batch; answers the refusal, or null.
+   */
   onAcceptSetupBatch: (batchId: string) => Promise<string | null>
   /** Declines a proposed change; answers the refusal, or null. */
   onDeclineSetup: (proposalId: string) => Promise<string | null>
@@ -612,7 +627,6 @@ export function SessionPage({
       onAcceptProposal: (proposalId) => deciding(onAcceptProposal(proposalId)),
       onDeclineProposal: (proposalId) => deciding(onDeclineProposal(proposalId)),
       onAcceptSetup: (proposalId) => deciding(onAcceptSetup(proposalId)),
-      onAcceptSetupBatch: (batchId) => deciding(onAcceptSetupBatch(batchId)),
       onDeclineSetup: (proposalId) => deciding(onDeclineSetup(proposalId)),
       spec: {
         thread,
@@ -662,6 +676,24 @@ export function SessionPage({
       setRefused(null)
     })()
   }
+  /**
+   * Accepts every setup change that waits (Decided 1 of #218): batch after batch, in the order they
+   * were proposed, each in the order of its changes; the first refusal stops it, and is said.
+   */
+  const acceptAllSetup = (): void => {
+    const batches = setupBatchesWaiting(thread)
+    void (async () => {
+      for (const batch of batches) {
+        // oxlint-disable-next-line no-await-in-loop -- one batch applied after the other
+        const said = await onAcceptSetupBatch(batch)
+        if (said !== null) {
+          setRefused(said)
+          return
+        }
+      }
+      setRefused(null)
+    })()
+  }
   const itemsOf = (kind: NoticeKind): NoticeItem[] => waitingByKind.get(kind) ?? []
   const notices: NoticeGroup[] = [
     {
@@ -700,6 +732,20 @@ export function SessionPage({
         proposalsWaiting.length > 1 ? (
           <Button variant="link" size="sm" onClick={acceptAll}>
             Add all
+          </Button>
+        ) : undefined,
+    },
+    {
+      kind: 'setup',
+      label: 'Setup changes',
+      title: 'Set up the Project',
+      tone: 'build',
+      icon: <IconListCheck size="md" aria-hidden="true" />,
+      items: itemsOf('setup'),
+      actions:
+        itemsOf('setup').length > 1 ? (
+          <Button variant="link" size="sm" onClick={acceptAllSetup}>
+            Accept all
           </Button>
         ) : undefined,
     },

@@ -279,8 +279,6 @@ export interface SessionPageProps {
   loaded: boolean
   /** What "today" means for this render, so the separators are read once. */
   now: number
-  /** Whether the title is being typed into, which the page that called this one decides. */
-  editing: boolean
   /** What the last act was refused with, in the engine's own words, or null. */
   refusal: string | null
   /** What the engine has pushed for this Session since it was opened. */
@@ -315,9 +313,8 @@ export interface SessionPageProps {
   onDecide: (toolCallId: string, option: PermissionOption) => void
   /** Sets one of the agent's own options for the turn to come. */
   onChooseOption: (optionId: string, value: string) => void
-  onRename: (title: string) => void
-  onStartEditing: () => void
-  onCancelEditing: () => void
+  /** Renames the Session, in its row of the sidebar where its title lives (review of #250). */
+  onRename: () => void
   onArchive: () => void
   onSearchFiles: (query: string) => Promise<string[]>
   onPickFiles: () => Promise<string[]>
@@ -377,7 +374,6 @@ export function SessionPage({
   entries,
   loaded,
   now,
-  editing,
   refusal,
   agent,
   sessions,
@@ -390,8 +386,6 @@ export function SessionPage({
   onDecide,
   onChooseOption,
   onRename,
-  onStartEditing,
-  onCancelEditing,
   onArchive,
   onSearchFiles,
   onPickFiles,
@@ -892,9 +886,6 @@ export function SessionPage({
           <SessionHeader
             title={session.title}
             onRename={onRename}
-            editing={editing}
-            onStartEditing={onStartEditing}
-            onCancelEditing={onCancelEditing}
             onArchive={onArchive}
             // A Session nothing was ever written in is one the user made by mistake far more often
             // than one they are done with, and putting it away is a press they would come to

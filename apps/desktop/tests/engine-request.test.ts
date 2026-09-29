@@ -25,6 +25,7 @@ import { StderrSink } from '#engine/agents/supervisor.ts'
 import { agentDirectoriesLayer } from '#engine/agents/bare.ts'
 import { acpTracesLayer } from '#engine/agents/trace.ts'
 import { heldWordsLayer } from '#engine/agents/held.ts'
+import { sessionModesLayer } from '#engine/agents/modes.ts'
 import { type Proposals, proposalsLayer } from '#engine/commands/proposals.ts'
 import { type Commands, UnknownRunError, commandsLayer } from '#engine/commands/service.ts'
 import { type Context, contextLayer } from '#engine/context/service.ts'
@@ -108,6 +109,9 @@ function running<A, E>(
   readVersion: (command: string) => Effect.Effect<string | undefined> = () =>
     Effect.succeed('1.0.0'),
 ) {
+  // The list this test reads: an engine an earlier test left running past its timeout still
+  // tells its own, never this one's.
+  const tellTo = told
   // The agents are the fake ones here: a suite that asks for a turn is asking whether the message
   // reaches the runtime, and the runtime itself is proved by its own suite, on the fake provider.
   const agents = Layer.mergeAll(
@@ -127,7 +131,7 @@ function running<A, E>(
       changed: () => undefined,
       ran: () => undefined,
       workspace: (projectId, workspaceId) => {
-        told.push({ projectId, workspaceId })
+        tellTo.push({ projectId, workspaceId })
       },
       launched: () => undefined,
       agents: () => undefined,
@@ -158,7 +162,12 @@ function running<A, E>(
     check: () => Effect.succeed([]),
     update: () => Effect.die('nothing in this file updates an agent'),
   })
-  const lent = tools.pipe(Layer.provide(rows), Layer.provide(agents), Layer.provide(heldWordsLayer))
+  const lent = tools.pipe(
+    Layer.provide(rows),
+    Layer.provide(agents),
+    Layer.provide(heldWordsLayer),
+    Layer.provide(sessionModesLayer),
+  )
   const runtime = runtimeLayer.pipe(
     Layer.provideMerge(discoveryLayer),
     Layer.provide(rows),
@@ -169,6 +178,7 @@ function running<A, E>(
     Layer.provide(poolLayer.pipe(Layer.provide(clockLayer))),
     Layer.provide(agents),
     Layer.provide(heldWordsLayer),
+    Layer.provide(sessionModesLayer),
     Layer.provide(agentDirectoriesLayer(dataFolder)),
     Layer.provide(acpTracesLayer(dataFolder)),
   )

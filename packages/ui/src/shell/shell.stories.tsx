@@ -511,16 +511,12 @@ export const NothingToSee: Story = {
 /** The same shell with the system asking for less movement: the end state, and no journey. */
 export const ReducedMotion: Story = {
   play: async ({ canvasElement }) => {
-    const restore = await emulateReducedMotion()
-    try {
-      const canvas = within(canvasElement)
-      const sidebar = canvas.getByRole('complementary')
-      await userEvent.click(canvas.getByRole('button', { name: 'Collapse the sidebar' }))
-      await waitFor(() => {
-        expect(sidebar.getBoundingClientRect().width).toBeCloseTo(SIDEBAR_RAIL, 0)
-      })
-    } finally {
-      await restore?.()
-    }
+    await emulateReducedMotion()
+    const canvas = within(canvasElement)
+    const sidebar = canvas.getByRole('complementary')
+    await userEvent.click(canvas.getByRole('button', { name: 'Collapse the sidebar' }))
+    await waitFor(() => {
+      expect(sidebar.getBoundingClientRect().width).toBeCloseTo(SIDEBAR_RAIL, 0)
+    })
   },
 }

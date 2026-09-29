@@ -196,7 +196,7 @@ export const HemeraToolOutsideTheRoot: Story = {
     await unfold(canvasElement)
     // What the call is and what it is about, on one line; what accepting does is its group's.
     const head = canvas.getByText('Write file').parentElement
-    await expect(head?.textContent).toBe('Write file../notes/todo.md')
+    await expect(head?.textContent).toBe('Write file ../notes/todo.md')
     await expect(canvas.queryByText('fs_write')).toBeNull()
     await expect(getComputedStyle(canvas.getByText('../notes/todo.md')).fontFamily).toMatch(
       /mono|Fira/i,
@@ -331,8 +331,9 @@ export const TheWholeLine: Story = {
   play: async ({ canvasElement, args }) => {
     const canvas = within(canvasElement)
     const command = args.command ?? ''
-    // Closed, the row says the line once, on one line.
-    await expect(canvas.getAllByText(command)).toHaveLength(1)
+    // Closed, the row says the line once, cut to one line.
+    const line = canvas.getByText(command)
+    const folded = line.getBoundingClientRect().height
     await expect(canvas.queryByText(/Waiting/)).toBeNull()
     await expect(canvas.queryByText(/asks/)).toBeNull()
     const answers = canvas
@@ -340,18 +341,15 @@ export const TheWholeLine: Story = {
       .map((one) => one.textContent)
       .filter((text) => text !== '')
     await expect(answers).toEqual(['Refuse', 'Allow once'])
-    // Unfolded, the whole line, wrapped over several rows, nothing scrolled or cut, and where.
+    // Unfolded in place: the same text, now whole, wrapped over several lines where it stood, and
+    // where it runs as a small line under it — one text, never a second block.
     await unfold(canvasElement)
-    const line = await canvas.findByText(command, { selector: 'pre' })
-    // Said once: the row's cut line gives way to the whole one, and is hidden from the reader.
     await waitFor(() => {
-      expect(
-        canvas.getAllByText(command).filter((one) => one.closest('[aria-hidden]') === null),
-      ).toHaveLength(1)
+      expect(line.getBoundingClientRect().height).toBeGreaterThan(folded)
     })
+    await expect(canvas.getAllByText(command)).toHaveLength(1)
     await expect(line.scrollWidth).toBeLessThanOrEqual(line.clientWidth)
-    await expect(line.getBoundingClientRect().height).toBeGreaterThan(20)
-    await expect(canvas.getByText('api')).toBeVisible()
+    await expect(await canvas.findByText('api')).toBeVisible()
   },
 }
 

@@ -14,8 +14,10 @@ import { collapse, expand, fold, POP, pop, RISE, rise, useTransition } from '../
  * more. It stands over the page rather than in it: nothing else moves when it comes or goes.
  *
  * Closed, it is an icon a kind and how many wait of it, and nothing else — no sentence says it
- * waits, the pill is that sentence. Pressed, it opens above itself on every item, grouped by kind,
- * each drawn by whoever knows what it asks. Something new arriving while it is closed pops it
+ * waits, the pill is that sentence. Pressed, it opens above itself on every item, grouped by kind
+ * under a head each — the kind's mark, its name, how many, and what answers them all — with the same
+ * room and the same rule between every two groups; each item is a `NoticeCard`, one anatomy for
+ * every kind (review of #250). Something new arriving while it is closed pops it
  * again, and never opens it: the reader opens it.
  *
  * The kinds are the caller's, handed over as groups: a kind this component has never heard of is
@@ -39,7 +41,7 @@ export interface NoticeGroup {
   /** Whether the kind holds the turn where it stands, drawn in the warning's tone. */
   urgent?: boolean | undefined
   items: readonly NoticeItem[]
-  /** What answers the whole group at once, at its foot: `Accept all`. */
+  /** What answers the whole group at once, in its head: `Add all`. */
   actions?: ReactNode
 }
 
@@ -82,12 +84,19 @@ const PANEL = 'scroll-quiet flex max-h-pinned w-notices flex-col overflow-y-auto
  */
 const GROUP = 'flex flex-col'
 
-/** A group after the first: a rule between the two, and nothing that names either. */
-const GROUP_APART = 'mt-2 flex flex-col border-t border-border pt-2'
+/** A group after the first: a rule between the two, the same room on both sides of it. */
+const GROUP_APART = 'mt-3 flex flex-col border-t border-border pt-3'
 
-const ITEM = 'py-1'
+/** A group's head: its kind's mark, its name and how many wait, and what answers them all. */
+const GROUP_HEAD =
+  'flex h-control-sm items-center gap-2 pb-1 text-xs font-medium text-muted-foreground'
 
-const FOOT = 'flex items-center justify-end gap-1 pt-1'
+const GROUP_COUNT = 'font-mono'
+
+const GROUP_ACTIONS = 'ml-auto flex items-center'
+
+/** The room under an item is its own, so an item folding away takes all of it. */
+const ITEM = 'pb-2'
 
 /** What a group of the list and an item of a group arrive and leave on: their height. */
 function Fold({ children }: { children: ReactNode }): ReactNode {
@@ -183,21 +192,22 @@ export function SessionNotices({ groups, defaultOpen = false }: SessionNoticesPr
                         aria-label={group.label}
                         className={index === 0 ? GROUP : GROUP_APART}
                       >
+                        <header className={GROUP_HEAD}>
+                          <span aria-hidden="true" className="flex">
+                            {group.icon}
+                          </span>
+                          {group.label}
+                          <span className={GROUP_COUNT}>{String(group.items.length)}</span>
+                          {group.actions !== undefined && (
+                            <span className={GROUP_ACTIONS}>{group.actions}</span>
+                          )}
+                        </header>
                         <AnimatePresence initial={false}>
                           {group.items.map((item) => (
                             <Fold key={item.id}>
                               <div className={ITEM}>{item.content}</div>
                             </Fold>
                           ))}
-                        </AnimatePresence>
-                        {/* What answers the group at once comes and goes by its height too:
-                            Accept all leaves with the last but one proposal. */}
-                        <AnimatePresence initial={false}>
-                          {group.actions !== undefined && (
-                            <Fold key="actions">
-                              <div className={FOOT}>{group.actions}</div>
-                            </Fold>
-                          )}
                         </AnimatePresence>
                       </section>
                     </Fold>

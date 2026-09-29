@@ -1,9 +1,7 @@
-import { cn } from 'cn'
 import type { ReactNode } from 'react'
 
-import { IconButton } from '../components/button/button.tsx'
-import { Tooltip } from '../components/tooltip/tooltip.tsx'
-import { IconBookmarkPlus, IconCheck, IconX } from '../icons.ts'
+import { IconBookmarkPlus } from '../icons.ts'
+import { NoticeCard } from '../session/notice-card.tsx'
 import { COMMAND_TYPE_ICONS, type CommandType } from './command-type.ts'
 import { type NoticeAnswer, NoticeRecord } from './notice-record.tsx'
 
@@ -12,12 +10,10 @@ import { type NoticeAnswer, NoticeRecord } from './notice-record.tsx'
  * notices list it (issue #237).
  *
  * The agent has no write on the catalogue: `commands_propose` leaves an entry in the thread and
- * nothing else, and the command enters the catalogue only when a human accepts it. One row says
- * what would be kept — the type with its fixed icon, the name, where it would run when that is not
- * the Workspace root, and the line, wrapped where it is so what is accepted is read whole — and
- * the two answers, as marks: a row of proposals is answered one mark at a time, and a pair of
- * word-buttons a row made six proposals a wall of buttons. Why the agent proposes it is under the
- * pointer on the name, and in the thread's record of it, which is also where the answer stays.
+ * nothing else, and the command enters the catalogue only when a human accepts it. It is drawn as
+ * every notice is (`NoticeCard`): "Add to the catalogue", then the type with its fixed icon and the
+ * name, the line whole, where it would run, and Decline / Add. Why the agent proposes it is under
+ * the pointer on the name, and in the thread's record of it, which is also where the answer stays.
  */
 
 /** Where a proposal stands: waiting for the human, or answered. */
@@ -36,23 +32,9 @@ export interface CommandProposalProps {
   /** Writes the command to the catalogue, which is the human's to do. */
   onAccept: () => void
   onDecline: () => void
-  /** Where the row sits; never how it looks. */
-  className?: string | undefined
 }
 
-const ROW = 'flex min-w-0 items-start gap-2 text-sm'
-
-const MARK = 'flex h-control-sm shrink-0 items-center text-muted-foreground'
-
-const WHAT = 'flex min-w-0 flex-1 flex-wrap items-baseline gap-x-2 py-1.5'
-
-const NAME = 'shrink-0 font-medium text-foreground'
-
-const FOLDER = 'shrink-0 font-mono text-xs text-muted-foreground'
-
-const LINE = 'min-w-0 font-mono text-xs break-all text-muted-foreground'
-
-const ANSWERS = 'flex shrink-0 items-center'
+const NAME = 'font-medium'
 
 export function CommandProposal({
   name,
@@ -62,42 +44,28 @@ export function CommandProposal({
   why,
   onAccept,
   onDecline,
-  className,
 }: CommandProposalProps): ReactNode {
   const TypeIcon = COMMAND_TYPE_ICONS[type]
   return (
-    <div role="group" aria-label={`Proposed command ${name}`} className={cn(ROW, className)}>
-      <span className={MARK}>
-        <TypeIcon size="sm" aria-hidden="true" />
-      </span>
-      <span className={WHAT}>
-        <span className={NAME} title={why}>
-          {name}
-        </span>
-        {folder !== '.' && <span className={FOLDER}>{folder}</span>}
-        <span className={LINE}>{line}</span>
-      </span>
-      <span className={ANSWERS}>
-        <Tooltip label="Decline">
-          <IconButton
-            variant="ghost"
-            size="sm"
-            icon={<IconX size="sm" />}
-            aria-label={`Decline ${name}`}
-            onClick={onDecline}
-          />
-        </Tooltip>
-        <Tooltip label="Accept">
-          <IconButton
-            variant="ghost"
-            size="sm"
-            icon={<IconCheck size="sm" />}
-            aria-label={`Accept ${name}`}
-            onClick={onAccept}
-          />
-        </Tooltip>
-      </span>
-    </div>
+    <NoticeCard
+      icon={<IconBookmarkPlus size="sm" />}
+      title="Add to the catalogue"
+      name={`Proposed command ${name}`}
+      subject={
+        <>
+          <span className="flex shrink-0 text-muted-foreground">
+            <TypeIcon size="sm" aria-hidden="true" />
+          </span>
+          <span className={NAME} title={why}>
+            {name}
+          </span>
+        </>
+      }
+      line={line}
+      place={folder === '.' ? 'Workspace root' : folder}
+      refuse={{ label: 'Decline', onPress: onDecline }}
+      accept={{ label: 'Add', onPress: onAccept }}
+    />
   )
 }
 

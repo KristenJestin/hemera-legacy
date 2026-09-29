@@ -581,7 +581,7 @@ export function SessionPage({
    * thread keeps its quiet record where it was asked.
    */
   const waitingByKind = new Map<NoticeKind, NoticeItem[]>(NOTICE_KINDS.map((kind) => [kind, []]))
-  /** The proposals that wait, which `Accept all` answers in one press. */
+  /** The proposals that wait, which `Add all` answers in one press. */
   const proposalsWaiting: string[] = []
   for (let at = 0; at < thread.length; at += 1) {
     const entry = thread[at]
@@ -675,8 +675,8 @@ export function SessionPage({
       items: itemsOf('proposal'),
       actions:
         proposalsWaiting.length > 1 ? (
-          <Button variant="primary" size="sm" onClick={acceptAll}>
-            Accept all
+          <Button variant="secondary" size="sm" onClick={acceptAll}>
+            Add all
           </Button>
         ) : undefined,
     },

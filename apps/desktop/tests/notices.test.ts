@@ -120,7 +120,7 @@ describe('Everything that waits for a human goes to the notices', () => {
   })
 
   test('the permission comes first, and the proposals last', () => {
-    expect(NOTICE_KINDS).toEqual(['permission', 'question', 'spec', 'proposal'])
+    expect(NOTICE_KINDS).toEqual(['permission', 'question', 'spec', 'proposal', 'setup'])
   })
 })
 

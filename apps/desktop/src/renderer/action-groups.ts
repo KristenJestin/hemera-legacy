@@ -125,6 +125,7 @@ const MEMBERS: readonly SessionEntry['kind'][] = [
   'command_run',
   'spec_proposal',
   'spec_question',
+  'setup_proposal',
 ]
 
 /**

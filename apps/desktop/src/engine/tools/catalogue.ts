@@ -48,6 +48,7 @@ import type { DescribedWorkspace } from '../workspaces/described.ts'
 import { Database } from '../storage/database.ts'
 import { contextDeliveries } from '../storage/schema.ts'
 import { Variables } from '../workspaces/variables.ts'
+import { SetupDesk } from '../setup/desk.ts'
 import { mutate } from '../transaction.ts'
 import { ToolAccess } from './access.ts'
 import {
@@ -62,6 +63,8 @@ import { type RefusedPathError, resolveInside } from './paths.ts'
 import { type OutsideAnswer, ToolPermissions } from './permissions.ts'
 import { type Page, type ReadRange, numbered, readPage } from './read.ts'
 import { searchIn } from './search.ts'
+import { argumentsShown } from '../setup/hidden.ts'
+import { setupTools } from './setup.ts'
 import { specTools } from './spec.ts'
 
 /** How much of an argument list is kept in the Journal, so a payload stays a payload. */
@@ -275,6 +278,7 @@ export const toolCatalogueLayer: Layer.Layer<
   | Specs
   | Database
   | Variables
+  | SetupDesk
 > = Layer.effect(
   ToolCatalogue,
   Effect.gen(function* () {
@@ -289,6 +293,7 @@ export const toolCatalogueLayer: Layer.Layer<
     const notices = yield* AgentNotices
     const variables = yield* Variables
     const specs = yield* Specs
+    const desk = yield* SetupDesk
 
     /**
      * One entry of a call written into its Session's thread, below what the agent said before it.
@@ -318,6 +323,17 @@ export const toolCatalogueLayer: Layer.Layer<
         )
 
     const spec = specTools({ specs, sessions, held, inThread, askedForSpec })
+
+    // The Project's setup, read freely and changed only by the human's acceptance (#218).
+    const setup = setupTools({
+      projects,
+      sessions,
+      commands,
+      variables,
+      specs,
+      desk,
+      inThread,
+    })
 
     /**
      * The answers already given, per Session and by tool and key, so a retry is answered and not
@@ -418,7 +434,11 @@ export const toolCatalogueLayer: Layer.Layer<
           agent: made.agent,
           ms: made.milliseconds,
           paths: answer.paths,
-          arguments: JSON.stringify(asked.arguments).slice(0, ARGUMENTS_KEPT),
+          // Never a variable's value a proposal carries (Decided 2 of #218).
+          arguments: JSON.stringify(argumentsShown(asked.tool, asked.arguments)).slice(
+            0,
+            ARGUMENTS_KEPT,
+          ),
         })
         yield* inThread(asked.sessionId, {
           role: 'agent',
@@ -1204,6 +1224,12 @@ export const toolCatalogueLayer: Layer.Layer<
             }
             return completed(`read the Project ${projectName}`, lines.join('\n'))
           }
+
+          case 'setup_read':
+            return yield* setup.read(projectId)
+
+          case 'setup_propose':
+            return yield* setup.propose(asked.sessionId, projectId, projectName, call.arguments)
 
           case 'session_get': {
             const thread = yield* answered(sessions.read(asked.sessionId, undefined, THREAD_TAIL))

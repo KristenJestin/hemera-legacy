@@ -9,7 +9,15 @@
  * accepting, declining and refused.
  */
 
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
@@ -42,8 +50,11 @@ import { repository } from './repositories.ts'
 
 let dataFolder: string
 let main: string
+/** The engine's diagnostic log, every line of it: where a value would show if one leaked. */
+let diagnosed: string[] = []
 
 beforeEach(() => {
+  diagnosed = []
   dataFolder = mkdtempSync(join(tmpdir(), 'hemera-setup-'))
   main = realpathSync.native(mkdtempSync(join(tmpdir(), 'hemera-setup-main-')))
   repository(join(main, 'sources', 'api'))
@@ -84,7 +95,12 @@ const deciding = setupProposalsLayer.pipe(
         Layer.mergeAll(
           hostLinks,
           noLaunches,
-          Layer.succeed(StderrSink, { write: () => Effect.void }),
+          Layer.succeed(StderrSink, {
+            write: (line: string) =>
+              Effect.sync(() => {
+                diagnosed.push(line)
+              }),
+          }),
         ),
       ),
     ),
@@ -124,6 +140,17 @@ const proposalsIn = (entries: readonly SessionEntry[]) =>
       expect(proposal.state).toBe(entry.state)
       return Object.assign(proposal, { body: entry.body })
     })
+
+/**
+ * Every file the engine wrote into its data folder but the database itself — the logs, the traces,
+ * whatever lands there — as text: the database holds the variable, and nothing else may.
+ */
+function filesWritten(folder: string): string {
+  return readdirSync(folder, { recursive: true, withFileTypes: true })
+    .filter((entry) => entry.isFile() && !entry.name.includes('.sqlite'))
+    .map((entry) => readFileSync(join(entry.parentPath, entry.name), 'utf8'))
+    .join('\n')
+}
 
 /** Everything the thread and the Journal hold, as text: where a secret would show if it leaked. */
 const everythingWritten = (entries: readonly SessionEntry[], journal: readonly object[]) =>
@@ -208,7 +235,7 @@ describe('Every change is a proposal the user accepts', () => {
       ],
     })
 
-    const seen = await toolApplication(dataFolder)(agent)(
+    const seen = await toolApplication(dataFolder, diagnosed)(agent)(
       Effect.gen(function* () {
         const runtime = yield* AgentRuntime
         const projects = yield* Projects
@@ -231,6 +258,8 @@ describe('Every change is a proposal the user accepts', () => {
 
         yield* runtime.prompt(session.id, 'set this Project up')
         const proposed = proposalsIn(yield* threadOf(session.id))
+        // What the Context tab lists while the value waits in memory for the click.
+        const context = yield* contextOf(session.id)
         const before = yield* settings()
         const first = yield* setup.accept(session.id, proposed[0]?.proposalId ?? '')
         const afterOne = yield* settings()
@@ -238,7 +267,17 @@ describe('Every change is a proposal the user accepts', () => {
         const after = yield* settings()
         const entries = yield* threadOf(session.id)
         const read = yield* journal.read({ projectId: session.projectId })
-        return { proposed, before, first, afterOne, rest, after, entries, lines: read.entries }
+        return {
+          proposed,
+          context,
+          before,
+          first,
+          afterOne,
+          rest,
+          after,
+          entries,
+          lines: read.entries,
+        }
       }).pipe(Effect.provide(deciding)),
     )
 
@@ -300,8 +339,12 @@ describe('Every change is a proposal the user accepts', () => {
       ['setup.accepted', 'human'],
     ])
     expect(seen.lines.map((line) => line.type)).toContain('project.repository_added')
-    // The value was set, and is shown nowhere: not in the thread, not in the Journal.
+    // The value was set, and is shown nowhere: not in the thread, not in the Journal, not in the
+    // Context tab, not in the engine's log nor in any file of the data folder but the database.
     expect(everythingWritten(seen.entries, seen.lines)).not.toContain(SECRET)
+    expect(JSON.stringify(seen.context)).not.toContain(SECRET)
+    expect(diagnosed.join('\n')).not.toContain(SECRET)
+    expect(filesWritten(dataFolder)).not.toContain(SECRET)
   })
 })
 

@@ -1,0 +1,73 @@
+# The AUR packages, built as the AUR builds them before anything is published (packaging/aur/).
+#
+# Each package is updated by the same tool the release uses, to the latest release it follows,
+# then built by makepkg in an Arch Linux container as a user that is not root, and read by namcap.
+# The .SRCINFO the tool writes and the one committed are both compared with what makepkg prints:
+# a PKGBUILD changed without its .SRCINFO is caught here rather than refused by the AUR.
+# Nothing here publishes anything.
+
+name: aur
+
+on:
+  pull_request:
+    paths:
+      - 'packaging/aur/**'
+      - 'tools/aur-publish.ts'
+      - '.github/workflows/aur.yml'
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        package: [hemera-bin, hemera-beta-bin]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.21.0
+
+      # `gh release list` answers the newest first: the release is the newest that is not a
+      # pre-release, the beta the newest that is one.
+      - name: Update the package to the latest release it follows
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if [ '${{ matrix.package }}' = hemera-bin ]; then
+            select='[.[] | select(.isPrerelease | not)][0].tagName'
+          else
+            select='[.[] | select(.isPrerelease)][0].tagName'
+          fi
+          tag="$(gh release list -R "$GITHUB_REPOSITORY" --exclude-drafts -L 100 --json tagName,isPrerelease -q "$select")"
+          echo "latest release for ${{ matrix.package }}: $tag"
+          node tools/aur-publish.ts '${{ matrix.package }}' "$tag" --out "$RUNNER_TEMP/updated"
+
+      - name: Build it with makepkg and read it with namcap
+        run: |
+          docker run --rm \
+            -v "$RUNNER_TEMP/updated:/updated:ro" \
+            -v "$GITHUB_WORKSPACE/packaging/aur/${{ matrix.package }}:/committed:ro" \
+            archlinux:latest bash -euo pipefail -c '
+              pacman -Syu --noconfirm --needed base-devel namcap >/dev/null
+              useradd -m builder
+              cp -r /updated /home/builder/updated
+              cp -r /committed /home/builder/committed
+              chown -R builder: /home/builder
+              echo "::group::the committed .SRCINFO against makepkg"
+              su builder -c "cd ~/committed && makepkg --printsrcinfo | diff -u .SRCINFO -"
+              echo "::endgroup::"
+              echo "::group::the updated .SRCINFO against makepkg"
+              su builder -c "cd ~/updated && makepkg --printsrcinfo | diff -u .SRCINFO -"
+              echo "::endgroup::"
+              pacman -S --noconfirm --needed $(source /updated/PKGBUILD && echo "${depends[@]}") >/dev/null
+              echo "::group::makepkg"
+              su builder -c "cd ~/updated && makepkg --noconfirm"
+              echo "::endgroup::"
+              echo "::group::namcap"
+              su builder -c "cd ~/updated && namcap PKGBUILD && namcap *.pkg.tar.zst"
+              echo "::endgroup::"
+            '

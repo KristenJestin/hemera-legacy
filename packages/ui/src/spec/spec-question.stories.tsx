@@ -365,3 +365,18 @@ export const KeptWaiting: Story = {
     await expect(canvas.queryByRole('button', { name: /Negative rows/ })).toBeNull()
   },
 }
+
+/**
+ * Among the Session's notices (review of #250): a notice like every other kind — the question is
+ * its title, its choices are its answers, and it wears no frame of its own.
+ */
+export const AsANotice: Story = {
+  args: { bare: true },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement)
+    const card = canvas.getByRole('group', { name: `Question: ${CREDIT_NOTES.body}` })
+    await expect(within(card).queryByText('The agent asks')).toBeNull()
+    await userEvent.click(within(card).getByRole('button', { name: /Negative rows/ }))
+    await expect(args.onAnswer).toHaveBeenCalledWith({ optionId: 'negative' })
+  },
+}

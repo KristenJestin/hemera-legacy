@@ -57,7 +57,9 @@ export const Pending: Story = {
   play: async ({ canvasElement, args }) => {
     const canvas = within(canvasElement)
     await expect(canvas.getByText(args.name)).toBeVisible()
-    await expect(canvas.getByText(args.line)).toBeVisible()
+    // Its whole line and where it runs are one press away, unfolding in place.
+    await userEvent.click(canvas.getByRole('button', { name: 'Show the whole line' }))
+    await expect(await canvas.findByText(args.line)).toBeVisible()
     await expect(canvas.getByText(args.folder)).toBeVisible()
     // What accepting does is its group's head, not the card's (review of #250); why is under the
     // pointer on the name.

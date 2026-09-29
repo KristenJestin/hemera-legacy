@@ -283,6 +283,23 @@ describe('A delivery shows in the timeline', () => {
   })
 })
 
+describe('A run handed to the agent draws nothing: the run has its own entry (#250)', () => {
+  test('neither the run handed over nor the one waiting to be is a line of the thread', () => {
+    const handed = entryOf(
+      'context_delivery',
+      'hemera',
+      'Hemera handed the agent the run of echo (exited, exit code 0).',
+      JSON.stringify({
+        kind: 'run',
+        fingerprint: 'dedc2f0504c2'.padEnd(64, '0'),
+        deliveredAt: null,
+      }),
+    )
+    expect(contextDeliveryOf(handed)).toBe(null)
+    expect(contextDeliveryOf({ ...handed, state: 'failed' })).toBe(null)
+  })
+})
+
 describe("Hemera's internal notes are said in words (#211)", () => {
   const notHanded = (kind: string, body: string) => ({
     ...entryOf(
@@ -314,7 +331,6 @@ describe("Hemera's internal notes are said in words (#211)", () => {
         'The new instructions of the Workspace will be handed over when the agent is ready.',
       ],
       ['notice', 'What Hemera had to tell the agent will be handed over when it is ready.'],
-      ['run', 'The run will be handed over with your next message.'],
     ]
     for (const [kind, words] of said) {
       const drawn = contextDeliveryOf(notHanded(kind ?? '', 'Not handed over, waiting: x.'))

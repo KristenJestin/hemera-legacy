@@ -109,12 +109,13 @@ jobs:
       # every `git` under 0.6 s. So Windows runs the two one after the other, and the stories
       # run even when the suites failed, so one run reports both.
       - name: Test the repository suites
+        id: repository
         if: runner.os == 'Windows'
         working-directory: source
         timeout-minutes: 15
         run: pnpm test --project repository
       - name: Test the stories
-        if: runner.os == 'Windows' && !cancelled()
+        if: runner.os == 'Windows' && (success() || steps.repository.conclusion == 'failure')
         working-directory: source
         timeout-minutes: 15
         run: pnpm test --project storybook-light --project storybook-dark

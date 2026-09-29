@@ -82,13 +82,7 @@ import {
   openingTabOf,
   overBefore,
 } from '../session-details.ts'
-import {
-  linesSnapshot,
-  markSeen,
-  marksOf,
-  removeFromLine,
-  subscribeToLines,
-} from '../line-store.ts'
+import { linesSnapshot, marksOf, removeFromLine, subscribeToLines } from '../line-store.ts'
 import { openSessions, type OfferedWorkspace } from '../sessions-store.ts'
 import { selectEntry } from '../shell-store.ts'
 import { type DefinedSpec, questionMarkOf } from '../spec-entries.ts'
@@ -598,7 +592,6 @@ export function SessionPage({
       repositories,
       onOpenUrl,
       onHandOver,
-      onSeenRun: (runId) => markSeen(session.id, runId),
       callLink: (drawnId) => links.byCall.get(drawnId),
       reportedCall: (toolCallId) => reported.get(toolCallId),
       onAcceptProposal: (proposalId) => deciding(onAcceptProposal(proposalId)),
@@ -899,11 +892,9 @@ export function SessionPage({
                 ...marksOf(session.id, lines),
                 before: overBefore(commandRuns, shells, opened.current),
               })}
-              emptyLabel={`Nothing running in ${workspace?.name ?? 'main'}`}
               onStop={(run) => onStopRun(run.id)}
               onRunAgain={(run) => onRunAgain(run.id)}
               onRemove={(item) => removeFromLine(session.id, item.id)}
-              onSeen={(item) => markSeen(session.id, item.id)}
               onOpenUrl={onOpenUrl}
               onAddToCatalogue={(shown) => {
                 const run = commandRuns.find((one) => one.id === shown.id)

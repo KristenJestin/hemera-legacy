@@ -1,7 +1,13 @@
 import type { Decorator, Meta, StoryObj } from '@storybook/react-vite'
-import type { ReactNode } from 'react'
+import { type ReactNode, useState } from 'react'
 import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
 
+import { MotionConfig } from 'motion/react'
+
+import { readEveryFrame } from '../../../.storybook/journey.ts'
+import { AT_ONCE, movesLess, withinFrames } from '../../../.storybook/reduced-motion.ts'
+import { ActionGroup } from '../../activity/action-group.tsx'
+import { ToolCallCard } from '../../activity/tool-call-card.tsx'
 import { TooltipProvider } from '../../components/tooltip/tooltip.tsx'
 import { IconSparkles } from '../../icons.ts'
 import { MessageDaySeparator, MessageGroup } from '../message.tsx'
@@ -267,9 +273,22 @@ const THREAD: ScrollerEntry[] = [
   },
 ]
 
+/**
+ * The entries of that same thread that asked for a mark: the reader's own questions.
+ *
+ * A Session with an agent is mostly the agent's: its answers, its thoughts, its tool calls, its
+ * consoles. The rail is how a reader gets back to something *they* asked, so an entry names a
+ * mark or it draws none — and everything else is read by scrolling, which is how it arrived.
+ */
+const ASKED_FOR = ['ask', 'client', 'question', 'page']
+
+const ASKED: ScrollerEntry[] = THREAD.map((entry) =>
+  entry.day === true || ASKED_FOR.includes(entry.id) ? entry : { ...entry, mark: undefined },
+)
+
 const meta = {
-  tags: ['autodocs', 'new'],
-  title: 'Components/Message Scroller',
+  tags: ['autodocs'],
+  title: 'Blocks/Message/Scroller',
   component: MessageScroller,
   decorators: [withTooltips],
   parameters: { layout: 'fullscreen' },
@@ -378,8 +397,15 @@ export const States: Story = {
 
     // A Session opens on what was written last: both rails are on their last mark, and neither
     // thread offers a way back to an edge the reader has not left.
-    expect(marksOf(EDGE).at(-1)).toHaveAttribute('aria-current', 'true')
-    expect(marksOf(AWAY).at(-1)).toHaveAttribute('aria-current', 'true')
+    // Where the reader is comes from the measuring, one effect after the rail itself: waited for
+    // rather than read, with the patience a machine busy with the rest of the run asks for.
+    await waitFor(
+      () => {
+        expect(marksOf(EDGE).at(-1)).toHaveAttribute('aria-current', 'true')
+        expect(marksOf(AWAY).at(-1)).toHaveAttribute('aria-current', 'true')
+      },
+      { timeout: 10_000 },
+    )
     expect(canvas.queryAllByRole('button', { name: 'Latest' })).toHaveLength(0)
 
     // The middle of the scrollable range: as far from the live edge as this thread allows.
@@ -407,14 +433,29 @@ export const ARealThread: Story = {
   args: { entries: THREAD },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    const rail = canvas.getByRole('navigation', { name: /^Marks of/ })
-    const marks = within(rail).getAllByRole('button')
+    // The rail is drawn once the thread has been measured, in an effect: read on the frame the
+    // story was drawn it is not there at all, and a machine busy with the rest of the run
+    // measures later than the default patience of a wait.
+    const rail = await canvas.findByRole('navigation', { name: /^Marks of/ }, { timeout: 10_000 })
+    const marks = await within(rail).findAllByRole('button')
 
     // Twelve messages and two days: one mark per message, and none for the days — a day is a
     // heading over what follows it, and a heading is not somewhere to go.
     expect(marks).toHaveLength(12)
     expect(canvas.getByRole('log').scrollTop).toBeGreaterThan(0)
-    expect(marks.at(-1)).toHaveAttribute('aria-current', 'true')
+    // At the left of the thread's column, away from the panel a mission opens on the right
+    // (issue #149).
+    const first = canvas.getAllByRole('group')[0]!
+    expect(rail.getBoundingClientRect().right).toBeLessThanOrEqual(
+      first.getBoundingClientRect().left,
+    )
+    // The reading position is one effect further on than the rail, as in `States`.
+    await waitFor(
+      () => {
+        expect(marks.at(-1)).toHaveAttribute('aria-current', 'true')
+      },
+      { timeout: 10_000 },
+    )
     expect(canvas.queryByRole('button', { name: 'Latest' })).toBeNull()
   },
 }
@@ -459,23 +500,106 @@ export const AMarkPressed: Story = {
   args: { entries: THREAD },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    const rail = canvas.getByRole('navigation', { name: /^Marks of/ })
-    const marks = within(rail).getAllByRole('button')
+    // The rail is drawn once the thread has been measured, in an effect: read on the frame the
+    // story was drawn it is not there at all, and a machine busy with the rest of the run
+    // measures later than the default patience of a wait.
+    const rail = await canvas.findByRole('navigation', { name: /^Marks of/ }, { timeout: 10_000 })
+    const marks = await within(rail).findAllByRole('button')
 
     await userEvent.click(marks[4]!)
-
-    await waitFor(() => {
-      expect(marks[4]).toHaveAttribute('aria-current', 'true')
-    })
+    // The press carries the thread there in a journey of its own, so the reading position is read
+    // once it has arrived: on a machine busy with the rest of the run it arrives later than a bare
+    // read allows for.
+    await waitFor(
+      () => {
+        expect(marks[4]).toHaveAttribute('aria-current', 'true')
+      },
+      { timeout: 10_000 },
+    )
     // The reader is on a message in the middle of the thread, so the way back is offered.
-    expect(canvas.getByRole('button', { name: 'Latest' })).toBeInTheDocument()
+    await canvas.findByRole('button', { name: 'Latest' })
+  },
+}
+
+/**
+ * A thread where only some entries asked for a mark, which is how a Session with an agent reads.
+ *
+ * The rail is how a reader finds their way back to something *they* asked. A tick for every
+ * block an agent reported was forty ticks for one question, and the trial of 22 September 2026
+ * made the mark an opt-in: an entry that names none draws none, and the rail's reading position
+ * steps over it exactly as it steps over a day. What matters here is that the two stay in step —
+ * a rail whose active index counted one list and drew another would point at the wrong message
+ * every time an unmarked entry went past.
+ */
+export const OnlyWhatAsksForAMark: Story = {
+  args: { entries: ASKED },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    // The rail is drawn once the thread has been measured, in an effect: read on the frame the
+    // story was drawn it is not there at all, and a machine busy with the rest of the run
+    // measures later than the default patience of a wait.
+    const rail = await canvas.findByRole('navigation', { name: /^Marks of/ }, { timeout: 10_000 })
+    const marks = await within(rail).findAllByRole('button')
+
+    // Four marks where `ARealThread` drew twelve: only what asked for one has one.
+    expect(marks).toHaveLength(ASKED_FOR.length)
+    // And the reading position is still the last mark, which is where the Session opened: the
+    // index comes from the same measuring as the rail, so it is waited for rather than read.
+    await waitFor(
+      () => {
+        expect(marks.at(-1)).toHaveAttribute('aria-current', 'true')
+      },
+      { timeout: 10_000 },
+    )
+
+    // Pressed, a mark still lands on its own entry and on no other: the rail counts what it
+    // drew, so its indices and its anchors cannot come apart.
+    await userEvent.click(marks[1]!)
+    await waitFor(
+      () => {
+        expect(marks[1]).toHaveAttribute('aria-current', 'true')
+      },
+      { timeout: 10_000 },
+    )
+    expect(marks.filter((mark) => mark.getAttribute('aria-current') === 'true')).toHaveLength(1)
+  },
+}
+
+/**
+ * A mark pressed while the thread is still being measured, which is what an answer arriving is.
+ *
+ * The press is a journey of its own, and the thread does not stop growing under it: what has just
+ * been written into the last entry makes the column taller, and the scroller's answer to a column
+ * that grew is to carry a reader who is following along to the bottom of it. A press that had only
+ * asked for the journey was undone by that answer — on a machine busy with the rest of the run the
+ * two landed in the wrong order, and the mark pressed was never reached.
+ */
+export const AMarkPressedUnderLoad: Story = {
+  render: () => <Streaming />,
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const write = canvas.getByRole('button', { name: 'Write another line' })
+    const rail = await canvas.findByRole('navigation', { name: /^Marks of/ }, { timeout: 10_000 })
+    const marks = await within(rail).findAllByRole('button')
+
+    // A line is written into the thread in the same breath as the press: the press is asked for
+    // while the thread is still being measured, and it is the press that has to win.
+    await userEvent.click(marks[4]!)
+    await userEvent.click(write)
+
+    await waitFor(
+      () => {
+        expect(marks[4]).toHaveAttribute('aria-current', 'true')
+      },
+      { timeout: 10_000 },
+    )
   },
 }
 
 /** The three states of a mark, with nothing else around them: read, beside it, and the rest. */
 export const TheRail: Story = {
   render: () => (
-    <div className="flex h-screen items-start justify-end p-6">
+    <div className="flex h-screen items-start justify-start p-6">
       <NavigationRail label="Marks of the thread" marks={MARKS} active={2} onSelect={selectMark} />
     </div>
   ),
@@ -500,17 +624,33 @@ export const TheRail: Story = {
   },
 }
 
+/** A message much longer than two lines of the preview's measure, as a last message often is. */
+const LONG_MARK: NavigationMark = {
+  id: 'long',
+  label:
+    'Invoices should export with HT and TTC amounts per line. Today the CSV only has totals, and accounting re-keys everything by hand every month, which is where the mistakes come from.',
+}
+
 /**
  * What a mark says when the pointer rests on it, or when the keyboard lands on it.
  *
  * A mark is six pixels of line, and what it stands for is a sentence: the preview is the design
  * system's own tooltip, on the inside of the rail, and its words are the mark's name — what the
  * eye reads is what is announced, and not a shorter truth about where the mark goes.
+ *
+ * The rail stands at the left of the thread, and the preview opens to its right, towards the
+ * thread; it quotes the message in a measure of its own, two lines at most, then an ellipsis
+ * (issue #149).
  */
 export const APreviewUnderTheHand: Story = {
   render: () => (
-    <div className="flex h-screen items-start justify-end p-6">
-      <NavigationRail label="Marks of the thread" marks={MARKS} active={2} onSelect={selectMark} />
+    <div className="flex h-screen items-start justify-start p-6">
+      <NavigationRail
+        label="Marks of the thread"
+        marks={[...MARKS, LONG_MARK]}
+        active={5}
+        onSelect={selectMark}
+      />
     </div>
   ),
   play: async ({ canvasElement }) => {
@@ -519,9 +659,472 @@ export const APreviewUnderTheHand: Story = {
     const marks = within(rail).getAllByRole('button')
 
     await userEvent.hover(marks[0]!)
-
     const preview = await waitFor(() => within(document.body).getByRole('tooltip'))
     expect(preview).toHaveTextContent(MARKS[0]!.label)
+    await userEvent.unhover(marks[0]!)
+
+    const last = marks.at(-1)!
+    await userEvent.hover(last)
+    const quoted = await waitFor(() =>
+      within(document.body).getByRole('tooltip', { name: /accounting re-keys/ }),
+    )
+    // Towards the thread: the preview starts where the rail ends.
+    expect(quoted.getBoundingClientRect().left).toBeGreaterThanOrEqual(
+      last.getBoundingClientRect().right,
+    )
+    // Two lines of its measure, and the rest cut rather than a line as wide as the thread.
+    const text = quoted.firstElementChild!
+    const lines =
+      text.getBoundingClientRect().height / parseFloat(getComputedStyle(text).lineHeight)
+    expect(Math.round(lines)).toBe(2)
+    expect(text.scrollHeight).toBeGreaterThan(text.clientHeight)
+  },
+}
+
+/**
+ * A thread with a fold in it, and something under the fold to be pushed.
+ *
+ * Three entries and no rail: what is read here is what happens to the third one when the second
+ * opens, and a thread long enough to scroll would put it out of sight.
+ */
+const FOLDS: ScrollerEntry[] = [
+  {
+    id: 'ask',
+    mark: 'Where does the export build the file?',
+    content: (
+      <MessageGroup
+        author="user"
+        name="You"
+        lines={[{ id: 'ask-1', body: 'Where does the export build the file?' }]}
+      />
+    ),
+  },
+  {
+    id: 'call',
+    content: (
+      <ToolCallCard
+        title="Read src/billing/export.ts"
+        kind="read"
+        status="completed"
+        input={'path: src/billing/export.ts\noffset: 20\nlimit: 40'}
+        output={
+          'export function exportInvoices(rows: Invoice[]): string {\n  return rows.join()\n}\n'
+        }
+      />
+    ),
+  },
+  {
+    id: 'after',
+    content: <p data-testid="under-the-fold">It builds the whole file before writing a byte.</p>,
+  },
+]
+
+/** The block under the fold, and the element motion carries it on. */
+function underTheFold(canvasElement: HTMLElement) {
+  const block = within(canvasElement).getByTestId('under-the-fold')
+  return { block, carried: block.parentElement! }
+}
+
+/** Resolves on the next frame. */
+function nextFrame(): Promise<void> {
+  return new Promise((resolve) => requestAnimationFrame(() => resolve()))
+}
+
+/** Where a block sat, frame by frame, for as long as a fold takes to open. */
+function travelOf(block: HTMLElement, frames: number): Promise<number[]> {
+  const seen: number[] = []
+  return new Promise((settle) => {
+    const look = (): void => {
+      seen.push(block.getBoundingClientRect().top)
+      if (seen.length >= frames) settle(seen)
+      else requestAnimationFrame(look)
+    }
+    look()
+  })
+}
+
+/**
+ * A fold opening pushes what is under it instead of teleporting it (trial of 22 September 2026).
+ *
+ * The room under the row is what grows — the `expand` kind, on the spring made for a dimension —
+ * and the block under the call is pushed down by it, a frame at a time, the way a page actually
+ * moves. It used to be a transform: the body was laid out at its full height at once and motion
+ * carried the blocks below it to their new places, because D0-06 forbade animating a height.
+ * The height is the movement now, so what is read is the journey itself rather than the
+ * projection that stood in for it.
+ *
+ * Read over the frames rather than at one moment: what a jump looks like is a block that was in
+ * its old place and then in its new one with nothing in between, and the only way to refuse
+ * that is to find the in between.
+ */
+export const AFoldOpening: Story = {
+  args: { entries: FOLDS },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const { block } = underTheFold(canvasElement)
+    const before = block.getBoundingClientRect().top
+
+    await userEvent.click(canvas.getByRole('button', { name: /^Read file/ }))
+
+    if (movesLess()) {
+      // Asked for less movement, there is no journey to catch: the block is in its new place
+      // within a few frames, which is what `AFoldWithoutMotion` says of a tree told the same.
+      await expect(
+        await withinFrames(() => block.getBoundingClientRect().top > before, AT_ONCE),
+      ).toBe(true)
+      return
+    }
+
+    const travel = await travelOf(block, 40)
+    const arrived = travel.at(-1)!
+    // It ends lower than it began: the fold made room above it.
+    await expect(arrived).toBeGreaterThan(before)
+    // And it was caught on the way: at least one frame has it neither where it was nor where it
+    // was going, which is the whole difference between travelling and being redrawn.
+    await expect(
+      travel.some((top) => top > before + 1 && top < arrived - 1),
+      'the thread jumped instead of moving',
+    ).toBe(true)
+  },
+}
+
+/**
+ * The same fold for a reader who asked for less movement: the end state, and no journey.
+ *
+ * `MotionConfig` is the way the preference is said here rather than the browser's own media
+ * query, and on purpose: the query is read once, when a component mounts, and a story that
+ * emulates it afterwards is testing a tree that never heard. What is being proved is the rule
+ * itself — a thread told to move less is not a thread whose blocks travel quickly, it is one
+ * where a block is simply where it belongs and nothing is carrying it there.
+ */
+export const AFoldWithoutMotion: Story = {
+  args: { entries: FOLDS },
+  render: (args) => (
+    <MotionConfig reducedMotion="always">
+      <div className="h-screen p-6">
+        <MessageScroller {...args} />
+      </div>
+    </MotionConfig>
+  ),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const { block, carried } = underTheFold(canvasElement)
+    const before = block.getBoundingClientRect().top
+    const carriers: string[] = []
+    const watch = readEveryFrame(() => {
+      carriers.push(getComputedStyle(carried).transform)
+      return block.getBoundingClientRect().top
+    })
+
+    await userEvent.click(canvas.getByRole('button', { name: /^Read file/ }))
+
+    // Arrived: lower than it was, and resting there from one frame to the next.
+    await waitFor(async () => {
+      const top = block.getBoundingClientRect().top
+      expect(top).toBeGreaterThan(before)
+      await nextFrame()
+      expect(block.getBoundingClientRect().top).toBe(top)
+    })
+    const after = block.getBoundingClientRect().top
+    const readings = watch.stop()
+
+    /*
+     * And arrived at once, told frame by frame rather than against a clock: a window of a fifth
+     * of a second used to be the assertion, and a machine busy with the rest of the run can take
+     * longer than that to draw the press at all. No frame has the block anywhere between where it
+     * was and where it rests, and on no frame is anything carrying it there.
+     */
+    expect(
+      readings
+        .map((reading) => reading.value)
+        .filter((top) => Math.abs(top - before) > 1 && Math.abs(top - after) > 1),
+      'the block was caught on its way',
+    ).toEqual([])
+    expect(
+      carriers.filter((transform) => transform !== 'none'),
+      'a reader who asked for less movement was taken on the journey anyway',
+    ).toEqual([])
+  },
+}
+
+/** A word of an answer still arriving, repeated as many times as the agent has written. */
+const WORDS = 'The export builds the whole file in memory before it writes a byte. '
+
+/**
+ * A thread whose last entry is being written into, which is what an answer arriving is.
+ *
+ * The engine does not add an entry per word: it writes the same entry again with more of it, so
+ * the thread grows taller without the list ever growing longer. The button is the agent typing.
+ */
+function Streaming(): ReactNode {
+  const [written, setWritten] = useState(1)
+  const entries: ScrollerEntry[] = [
+    ...THREAD,
+    {
+      id: 'answer-arriving',
+      content: <p data-testid="arriving">{WORDS.repeat(written)}</p>,
+    },
+  ]
+  return (
+    <div className="flex h-screen flex-col gap-2 p-6">
+      <div className="min-h-0 flex-1">
+        <MessageScroller label="the thread of CSV invoice export" entries={entries} />
+      </div>
+      <button type="button" onClick={() => setWritten((was) => was + 8)}>
+        Write another line
+      </button>
+    </div>
+  )
+}
+
+/** How far the last thing written is from the bottom of what is on screen, in pixels. */
+function fromTheEdge(thread: HTMLElement): number {
+  return thread.scrollHeight - thread.scrollTop - thread.clientHeight
+}
+
+/**
+ * A thread the reader is at the end of follows the answer as it is written (trial of
+ * 22 September 2026).
+ *
+ * The thread used to follow what arrived by counting entries, and an answer is not an entry
+ * arriving: it is the last one being written again, with more of it. So the column grew and the
+ * scroll stayed where it was — the reader watched the first line of an answer and read the rest
+ * of it by scrolling down after the fact. What is watched is the height of what is written.
+ *
+ * And it is the reader's own scroll that decides: someone who went up to check something is
+ * reading, and the thread lets go of them until they come back.
+ */
+export const AnAnswerArriving: Story = {
+  render: () => <Streaming />,
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const thread = canvas.getByRole('log', { name: /CSV invoice export/ })
+    const write = canvas.getByRole('button', { name: 'Write another line' })
+
+    // A Session opens on what was written last, which is where this starts.
+    await waitFor(() => {
+      expect(fromTheEdge(thread)).toBeLessThanOrEqual(56)
+    })
+
+    await userEvent.click(write)
+    await userEvent.click(write)
+    await waitFor(() => {
+      expect(canvas.getByTestId('arriving').textContent!.length).toBeGreaterThan(WORDS.length * 16)
+    })
+    await waitFor(() => {
+      expect(
+        fromTheEdge(thread),
+        'the thread stopped following what was written',
+      ).toBeLessThanOrEqual(56)
+    })
+
+    // The reader goes up to read something again: the thread lets go, and what arrives after
+    // that leaves them exactly where they were.
+    thread.scrollTop = 0
+    await waitFor(() => {
+      expect(canvas.getByRole('button', { name: 'Latest' })).toBeInTheDocument()
+    })
+    const held = thread.scrollTop
+    await userEvent.click(write)
+    await waitFor(() => {
+      expect(canvas.getByTestId('arriving').textContent!.length).toBeGreaterThan(WORDS.length * 24)
+    })
+    await expect(thread.scrollTop, 'the thread moved under a reader who had gone up').toBe(held)
+  },
+}
+
+/**
+ * A thread under which a card is pinned above the composer, as the agent's proposal is the moment
+ * it arrives: nothing of the thread changes, and the room it is given loses the card's height.
+ */
+function Pinning(): ReactNode {
+  const [pinned, setPinned] = useState(false)
+  return (
+    <div className="flex h-screen flex-col gap-2 p-6">
+      <div className="min-h-0 flex-1">
+        <MessageScroller label="the thread of CSV invoice export" entries={THREAD} />
+      </div>
+      {pinned && (
+        <div data-testid="pinned" className="flex h-24 flex-col justify-end border-t border-border">
+          <p>Credit notes: where do they go in the export?</p>
+        </div>
+      )}
+      <button type="button" onClick={() => setPinned(true)}>
+        Pin the question
+      </button>
+    </div>
+  )
+}
+
+/**
+ * A card pinned above the composer does not take the end of the thread from a reader who was
+ * following it (issue #149).
+ *
+ * The card takes its height from the bottom of the room the thread is given, and nothing written
+ * in the thread changes: the thread was only following what it holds getting taller, so it
+ * measured its own box getting smaller and stayed where it was, and the last lines of the thread
+ * went under the card.
+ */
+export const ACardPinnedBelow: Story = {
+  render: () => <Pinning />,
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const thread = canvas.getByRole('log', { name: /CSV invoice export/ })
+
+    await waitFor(() => {
+      expect(fromTheEdge(thread)).toBeLessThanOrEqual(56)
+    })
+    await userEvent.click(canvas.getByRole('button', { name: 'Pin the question' }))
+    await expect(canvas.getByTestId('pinned')).toBeVisible()
+    await waitFor(() => {
+      expect(
+        fromTheEdge(thread),
+        'the thread stopped following when a card was pinned under it',
+      ).toBeLessThanOrEqual(1)
+    })
+    await expect(canvas.queryByRole('button', { name: 'Latest' })).toBeNull()
+  },
+}
+
+/**
+ * A thread that opens on a few of its entries, then is written around them: above, as an earlier
+ * page of it read back, and below, as what arrives next.
+ */
+function WrittenAround(): ReactNode {
+  const [whole, setWhole] = useState(false)
+  return (
+    <div className="flex h-screen flex-col gap-2 p-6">
+      <div className="min-h-0 flex-1">
+        <MessageScroller
+          label="the thread of CSV invoice export"
+          entries={whole ? THREAD : THREAD.slice(3, 6)}
+        />
+      </div>
+      <button type="button" onClick={() => setWhole(true)}>
+        Write around it
+      </button>
+    </div>
+  )
+}
+
+/**
+ * Entries written above the ones already drawn keep every mark on its own message.
+ *
+ * An entry hands the scroller its element once, when it is drawn, and never again: counted by the
+ * place it had then, the entries already there kept a place that was no longer theirs, and those
+ * written past them left places nobody filled — which the measuring then read, and threw on, at
+ * every scroll and every word of an answer.
+ */
+export const EntriesWrittenAbove: Story = {
+  render: () => <WrittenAround />,
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await userEvent.click(canvas.getByRole('button', { name: 'Write around it' }))
+    const rail = await canvas.findByRole('navigation', { name: /^Marks of/ }, { timeout: 10_000 })
+    const marks = await within(rail).findAllByRole('button')
+
+    await userEvent.click(marks[4]!)
+    await waitFor(
+      () => {
+        expect(marks[4]).toHaveAttribute('aria-current', 'true')
+      },
+      { timeout: 10_000 },
+    )
+    expect(marks.filter((mark) => mark.getAttribute('aria-current') === 'true')).toHaveLength(1)
+  },
+}
+
+/**
+ * A run of calls the reader unfolded, at the live edge, which a press makes one call longer: what
+ * a turn does while the agent works, one call after the other.
+ */
+function GrowingRun(): ReactNode {
+  const [calls, setCalls] = useState(6)
+  const entries: ScrollerEntry[] = [
+    ...THREAD,
+    {
+      id: 'run',
+      content: (
+        <ActionGroup count={calls} status="in_progress" defaultOpen>
+          {Array.from({ length: calls }, (_, at) => (
+            <ToolCallCard
+              key={at}
+              title={`Read src/billing/part-${String(at)}.ts`}
+              kind="read"
+              status="completed"
+              subject={{ text: `src/billing/part-${String(at)}.ts` }}
+            />
+          ))}
+        </ActionGroup>
+      ),
+    },
+    {
+      id: 'after',
+      content: <p data-testid="after-the-run">The totals are computed in the export.</p>,
+    },
+  ]
+  return (
+    <div className="flex h-screen flex-col gap-2 p-6">
+      <div className="min-h-0 flex-1">
+        <MessageScroller label="the thread of CSV invoice export" entries={entries} />
+      </div>
+      <button type="button" onClick={() => setCalls((was) => was + 1)}>
+        Call another tool
+      </button>
+    </div>
+  )
+}
+
+/** What each block of the thread is drawn with, frame after frame. */
+function transformsOver(thread: HTMLElement, frames: number): Promise<string[][]> {
+  const seen: string[][] = []
+  return new Promise((resolve) => {
+    const sample = (): void => {
+      seen.push(
+        [...thread.firstElementChild!.children].map((block) => getComputedStyle(block).transform),
+      )
+      if (seen.length < frames) requestAnimationFrame(sample)
+      else resolve(seen)
+    }
+    requestAnimationFrame(sample)
+  })
+}
+
+/**
+ * A call arriving in a run does not replay the blocks around it (issue #183).
+ *
+ * The run grows by one row, at once, and a thread following its live edge scrolls by that row:
+ * the block under the run stays where it is on the screen and the run grows upwards into what
+ * scrolled away. Every block used to be a layout element that motion carried from its old place
+ * to its new one, so the block under the run was drawn a row higher on the next frame, over the
+ * row that had just arrived, and slid back down — a pop on every call, for a block that had not
+ * moved at all. No block of the thread carries a transform, on any frame, and the one under the
+ * run ends where it was.
+ */
+export const ARunGrowingAtTheEdge: Story = {
+  render: () => <GrowingRun />,
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const thread = canvas.getByRole('log', { name: /CSV invoice export/ })
+    await waitFor(() => {
+      expect(fromTheEdge(thread)).toBeLessThanOrEqual(1)
+    })
+    const after = canvas.getByTestId('after-the-run')
+    const before = after.getBoundingClientRect().top
+
+    const watched = transformsOver(thread, 40)
+    await userEvent.click(canvas.getByRole('button', { name: 'Call another tool' }))
+    await expect(await canvas.findByText('src/billing/part-6.ts')).toBeInTheDocument()
+    const frames = await watched
+
+    await expect(
+      frames.flat().filter((transform) => transform !== 'none'),
+      'a block of the thread was carried from where it had been',
+    ).toEqual([])
+    await waitFor(() => {
+      expect(fromTheEdge(thread)).toBeLessThanOrEqual(1)
+    })
+    await expect(after.getBoundingClientRect().top).toBeCloseTo(before, 0)
   },
 }
 

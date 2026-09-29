@@ -31,6 +31,7 @@ import { openDiagnosticLog, reported, writeDiagnosticTo } from './diagnostic.ts'
 import { readSidecar } from './display-sidecar.ts'
 import { collectReport } from './environment.ts'
 import { startEngine } from './engine-client.ts'
+import { headless } from './window-options.ts'
 import { createWindow, loadWindow } from './window.ts'
 
 const main = dirname(fileURLToPath(import.meta.url))
@@ -112,7 +113,9 @@ if (!app.requestSingleInstanceLock()) {
 } else {
   app.on('second-instance', () => {
     const [first] = BrowserWindow.getAllWindows()
-    if (first === undefined) return
+    // Under the end-to-end suite with no window on screen, handing the window back would put it
+    // on screen and take the focus of whoever is using the machine: it stays where it is.
+    if (first === undefined || headless(process.env)) return
     if (first.isMinimized()) first.restore()
     first.focus()
   })
@@ -149,6 +152,21 @@ if (!app.requestSingleInstanceLock()) {
     const window = createWindow(main)
     registerChannels(window, identity, engine, data)
     await loadWindow(window)
+
+    // What the Projects run each time Hemera opens, asked once the window is shown and never
+    // before, so opening is not slowed down (#114). Nothing waits for it: a run that fails is the
+    // Project's to show, and what could not be started at all is written down here.
+    void Effect.runPromise(
+      engine.ask('engine.atOpen', {}).pipe(
+        Effect.match({
+          onSuccess: (refused) => {
+            for (const one of refused) log(one)
+          },
+          onFailure: (failed) =>
+            log(`the commands to run at open were not run: ${reported(failed)}`),
+        }),
+      ),
+    )
 
     if (process.argv.includes(REPORT_FLAG)) {
       // The transition is played and counted in the page, because that is where frames are

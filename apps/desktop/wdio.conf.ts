@@ -6,6 +6,7 @@
  * claims is about a window on a machine, and a mock has neither.
  *
  *   pnpm --filter @hemera/desktop e2e
+ *   pnpm --filter @hemera/desktop e2e:headless   (the same, with no window on screen)
  */
 
 import { readdirSync, rmSync } from 'node:fs'
@@ -13,7 +14,25 @@ import { tmpdir } from 'node:os'
 import { basename, dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
+import { installFakeAgent } from './e2e/agent/install.ts'
+import { QUALIFIED_VARIABLE } from './src/engine/agents/bare.ts'
+
 const application = dirname(fileURLToPath(import.meta.url))
+
+/**
+ * The spec files that go on with what another one left behind, and the file they go on from.
+ *
+ * A restart of the application is the one thing a spec file cannot do to itself — the service
+ * starts one instance per file and has no way to close it and start it again — and it is exactly
+ * what a Session has to survive. So a Session written by one file is opened again by the next,
+ * on the folder the first one wrote: the second instance starts on a data folder that already
+ * holds a thread, which is what reopening the application is. They run in order because the
+ * capabilities are read in order and one window runs at a time.
+ */
+const CONTINUED = new Map([
+  ['sessions.reopened.e2e.ts', 'sessions.e2e.ts'],
+  ['specs.reopened.e2e.ts', 'specs.e2e.ts'],
+])
 
 /**
  * The data folder one spec file runs on, made for it and thrown away after the run (D3-06).
@@ -25,7 +44,8 @@ const application = dirname(fileURLToPath(import.meta.url))
  * One folder per spec file, because a data folder is state and state shared between files is
  * one suite deciding what the next one starts on: a sidebar left folded by one is a header the
  * next cannot find its way around. Each spec file therefore gets a capability of its own, which
- * is the only place the service reads the folder from.
+ * is the only place the service reads the folder from — but for the few that go on from another
+ * one, which is what `CONTINUED` is and why it is written above.
  *
  * The path is spelled out rather than drawn from `mkdtemp`, because this file is evaluated once
  * by the launcher and once again inside every worker: a folder made on evaluation would be a
@@ -33,7 +53,8 @@ const application = dirname(fileURLToPath(import.meta.url))
  * starting it somewhere else entirely.
  */
 export function e2eDataOf(spec: string): string {
-  return join(tmpdir(), `hemera-e2e-${basename(spec, '.e2e.ts')}`)
+  const folder = CONTINUED.get(basename(spec)) ?? basename(spec)
+  return join(tmpdir(), `hemera-e2e-${basename(folder, '.e2e.ts')}`)
 }
 
 /** Every spec file of the suite, which is one capability and one data folder each. */
@@ -44,6 +65,23 @@ const SPECS = readdirSync(join(application, 'e2e'))
 // A terminal opened inside an Electron based editor exports ELECTRON_RUN_AS_NODE, and the
 // binary would then start as a plain Node process: no window for the suite to drive.
 delete process.env.ELECTRON_RUN_AS_NODE
+
+// The agent the suite talks to, put on this process's `PATH` before anything is started: the
+// application looks a command up on the machine it runs on, and this is the machine it is given
+// (`e2e/agent/install.ts`). Nothing of the product is aware of it, and no real agent is run.
+installFakeAgent()
+
+// The agent it answers for is OpenCode, whose declaration refuses to run it bare where it has not
+// been qualified (Linux, today): named here, the engine treats that one agent as qualified whatever
+// it declares, and says so once in its diagnostic log (`src/engine/agents/bare.ts`). It reaches
+// the application as `HEMERA_E2E_HEADLESS` does, below.
+process.env[QUALIFIED_VARIABLE] = 'opencode'
+
+// `HEMERA_E2E_HEADLESS` reaches the application the way the agent's `PATH` does: the driver
+// starts it with this process's environment, and the service has no environment of its own to
+// hand it. `wdio.headless.conf.ts` sets it here, before anything is started; the application
+// then opens its window off screen (`src/main/window-options.ts`), and so does every second
+// start a suite makes with this environment.
 
 export const config: WebdriverIO.Config = {
   runner: 'local',

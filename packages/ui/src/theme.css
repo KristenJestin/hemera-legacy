@@ -83,7 +83,9 @@
 
   --success: #16a34a;
   --success-muted: #ecfdf3;
-  --success-muted-foreground: #15803d;
+  /* A shade under green-700: its own counts (a diff's +N) are read on the page itself, where
+     green-700 made 4.29:1 on the background and the catalogue asks 4.5:1 of small text. */
+  --success-muted-foreground: #157a3a;
   --warning: #d97706;
   --warning-muted: #fffbeb;
   --warning-muted-foreground: #b45309;
@@ -110,8 +112,43 @@
   --ring: rgba(217, 70, 239, 0.25);
   --overlay: rgba(16, 16, 24, 0.2);
 
+  /* What dragging across a text leaves behind (trial of 22 September 2026).
+     A role of its own, and opaque: selected text is the one place the theme cannot know what it
+     is drawn over, and a fill at a tenth of the primary let the page through — in the dark
+     theme the selection was all but invisible. An opaque fill with a foreground of its own
+     answers for its own contrast whatever the text was before it was selected: a comment, a
+     command, a line of a diff. 9.9:1 here, 8.5:1 in the dark. */
+  --selection: #f0abfc;
+  --selection-foreground: #111118;
+
   --shadow: 0 1px 2px rgba(16, 16, 24, 0.05), 0 1px 3px rgba(16, 16, 24, 0.04);
   --shadow-raised: 0 12px 32px rgba(16, 16, 24, 0.12);
+
+  /* The soft ring a thumb sits in: what says a round surface on a track is the thing the hand
+     has hold of, and not a dot drawn on it. The primary, at a fraction of itself, so the halo
+     is the accent bleeding out of the thumb rather than a second colour; `strong` is the same
+     ring under the hand and under the focus, which is how the control answers being touched
+     without moving anything anybody is reading. It is the one shadow of the theme that carries
+     a hue: everything else here is the page's own shade of black. */
+  --halo: 0 0 0 3px rgba(192, 38, 211, 0.16);
+  --halo-strong: 0 0 0 5px rgba(192, 38, 211, 0.26);
+
+  /* The second layer of that halo: the light the thumb throws, rather than the ring it sits in
+     (trial of 22 September 2026). A ring alone says where the thumb ends; a blurred glow under
+     that ring says the thumb is lit, which is the difference between an instrument and a dot
+     drawn on a line. Blurred and spread where `--halo` is spread alone, so the two layers never
+     draw the same edge twice. */
+  --halo-glow: 0 0 10px 1px rgba(192, 38, 211, 0.18);
+  --halo-glow-strong: 0 0 16px 3px rgba(192, 38, 211, 0.3);
+
+  /* What lights the core of a thumb: a highlight along its top edge and a shade along its
+     bottom, both inside it, so a round surface reads as domed rather than as a flat disc. It is
+     drawn inside because the halo already owns everything outside the thumb. */
+  --knob: inset 0 1px 1px rgba(255, 255, 255, 0.9), inset 0 -1px 2px rgba(16, 16, 24, 0.08);
+
+  /* The groove a track is sunk into, which is the well of the instrument look: an inner shadow
+     and a hairline rim, in the page's own black. A hole in a surface has no hue of its own. */
+  --well: inset 0 1px 3px rgba(16, 16, 24, 0.1), inset 0 0 0 1px rgba(16, 16, 24, 0.05);
 }
 
 /* ---- Roles, dark ---- */
@@ -179,8 +216,30 @@
   --ring: rgba(232, 121, 249, 0.3);
   --overlay: rgba(0, 0, 0, 0.5);
 
+  /* The same role, and the same rule read the other way: a magenta deep enough to sit on the
+     page's own black and still carry the theme's text on it. */
+  --selection: #6b1f7a;
+  --selection-foreground: #ececf1;
+
   --shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
   --shadow-raised: 0 14px 40px rgba(0, 0, 0, 0.6);
+
+  /* The dark theme's primary is the lighter of the two, and a halo drawn at the light theme's
+     strength on this background reads as a smudge rather than a ring: it is given less of
+     itself, and the hue it is given is the one the page actually uses. */
+  --halo: 0 0 0 3px rgba(232, 121, 249, 0.2);
+  --halo-strong: 0 0 0 5px rgba(232, 121, 249, 0.32);
+
+  /* The glow reads the other way round from the ring: on the page's own black there is room for
+     it, and a thumb that threw no light on a dark panel is a thumb nothing says is lit. */
+  --halo-glow: 0 0 12px 2px rgba(232, 121, 249, 0.26);
+  --halo-glow-strong: 0 0 20px 4px rgba(232, 121, 249, 0.42);
+
+  /* The same dome, lit by what there is: a dark theme has no white to catch on the top edge, so
+     the highlight is a fraction of one and the shade below it is the black it already sits on. */
+  --knob: inset 0 1px 1px rgba(255, 255, 255, 0.16), inset 0 -1px 2px rgba(0, 0, 0, 0.6);
+
+  --well: inset 0 1px 3px rgba(0, 0, 0, 0.7), inset 0 0 0 1px rgba(255, 255, 255, 0.04);
 }
 
 /* ---- The Tailwind theme reads the roles, never the raw values ---- */
@@ -244,6 +303,8 @@
   --color-input: var(--input);
   --color-ring: var(--ring);
   --color-overlay: var(--overlay);
+  --color-selection: var(--selection);
+  --color-selection-foreground: var(--selection-foreground);
 
   --shadow-sm: var(--shadow);
   --shadow-lg: var(--shadow-raised);
@@ -286,6 +347,39 @@
      enough for a path to be read, narrow enough not to cover the box it belongs to. */
   --spacing-menu: 20rem;
 
+  /* How tall the agent panel is drawn, whatever stage it is on and whatever it is waiting for.
+     One height for the loading state, the list, the empty answer and a refusal alike: the panel
+     opens upwards out of the composer, so a body that grew would push it past the top of the
+     window and make the positioner flip it to the other side under the reader's hand. Tall
+     enough for the models on one side and the effort above the modes on the other, short enough
+     to sit above a composer in a window that is not maximised. */
+  --spacing-menu-panel: 26rem;
+
+  /* And how wide, since the maintainer kept the two-column model stage on 22 September 2026:
+     the models are searched on one side and what is set about them stands on the other, and
+     both have to be read without a name being cut short. Narrow enough to stay a menu of the
+     composer rather than a window of its own. */
+  --spacing-menu-wide: 26rem;
+
+  /* How wide that second column stands, out of the panel's own width. A fraction of the parent
+     is not a step of anything — it moves with whatever is around it, and the column beside it
+     was left to take the remainder. Written down instead: wide enough for the effort's marks
+     beside its track and for "Bypass permissions" read whole, narrow enough to leave the models
+     the larger half, which is the list that scrolls. */
+  --spacing-menu-side: 11.5rem;
+
+  /* How thick the track of the effort's scale is drawn. Thin enough to read as a line the thumb
+     runs along rather than as a bar, and thick enough that the part of it that is filled is
+     read as filled at a glance. A named step, because two tracks of two thicknesses in one
+     panel is two controls that look like they came from two systems. */
+  --spacing-track: 0.375rem;
+
+  /* How wide the thumb of that scale is drawn. Tailwind's own multiplication has no step
+     between sixteen and twenty-four, and a thumb that is to be taken hold of wants twenty.
+     Written down here it is a step the scale check knows, and a second control cannot invent a
+     size of its own in silence. */
+  --spacing-thumb-lg: 1.25rem;
+
   /* The prototype draws its icons at eighteen, with sixteen for the small ones and twenty-two
      for the few that stand alone. The first pass of lot 4 sat a step under all three, which is
      what made every control read as slightly unfinished: an icon beside a word has to weigh as
@@ -293,6 +387,11 @@
   --spacing-icon-sm: 1rem;
   --spacing-icon-md: 1.125rem;
   --spacing-icon-lg: 1.375rem;
+
+  /* How big the face is drawn as the subject of a page (issue #140): the Home before anything
+     runs, an empty state. Past the largest step of the scale, so it reads as what the page is
+     about rather than as an icon grown up. */
+  --spacing-face-hero: 8rem;
 
   /* How tall a control is drawn, one step per size of the components (design D2-07). A named
      step and not a number: `h-control-md` is a class the scale check knows the whole list of,
@@ -338,6 +437,33 @@
      stop says, so this is the one number the two of them are built from. */
   --spacing-timeline-mark: 1.25rem;
 
+  /* How tall a wide dialog is drawn, whatever it holds: the details of a Session change tab
+     inside it, and a dialog that took the height of each tab changed size under the hand that
+     switched them (third review of #18). A share of the window rather than a length, because it
+     is the window it has to leave a margin in: enough for a page of its own, short of the edges. */
+  --spacing-dialog-wide: 70vh;
+
+  /* The Spec folded (issue #164): the small frame at the window's edge, the three phases' glyphs
+     in their squares — a square, the room around it and the two borders of a frame. Its width is a
+     token rather than what it holds, because it is one end of the slot the swap moves. */
+  --spacing-spec-frame: 3.5rem;
+
+  /* How tall what waits above the composer may grow before it scrolls of its own: several blocking
+     questions at once would otherwise push the thread out of the window. A share of the window,
+     for the reason a wide dialog is one: it is the thread above that has to keep its room. */
+  --spacing-pinned: 40vh;
+
+  /* How wide the Session's notices open above the composer (issue #237): wide enough for a
+     one-off's whole line to wrap over a few rows rather than one row a word, narrower than the
+     thread's column so the panel still reads as the pill's and not as a page of its own. */
+  --spacing-notices: 36rem;
+
+  /* The Spec open: a share of the Session's row, the container it is asked of. A length of the
+     row rather than a fraction of the panel's own box, because the panel's box is what slides in
+     while it opens: what the panel holds is laid at this width from the first frame, so nothing
+     inside it reflows on the way. */
+  --spacing-spec-panel: 45cqw;
+
   /* The motion personality, CSS side: the same curve and the same durations `src/motion.ts`
      gives the spring, for the transitions Base UI drives through data attributes. */
   --ease-calm: cubic-bezier(0.25, 0.8, 0.25, 1);
@@ -350,9 +476,21 @@
   --duration-turn: 1200ms;
   --animate-turn: turn var(--duration-turn) linear infinite;
 
+  /* The breath of a dot that says something is running (design D17-04). One turn of the loading
+     indicator long, because the two are read side by side in a thread, and two rhythms beating
+     against each other are what make a page look nervous. It moves nothing but the opacity —
+     the dot keeps its place, its size and its colour, and only the pixels come and go. */
+  --animate-breathe: breathe var(--duration-turn) var(--ease-calm) infinite;
+
   @keyframes turn {
     to {
       transform: rotate(360deg);
+    }
+  }
+
+  @keyframes breathe {
+    50% {
+      opacity: 0.35;
     }
   }
 }
@@ -440,6 +578,31 @@
   grid-template-columns: var(--sidebar-current-width, var(--spacing-sidebar)) 1fr;
 }
 
+/* The slot the Spec takes in a Session's row (issue #164): its small frame, the open panel, or a
+   width between the two, which the panel writes as `--spec-open` on every frame of the swap — 0
+   folded, 1 open — so the chat beside it is pushed as it moves. A share and not a length, because
+   the two ends are lengths of different kinds, rems and a share of the row, and only the browser
+   can put them on one line; at rest it is one of the two tokens exactly, and stays so while the
+   window is resized. `--spec-in` scales the whole of it, from nothing to 1, while a Spec that has
+   just been created arrives in the row (issue #130); it is 1 for a Spec that was already there. */
+@utility spec-slot {
+  width: calc(
+    (var(--spacing-spec-frame) + (var(--spacing-spec-panel) - var(--spacing-spec-frame)) *
+        var(--spec-open, 0)) *
+      var(--spec-in, 1)
+  );
+}
+
+/* The open panel, drawn from the same shares as its slot: out past its clip by its whole width
+   and the margin it keeps at the content's edge folded, or not arrived yet, and in place open. One
+   value moves both, so the panel and the chat it pushes never fall out of step and never overlap,
+   and a swap turned round half-way turns both round together. The margin is the dock's `pr-3`,
+   which the clip reaches across (issue #181): the panel comes in from the content's edge, as the
+   small frame leaves by it, and not from inside the margin. */
+@utility spec-panel-in {
+  translate: calc((1 - var(--spec-open, 0) * var(--spec-in, 1)) * (100% + var(--spacing) * 3)) 0;
+}
+
 /* Where the active tab meets the sheet it opens (design D2-02).
    The tab is the sheet's own surface carried up into the bar, so the join between them is not a
    corner but a curve running the other way: the sheet flares outwards as it reaches the tab
@@ -460,11 +623,11 @@
    instead, and they find those edges the same way the cut does: through the two properties that
    say where they are. */
 @utility tab-mark-start {
-  right: calc(100% - var(--tab-mark-left, 0px));
+  right: calc(100% - var(--mark-left, 0px));
 }
 
 @utility tab-mark-end {
-  left: calc(100% - var(--tab-mark-right, 0px));
+  left: calc(100% - var(--mark-right, 0px));
 }
 
 @utility tab-flare {
@@ -576,8 +739,7 @@
      belongs to is a mark with nothing to say, and the other default — cut nothing — is a sheet
      lying across the whole strip. */
   clip-path: inset(
-    0 var(--tab-mark-right, 100%) 0 var(--tab-mark-left, 0px) round var(--radius-md)
-      var(--radius-md) 0 0
+    0 var(--mark-right, 100%) 0 var(--mark-left, 0px) round var(--radius-md) var(--radius-md) 0 0
   );
 }
 
@@ -592,10 +754,24 @@
   scrollbar-width: thin;
   scrollbar-color: var(--color-border) transparent;
   scrollbar-gutter: stable;
-  /* The content is a sheet of its own, set in from the window on three sides. */
-  margin: 0 0.5rem 0.5rem 0;
+  /* The content is a sheet of its own, set in from the window on three sides. The fourth is the
+     sidebar's: the panel and the separator beside it are what stands between the sheet and the
+     window, so the sheet asks for nothing there — unless it is told it is alone. */
+  margin: 0 0.5rem 0.5rem var(--content-inset-left, 0px);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-lg);
+}
+
+/* The content with nothing beside it, which is the window before a Project (design D4-06).
+   No sidebar and no separator means nothing stands between the sheet and the window on that
+   side, and a sheet set in on three sides only reads as a panel the window cut off rather than
+   as the one surface everything is read on. Set in on the fourth as it is on the second, so the
+   frame closes and the two sides of the page are the same.
+   The inset travels as a custom property rather than as a second margin rule: a margin written
+   twice is decided by whichever of the two utilities the build happens to order last, and where
+   the content sits is not a question a sort order should answer. */
+@utility content-area-alone {
+  --content-inset-left: 0.5rem;
 }
 
 /* The strip of tabs runs a pixel past the bottom of the bar (design D2-02).
@@ -650,8 +826,11 @@
   }
 }
 
+/* The veil behind a dialog fades, and fades only: its blur stays what it is from the first frame
+   to the last. A blur that is itself in transition is computed again over the whole window on
+   every frame, which is the frame the page behind it is seen to jump on (issue #183). */
 @utility backdrop-motion {
-  transition-property: opacity, backdrop-filter;
+  transition-property: opacity;
   transition-duration: var(--duration-base);
   transition-timing-function: var(--ease-calm);
   @media (prefers-reduced-motion: reduce) {
@@ -669,6 +848,25 @@
    A popup comes down from its trigger and folds back up into it rather than growing out of a
    corner: a scale from an origin reads as a direction nobody asked for, and the direction a
    list opens in is the first thing the eye uses to find where it came from. */
+/* Where a popup that grows is drawn: everything but what is still below its anchor's edge, so it
+   rises from behind the anchor. Its shadow is kept on the three other sides; the fourth is the
+   anchor's edge, the `sideOffset` under the popup. Written for a popup that opens upwards. */
+@utility popup-emerges {
+  clip-path: inset(-3rem -3rem -0.25rem -3rem);
+}
+
+/* What comes out of what opens it: the same beat as `popup-motion`, scaling from the point the
+   popup hangs from, which Base UI writes as `--transform-origin` (issue #237). */
+@utility popup-grows {
+  transform-origin: var(--transform-origin);
+  transition-property: opacity, scale, translate;
+  transition-duration: var(--duration-base);
+  transition-timing-function: var(--ease-calm);
+  @media (prefers-reduced-motion: reduce) {
+    transition-property: none;
+  }
+}
+
 @utility popup-motion {
   /* `translate` and `scale` and not `transform`: Tailwind 4 writes its transform utilities as
      the individual properties, and a transition naming `transform` never sees them — the popup
@@ -677,6 +875,80 @@
   transition-duration: var(--duration-base);
   transition-timing-function: var(--ease-calm);
   /* A system asking for less movement gets the popup where it ends, and nothing on the way. */
+  @media (prefers-reduced-motion: reduce) {
+    transition-property: none;
+  }
+}
+
+/* What the thumb of a scale does under the hand and under the focus: the halo around it
+   brightens and the thumb itself grows a little, which is the whole of how a control answers
+   being touched without moving what is being read. `scale` and not `transform`: Tailwind 4
+   writes its scale utility as the individual property, and naming `transform` here would both
+   miss it and fight the layout animation motion plays on the same element. */
+@utility thumb-motion {
+  transition-property: box-shadow, scale;
+  transition-duration: var(--duration-fast);
+  transition-timing-function: var(--ease-calm);
+  @media (prefers-reduced-motion: reduce) {
+    transition-property: none;
+  }
+}
+
+/* What the box of a checkbox does as it is checked and unchecked: its fill and its edge fade on
+   the beat its tick draws on, so a tick undrawing is still drawn on the fill it is the colour of,
+   rather than white on white the moment the box lets go. */
+@utility check-motion {
+  transition-property: background-color, border-color;
+  transition-duration: var(--duration-base);
+  transition-timing-function: var(--ease-calm);
+  @media (prefers-reduced-motion: reduce) {
+    transition-property: none;
+  }
+}
+
+/* The two shadows a scale is built out of that are drawn inside what wears them: the groove a
+   track is sunk into, and the dome that lights a thumb's core. They are utilities rather than
+   steps of the shadow scale because a `shadow-*` utility named anything but a size is read as a
+   colour — by Tailwind's own grammar and so by the design-system lint — and neither of these is
+   a colour. What they carry is still the theme's: the value is a token, declared once per
+   theme, and this is the door it comes through. */
+@utility track-well {
+  box-shadow: var(--well);
+}
+
+/* And the two the thumb of that scale is lit by: the ring it sits in, and the glow it throws on
+   the surface under it, each at its resting strength and at the one it answers the hand with.
+   Utilities for the reason the well is one — a `shadow-*` utility named anything but a size is
+   read as a colour, by Tailwind's grammar and so by the design-system lint — and four of them
+   rather than two, because the halo is given to a state at a time: `halo group-hover:halo-strong`
+   is the ring brightening under the hand, and the glow is the same sentence one layer down. */
+@utility halo {
+  box-shadow: var(--halo);
+}
+
+@utility halo-strong {
+  box-shadow: var(--halo-strong);
+}
+
+@utility halo-glow {
+  box-shadow: var(--halo-glow);
+}
+
+@utility halo-glow-strong {
+  box-shadow: var(--halo-glow-strong);
+}
+
+@utility thumb-dome {
+  box-shadow: var(--knob);
+}
+
+/* How the part of a Spec that has the focus takes its soft highlight and gives it back (lot 19):
+   the background fades on the theme's `fast` step — the stage's cross-fade of the first brief,
+   now that the Spec is one document and the focus moves inside it rather than replacing it. */
+@utility highlight-motion {
+  transition-property: background-color;
+  transition-duration: var(--duration-fast);
+  transition-timing-function: var(--ease-calm);
   @media (prefers-reduced-motion: reduce) {
     transition-property: none;
   }
@@ -733,7 +1005,68 @@
     cursor: not-allowed;
   }
 
+  /* Selected text carries its own two colours, and not a tint laid over whatever was there.
+     `--primary-muted` is a fill made to sit under a badge whose foreground comes with it; under
+     a drag across a paragraph it is a tenth of a colour over an unknown one, which in the dark
+     theme read as nothing at all. */
   ::selection {
-    background-color: var(--color-primary-muted);
+    background-color: var(--color-selection);
+    color: var(--color-selection-foreground);
   }
+}
+
+/* ---- What a diff is coloured with (design D17-13) ----
+
+   The highlighter names a role per token and writes it as a variable — `var(--shiki-token-keyword)`
+   — and the block below is the only place a role meets a colour, exactly as every other colour of
+   the interface. Nothing in a component knows that a keyword is magenta; the classes below are
+   what a token wears, and the role's variable is set on the diff's own box so that what a diff is
+   coloured with cannot leak into the rest of the window. The names are the ones shiki's own
+   css-variables theme uses: swap the colour without touching the highlighter, or the highlighter
+   without touching a colour. */
+.code-diff {
+  --shiki-foreground: var(--foreground);
+  --shiki-background: transparent;
+  --shiki-token-comment: var(--muted-foreground);
+  --shiki-token-constant: var(--info-muted-foreground);
+  --shiki-token-keyword: var(--primary-strong);
+  --shiki-token-string: var(--success-muted-foreground);
+  --shiki-token-function: var(--mission-define-muted-foreground);
+  --shiki-token-parameter: var(--mission-build-muted-foreground);
+  --shiki-token-punctuation: var(--muted-foreground);
+  --shiki-token-link: var(--info-muted-foreground);
+}
+
+.tok-comment {
+  color: var(--shiki-token-comment);
+  font-style: italic;
+}
+
+.tok-constant {
+  color: var(--shiki-token-constant);
+}
+
+.tok-keyword {
+  color: var(--shiki-token-keyword);
+}
+
+.tok-string {
+  color: var(--shiki-token-string);
+}
+
+.tok-function {
+  color: var(--shiki-token-function);
+}
+
+.tok-parameter {
+  color: var(--shiki-token-parameter);
+}
+
+.tok-punctuation {
+  color: var(--shiki-token-punctuation);
+}
+
+.tok-link {
+  color: var(--shiki-token-link);
+  text-decoration: underline;
 }

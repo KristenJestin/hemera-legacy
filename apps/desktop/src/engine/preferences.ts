@@ -15,6 +15,7 @@ import {
   DEFAULT_DISPLAY_PREFERENCES,
   activeProjectSchema,
   activeSessionsSchema,
+  composersSchema,
   type DisplayPreferences,
   type DisplayPreferencesChange,
   type SidebarPreference,
@@ -33,6 +34,8 @@ export const THEME_KEY = 'theme'
 export const SIDEBAR_KEY = 'sidebar'
 export const ACTIVE_PROJECT_KEY = 'activeProjectId'
 export const ACTIVE_SESSIONS_KEY = 'activeSessions'
+export const COMPOSERS_KEY = 'composers'
+export const ACP_TRACE_KEY = 'acpTrace'
 
 function themeOf(value: string | undefined): ThemePreference | null {
   if (value === undefined) return null
@@ -79,6 +82,20 @@ function activeSessionsOf(value: string | undefined): Record<string, string> | u
   }
 }
 
+/**
+ * What each Project's composer was left on, or undefined when the row says something this
+ * version cannot read — which answers the same way as never having chosen an agent there.
+ */
+function composersOf(value: string | undefined) {
+  if (value === undefined) return undefined
+  try {
+    const read = composersSchema.safeParse(JSON.parse(value))
+    return read.success ? read.data : undefined
+  } catch {
+    return undefined
+  }
+}
+
 export class Preferences extends Context.Service<
   Preferences,
   {
@@ -111,6 +128,10 @@ export const preferencesLayer = Layer.effect(
           activeSessions:
             activeSessionsOf(stored.get(ACTIVE_SESSIONS_KEY)) ??
             DEFAULT_DISPLAY_PREFERENCES.activeSessions,
+          composers:
+            composersOf(stored.get(COMPOSERS_KEY)) ?? DEFAULT_DISPLAY_PREFERENCES.composers,
+          // Anything but the word this version writes is off: a trace is never on by accident.
+          acpTrace: stored.get(ACP_TRACE_KEY) === 'true',
         }
       }),
 
@@ -135,6 +156,12 @@ export const preferencesLayer = Layer.effect(
               key: ACTIVE_SESSIONS_KEY,
               value: JSON.stringify(change.activeSessions),
             })
+          }
+          if (change.composers !== undefined) {
+            written.push({ key: COMPOSERS_KEY, value: JSON.stringify(change.composers) })
+          }
+          if (change.acpTrace !== undefined) {
+            written.push({ key: ACP_TRACE_KEY, value: String(change.acpTrace) })
           }
           if (written.length === 0) return
 

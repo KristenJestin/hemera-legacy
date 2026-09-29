@@ -1,4 +1,6 @@
-import type { Project } from '@hemera/ipc'
+import type { Project, RepositoryIcon } from '@hemera/ipc'
+
+import { patiently } from './patiently.ts'
 
 /**
  * The Projects of the data folder, as the window holds them (design D4-11).
@@ -64,9 +66,16 @@ function message(cause: unknown): string {
   return cause instanceof Error ? cause.message : String(cause)
 }
 
-/** Everything that is not archived, which is what the bar lists. */
+/**
+ * Everything that is not archived, which is what the bar lists.
+ *
+ * Asked again when it fails: this is the window's first question, asked while the engine may
+ * still be starting, and a list that failed then was a window with no Project in it.
+ */
 export async function loadProjects(): Promise<boolean> {
-  return await acting(async () => await window.hemera.invoke('projects.list', {}))
+  return await acting(
+    async () => await patiently(async () => await window.hemera.invoke('projects.list', {})),
+  )
 }
 
 export async function createProject(asked: {
@@ -82,7 +91,7 @@ export async function createProject(asked: {
 
 export async function renameProject(
   project: Project,
-  change: { name?: string; tone?: Project['tone'] },
+  change: { name?: string; tone?: Project['tone']; specPrefix?: string },
 ): Promise<boolean> {
   return await acting(async () => {
     await window.hemera.invoke('projects.update', {
@@ -136,6 +145,73 @@ export async function removeRepository(project: Project, relativePath: string): 
       id: project.id,
       version: project.version,
       relativePath,
+    })
+    return await window.hemera.invoke('projects.list', {})
+  })
+}
+
+/**
+ * Where the Project's dedicated Workspaces are made (D8-02): a folder, or a blank for Hemera's
+ * own, which the channel carries as the default (Decided 17).
+ */
+export async function setWorkspacesRoot(project: Project, path: string | null): Promise<boolean> {
+  return await acting(async () => {
+    await window.hemera.invoke('projects.setWorkspacesRoot', {
+      id: project.id,
+      version: project.version,
+      path,
+    })
+    return await window.hemera.invoke('projects.list', {})
+  })
+}
+
+/** What their branches start with (D8-04): a prefix, or a blank for the Project's slug. */
+export async function setBranchPrefix(project: Project, prefix: string | null): Promise<boolean> {
+  return await acting(async () => {
+    await window.hemera.invoke('projects.setBranchPrefix', {
+      id: project.id,
+      version: project.version,
+      prefix,
+    })
+    return await window.hemera.invoke('projects.list', {})
+  })
+}
+
+/** Whether a repository gets a worktree in every dedicated Workspace unless left out (D8-04). */
+export async function setRepositoryIncluded(
+  project: Project,
+  relativePath: string,
+  included: boolean,
+): Promise<boolean> {
+  return await acting(async () => {
+    await window.hemera.invoke('projects.setRepositoryIncluded', {
+      id: project.id,
+      version: project.version,
+      path: relativePath,
+      included,
+    })
+    return await window.hemera.invoke('projects.list', {})
+  })
+}
+
+/**
+ * Rewrites a declared repository at once (recette 1, item 11): its path, its icon, and whether a
+ * dedicated Workspace takes it by default. The engine moves the commands and the recipe steps that
+ * named its old path along with it; a path it refuses is its sentence, kept as `refusal`.
+ */
+export async function updateRepository(
+  project: Project,
+  relativePath: string,
+  next: { path: string; icon: RepositoryIcon | null; included: boolean },
+): Promise<boolean> {
+  return await acting(async () => {
+    await window.hemera.invoke('repositories.update', {
+      id: project.id,
+      version: project.version,
+      relativePath,
+      newPath: next.path,
+      icon: next.icon,
+      included: next.included,
     })
     return await window.hemera.invoke('projects.list', {})
   })

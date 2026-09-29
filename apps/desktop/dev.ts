@@ -30,11 +30,17 @@ import { build, createServer } from 'vite-plus'
 
 import { VERSION_VARIABLE } from './src/main/channel.ts'
 import { RENDERER_URL_VARIABLE } from './src/main/renderer-source.ts'
-import { mainBundle, preloadBundle, engineBundle, rendererBundle } from './bundles.ts'
+import {
+  adapterBundle,
+  mainBundle,
+  preloadBundle,
+  engineBundle,
+  rendererBundle,
+} from './bundles.ts'
 
 const application = dirname(fileURLToPath(import.meta.url))
 
-const NODE_BUNDLES = [mainBundle, preloadBundle, engineBundle]
+const NODE_BUNDLES = [mainBundle, preloadBundle, engineBundle, adapterBundle]
 
 /**
  * A build in watch mode answers with its watcher before its first build is written, and the
@@ -92,7 +98,9 @@ const described = spawnSync('git describe --tags --always', {
   shell: true,
 })
 
-const started = spawn(binary, [application], {
+// What `pnpm dev` was given goes to the application: `--data-dir <folder>` is how a trial run
+// stays away from the real data folder, and a development run is the one build that takes it.
+const started = spawn(binary, [application, ...process.argv.slice(2)], {
   stdio: 'inherit',
   env: {
     ...environment,

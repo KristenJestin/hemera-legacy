@@ -1,18 +1,32 @@
+import { realpathSync } from 'node:fs'
+import { isAbsolute, relative, sep } from 'node:path'
+
 import {
   type Project as DomainProject,
   InvalidProjectNameError,
   InvalidRepositoryPathError,
+  InvalidSpecPrefixError,
   MAIN_WORKSPACE,
   type ProjectTone,
+  REPOSITORY_ICONS,
+  type RepositoryIcon,
   projectName,
   rankBetween,
   repositoryPath,
+  specPrefix,
+  specPrefixFrom,
 } from '@hemera/core'
 import { and, asc, eq, inArray, isNull } from 'drizzle-orm'
 import { Context, Effect, Layer } from 'effect'
 
 import { Database, DatabaseError, type EngineTransaction } from './storage/database.ts'
-import { projectRepositories, projects, workspaces } from './storage/schema.ts'
+import {
+  projectCommands,
+  projectPreparationSteps,
+  projectRepositories,
+  projects,
+  workspaces,
+} from './storage/schema.ts'
 import { type Mutation, StaleVersionError, mutate } from './transaction.ts'
 
 /**
@@ -31,6 +45,29 @@ export interface Project extends DomainProject {
   mainPath: string
   /** What it reads from, relative to that root, in the order the user put them in. */
   repositories: string[]
+  /** Where its dedicated Workspaces are made, and null for Hemera's own folder (D8-02). */
+  workspacesRoot: string | null
+  /** What their branches start with, and null for the Project's name as a slug (D8-04). */
+  branchPrefix: string | null
+  /** The repositories a dedicated Workspace gets a worktree of unless left out (D8-04). */
+  included: string[]
+  /** What its Spec keys start with, `PREFIX-n` (D7-02). */
+  specPrefix: string
+  /** The icon each repository wears, by its path; one that wears none is not in it (item 11). */
+  repositoryIcons: Record<string, RepositoryIcon>
+}
+
+/** What a repository of a Project is rewritten with, all at once (recette 1, item 11). */
+export interface RepositoryEdit {
+  readonly id: string
+  readonly version: number
+  /** The repository as the Project declares it now. */
+  readonly relativePath: string
+  /** Where it is to be read from, relative to the root: itself, or another place. */
+  readonly newPath: string
+  readonly icon: RepositoryIcon | null
+  /** Whether a dedicated Workspace gets a worktree of it unless left out (D8-04). */
+  readonly included: boolean
 }
 
 /** A Project was asked for by an identifier nothing answers to. */
@@ -41,12 +78,36 @@ export class UnknownProjectError extends Error {
   }
 }
 
+/** A folder of dedicated Workspaces that cannot be one (D8-02). */
+export class InvalidWorkspacesRootError extends Error {
+  constructor(
+    readonly path: string,
+    reason: string,
+  ) {
+    super(`the folder of the Workspaces "${path}" is refused: ${reason}`)
+    this.name = 'InvalidWorkspacesRootError'
+  }
+}
+
+/** A branch prefix Git would not take, or one that is no prefix at all (D8-04). */
+export class InvalidBranchPrefixError extends Error {
+  constructor(
+    readonly prefix: string,
+    reason: string,
+  ) {
+    super(`the branch prefix "${prefix}" is refused: ${reason}`)
+    this.name = 'InvalidBranchPrefixError'
+  }
+}
+
 /** What the caller hands over to create one. */
 export interface NewProject {
   name: string
   tone: ProjectTone
   /** The folder `main` will point at. Checked by the main process before it gets here. */
   mainPath: string
+  /** The Spec key prefix; derived from the name when not given (Decided 2). */
+  specPrefix?: string | undefined
 }
 
 /** What can be changed about a Project without touching its Workspaces. */
@@ -55,6 +116,8 @@ export interface ProjectEdit {
   version: number
   name?: string | undefined
   tone?: ProjectTone | undefined
+  /** A new Spec key prefix; the keys already minted keep theirs (D7-02). */
+  specPrefix?: string | undefined
 }
 
 /**
@@ -74,8 +137,10 @@ export interface ProjectsService {
   readonly list: (includeArchived?: boolean | undefined) => Effect.Effect<Project[], DatabaseError>
   readonly create: (
     asked: NewProject,
-  ) => Effect.Effect<Project, DatabaseError | InvalidProjectNameError>
-  readonly update: (edit: ProjectEdit) => Effect.Effect<Project, Refusal | InvalidProjectNameError>
+  ) => Effect.Effect<Project, DatabaseError | InvalidProjectNameError | InvalidSpecPrefixError>
+  readonly update: (
+    edit: ProjectEdit,
+  ) => Effect.Effect<Project, Refusal | InvalidProjectNameError | InvalidSpecPrefixError>
   readonly moveMain: (id: string, version: number, path: string) => Effect.Effect<Project, Refusal>
   readonly archive: (id: string, version: number) => Effect.Effect<Project, Refusal>
   readonly restore: (id: string, version: number) => Effect.Effect<Project, Refusal>
@@ -89,12 +154,70 @@ export interface ProjectsService {
     version: number,
     relativePath: string,
   ) => Effect.Effect<Project, Refusal>
+  /** Null is Hemera's own folder; a path is absolute and outside `main` (D8-02). */
+  readonly setWorkspacesRoot: (
+    id: string,
+    version: number,
+    path: string | null,
+  ) => Effect.Effect<Project, Refusal | InvalidWorkspacesRootError>
+  /** Null is the Project's name as a slug; a prefix is one Git takes (D8-04). */
+  readonly setBranchPrefix: (
+    id: string,
+    version: number,
+    prefix: string | null,
+  ) => Effect.Effect<Project, Refusal | InvalidBranchPrefixError>
+  readonly setRepositoryIncluded: (
+    id: string,
+    version: number,
+    relativePath: string,
+    included: boolean,
+  ) => Effect.Effect<Project, Refusal | InvalidRepositoryPathError>
+  /**
+   * Rewrites a repository in one transaction (recette 1, item 11): its path, validated as an
+   * added one is, its icon and its default inclusion — and every command's base and every recipe
+   * step's base that named its old path, so nothing points at a place the Project no longer
+   * declares.
+   */
+  readonly updateRepository: (
+    edit: RepositoryEdit,
+  ) => Effect.Effect<Project, Refusal | InvalidRepositoryPathError>
 }
 
 export class Projects extends Context.Service<Projects, ProjectsService>()('Projects') {}
 
 /** What any change to an existing Project can be refused with. */
 type Refusal = DatabaseError | StaleVersionError | UnknownProjectError
+
+/**
+ * A Workspace path as the filesystem itself spells it: links followed, and on Windows the long
+ * form of a DOS short name (`RUNNER~1`) and the case the folders were created with.
+ *
+ * The tools judge a path by where it really is (D6-05), and a root kept in another spelling of
+ * the same place is a root every path inside it reads as leaving. A path that does not exist
+ * (yet) is kept as it was given.
+ */
+function canonical(path: string): string {
+  try {
+    return realpathSync.native(path)
+  } catch {
+    return path
+  }
+}
+
+/**
+ * Why a branch prefix is refused, and null when it is one (D8-04): it goes in front of every
+ * branch a dedicated Workspace makes, so it is a part of a branch name Git takes — no space, no
+ * `..`, no `/` at either end, none of the characters a reference cannot hold.
+ */
+function prefixRefusal(prefix: string): string | null {
+  if (prefix === '') return 'it is empty'
+  if (/\s/.test(prefix)) return 'it holds a space'
+  if (prefix.includes('..')) return 'it holds ".."'
+  if (prefix.startsWith('/') || prefix.endsWith('/')) return 'it starts or ends with "/"'
+  if (prefix.includes('//')) return 'it holds "//"'
+  if (/[~^:?*[\\]|@\{/.test(prefix)) return 'it holds a character a branch name cannot'
+  return null
+}
 
 /** The date every row of one mutation shares, so a Project and its event agree on when. */
 function now(): string {
@@ -115,6 +238,14 @@ function named(candidate: string) {
     try: () => projectName(candidate),
     catch: (cause) =>
       cause instanceof InvalidProjectNameError ? cause : new InvalidProjectNameError(String(cause)),
+  })
+}
+
+function prefixed(candidate: string) {
+  return Effect.try({
+    try: () => specPrefix(candidate),
+    catch: (cause) =>
+      cause instanceof InvalidSpecPrefixError ? cause : new InvalidSpecPrefixError(candidate),
   })
 }
 
@@ -201,6 +332,20 @@ export const projectsLayer = Layer.effect(
           repositories: locations
             .filter((one) => one.projectId === row.id)
             .map((one) => one.relativePath),
+          workspacesRoot: row.workspacesRoot,
+          branchPrefix: row.branchPrefix,
+          included: locations
+            .filter((one) => one.projectId === row.id && one.includedByDefault === 1)
+            .map((one) => one.relativePath),
+          specPrefix: row.specPrefix,
+          repositoryIcons: Object.fromEntries(
+            locations.flatMap((one) => {
+              const icon = REPOSITORY_ICONS.find((known) => known === one.icon)
+              return one.projectId === row.id && icon !== undefined
+                ? [[one.relativePath, icon] as const]
+                : []
+            }),
+          ),
         }))
       })
 
@@ -224,7 +369,14 @@ export const projectsLayer = Layer.effect(
       transaction: Parameters<Parameters<typeof mutate>[1]>[0],
       id: string,
       version: number,
-      change: Partial<{ name: string; tone: string; archivedAt: string | null }>,
+      change: Partial<{
+        name: string
+        tone: string
+        specPrefix: string
+        archivedAt: string | null
+        workspacesRoot: string | null
+        branchPrefix: string | null
+      }>,
     ) =>
       Effect.gen(function* () {
         const written = yield* transaction
@@ -269,9 +421,21 @@ export const projectsLayer = Layer.effect(
               const id = crypto.randomUUID()
               const written = now()
               const name = yield* named(asked.name)
+              const mainPath = canonical(asked.mainPath)
+              const prefix =
+                asked.specPrefix === undefined
+                  ? specPrefixFrom(name)
+                  : yield* prefixed(asked.specPrefix)
               yield* transaction
                 .insert(projects)
-                .values({ id, name, tone: asked.tone, createdAt: written, updatedAt: written })
+                .values({
+                  id,
+                  name,
+                  tone: asked.tone,
+                  specPrefix: prefix,
+                  createdAt: written,
+                  updatedAt: written,
+                })
                 .pipe(Effect.mapError(failed('writing the Project')))
               // The Workspace is created with the Project and never removed: the path belongs to
               // it, so a Project without one is a Project with nowhere to be.
@@ -281,7 +445,7 @@ export const projectsLayer = Layer.effect(
                   id: crypto.randomUUID(),
                   projectId: id,
                   name: MAIN_WORKSPACE,
-                  path: asked.mainPath,
+                  path: mainPath,
                   createdAt: written,
                 })
                 .pipe(Effect.mapError(failed('writing the Workspace')))
@@ -297,8 +461,13 @@ export const projectsLayer = Layer.effect(
                 updatedAt: Date.parse(written),
                 archivedAt: null,
                 version: 1,
-                mainPath: asked.mainPath,
+                mainPath,
                 repositories: [],
+                repositoryIcons: {},
+                workspacesRoot: null,
+                branchPrefix: null,
+                included: [],
+                specPrefix: prefix,
               }
               return {
                 result: project,
@@ -310,7 +479,12 @@ export const projectsLayer = Layer.effect(
                     source: 'ui',
                     author: 'human',
                     projectId: id,
-                    payload: { name, tone: asked.tone, mainPath: asked.mainPath },
+                    payload: {
+                      name,
+                      tone: asked.tone,
+                      mainPath,
+                      specPrefix: prefix,
+                    },
                   },
                 ],
               } satisfies Mutation<Project>
@@ -328,6 +502,10 @@ export const projectsLayer = Layer.effect(
               // be told about — which is the whole reason the use case declares it.
               if (edit.name !== undefined) change['name'] = yield* named(edit.name)
               if (edit.tone !== undefined) change['tone'] = edit.tone
+              // Only the next keys take it: the keys already minted are never renamed (D7-02).
+              if (edit.specPrefix !== undefined) {
+                change['specPrefix'] = yield* prefixed(edit.specPrefix)
+              }
               yield* bump(transaction, edit.id, edit.version, change)
               const project = yield* readOne(edit.id)
               return {
@@ -340,7 +518,11 @@ export const projectsLayer = Layer.effect(
                     source: 'ui',
                     author: 'human',
                     projectId: edit.id,
-                    payload: { name: project.name, tone: project.tone },
+                    payload: {
+                      name: project.name,
+                      tone: project.tone,
+                      specPrefix: project.specPrefix,
+                    },
                   },
                 ],
               } satisfies Mutation<Project>
@@ -348,10 +530,11 @@ export const projectsLayer = Layer.effect(
           ),
         ),
 
-      moveMain: (id, version, path) =>
+      moveMain: (id, version, moved) =>
         withDatabase(
           mutate('moving the main Workspace', (transaction) =>
             Effect.gen(function* () {
+              const path = canonical(moved)
               yield* bump(transaction, id, version, {})
               yield* transaction
                 .update(workspaces)
@@ -491,6 +674,190 @@ export const projectsLayer = Layer.effect(
                     author: 'human',
                     projectId: id,
                     payload: { relativePath },
+                  },
+                ],
+              } satisfies Mutation<Project>
+            }),
+          ),
+        ),
+
+      setWorkspacesRoot: (id, version, path) =>
+        withDatabase(
+          mutate('choosing the folder of the Workspaces', (transaction) =>
+            Effect.gen(function* () {
+              const workspacesRoot = path === null ? null : canonical(path.trim())
+              if (workspacesRoot !== null) {
+                if (!isAbsolute(workspacesRoot)) {
+                  return yield* Effect.fail(
+                    new InvalidWorkspacesRootError(workspacesRoot, 'it is not an absolute path'),
+                  )
+                }
+                // Inside `main` is set aside (D8-02): the Workspaces would be in the sources
+                // they are worktrees of, and in every search and every watcher of `main`.
+                const main = (yield* readOne(id)).mainPath
+                const below = relative(main, workspacesRoot)
+                if (
+                  below === '' ||
+                  !(below === '..' || below.startsWith(`..${sep}`) || isAbsolute(below))
+                ) {
+                  return yield* Effect.fail(
+                    new InvalidWorkspacesRootError(workspacesRoot, `it is inside main (${main})`),
+                  )
+                }
+              }
+              yield* bump(transaction, id, version, { workspacesRoot })
+              const project = yield* readOne(id)
+              return {
+                result: project,
+                events: [
+                  {
+                    type: 'project.updated',
+                    entityKind: 'project',
+                    entityId: id,
+                    source: 'ui',
+                    author: 'human',
+                    projectId: id,
+                    payload: { workspacesRoot },
+                  },
+                ],
+              } satisfies Mutation<Project>
+            }),
+          ),
+        ),
+
+      setBranchPrefix: (id, version, prefix) =>
+        withDatabase(
+          mutate('choosing the branch prefix', (transaction) =>
+            Effect.gen(function* () {
+              const branchPrefix = prefix === null ? null : prefix.trim()
+              const refused = branchPrefix === null ? null : prefixRefusal(branchPrefix)
+              if (branchPrefix !== null && refused !== null) {
+                return yield* Effect.fail(new InvalidBranchPrefixError(branchPrefix, refused))
+              }
+              yield* bump(transaction, id, version, { branchPrefix })
+              const project = yield* readOne(id)
+              return {
+                result: project,
+                events: [
+                  {
+                    type: 'project.updated',
+                    entityKind: 'project',
+                    entityId: id,
+                    source: 'ui',
+                    author: 'human',
+                    projectId: id,
+                    payload: { branchPrefix },
+                  },
+                ],
+              } satisfies Mutation<Project>
+            }),
+          ),
+        ),
+
+      setRepositoryIncluded: (id, version, relativePath, included) =>
+        withDatabase(
+          mutate('changing a repository', (transaction) =>
+            Effect.gen(function* () {
+              yield* bump(transaction, id, version, {})
+              const written = yield* transaction
+                .update(projectRepositories)
+                .set({ includedByDefault: included ? 1 : 0 })
+                .where(
+                  and(
+                    eq(projectRepositories.projectId, id),
+                    eq(projectRepositories.relativePath, relativePath),
+                  ),
+                )
+                .returning({ id: projectRepositories.id })
+                .pipe(Effect.mapError(failed('writing the repository')))
+              if (written.length === 0) {
+                return yield* Effect.fail(
+                  new InvalidRepositoryPathError(relativePath, 'it is not declared'),
+                )
+              }
+              const project = yield* readOne(id)
+              return {
+                result: project,
+                events: [
+                  {
+                    type: 'project.repository_updated',
+                    entityKind: 'project',
+                    entityId: id,
+                    source: 'ui',
+                    author: 'human',
+                    projectId: id,
+                    payload: { relativePath, included },
+                  },
+                ],
+              } satisfies Mutation<Project>
+            }),
+          ),
+        ),
+
+      updateRepository: (edit) =>
+        withDatabase(
+          mutate('changing a repository', (transaction) =>
+            Effect.gen(function* () {
+              const { id, version, relativePath, icon, included } = edit
+              // The new path is refused as an added one is: absolute, climbing out of the root,
+              // or another repository already declared there.
+              const newPath = yield* located(edit.newPath)
+              const project = yield* readOne(id)
+              if (!project.repositories.includes(relativePath)) {
+                return yield* Effect.fail(
+                  new InvalidRepositoryPathError(relativePath, 'it is not declared'),
+                )
+              }
+              if (newPath !== relativePath && project.repositories.includes(newPath)) {
+                return yield* Effect.fail(
+                  new InvalidRepositoryPathError(edit.newPath, 'it is declared twice'),
+                )
+              }
+              yield* bump(transaction, id, version, {})
+              yield* transaction
+                .update(projectRepositories)
+                .set({ relativePath: newPath, icon, includedByDefault: included ? 1 : 0 })
+                .where(
+                  and(
+                    eq(projectRepositories.projectId, id),
+                    eq(projectRepositories.relativePath, relativePath),
+                  ),
+                )
+                .pipe(Effect.mapError(failed('writing the repository')))
+              // What named the old path follows it: a command runs under it, a step of the
+              // recipe applies under it (D8-07, D8-05 as amended by recette 1).
+              yield* transaction
+                .update(projectCommands)
+                .set({ folderBase: newPath })
+                .where(
+                  and(
+                    eq(projectCommands.projectId, id),
+                    eq(projectCommands.folderBase, relativePath),
+                  ),
+                )
+                .pipe(Effect.mapError(failed('writing the commands')))
+              yield* transaction
+                .update(projectPreparationSteps)
+                .set({ base: newPath })
+                .where(
+                  and(
+                    eq(projectPreparationSteps.projectId, id),
+                    eq(projectPreparationSteps.base, relativePath),
+                  ),
+                )
+                .pipe(Effect.mapError(failed('writing the recipe')))
+              const after = yield* readOne(id)
+              return {
+                result: after,
+                events: [
+                  {
+                    type: 'project.repository_updated',
+                    entityKind: 'project',
+                    entityId: id,
+                    source: 'ui',
+                    author: 'human',
+                    projectId: id,
+                    payload: { relativePath, newPath, icon, included },
                   },
                 ],
               } satisfies Mutation<Project>

@@ -37,6 +37,12 @@ const SESSIONS: ShellSession[] = [
   { id: 'drizzle', title: 'Migrate to Drizzle 1.0' },
 ]
 
+/** Twenty Sessions, for the story that asks what a rail does with more than it can show. */
+const MANY_SESSIONS: ShellSession[] = Array.from({ length: 20 }, (_, index) => ({
+  id: `session-${index}`,
+  title: `Session number ${index + 1}`,
+}))
+
 /** Twelve Projects, for the story that asks what a full bar does. */
 const MANY: ShellProject[] = Array.from({ length: 12 }, (_, index) => ({
   id: `project-${index}`,
@@ -147,13 +153,100 @@ type Story = StoryObj<typeof meta>
 
 export const Playground: Story = {}
 
-export const Collapsed: Story = {
-  args: { collapsed: true },
+/**
+ * The folded rail as the eye reads it, and what it must not hold (recette 5 of 24 September 2026).
+ *
+ * The heads of the groups used to fade to nothing and keep their height, and the rail was drawn
+ * with holes in it: two rules around the room the Sessions would have had, a lone Session with
+ * empty space on either side of it. Every row of the rail is an icon or a rule, a rule sits only
+ * between two groups that hold something, the rows stack at the scale's gap — never a gap as tall
+ * as a row — and the foot stays at the bottom.
+ */
+async function expectATightRail(canvasElement: HTMLElement): Promise<void> {
+  const canvas = within(canvasElement)
+  const rail = canvas.getByRole('complementary')
+  await waitFor(() => {
+    expect(rail.getBoundingClientRect().width).toBeCloseTo(SIDEBAR_RAIL, 0)
+  })
+  // In the order the column lays them, which is the order they are read in: sorting by position
+  // would mix a list scrolled under the foot with the foot itself.
+  const rows = [...rail.querySelectorAll<HTMLElement>('button, [data-separator]')].filter(
+    (row) => row.getBoundingClientRect().height > 0,
+  )
+  const isRule = (row: HTMLElement | undefined) => row?.hasAttribute('data-separator') === true
+  expect(isRule(rows[0]), 'the rail starts on a rule').toBe(false)
+  expect(isRule(rows.at(-1)), 'the rail ends on a rule').toBe(false)
+  rows.forEach((row, index) => {
+    if (isRule(row)) expect(isRule(rows[index + 1]), 'two rules around an empty group').toBe(false)
+  })
+
+  const settings = canvas.getByRole('button', { name: 'Settings' })
+  const foot = rows.indexOf(settings) - 1
+  const one = canvas.getByRole('button', { name: 'Home' }).getBoundingClientRect().height
+  for (let index = 1; index < rows.length; index += 1) {
+    // The one gap that is meant: the column above gives the foot the rest of the height.
+    if (index === foot) continue
+    const gap =
+      rows[index]!.getBoundingClientRect().top - rows[index - 1]!.getBoundingClientRect().bottom
+    expect(
+      gap,
+      `a hole before ${rows[index]!.getAttribute('aria-label') ?? 'a rule'}`,
+    ).toBeLessThan(one)
+  }
+  // The foot is anchored: nothing but the panel's own padding under it.
+  expect(
+    rail.getBoundingClientRect().bottom - settings.getBoundingClientRect().bottom,
+  ).toBeLessThan(one)
+}
+
+/** Folded with no Session: one rule between the Home and the Journal, and no room for a list. */
+export const FoldedWithNoSession: Story = {
+  args: { collapsed: true, sessions: [] },
   play: async ({ canvasElement }) => {
-    const rail = within(canvasElement).getByRole('complementary')
-    await waitFor(() => {
-      expect(rail.getBoundingClientRect().width).toBeCloseTo(SIDEBAR_RAIL, 0)
-    })
+    await expectATightRail(canvasElement)
+    const canvas = within(canvasElement)
+    // Two rules in all: between the places and the Project's, and above the foot.
+    expect(canvasElement.querySelectorAll('[data-separator]')).toHaveLength(2)
+    expect(canvas.queryByText('Sessions')).toBeNull()
+    expect(canvas.queryByText('No Session yet')).toBeNull()
+
+    // Unfolded, the heads and the sentence come back, and so does the rule of the empty list.
+    await userEvent.click(canvas.getByRole('button', { name: 'Expand the sidebar' }))
+    await waitFor(
+      () => {
+        expect(canvas.getByText('No Session yet')).toBeVisible()
+        expect(canvas.getByText('Project')).toBeVisible()
+      },
+      { timeout: 3000 },
+    )
+    expect(canvasElement.querySelectorAll('[data-separator]')).toHaveLength(3)
+    // The labels slide in after the width: the a11y check that follows the play must not read a
+    // label mid-fade (its contrast fails at opacity 0), so the play ends once every one is opaque.
+    await waitFor(
+      () => {
+        for (const label of canvasElement.querySelectorAll<HTMLElement>('span.truncate')) {
+          expect(Number(getComputedStyle(label).opacity)).toBe(1)
+        }
+      },
+      { timeout: 3000 },
+    )
+  },
+}
+
+/** Folded with one Session: its icon sits between the two rules, at the gap of every other row. */
+export const FoldedWithOneSession: Story = {
+  args: { collapsed: true, sessions: SESSIONS.slice(0, 1) },
+  play: async ({ canvasElement }) => {
+    await expectATightRail(canvasElement)
+    expect(canvasElement.querySelectorAll('[data-separator]')).toHaveLength(3)
+  },
+}
+
+/** Folded with more Sessions than the rail is tall: the list scrolls, and the foot stays put. */
+export const FoldedWithManySessions: Story = {
+  args: { collapsed: true, sessions: MANY_SESSIONS },
+  play: async ({ canvasElement }) => {
+    await expectATightRail(canvasElement)
   },
 }
 
@@ -222,6 +315,17 @@ export const FoldsToARailAndBack: Story = {
     await waitFor(
       () => {
         expect(sidebar.getBoundingClientRect().width).toBeCloseTo(SIDEBAR_DEFAULT, 0)
+      },
+      { timeout: 3000 },
+    )
+    // The words fade back in after the panel has opened, and the accessibility check that
+    // follows the story reads a word still fading at a fraction of its contrast: the story ends
+    // once every one of them is all the way in.
+    await waitFor(
+      () => {
+        for (const faded of sidebar.querySelectorAll<HTMLElement>('[style*="opacity"]')) {
+          expect(getComputedStyle(faded).opacity).toBe('1')
+        }
       },
       { timeout: 3000 },
     )
@@ -346,9 +450,10 @@ export const ManyProjects: Story = {
 /**
  * Scenario « Aucun Projet au démarrage » of `specs/project-workspaces/spec.md`.
  *
- * What the shell is before anything has been created: the mark, the fold, and the page. No tab
- * to press, no sidebar to list Sessions that do not exist, and no bell for events nobody has
- * made yet — and the keystroke that opens the command still belongs to the application.
+ * What the shell is before anything has been created: the mark, and the page. No tab to press,
+ * no sidebar to list Sessions that do not exist, no bell for events nobody has made yet, and no
+ * fold, because there is nothing to fold — the keystroke that opens the command still belongs
+ * to the application, and the one that folded the sidebar has nothing left to reach.
  */
 export const NoProjectYet: Story = {
   args: { projects: [], sessions: [] },
@@ -359,16 +464,26 @@ export const NoProjectYet: Story = {
     expect(canvas.queryByRole('navigation', { name: 'Projects' })).toBeNull()
     expect(canvas.queryByRole('button', { name: 'Notifications' })).toBeNull()
 
-    // The mark and the fold are what is left of the bar, and the page has the rest.
+    // The mark is what is left of the bar, and the page has the rest.
     expect(canvas.getByText('Hemera')).toBeInTheDocument()
-    expect(canvas.getByRole('button', { name: 'Collapse the sidebar' })).toBeInTheDocument()
-    // The page takes the room the sidebar would have had, which is what "no sidebar" means
-    // here: it starts at the edge of the window, with nothing between the two. Its own width is
-    // not the window's — the content is a sheet set in on three sides — so the claim is made
-    // where it can be made exactly, on the side the sidebar would have been.
-    const content = canvas.getByRole('main')
-    const root = canvasElement.querySelector('.shell-root')!
-    expect(content.getBoundingClientRect().left).toBeCloseTo(root.getBoundingClientRect().left, 0)
+    // The fold is not drawn at all, at either label it could wear: it folds the sidebar, and
+    // there is no sidebar. Neither is anything else in the bar an `IconButton`.
+    expect(canvas.queryByRole('button', { name: 'Collapse the sidebar' })).toBeNull()
+    expect(canvas.queryByRole('button', { name: 'Expand the sidebar' })).toBeNull()
+
+    // And the keystroke it advertised reaches nothing either: the window is what it was.
+    await userEvent.keyboard('{Control>}b{/Control}')
+    expect(canvas.queryByRole('complementary')).toBeNull()
+    expect(canvas.queryByRole('separator', { name: 'Sidebar width' })).toBeNull()
+
+    // The page is framed on all four sides. The left edge is normally the sidebar's and the
+    // separator's; with neither of them drawn the sheet carries it itself, set in and drawn
+    // exactly as the right one is, so the two sides of the window read the same.
+    const frame = getComputedStyle(canvas.getByRole('main'))
+    expect(frame.marginLeft).toBe(frame.marginRight)
+    expect(frame.borderLeftWidth).toBe(frame.borderRightWidth)
+    expect(frame.borderTopLeftRadius).toBe(frame.borderTopRightRadius)
+    expect(frame.borderBottomLeftRadius).toBe(frame.borderBottomRightRadius)
   },
 }
 
@@ -407,16 +522,12 @@ export const NothingToSee: Story = {
 /** The same shell with the system asking for less movement: the end state, and no journey. */
 export const ReducedMotion: Story = {
   play: async ({ canvasElement }) => {
-    const restore = await emulateReducedMotion()
-    try {
-      const canvas = within(canvasElement)
-      const sidebar = canvas.getByRole('complementary')
-      await userEvent.click(canvas.getByRole('button', { name: 'Collapse the sidebar' }))
-      await waitFor(() => {
-        expect(sidebar.getBoundingClientRect().width).toBeCloseTo(SIDEBAR_RAIL, 0)
-      })
-    } finally {
-      await restore?.()
-    }
+    await emulateReducedMotion()
+    const canvas = within(canvasElement)
+    const sidebar = canvas.getByRole('complementary')
+    await userEvent.click(canvas.getByRole('button', { name: 'Collapse the sidebar' }))
+    await waitFor(() => {
+      expect(sidebar.getBoundingClientRect().width).toBeCloseTo(SIDEBAR_RAIL, 0)
+    })
   },
 }

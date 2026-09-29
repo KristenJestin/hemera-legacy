@@ -1,0 +1,315 @@
+/**
+ * The Spec entries of a thread, as their blocks are drawn from them (design D7-01, D7-07, D7-09).
+ *
+ * `agent-blocks.tsx` draws no `mission_brief` entry (issue #205), a `spec_question`
+ * as the question card — its answer marked in it once the `spec_answer` entry written beside it
+ * is in the thread — and a `spec_proposal` as the agent's proposal. What each block is handed is
+ * read by `spec-entries.ts`, which is what is tested here: the design system is a browser's to
+ * load, and its blocks are proved in Storybook.
+ */
+
+import { describe, expect, test } from 'vite-plus/test'
+
+import type { SessionEntry } from '@hemera/ipc'
+import {
+  definedAtOnceOf,
+  drawnInThread,
+  proposalIdOf,
+  proposalOf,
+  questionEntryOf,
+  questionMarkOf,
+  waitsForAnswer,
+} from '#renderer/spec-entries.ts'
+
+function entry(kind: SessionEntry['kind'], payload: string, id: string = kind): SessionEntry {
+  return {
+    id,
+    sessionId: 'writer',
+    seq: 1,
+    role: kind === 'spec_answer' ? 'user' : 'hemera',
+    kind,
+    body: kind === 'mission_brief' ? '# Mission: define' : 'Which date decides the month?',
+    payload,
+    correlationId: null,
+    turnId: null,
+    state: null,
+    origin: 'live',
+    createdAt: new Date(2026, 8, 23, 10, 44).getTime(),
+  }
+}
+
+const QUESTION = entry(
+  'spec_question',
+  JSON.stringify({
+    id: 'q-date',
+    body: 'Which date decides the month?',
+    blocking: true,
+    phase: null,
+    options: [
+      { id: 'issue', label: 'The issue date', recommended: true },
+      { id: 'payment', label: 'The payment date' },
+    ],
+    answer: null,
+  }),
+)
+
+describe('What the agent was told is not in the thread (#205)', () => {
+  test('a brief draws no row in the thread: the Context tab lists it', () => {
+    expect(drawnInThread(entry('mission_brief', JSON.stringify({ phase: 'shape' })))).toBe(false)
+    expect(drawnInThread(entry('mission_brief', JSON.stringify({ phase: null })))).toBe(false)
+  })
+
+  test('an answer draws no row either, and a question and a proposal do', () => {
+    expect(drawnInThread(entry('spec_answer', '{}'))).toBe(false)
+    expect(drawnInThread(QUESTION)).toBe(true)
+    expect(drawnInThread(entry('spec_proposal', '{}'))).toBe(true)
+  })
+})
+
+describe('A question is asked and answered in the chat', () => {
+  test('a question with no answer beside it is open, its options as the agent offered them', () => {
+    const block = questionEntryOf(QUESTION, [QUESTION], new Set(['q-date']))
+    expect(block?.cancelled).toBe(false)
+    expect(block?.question).toEqual({
+      id: 'q-date',
+      body: 'Which date decides the month?',
+      blocking: true,
+      phase: 'shape',
+      options: [
+        { id: 'issue', label: 'The issue date', recommended: true },
+        { id: 'payment', label: 'The payment date' },
+      ],
+      answer: null,
+    })
+  })
+
+  test('the answer written beside it folds it to the option chosen', () => {
+    const answer = entry(
+      'spec_answer',
+      JSON.stringify({ questionId: 'q-date', optionId: 'issue' }),
+      'answer',
+    )
+    expect(questionEntryOf(QUESTION, [QUESTION, answer], null)?.question.answer).toEqual({
+      optionId: 'issue',
+      text: undefined,
+    })
+  })
+
+  test('or to the words of the reader’s own; an answer to another question changes nothing', () => {
+    const other = entry(
+      'spec_answer',
+      JSON.stringify({ questionId: 'q-other', optionId: 'x' }),
+      'other',
+    )
+    const own = entry(
+      'spec_answer',
+      JSON.stringify({ questionId: 'q-date', text: 'The delivery date' }),
+      'own',
+    )
+    expect(questionEntryOf(QUESTION, [QUESTION, other], null)?.question.answer).toBe(null)
+    expect(questionEntryOf(QUESTION, [QUESTION, other, own], null)?.question.answer).toEqual({
+      optionId: undefined,
+      text: 'The delivery date',
+    })
+  })
+
+  test('an entry this version cannot read is not drawn', () => {
+    expect(questionEntryOf(entry('spec_question', JSON.stringify({ id: 'q' })), [], null)).toBe(
+      null,
+    )
+  })
+})
+
+describe('An answered question stays in place, its answer marked in it', () => {
+  test('an open question marks nothing on the rail', () => {
+    expect(questionMarkOf(QUESTION, [QUESTION], null)).toBeUndefined()
+  })
+
+  test('answered by a choice, the question is marked on the rail by the choice’s label', () => {
+    const answer = entry(
+      'spec_answer',
+      JSON.stringify({ questionId: 'q-date', optionId: 'payment' }),
+      'answer',
+    )
+    expect(questionMarkOf(QUESTION, [QUESTION, answer], null)).toBe('The payment date')
+  })
+
+  test('answered in the reader’s own words, it is marked by the words typed', () => {
+    const own = entry(
+      'spec_answer',
+      JSON.stringify({ questionId: 'q-date', text: 'The delivery date' }),
+      'own',
+    )
+    expect(questionMarkOf(QUESTION, [QUESTION, own], null)).toBe('The delivery date')
+  })
+
+  test('an entry that does not parse marks nothing', () => {
+    expect(questionMarkOf(entry('spec_question', '{'), [], null)).toBeUndefined()
+  })
+})
+
+describe('A Rework asks the open questions again', () => {
+  test('a question the current revision no longer holds is drawn cancelled, not answerable', () => {
+    // After the Rework the same question is asked again under `q-date-2`.
+    expect(questionEntryOf(QUESTION, [QUESTION], new Set(['q-date-2']))?.cancelled).toBe(true)
+  })
+
+  test('one answered before the Rework stays folded to its answer', () => {
+    const answer = entry(
+      'spec_answer',
+      JSON.stringify({ questionId: 'q-date', optionId: 'issue' }),
+      'answer',
+    )
+    const block = questionEntryOf(QUESTION, [QUESTION, answer], new Set(['q-date-2']))
+    expect(block?.cancelled).toBe(false)
+    expect(block?.question.answer).toEqual({ optionId: 'issue', text: undefined })
+  })
+
+  test('nothing is cancelled before the Spec has been read', () => {
+    expect(questionEntryOf(QUESTION, [QUESTION], null)?.cancelled).toBe(false)
+  })
+})
+
+describe('A free Session’s agent proposes a Spec', () => {
+  const proposal = entry(
+    'spec_proposal',
+    JSON.stringify({ title: 'CSV invoice export', type: 'feature' }),
+    'proposal',
+  )
+  const other = entry(
+    'spec_proposal',
+    JSON.stringify({ title: 'Payments report', type: 'feature' }),
+    'other',
+  )
+  const thread = [proposal, other]
+  const created = { key: 'ATL-7', title: 'CSV invoice export', type: 'feature' as const }
+
+  test('proposed while the Session is free, created once it defines the Spec it proposed', () => {
+    expect(proposalOf(proposal, thread, null, null)).toEqual({
+      title: 'CSV invoice export',
+      type: 'feature',
+      state: 'proposed',
+    })
+    expect(proposalOf(proposal, thread, 'spec-7', created)?.state).toBe('created')
+  })
+
+  test('of two proposals in one Session, only the one the Spec came from reads created', () => {
+    expect(proposalOf(other, thread, 'spec-7', created)?.state).toBe('declined')
+    // Created with a title edited in the card, the Spec came from the last proposal.
+    const edited = { ...created, title: 'CSV export of a month' }
+    expect(proposalOf(proposal, thread, 'spec-7', edited)?.state).toBe('declined')
+    expect(proposalOf(other, thread, 'spec-7', edited)?.state).toBe('created')
+  })
+
+  test('declined once the engine kept it declined, which the Spec it came from overrides', () => {
+    const declined = { ...proposal, state: 'declined' }
+    expect(proposalOf(declined, thread, null, null)?.state).toBe('declined')
+    expect(proposalOf(declined, [declined, other], 'spec-7', created)?.state).toBe('created')
+  })
+
+  test('named to the engine by its correlation, without the prefix', () => {
+    expect(proposalIdOf({ ...proposal, correlationId: 'proposal:4f1c' })).toBe('4f1c')
+  })
+
+  test('not drawn while the Spec of a define Session is still being read, nor of an unknown type', () => {
+    expect(proposalOf(proposal, thread, 'spec-7', null)).toBe(null)
+    const epic = entry('spec_proposal', JSON.stringify({ title: 'X', type: 'epic' }))
+    expect(proposalOf(epic, [epic], null, null)).toBe(null)
+  })
+})
+
+describe('New Spec’s agent points to a Spec that exists (#198)', () => {
+  const pointer = entry(
+    'spec_proposal',
+    JSON.stringify({ title: 'Read text aloud', type: 'feature', specId: 'spec-4', key: 'ATL-4' }),
+    'pointer',
+  )
+  const existing = { key: 'ATL-4', title: 'Read text aloud', type: 'feature' as const }
+
+  test('it is read with the Spec it points to, waiting while the Session is free', () => {
+    expect(proposalOf(pointer, [pointer], null, null)).toEqual({
+      title: 'Read text aloud',
+      type: 'feature',
+      state: 'proposed',
+      existing: { specId: 'spec-4', key: 'ATL-4' },
+    })
+    expect(waitsForAnswer(pointer, [pointer], null, null)).toBe(true)
+  })
+
+  test('continued once the Session defines that Spec, and not otherwise', () => {
+    expect(proposalOf(pointer, [pointer], 'spec-4', existing)?.state).toBe('created')
+    expect(proposalOf(pointer, [pointer], 'spec-9', existing)?.state).toBe('declined')
+    expect(proposalOf({ ...pointer, state: 'declined' }, [pointer], null, null)?.state).toBe(
+      'declined',
+    )
+  })
+
+  test('a Spec created from a later proposal of the same title is not the one pointed to', () => {
+    const proposed = entry(
+      'spec_proposal',
+      JSON.stringify({ title: 'Read text aloud', type: 'feature' }),
+      'proposed',
+    )
+    const thread = [pointer, proposed]
+    expect(proposalOf(proposed, thread, 'spec-9', existing)?.state).toBe('created')
+    expect(proposalOf(pointer, thread, 'spec-9', existing)?.state).toBe('declined')
+  })
+})
+
+describe('A pending proposal and a pending question are pinned above the composer', () => {
+  const proposal = entry(
+    'spec_proposal',
+    JSON.stringify({ title: 'CSV invoice export', type: 'feature' }),
+    'proposal',
+  )
+  const answer = entry(
+    'spec_answer',
+    JSON.stringify({ questionId: 'q-date', optionId: 'issue' }),
+    'answer',
+  )
+
+  test('a proposal waits while the Session is free and not declined, then goes back in the thread', () => {
+    expect(waitsForAnswer(proposal, [proposal], null, null)).toBe(true)
+    const declined = { ...proposal, state: 'declined' }
+    expect(waitsForAnswer(declined, [declined], null, null)).toBe(false)
+    expect(waitsForAnswer(proposal, [proposal], 'spec-7', null)).toBe(false)
+  })
+
+  test('a question waits until it is answered, and a question left behind by a Rework does not', () => {
+    expect(waitsForAnswer(QUESTION, [QUESTION], 'spec-7', new Set(['q-date']))).toBe(true)
+    expect(waitsForAnswer(QUESTION, [QUESTION, answer], 'spec-7', new Set(['q-date']))).toBe(false)
+    expect(waitsForAnswer(QUESTION, [QUESTION], 'spec-7', new Set(['q-other']))).toBe(false)
+  })
+
+  test('nothing else is pinned', () => {
+    const brief = entry('mission_brief', JSON.stringify({ phase: 'shape' }))
+    expect(waitsForAnswer(brief, [brief], null, null)).toBe(false)
+  })
+})
+
+describe('New Spec creates the proposed Spec at once (#205)', () => {
+  const created = entry(
+    'spec_proposal',
+    JSON.stringify({ title: 'Read aloud', type: 'feature', createdKey: 'XC-2' }),
+    'created',
+  )
+
+  test('a Spec created at once is drawn as the quiet line, and waits for nothing', () => {
+    expect(proposalOf(created, [created], null, null)).toEqual({
+      title: 'Read aloud',
+      type: 'feature',
+      state: 'created',
+      createdAtOnce: 'XC-2',
+    })
+    expect(waitsForAnswer(created, [created], null, null)).toBe(false)
+  })
+
+  test('a Session the list still says is free is read again once its Spec was created at once', () => {
+    const free = { id: 'writer', mission: 'free' as const }
+    const pushed = new Map([['writer', { entries: [created] }]])
+    expect(definedAtOnceOf([free], pushed)).toEqual(['writer'])
+    expect(definedAtOnceOf([{ ...free, mission: 'define' as const }], pushed)).toEqual([])
+    const asked = entry('spec_proposal', JSON.stringify({ title: 'Read aloud', type: 'feature' }))
+    expect(definedAtOnceOf([free], new Map([['writer', { entries: [asked] }]]))).toEqual([])
+  })
+})

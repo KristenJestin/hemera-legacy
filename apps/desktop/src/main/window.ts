@@ -10,19 +10,14 @@
  * so there is no pale frame around a dark page while the renderer catches up.
  */
 
-import { join } from 'node:path'
-
 import type { ThemePreference } from '@hemera/ipc'
 import { type Theme, titleBarHeight, windowColors } from '@hemera/ui/window'
+import { shell } from 'electron/common'
 import { BrowserWindow, nativeTheme } from 'electron/main'
 
+import { guardNavigation } from './navigation-guard.ts'
 import { rendererSource } from './renderer-source.ts'
-
-/**
- * The name the persisted state is filed under. State is only kept when a window has one,
- * and it is the same window across restarts that gets its size and position back.
- */
-export const WINDOW_NAME = 'main'
+import { windowOptions } from './window-options.ts'
 
 /**
  * What the platform says the application is wearing right now (design D1-03).
@@ -62,27 +57,9 @@ export function paintWindow(window: BrowserWindow, theme: Theme): void {
  * first thing the application would do is throw in its own console.
  */
 export function createWindow(main: string): BrowserWindow {
-  const opening = windowColors(systemTheme())
-  const window = new BrowserWindow({
-    show: true,
-    backgroundColor: opening.background,
-    titleBarStyle: 'hidden',
-    titleBarOverlay: {
-      color: opening.background,
-      symbolColor: opening.foreground,
-      height: titleBarHeight(),
-    },
-    name: WINDOW_NAME,
-    windowStatePersistence: true,
-    webPreferences: {
-      preload: join(main, '..', 'preload', 'index.cjs'),
-      sandbox: true,
-      contextIsolation: true,
-      nodeIntegration: false,
-      backgroundThrottling: true,
-      spellcheck: false,
-    },
-  })
+  const window = new BrowserWindow(
+    windowOptions(main, windowColors(systemTheme()), titleBarHeight(), process.env),
+  )
 
   // One listener answers both reasons the theme can change: the desktop changed its mind while
   // the preference is `system`, and the preference itself changed. `shouldUseDarkColors` is the
@@ -90,6 +67,8 @@ export function createWindow(main: string): BrowserWindow {
   nativeTheme.on('updated', () => {
     if (!window.isDestroyed()) paintWindow(window, systemTheme())
   })
+
+  guardNavigation(window.webContents, rendererSource(), shell.openExternal)
 
   return window
 }

@@ -1,0 +1,564 @@
+/**
+ * What an agent is provided, and how a change of it reaches it (D6-07, D6-08).
+ *
+ * The base is `CONTEXT_BASE`, the four sentences every Session is given once, and the line that
+ * names the Session's Workspace (D8-08), by whatever means its adapter has. The Project's
+ * instructions are the `AGENTS.md` at the root of the Workspace.
+ * Whether the agent reads it itself is its adapter's declaration, since bare mode can keep it
+ * from reading it. An agent that reads it is not sent it — that would be a second injection of a
+ * text it already has — and the Context view says the file was read natively. An agent that does
+ * not is given it at the start of the Session, and the view says so. Either way the fingerprint
+ * of what was there at the start is recorded, and a later change goes the same way to both.
+ *
+ * A change during a Session is not a prompt either. It waits, and is handed over between two
+ * turns as its own text carrying the marker that says who wrote it. What decides whether there is
+ * a change is the last text the agent was given: a file edited and then put back is a change
+ * each time, and a file that reads as it was last given is none.
+ *
+ * Nothing here watches the filesystem. The safe point is the caller's, and `pending` reads the
+ * file then, which is the only moment the answer is worth anything. The entry a delivery makes
+ * in the thread is the caller's too: it is written when the text is handed over, by the one that
+ * hands it over, and not by the service that computed it. So is the moment a change counts as
+ * given: `delivered` is told once the agent took it, and a change whose sending failed is still
+ * pending at the next safe point.
+ */
+
+import { createHash } from 'node:crypto'
+import { readFile } from 'node:fs/promises'
+import { join } from 'node:path'
+import {
+  AGENTS_FILE,
+  type BaseReach,
+  CONTEXT_BASE,
+  type ContextReach,
+  deliveryText,
+} from '@hemera/core'
+import { and, desc, eq, inArray, sql } from 'drizzle-orm'
+import { Context as EffectContext, Effect, Layer } from 'effect'
+
+import { bareModeOf } from '../agents/bare.ts'
+import { ADAPTERS } from '../agents/discovery.ts'
+import { Git } from '../git.ts'
+import { Sessions, UnknownSessionError } from '../sessions.ts'
+import { Database, DatabaseError } from '../storage/database.ts'
+import { type ContextDeliveryKind, contextDeliveries, queuedResults } from '../storage/schema.ts'
+
+/** How a source of the provided context is named, in the table and under the same name in a view. */
+export type DeliveryKind = ContextDeliveryKind
+
+/** One thing a Session was provided, as its row records it. */
+interface Recorded {
+  readonly kind: DeliveryKind
+  /** The file it came from, and `''` for the base, which is not a file. */
+  readonly path: string
+  readonly fingerprint: string
+  readonly deliveredAt: string
+}
+
+/** One thing a Session was provided, as the Context view lists it. */
+export interface Delivery extends Recorded {
+  /**
+   * How it reached the agent (D6-10): the base by its agent's means, `AGENTS.md` read by the agent
+   * itself or given at the start of the Session, a change as a delivery prompt of its own between
+   * two turns.
+   */
+  readonly reached: ContextReach
+}
+
+/** What a Session is given when it starts. */
+export interface Started {
+  /** Word for word what the adapter hands the agent once. */
+  readonly base: string
+  /** The instructions as they stood, and their fingerprint; null without the file. */
+  readonly instructions: {
+    readonly path: string
+    readonly fingerprint: string
+    /**
+     * The text Hemera hands the agent at the start, for an agent that does not read the file
+     * itself; null for one that does, which is never sent it.
+     */
+    readonly given: string | null
+  } | null
+}
+
+/** What waits for the next safe point. */
+export interface Pending {
+  readonly path: string
+  /** The fingerprint of what the agent was last given, which this change replaces (D6-08). */
+  readonly before: string | null
+  /** The fingerprint of the instructions as they now read. */
+  readonly fingerprint: string
+  /** The text as it is handed over: the marker, and the instructions as they now read. */
+  readonly text: string
+  /** The instructions as they now read, which is what a delivery carries as its resource. */
+  readonly content: string
+}
+
+/** A sub-agent's result waiting for the next safe point, as its row holds it (issue #72). */
+export interface QueuedResult {
+  readonly id: string
+  readonly text: string
+}
+
+/** What this service provides a Session, and what it can be refused with. */
+export interface ContextService {
+  /**
+   * The base a Session is given, word for word: `CONTEXT_BASE`, then the line that names its
+   * Workspace, its path and its repositories (D8-08).
+   */
+  readonly base: (sessionId: string) => Effect.Effect<string, Refusal>
+  /** Records what a Session starts with, and hands back what its adapter gives it. */
+  readonly start: (sessionId: string) => Effect.Effect<Started, Refusal>
+  /** What waits for the next safe point, if anything. */
+  readonly pending: (sessionId: string) => Effect.Effect<Pending | null, Refusal>
+  /**
+   * Records a change as given, once the agent took it: from then on it is what the agent holds,
+   * and the file reading as it is no longer a change.
+   */
+  readonly delivered: (sessionId: string, given: Pending) => Effect.Effect<Delivery, Refusal>
+  /**
+   * Queues a sub-agent's result for the next safe point (D7-14), written down so that a quit
+   * before that point does not lose it (issue #72).
+   */
+  readonly queueInternal: (sessionId: string, text: string) => Effect.Effect<void, Refusal>
+  /** The sub-agent's results waiting for the next safe point, oldest first. */
+  readonly queuedInternal: (sessionId: string) => Effect.Effect<QueuedResult[], Refusal>
+  /**
+   * Records sub-agent's results as given, once the agent took them (D7-14): each leaves the queue
+   * and gets its `internal` row in one transaction, so it is handed over once.
+   */
+  readonly handedInternal: (
+    sessionId: string,
+    handed: readonly QueuedResult[],
+  ) => Effect.Effect<void, Refusal>
+  /**
+   * Records Hemera's own words as given, once the agent took them: a notice, or the New Spec
+   * request, each a row of its own for the Context view to list.
+   */
+  readonly handed: (
+    sessionId: string,
+    kind: 'notice' | 'request',
+    text: string,
+  ) => Effect.Effect<void, Refusal>
+  /** Everything a Session was provided, oldest first. */
+  readonly provided: (sessionId: string) => Effect.Effect<Delivery[], Refusal>
+}
+
+/** Everything a delivery can be refused with. */
+type Refusal = DatabaseError | UnknownSessionError | UnreadableInstructionsError
+
+/** Thrown when `AGENTS.md` is there and could not be read: not the same as not having one. */
+export class UnreadableInstructionsError extends Error {
+  readonly path: string
+  readonly detail: string
+
+  constructor(path: string, detail: string) {
+    super(`${path} could not be read: ${detail}`)
+    this.name = 'UnreadableInstructionsError'
+    this.path = path
+    this.detail = detail
+  }
+}
+
+export class Context extends EffectContext.Service<Context, ContextService>()('Context') {}
+
+/** What makes the same text recognisable, and never given twice. */
+export function fingerprintOf(text: string): string {
+  return createHash('sha256').update(text, 'utf8').digest('hex')
+}
+
+/** The instructions of a Workspace, as they stand, and their fingerprint. */
+interface Instructions {
+  readonly text: string
+  readonly fingerprint: string
+}
+
+export const contextLayer = Layer.effect(
+  Context,
+  Effect.gen(function* () {
+    const database = yield* Database
+    const sessions = yield* Sessions
+    const git = yield* Git
+
+    const failed = (doing: string) => (cause: unknown) => new DatabaseError({ doing, cause })
+
+    const withDatabase = <A, E>(effect: Effect.Effect<A, E, Database>): Effect.Effect<A, E> =>
+      effect.pipe(Effect.provideService(Database, database))
+
+    /** Whether a read failed because the file is simply not there, which is not a failure. */
+    const missing = (cause: unknown): boolean =>
+      cause instanceof Error && 'code' in cause && cause.code === 'ENOENT'
+
+    const said = (cause: unknown): string =>
+      cause instanceof Error ? cause.message : 'the reason is unknown'
+
+    /** The instructions of a Workspace, read; null when the Workspace has none. */
+    const instructionsOf = (
+      root: string,
+    ): Effect.Effect<Instructions | null, UnreadableInstructionsError> =>
+      Effect.gen(function* () {
+        const at = join(root, AGENTS_FILE)
+        const read = yield* Effect.promise(() =>
+          readFile(at, 'utf8').then(
+            (text) => ({ read: true as const, text }),
+            (cause: unknown) => ({ read: false as const, cause }),
+          ),
+        )
+        if (!read.read) {
+          if (missing(read.cause)) return null
+          return yield* Effect.fail(new UnreadableInstructionsError(at, said(read.cause)))
+        }
+        return { text: read.text, fingerprint: fingerprintOf(read.text) }
+      })
+
+    /** Where a Session works (D8-08): its Workspace, whose root holds the instructions. */
+    const workspaceOf = (sessionId: string) =>
+      sessions
+        .workspace(sessionId)
+        .pipe(
+          Effect.mapError((cause) =>
+            cause instanceof UnknownSessionError
+              ? cause
+              : new DatabaseError({ doing: 'reading the Workspace of a delivery', cause }),
+          ),
+        )
+
+    /** The root of the Workspace: what a Session is given is its Workspace's own folder. */
+    const rootOf = (sessionId: string): Effect.Effect<string, Refusal> =>
+      workspaceOf(sessionId).pipe(Effect.map((workspace) => workspace.path))
+
+    /**
+     * The base, and the line that says where the Session works (D8-08): the Workspace by name
+     * and path, and its repositories relative to that path.
+     */
+    const composedBase = (sessionId: string): Effect.Effect<string, Refusal> =>
+      Effect.gen(function* () {
+        const workspace = yield* workspaceOf(sessionId)
+        // Each repository with its branch, read from Git as the base is composed and never
+        // stored (D8-08, D8-15); a folder Git cannot read is named without a branch.
+        const named = yield* Effect.forEach(workspace.repositories, (repository) =>
+          git.status(join(workspace.path, repository)).pipe(
+            Effect.match({
+              onFailure: () => repository,
+              onSuccess: (status) => `${repository} on ${status.branch}`,
+            }),
+          ),
+        )
+        const held = named.length === 0 ? '' : ` (repositories: ${named.join(', ')})`
+        return `${CONTEXT_BASE}\nWorkspace: ${workspace.name} at ${workspace.path}${held}`
+      })
+
+    /** The kind of a row, which the table's check constraint already closed. */
+    const kindOf = (kind: string): DeliveryKind => {
+      switch (kind) {
+        case 'base':
+        case 'native':
+        case 'provided':
+        case 'instructions':
+        case 'brief':
+        case 'answer':
+        case 'edit':
+        case 'internal':
+        case 'notice':
+        case 'request':
+          return kind
+        default:
+          return 'instructions'
+      }
+    }
+
+    /** Everything a Session was provided, oldest first: what the Context view lists. */
+    const rowsOf = (sessionId: string): Effect.Effect<Recorded[], DatabaseError> =>
+      withDatabase(
+        database
+          .select({
+            kind: contextDeliveries.kind,
+            path: contextDeliveries.path,
+            fingerprint: contextDeliveries.fingerprint,
+            deliveredAt: contextDeliveries.deliveredAt,
+          })
+          .from(contextDeliveries)
+          .where(eq(contextDeliveries.sessionId, sessionId))
+          .orderBy(contextDeliveries.deliveredAt, contextDeliveries.kind)
+          .pipe(Effect.mapError(failed('reading the provided context'))),
+      ).pipe(
+        Effect.map((rows) =>
+          rows.map((row) => ({
+            kind: kindOf(row.kind),
+            path: row.path,
+            fingerprint: row.fingerprint,
+            deliveredAt: row.deliveredAt,
+          })),
+        ),
+      )
+
+    /**
+     * The fingerprint of the instructions a Session was last given: read natively, given at the
+     * start, or delivered.
+     *
+     * The last one and not any one: a file edited A, B, then A again has changed back, and the
+     * agent holds B until it is told. Rows of one moment are told apart by their insertion order.
+     */
+    const lastGiven = (sessionId: string): Effect.Effect<string | null, DatabaseError> =>
+      withDatabase(
+        database
+          .select({ fingerprint: contextDeliveries.fingerprint })
+          .from(contextDeliveries)
+          .where(
+            and(
+              eq(contextDeliveries.sessionId, sessionId),
+              eq(contextDeliveries.path, AGENTS_FILE),
+              inArray(contextDeliveries.kind, ['native', 'provided', 'instructions']),
+            ),
+          )
+          .orderBy(desc(contextDeliveries.deliveredAt), desc(sql`rowid`))
+          .limit(1)
+          .pipe(Effect.mapError(failed('reading the last instructions given'))),
+      ).pipe(Effect.map((rows) => rows[0]?.fingerprint ?? null))
+
+    /**
+     * Records one thing given to a Session, and says whether it is new.
+     *
+     * A base or a file the Session started with already recorded is not written a second time:
+     * the unique index over the Session, the kind, the path and the fingerprint is the rule for
+     * those, and null here is something the agent already has. A delivery is always written.
+     */
+    const record = (
+      sessionId: string,
+      kind: DeliveryKind,
+      path: string,
+      fingerprint: string,
+    ): Effect.Effect<Recorded | null, DatabaseError> =>
+      withDatabase(
+        database
+          .insert(contextDeliveries)
+          .values({
+            id: crypto.randomUUID(),
+            sessionId,
+            kind,
+            path,
+            fingerprint,
+            deliveredAt: new Date().toISOString(),
+          })
+          .onConflictDoNothing()
+          .returning({
+            kind: contextDeliveries.kind,
+            path: contextDeliveries.path,
+            fingerprint: contextDeliveries.fingerprint,
+            deliveredAt: contextDeliveries.deliveredAt,
+          })
+          .pipe(Effect.mapError(failed('recording what was provided'))),
+      ).pipe(
+        Effect.map((rows) => {
+          const row = rows.at(0)
+          if (row === undefined) return null
+          return {
+            kind: kindOf(row.kind),
+            path: row.path,
+            fingerprint: row.fingerprint,
+            deliveredAt: row.deliveredAt,
+          }
+        }),
+      )
+
+    /**
+     * Whether the agent of this Session reads `AGENTS.md` itself under its bare mode, as its
+     * adapter declares (D6-07). A Session with no agent yet reads as one that does not: it is
+     * given the file rather than assumed to have it.
+     */
+    const readsItself = (sessionId: string): Effect.Effect<boolean, Refusal> =>
+      sessions.one(sessionId).pipe(
+        Effect.mapError((cause) =>
+          cause instanceof UnknownSessionError
+            ? cause
+            : new DatabaseError({ doing: 'reading the Session of what it starts with', cause }),
+        ),
+        Effect.map(({ session }) =>
+          session.provider === null
+            ? false
+            : bareModeOf(ADAPTERS[session.provider], process.platform).readsAgentsFile,
+        ),
+      )
+
+    const start = (sessionId: string): Effect.Effect<Started, Refusal> =>
+      Effect.gen(function* () {
+        const root = yield* rootOf(sessionId)
+        const instructions = yield* instructionsOf(root)
+        const given = yield* composedBase(sessionId)
+        yield* record(sessionId, 'base', '', fingerprintOf(given))
+        if (instructions === null) return { base: given, instructions: null }
+        const reads = yield* readsItself(sessionId)
+        yield* record(
+          sessionId,
+          reads ? 'native' : 'provided',
+          AGENTS_FILE,
+          instructions.fingerprint,
+        )
+        return {
+          base: given,
+          instructions: {
+            path: AGENTS_FILE,
+            fingerprint: instructions.fingerprint,
+            given: reads ? null : instructions.text,
+          },
+        }
+      })
+
+    const pending = (sessionId: string): Effect.Effect<Pending | null, Refusal> =>
+      Effect.gen(function* () {
+        const root = yield* rootOf(sessionId)
+        const read = yield* instructionsOf(root)
+        const before = yield* lastGiven(sessionId)
+        // A file deleted or renamed away after the agent read it is a change too: the agent still
+        // holds the old instructions, and it is told they are now empty. A Workspace that never
+        // had one has nothing to say.
+        if (read === null && before === null) return null
+        const instructions = read ?? { text: '', fingerprint: fingerprintOf('') }
+        // What the agent holds is what it was last given, read at the start or delivered since:
+        // a file that reads as that is not a change, and one that reads as anything else is.
+        if (before === instructions.fingerprint) return null
+        return {
+          path: AGENTS_FILE,
+          before,
+          fingerprint: instructions.fingerprint,
+          text: deliveryText(instructions.text),
+          content: instructions.text,
+        }
+      })
+
+    const delivered = (sessionId: string, given: Pending): Effect.Effect<Delivery, Refusal> =>
+      Effect.gen(function* () {
+        const written = yield* record(sessionId, 'instructions', given.path, given.fingerprint)
+        // A delivery row is always new — the unique index leaves them out — so this is the row
+        // just written; a base or the file a Session started with never reaches here.
+        const row = written ?? {
+          kind: 'instructions' as const,
+          path: given.path,
+          fingerprint: given.fingerprint,
+          deliveredAt: new Date().toISOString(),
+        }
+        return { ...row, reached: 'delivery_prompt' as const }
+      })
+
+    const queueInternal = (sessionId: string, text: string): Effect.Effect<void, Refusal> =>
+      withDatabase(
+        database
+          .insert(queuedResults)
+          .values({ id: crypto.randomUUID(), sessionId, text, queuedAt: new Date().toISOString() })
+          .pipe(Effect.mapError(failed('queuing the result of a sub-agent'))),
+      ).pipe(Effect.asVoid)
+
+    const queuedInternal = (sessionId: string): Effect.Effect<QueuedResult[], Refusal> =>
+      withDatabase(
+        database
+          .select({ id: queuedResults.id, text: queuedResults.text })
+          .from(queuedResults)
+          .where(eq(queuedResults.sessionId, sessionId))
+          .orderBy(queuedResults.queuedAt, sql`rowid`)
+          .pipe(Effect.mapError(failed('reading the queued results of sub-agents'))),
+      )
+
+    const handedInternal = (
+      sessionId: string,
+      handed: readonly QueuedResult[],
+    ): Effect.Effect<void, Refusal> =>
+      withDatabase(
+        database
+          .transaction((transaction) =>
+            Effect.gen(function* () {
+              // Only what was taken off the queue is recorded: a result a second safe point
+              // already handed over is not recorded twice.
+              const taken = yield* transaction
+                .delete(queuedResults)
+                .where(
+                  and(
+                    eq(queuedResults.sessionId, sessionId),
+                    inArray(
+                      queuedResults.id,
+                      handed.map((one) => one.id),
+                    ),
+                  ),
+                )
+                .returning({ text: queuedResults.text })
+              const deliveredAt = new Date().toISOString()
+              for (const one of taken) {
+                yield* transaction.insert(contextDeliveries).values({
+                  id: crypto.randomUUID(),
+                  sessionId,
+                  kind: 'internal',
+                  path: '',
+                  fingerprint: fingerprintOf(one.text),
+                  deliveredAt,
+                })
+              }
+            }),
+          )
+          .pipe(Effect.mapError(failed('recording the results of sub-agents as given'))),
+      )
+
+    /**
+     * How the base reaches the agent of this Session: by the means its adapter declares, on the
+     * platform this engine runs on (D6-07). A Session with no agent yet has been given nothing, and
+     * reads as the means of the agents that have no system prompt to take it.
+     */
+    const baseReachOf = (sessionId: string): Effect.Effect<BaseReach, Refusal> =>
+      sessions.one(sessionId).pipe(
+        Effect.mapError((cause) =>
+          cause instanceof UnknownSessionError
+            ? cause
+            : new DatabaseError({ doing: 'reading the Session of what it was provided', cause }),
+        ),
+        Effect.map(({ session }) =>
+          session.provider === null
+            ? 'embedded_resource'
+            : bareModeOf(ADAPTERS[session.provider], process.platform).base,
+        ),
+      )
+
+    const provided = (sessionId: string): Effect.Effect<Delivery[], Refusal> =>
+      Effect.gen(function* () {
+        const base = yield* baseReachOf(sessionId)
+        const rows = yield* rowsOf(sessionId)
+        const reachOf = (kind: DeliveryKind): ContextReach => {
+          switch (kind) {
+            case 'base':
+              return base
+            case 'native':
+              return 'read_natively'
+            case 'provided':
+              return 'session_start'
+            case 'instructions':
+            case 'brief':
+            case 'answer':
+            case 'edit':
+            case 'internal':
+            case 'notice':
+              return 'delivery_prompt'
+            // It rides the first turn's prompt, in front of the user's message.
+            case 'request':
+              return 'embedded_resource'
+          }
+        }
+        return rows.map((row): Delivery => ({
+          kind: row.kind,
+          path: row.path,
+          fingerprint: row.fingerprint,
+          deliveredAt: row.deliveredAt,
+          reached: reachOf(row.kind),
+        }))
+      })
+
+    return {
+      base: composedBase,
+      start,
+      pending,
+      delivered,
+      queueInternal,
+      queuedInternal,
+      handedInternal,
+      handed: (sessionId, kind, text) =>
+        record(sessionId, kind, '', fingerprintOf(text)).pipe(Effect.asVoid),
+      provided,
+    }
+  }),
+)

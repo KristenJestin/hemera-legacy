@@ -14,9 +14,15 @@ import { mkdirSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
-import { Effect, Layer } from 'effect'
+import { Effect, Exit, Layer, Scope } from 'effect'
 
-import { NEW_SESSION_TITLE, NoActiveProjectError } from '@hemera/core'
+import {
+  type AgentProvider,
+  NEW_SESSION_TITLE,
+  NoActiveProjectError,
+  NoAgentError,
+} from '@hemera/core'
+import { StderrSink } from '#engine/agents/supervisor.ts'
 import { openProfile } from '#engine/migrate.ts'
 import { Projects, projectsLayer } from '#engine/projects.ts'
 import { Sessions, sessionsLayer } from '#engine/sessions.ts'
@@ -40,12 +46,11 @@ afterEach(() => {
  * A data folder opened and migrated, with both services standing on it.
  *
  * Called twice, it is a second run of the application: the layers are built again and the
- * database is opened again, which is the closest a test gets to a restart.
+ * database is opened again, which is the closest a test gets to a restart. `written` receives the
+ * engine's diagnostic lines.
  */
-function opened() {
-  const services = Layer.mergeAll(projectsLayer, sessionsLayer).pipe(
-    Layer.provideMerge(databaseLayer(join(dataFolder, 'hemera.sqlite'))),
-  )
+function opened(written: string[] = []) {
+  const services = servicesOn(written)
   return <A, E>(program: Effect.Effect<A, E, Projects | Sessions | SqliteClient>) =>
     Effect.runPromise(
       Effect.scoped(
@@ -60,17 +65,32 @@ function opened() {
     )
 }
 
+/** Both services on the suite's data folder, telling their diagnostic lines to `written`. */
+function servicesOn(written: string[]) {
+  return Layer.mergeAll(projectsLayer, sessionsLayer).pipe(
+    Layer.provideMerge(databaseLayer(join(dataFolder, 'hemera.sqlite'))),
+    Layer.provide(
+      Layer.succeed(StderrSink, {
+        write: (line: string) =>
+          Effect.sync(() => {
+            written.push(line)
+          }),
+      }),
+    ),
+  )
+}
+
 /** One Project, created the way the Dialog creates one. */
 const atlas = Effect.gen(function* () {
   const projects = yield* Projects
   return yield* projects.create({ name: 'Atlas', tone: 'primary', mainPath: '/tmp/atlas' })
 })
 
-/** One Session in it, created the way the interface creates one. */
-const sessionIn = (projectId: string) =>
+/** One Session in it, created the way the interface creates one: with the agent it will run. */
+const sessionIn = (projectId: string, provider: AgentProvider = 'claude') =>
   Effect.gen(function* () {
     const sessions = yield* Sessions
-    return yield* sessions.create(projectId)
+    return yield* sessions.create(projectId, provider)
   })
 
 /**
@@ -149,6 +169,25 @@ describe('Aucun Projet actif', () => {
   })
 })
 
+describe('Session sans agent', () => {
+  test('a Session cannot start without an agent, and nothing is written about one', async () => {
+    const refused = await opened()(
+      Effect.gen(function* () {
+        const project = yield* atlas
+        const sessions = yield* Sessions
+        return yield* Effect.flip(sessions.create(project.id))
+      }),
+    )
+
+    expect(refused).toBeInstanceOf(NoAgentError)
+    expect(refused.message).toBe('Choose an agent first.')
+    // The refusal is what the interface shows, and the Session it refused does not exist: the
+    // thread of an agentless Session is the user's words with nobody to answer them.
+    expect(await opened()(rowsIn('sessions'))).toBe(0)
+    expect(await opened()(rowsIn('session_entries'))).toBe(0)
+  })
+})
+
 describe('Message enregistré', () => {
   test('a message is written into the thread and read back from it, and its event names it', async () => {
     const [written, page, events] = await opened()(
@@ -188,7 +227,9 @@ describe('Message enregistré', () => {
     )
 
     expect(before.lastWrittenAt).toBeLessThanOrEqual(after.lastWrittenAt)
-    expect(after.version).toBe(before.version + 1)
+    // And it comes back at the version it was read at: no version is taken by a message, and
+    // none is handed out by one — what the Session *is* has not changed (D4b-02).
+    expect(after.version).toBe(before.version)
   })
 
   test('an empty message is refused and writes nothing', async () => {
@@ -376,7 +417,9 @@ describe('Renommage conservé', () => {
         const project = yield* atlas
         const sessions = yield* Sessions
         const session = yield* sessionIn(project.id)
-        yield* sessions.append(session.id, 'A message that moved the version on')
+        // A rename is a change to what the Session is, and it is what moves the version on; a
+        // message written into the thread is not one and moves nothing.
+        yield* sessions.rename(session.id, session.version, 'One window')
         // The two windows case: the second one still believes it is at version 1.
         return yield* Effect.flip(sessions.rename(session.id, session.version, 'Two windows'))
       }),
@@ -411,7 +454,7 @@ describe('Session archivée puis restaurée', () => {
         const sessions = yield* Sessions
         const session = yield* sessionIn(project.id)
         yield* sessions.append(session.id, 'A message that must survive the archive')
-        const put = yield* sessions.archive(session.id, 2)
+        const put = yield* sessions.archive(session.id, session.version)
         return [
           put,
           yield* sessions.list(project.id),
@@ -439,7 +482,7 @@ describe('Session archivée puis restaurée', () => {
         const sessions = yield* Sessions
         const session = yield* sessionIn(project.id)
         yield* sessions.append(session.id, 'Written before the archive')
-        yield* sessions.archive(session.id, 2)
+        yield* sessions.archive(session.id, session.version)
         return session.id
       }),
     )
@@ -467,6 +510,49 @@ describe('Session archivée puis restaurée', () => {
   })
 })
 
+/**
+ * What a window holds of a Session after the thread was written into (design D4b-02, D4b-06).
+ *
+ * The version is what a change to the Session itself is refused against, and a window writes
+ * against the one it was handed: a message that moved it would make the archive, the rename and
+ * the choice of an agent refuse every Session that has been used — which is every Session there
+ * is once somebody has said something.
+ */
+describe('Une Session utilisée reste archivable', () => {
+  test('A Session can be archived after a message was written', async () => {
+    const [created, archived] = await opened()(
+      Effect.gen(function* () {
+        const project = yield* atlas
+        const sessions = yield* Sessions
+        const session = yield* sessionIn(project.id)
+        yield* sessions.append(session.id, 'Have a look at the reader')
+        // The window still holds the Session it created, at the version it was created with.
+        return [session, yield* sessions.archive(session.id, session.version)] as const
+      }),
+    )
+
+    expect(created.version).toBe(1)
+    expect(archived.archivedAt).not.toBeNull()
+    expect(archived.version).toBe(2)
+  })
+
+  test('two messages leave the version where the Session was read at', async () => {
+    const [before, after] = await opened()(
+      Effect.gen(function* () {
+        const project = yield* atlas
+        const sessions = yield* Sessions
+        const session = yield* sessionIn(project.id)
+        yield* sessions.append(session.id, 'One')
+        yield* sessions.append(session.id, 'Two')
+        const held = yield* sessions.list(project.id)
+        return [session, held[0]] as const
+      }),
+    )
+
+    expect(after?.version).toBe(before.version)
+  })
+})
+
 describe('Aucune suppression proposée', () => {
   test('the service offers nothing that removes a Session, and nothing that removes a message', async () => {
     const offered = await opened()(
@@ -481,11 +567,19 @@ describe('Aucune suppression proposée', () => {
     expect(offered.toSorted()).toEqual([
       'append',
       'archive',
+      'chooseAgent',
+      'chooseWorkspace',
       'create',
       'list',
+      'mainOf',
+      'one',
       'read',
+      'recordChoices',
+      'recordNative',
       'rename',
       'restore',
+      'workspace',
+      'write',
     ])
   })
 })
@@ -558,8 +652,12 @@ describe('Travaux parallèles', () => {
         const sessions = yield* Sessions
         const first = yield* sessionIn(project.id)
         const second = yield* sessionIn(project.id)
+        // Dates are ISO text to the millisecond: two acts in the same millisecond tie on both
+        // `last_written_at` and `created_at`, and a tie comes back in no given order.
+        yield* Effect.sleep('2 millis')
         yield* sessions.append(second.id, 'Written last')
         const earlier = yield* sessions.list(project.id)
+        yield* Effect.sleep('2 millis')
         yield* sessions.rename(first.id, 1, 'Back to the top')
         return [[first.id, second.id], earlier, yield* sessions.list(project.id)] as const
       }),
@@ -595,5 +693,208 @@ describe('Arrêt brutal', () => {
     expect(page.entries.map((entry) => entry.body)).toEqual([
       'Written, and then the window went away',
     ])
+  })
+})
+
+describe("L'agent d'une Session", () => {
+  test('the agent and the model are shown, and the next start reads them from the Session', async () => {
+    const found = await opened()(
+      Effect.gen(function* () {
+        const sessions = yield* Sessions
+        const project = yield* atlas
+        const created = yield* sessions.create(project.id, 'codex')
+        const chosen = yield* sessions.chooseAgent(created.id, created.version, {
+          provider: 'claude',
+          model: 'claude-sonnet-4-5',
+        })
+        return { created, chosen }
+      }),
+    )
+
+    // A Session is made with the agent it runs and holds it from the row (design D5-06); the
+    // model is nobody's yet, and says so by holding nothing rather than by naming one the agent
+    // was never asked for.
+    expect(found.created.provider).toBe('codex')
+    expect(found.created.model).toBeNull()
+    expect(found.chosen.provider).toBe('claude')
+    expect(found.chosen.model).toBe('claude-sonnet-4-5')
+    expect(found.chosen.version).toBe(found.created.version + 1)
+
+    // Which agent a Session talks to is what the engine reads when it starts one, so it has to
+    // outlive the window that chose it: read again, on a second run of the process.
+    const again = await opened()(
+      Effect.gen(function* () {
+        const sessions = yield* Sessions
+        const seen = yield* sessions.list(found.chosen.projectId)
+        return seen[0]
+      }),
+    )
+    expect(again?.provider).toBe('claude')
+    expect(again?.model).toBe('claude-sonnet-4-5')
+  })
+
+  test('a write against a version that has moved on is refused', async () => {
+    const refused = await opened()(
+      Effect.gen(function* () {
+        const sessions = yield* Sessions
+        const project = yield* atlas
+        const created = yield* sessions.create(project.id, 'claude')
+        // Two windows, both holding the same Session: the second one chooses the agent, and
+        // the first one's choice was written against a Session that no longer is that one.
+        yield* sessions.chooseAgent(created.id, created.version, {
+          provider: 'claude',
+          model: null,
+        })
+        return {
+          projectId: project.id,
+          // The two windows case, said the way the other refusals are.
+          written: yield* Effect.flip(
+            sessions.chooseAgent(created.id, created.version, { provider: 'codex', model: null }),
+          ),
+        }
+      }),
+    )
+
+    expect(refused.written).toBeInstanceOf(StaleVersionError)
+    const kept = await opened()(
+      Effect.gen(function* () {
+        const sessions = yield* Sessions
+        const seen = yield* sessions.list(refused.projectId)
+        return seen.map((session) => session.provider)
+      }),
+    )
+    expect(kept).toEqual(['claude'])
+  })
+})
+
+describe('Le fil que l’agent écrit', () => {
+  test('a tool call is one entry in a later state, not a second entry beside it', async () => {
+    const thread = await opened()(
+      Effect.gen(function* () {
+        const sessions = yield* Sessions
+        const project = yield* atlas
+        const created = yield* sessions.create(project.id, 'claude')
+        yield* sessions.write(created.id, {
+          role: 'agent',
+          kind: 'tool_call',
+          body: 'Read parser.ts',
+          payload: '{"tool":"read","status":"in_progress"}',
+          correlationId: 'call-1',
+          turnId: 'turn-1',
+          state: 'in_progress',
+        })
+        yield* sessions.write(created.id, {
+          role: 'agent',
+          kind: 'tool_call',
+          body: 'Read parser.ts',
+          payload: '{"tool":"read","status":"completed"}',
+          correlationId: 'call-1',
+          turnId: 'turn-1',
+          state: 'completed',
+        })
+        yield* sessions.write(created.id, {
+          role: 'agent',
+          kind: 'message',
+          body: 'The parser drops the last line.',
+          turnId: 'turn-1',
+        })
+        return yield* sessions.read(created.id)
+      }),
+    )
+
+    // Two writes, one entry: the second found it by what it was about.
+    expect(thread.entries).toHaveLength(2)
+    expect(thread.entries[0]?.kind).toBe('tool_call')
+    expect(thread.entries[0]?.seq).toBe(1)
+    expect(thread.entries[0]?.state).toBe('completed')
+    expect(thread.entries[0]?.payload).toBe('{"tool":"read","status":"completed"}')
+    expect(thread.entries[0]?.role).toBe('agent')
+    // And the message that followed it is the next one in the same thread.
+    expect(thread.entries[1]?.kind).toBe('message')
+    expect(thread.entries[1]?.seq).toBe(2)
+    expect(thread.entries[1]?.payload).toBe('{}')
+    expect(thread.entries[1]?.turnId).toBe('turn-1')
+  })
+
+  test('what the agent handed back is kept with the Session, and Hemera is who wrote it', async () => {
+    const keptNative = await opened()(
+      Effect.gen(function* () {
+        const sessions = yield* Sessions
+        const project = yield* atlas
+        const created = yield* sessions.create(project.id, 'claude')
+        yield* sessions.chooseAgent(created.id, created.version, {
+          provider: 'codex',
+          model: null,
+        })
+        const attached = yield* sessions.recordNative(created.id, {
+          nativeSessionId: 'native-9',
+          nativeState: 'attached',
+          cwd: '/tmp/atlas',
+        })
+        const lost = yield* sessions.recordNative(created.id, {
+          nativeSessionId: 'native-9',
+          nativeState: 'lost',
+          cwd: '/tmp/atlas',
+        })
+        return { attached, lost }
+      }),
+    )
+
+    // The version is not touched by what the engine writes: a running agent must not be able
+    // to refuse a rename the user is making at the same time.
+    expect(keptNative.attached.version).toBe(keptNative.lost.version)
+    const readBack = await opened()(
+      Effect.gen(function* () {
+        const sessions = yield* Sessions
+        const seen = yield* sessions.list(keptNative.lost.projectId)
+        return seen[0]
+      }),
+    )
+    expect(readBack?.nativeState).toBe('lost')
+  })
+})
+
+describe('A write after release is dropped and said, never thrown', () => {
+  test('nothing is written, one line names the entry and its Session, and the caller is refused', async () => {
+    const written: string[] = []
+
+    const late = await Effect.runPromise(
+      Effect.gen(function* () {
+        // The engine's own order: the services are built into a scope, and the quit closes it.
+        const scope = yield* Scope.make()
+        const context = yield* Layer.build(servicesOn(written)).pipe(Scope.provide(scope))
+        const { sessions, created } = yield* Effect.provide(
+          Effect.gen(function* () {
+            yield* openProfile(dataFolder, SHIPPED, '0.4.0')
+            const project = yield* atlas
+            return { sessions: yield* Sessions, created: yield* sessionIn(project.id) }
+          }),
+          context,
+        )
+        yield* Scope.close(scope, Exit.void)
+
+        // A fiber that outlived the quit writes the entry that closes its turn: a refusal its
+        // caller handles, where the driver would have thrown a defect nobody catches.
+        const refused = yield* Effect.flip(
+          sessions.write(created.id, {
+            role: 'hemera',
+            kind: 'turn',
+            body: 'The turn ended.',
+            payload: JSON.stringify({ stopReason: 'interrupted' }),
+          }),
+        )
+        return { sessionId: created.id, refused }
+      }),
+    )
+
+    expect(late.refused).toBeInstanceOf(DatabaseError)
+    expect(written).toEqual([`sessions: write after release dropped: turn ${late.sessionId}`])
+    const thread = await opened()(
+      Effect.gen(function* () {
+        const sessions = yield* Sessions
+        return yield* sessions.read(late.sessionId)
+      }),
+    )
+    expect(thread.entries).toEqual([])
   })
 })

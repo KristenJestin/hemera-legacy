@@ -9,13 +9,18 @@
  * before it ever reaches the engine.
  */
 
-import { mkdirSync, mkdtempSync, rmSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
 import { Effect, Layer } from 'effect'
 
-import { InvalidProjectNameError, InvalidRepositoryPathError } from '@hemera/core'
+import {
+  InvalidProjectNameError,
+  InvalidRepositoryPathError,
+  InvalidSpecPrefixError,
+} from '@hemera/core'
+import { InvalidBranchPrefixError, InvalidWorkspacesRootError } from '#engine/projects.ts'
 import { openProfile } from '#engine/migrate.ts'
 import { Projects, projectsLayer } from '#engine/projects.ts'
 import { SqliteClient, databaseLayer } from '#engine/storage/database.ts'
@@ -113,6 +118,27 @@ describe('Création sur un dossier vide', () => {
       }),
     )
     expect(entries).toEqual([])
+  })
+})
+
+describe('A Workspace is kept as the disk spells it', () => {
+  test('a root reached through a link, or a short name, is written in its canonical form', async () => {
+    const real = join(dataFolder, 'the-real-workspace')
+    mkdirSync(real)
+    // A junction on Windows, which needs no privilege; a directory link elsewhere. A DOS short
+    // name is the same case on a runner that has one: another spelling of one place.
+    const link = join(dataFolder, 'through-a-link')
+    symlinkSync(real, link, 'junction')
+
+    const project = await opened()(
+      Effect.gen(function* () {
+        const projects = yield* Projects
+        const made = yield* projects.create({ name: 'Linked', tone: 'primary', mainPath: link })
+        return yield* projects.moveMain(made.id, made.version, link)
+      }),
+    )
+
+    expect(project.mainPath).toBe(realpathSync.native(real))
   })
 })
 
@@ -229,6 +255,138 @@ describe('Chemin hors racine refusé', () => {
   })
 })
 
+describe('The folder of the Workspaces and the branch prefix are the Project’s', () => {
+  test('both start at their default, are set, and are cleared back to it', async () => {
+    const [fresh, set, cleared, entries] = await opened()(
+      Effect.gen(function* () {
+        const projects = yield* Projects
+        const one = yield* created
+        const rooted = yield* projects.setWorkspacesRoot(one.id, one.version, '/tmp/atlas-trees')
+        const prefixed = yield* projects.setBranchPrefix(rooted.id, rooted.version, ' hemera ')
+        const unrooted = yield* projects.setWorkspacesRoot(prefixed.id, prefixed.version, null)
+        const back = yield* projects.setBranchPrefix(unrooted.id, unrooted.version, null)
+        return [one, prefixed, back, yield* journal] as const
+      }),
+    )
+
+    // Null is the default and not a value: Hemera's own folder, and the Project's name (D8-02).
+    expect(fresh.workspacesRoot).toBeNull()
+    expect(fresh.branchPrefix).toBeNull()
+    expect(set.workspacesRoot).toBe('/tmp/atlas-trees')
+    expect(set.branchPrefix).toBe('hemera')
+    expect(cleared.workspacesRoot).toBeNull()
+    expect(cleared.branchPrefix).toBeNull()
+    expect(entries.map((entry) => entry.type)).toEqual([
+      'project.created',
+      'project.updated',
+      'project.updated',
+      'project.updated',
+      'project.updated',
+    ])
+  })
+
+  test('a setting made against a version that is no longer current is refused', async () => {
+    const raised = await refusalOn(
+      Effect.gen(function* () {
+        const projects = yield* Projects
+        const one = yield* created
+        yield* projects.setBranchPrefix(one.id, one.version, 'hemera')
+        return yield* projects.setBranchPrefix(one.id, one.version, 'atlas')
+      }),
+    )
+
+    expect(raised).toBeInstanceOf(StaleVersionError)
+  })
+})
+
+describe('A folder of Workspaces is absolute and outside main, a prefix one Git takes', () => {
+  test.each([
+    ['relative', 'workspaces', 'it is not an absolute path'],
+    ['main itself', '/tmp/atlas', 'it is inside main'],
+    ['inside main', '/tmp/atlas/.worktrees', 'it is inside main'],
+  ])('a folder %s is refused, naming why', async (_, path, reason) => {
+    const raised = await refusalOn(
+      Effect.gen(function* () {
+        const projects = yield* Projects
+        const one = yield* created
+        return yield* projects.setWorkspacesRoot(one.id, one.version, path)
+      }),
+    )
+
+    expect(raised).toBeInstanceOf(InvalidWorkspacesRootError)
+    expect(raised.message).toContain(reason)
+  })
+
+  test.each([
+    ['', 'it is empty'],
+    ['my team', 'it holds a space'],
+    ['team..x', 'it holds ".."'],
+    ['/team', 'it starts or ends with "/"'],
+    ['team/', 'it starts or ends with "/"'],
+    ['team:x', 'it holds a character a branch name cannot'],
+  ])('the prefix "%s" is refused: %s', async (prefix, reason) => {
+    const raised = await refusalOn(
+      Effect.gen(function* () {
+        const projects = yield* Projects
+        const one = yield* created
+        return yield* projects.setBranchPrefix(one.id, one.version, prefix)
+      }),
+    )
+
+    expect(raised).toBeInstanceOf(InvalidBranchPrefixError)
+    expect(raised.message).toContain(reason)
+  })
+
+  test('a prefix with folders of its own is kept', async () => {
+    const project = await opened()(
+      Effect.gen(function* () {
+        const projects = yield* Projects
+        const one = yield* created
+        return yield* projects.setBranchPrefix(one.id, one.version, 'team/hemera')
+      }),
+    )
+
+    expect(project.branchPrefix).toBe('team/hemera')
+  })
+})
+
+describe('A repository is included by default and can be left out', () => {
+  test('included beside the list of repositories, which stays as it is', async () => {
+    const [declared, left, entries] = await opened()(
+      Effect.gen(function* () {
+        const projects = yield* Projects
+        const one = yield* created
+        const withApi = yield* projects.addRepository(one.id, one.version, './sources/api')
+        const both = yield* projects.addRepository(withApi.id, withApi.version, './sources/front')
+        const out = yield* projects.setRepositoryIncluded(
+          both.id,
+          both.version,
+          './sources/front',
+          false,
+        )
+        return [both, out, yield* journal] as const
+      }),
+    )
+
+    expect(declared.included).toEqual(['./sources/api', './sources/front'])
+    expect(left.repositories).toEqual(['./sources/api', './sources/front'])
+    expect(left.included).toEqual(['./sources/api'])
+    expect(entries.at(-1)?.type).toBe('project.repository_updated')
+  })
+
+  test('a location the Project does not declare is refused', async () => {
+    const raised = await refusalOn(
+      Effect.gen(function* () {
+        const projects = yield* Projects
+        const one = yield* created
+        return yield* projects.setRepositoryIncluded(one.id, one.version, './nowhere', false)
+      }),
+    )
+
+    expect(raised).toBeInstanceOf(InvalidRepositoryPathError)
+  })
+})
+
 describe('Archivé puis restauré', () => {
   test('it leaves the list, comes back to it, and keeps its Journal', async () => {
     const [afterArchive, afterRestore, entries] = await opened()(
@@ -288,7 +446,11 @@ describe('Aucune suppression', () => {
       'moveMain',
       'removeRepository',
       'restore',
+      'setBranchPrefix',
+      'setRepositoryIncluded',
+      'setWorkspacesRoot',
       'update',
+      'updateRepository',
     ])
   })
 })
@@ -303,6 +465,86 @@ describe('Un Projet inconnu', () => {
     )
 
     expect(raised).toBeInstanceOf(StaleVersionError)
+  })
+})
+
+describe('The Spec prefix comes from the Project name and can be changed', () => {
+  test('a created Project takes the prefix its name gives', async () => {
+    const [hemera, keyRoad] = await opened()(
+      Effect.gen(function* () {
+        const projects = yield* Projects
+        return [
+          yield* projects.create({ name: 'Hemera', tone: 'primary', mainPath: '/tmp/hemera' }),
+          yield* projects.create({ name: 'Key Road', tone: 'primary', mainPath: '/tmp/key-road' }),
+        ] as const
+      }),
+    )
+
+    expect(hemera.specPrefix).toBe('HEM')
+    expect(keyRoad.specPrefix).toBe('KR')
+  })
+
+  test('a prefix given at creation is kept', async () => {
+    const project = await opened()(
+      Effect.gen(function* () {
+        const projects = yield* Projects
+        return yield* projects.create({
+          name: 'Key Road',
+          tone: 'primary',
+          mainPath: '/tmp/key-road',
+          specPrefix: 'KEYR',
+        })
+      }),
+    )
+
+    expect(project.specPrefix).toBe('KEYR')
+  })
+
+  test('a changed prefix is written, read back and journalled', async () => {
+    const [project, listed, payload] = await opened()(
+      Effect.gen(function* () {
+        const projects = yield* Projects
+        const one = yield* projects.create({
+          name: 'Key Road',
+          tone: 'primary',
+          mainPath: '/tmp/key-road',
+        })
+        const changed = yield* projects.update({
+          id: one.id,
+          version: one.version,
+          specPrefix: 'KEYR',
+        })
+        const sql = yield* SqliteClient
+        const events = yield* sql<{ payload: string }>`
+          SELECT payload FROM domain_events WHERE type = 'project.updated'`
+        return [changed, yield* projects.list(), events[0]?.payload] as const
+      }),
+    )
+
+    expect(project.specPrefix).toBe('KEYR')
+    expect(listed[0]?.specPrefix).toBe('KEYR')
+    expect(JSON.parse(payload ?? '{}')).toMatchObject({ specPrefix: 'KEYR' })
+  })
+
+  test('a prefix that is not 2 to 4 upper-case letters is refused, and nothing changes', async () => {
+    const [raised, listed] = await opened()(
+      Effect.gen(function* () {
+        const projects = yield* Projects
+        const one = yield* projects.create({
+          name: 'Key Road',
+          tone: 'primary',
+          mainPath: '/tmp/key-road',
+        })
+        const refused = yield* Effect.flip(
+          projects.update({ id: one.id, version: one.version, specPrefix: 'k' }),
+        )
+        return [refused, yield* projects.list()] as const
+      }),
+    )
+
+    expect(raised).toBeInstanceOf(InvalidSpecPrefixError)
+    expect(listed[0]?.specPrefix).toBe('KR')
+    expect(listed[0]?.version).toBe(1)
   })
 })
 

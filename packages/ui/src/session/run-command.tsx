@@ -1,10 +1,11 @@
 import Fuse from 'fuse.js'
-import { type ReactNode, useMemo, useState } from 'react'
+import { type ReactNode, useEffect, useMemo, useRef, useState } from 'react'
 
 import { COMMAND_TYPE_ICONS, type CommandType } from '../activity/command-type.ts'
 import { Input } from '../components/field/field.tsx'
 import { Popover } from '../components/popover/popover.tsx'
 import { StatusDot } from '../components/status-dot/status-dot.tsx'
+import { Tooltip } from '../components/tooltip/tooltip.tsx'
 import { IconPlayerPlay } from '../icons.ts'
 
 /**
@@ -41,6 +42,13 @@ export interface RunCommandProps {
   onRunOnce: (line: string) => void
   /** Whether the field is open as it is drawn. */
   defaultOpen?: boolean | undefined
+  /**
+   * The keystroke that opens Run from anywhere in the Session (review of #250), written for the
+   * platform: shown in Run's tooltip. The page registers it, and says it was pressed by `asked`.
+   */
+  shortcut?: string | undefined
+  /** Bumped each time the keystroke is pressed: Run opens, its field taking the caret. */
+  asked?: number | undefined
   /** What is typed in the field as it is drawn. */
   defaultLine?: string | undefined
 }
@@ -227,8 +235,17 @@ export function RunCommand({
   onRunOnce,
   defaultOpen = false,
   defaultLine = '',
+  shortcut,
+  asked = 0,
 }: RunCommandProps): ReactNode {
   const [open, setOpen] = useState(defaultOpen)
+  // The keystroke asked for Run: it opens, and the popover puts the caret in its field.
+  const answered = useRef(asked)
+  useEffect(() => {
+    if (asked === answered.current) return
+    answered.current = asked
+    setOpen(true)
+  }, [asked])
   return (
     <Popover
       side="bottom"
@@ -237,10 +254,12 @@ export function RunCommand({
       open={open}
       onOpenChange={setOpen}
       trigger={
-        <button type="button" className={TRIGGER}>
-          <IconPlayerPlay size="sm" aria-hidden="true" />
-          Run
-        </button>
+        <Tooltip label="Run a command" keys={shortcut}>
+          <button type="button" className={TRIGGER}>
+            <IconPlayerPlay size="sm" aria-hidden="true" />
+            Run
+          </button>
+        </Tooltip>
       }
     >
       <RunField

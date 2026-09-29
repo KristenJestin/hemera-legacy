@@ -176,26 +176,26 @@ function groupsOf(
     {
       kind: 'permission',
       label: 'Permissions',
-      icon: <IconShield size="sm" aria-hidden="true" />,
+      icon: <IconShield size="md" aria-hidden="true" />,
       urgent: true,
       items: of('permission'),
     },
     {
       kind: 'question',
       label: 'Questions',
-      icon: <IconMessageQuestion size="sm" aria-hidden="true" />,
+      icon: <IconMessageQuestion size="md" aria-hidden="true" />,
       items: of('question'),
     },
     {
       kind: 'spec',
       label: 'Spec proposed',
-      icon: <IconFlag size="sm" aria-hidden="true" />,
+      icon: <IconFlag size="md" aria-hidden="true" />,
       items: of('spec'),
     },
     {
       kind: 'proposal',
       label: 'Proposed commands',
-      icon: <IconBookmarkPlus size="sm" aria-hidden="true" />,
+      icon: <IconBookmarkPlus size="md" aria-hidden="true" />,
       items: proposals,
       actions:
         proposals.length > 1 ? (
@@ -336,14 +336,17 @@ export const Closed: Story = {
       name: 'Waiting for your answer: Permissions 1',
     })
     expect(pill).toHaveTextContent('1')
+    // In the warning's tone, never the neutral chip: something waits.
+    expect(pill.className).toContain('border-warning')
     // What answers it is not on the page until the pill is pressed; the thread has its record.
     expect(screen.queryByRole('button', { name: 'Allow once' })).toBeNull()
     expect(canvas.getByRole('group', { name: 'Permission for Run command, waiting' })).toBeVisible()
     expect(screen.queryByRole('dialog')).toBeNull()
-    // On the top edge of the box, centred on it, once it has risen.
+    // Over the top edge of the box, detached from it by a clear gap, centred on it, once it has
+    // risen (review of #250).
     await waitFor(() => {
       const { pill: face, box } = boxesOf(canvasElement)
-      expect(Math.abs(face.bottom - box.top)).toBeLessThan(1)
+      expect(Math.abs(box.top - face.bottom - 10)).toBeLessThan(1)
       expect(Math.abs(face.left + face.width / 2 - (box.left + box.width / 2))).toBeLessThan(1)
     })
   },

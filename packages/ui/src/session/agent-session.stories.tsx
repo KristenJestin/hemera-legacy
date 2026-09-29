@@ -456,7 +456,7 @@ function Page({
                       {
                         kind: 'permission',
                         label: 'Permissions',
-                        icon: <IconShield size="sm" aria-hidden="true" />,
+                        icon: <IconShield size="md" aria-hidden="true" />,
                         urgent: true,
                         items: [{ id: 'permission', content: ASKED }],
                       },

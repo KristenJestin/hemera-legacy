@@ -9,7 +9,7 @@ import { StoppedTurn } from './stopped-turn.tsx'
 const meta = {
   title: 'Blocks/Session/StoppedTurn',
   component: StoppedTurn,
-  tags: ['autodocs', 'updated'],
+  tags: ['autodocs'],
   parameters: { layout: 'padded' },
   args: { at: '14:07' },
   argTypes: {

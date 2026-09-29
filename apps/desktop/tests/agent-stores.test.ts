@@ -40,6 +40,8 @@ import {
   say,
   setOffered,
   specWritingOf,
+  turnRowOf,
+  answersAQuestion,
 } from '#renderer/agent-store.ts'
 import {
   archiveSession,
@@ -464,6 +466,56 @@ describe('Le tour tourne dès que la question est écrite', () => {
     await asking
     expect(agentOf('session-6').running).toBe(false)
     expect(agentOf('session-6').stopReason).toBe('end_turn')
+  })
+
+  test('the turn entry pushed ends the turn, in the same state that holds it', () => {
+    push({ event: 'turn_start', sessionId: 'session-7', entry: null })
+    push({ event: 'entry', sessionId: 'session-7', entry: entry('e1', 'user', 'test') })
+    const done = reported('e2', 'turn', 'The agent finished its turn.', 'end_turn')
+    push({ event: 'entry', sessionId: 'session-7', entry: done })
+
+    // The row reads "Done" off this entry, and the composer draws Send from this flag: the
+    // `turn` event that follows is a second message, and a frame drawn between the two had both.
+    const held = agentOf('session-7')
+    expect(held.running).toBe(false)
+    expect(turnRowOf(held.entries, held.running, held.latest)?.state).toBe('done')
+  })
+
+  test('a message said after a turn ended is thinking, never the last turn done', () => {
+    const said = entry('e1', 'user', 'test')
+    const done = reported('e2', 'turn', 'The agent finished its turn.', 'end_turn')
+
+    // The next message is said: the Session runs before the engine has echoed it, and the thread
+    // still ends on the turn before, which is the entry pushed last. That end is not what the
+    // turn just asked for is doing.
+    expect(turnRowOf([said, done], true, 'e2')).toEqual({ state: 'thinking' })
+    expect(turnRowOf([said], false)).toBeNull()
+  })
+
+  test('the row says it waits only when the notices hold something (#250)', () => {
+    const request = {
+      ...reported('e2', 'permission_request', 'fs_write asks to act outside the Workspace'),
+      role: 'hemera' as const,
+      state: 'pending',
+      payload: JSON.stringify({ toolCallId: 'q-1', options: [] }),
+    }
+    const said = entry('e1', 'user', 'Go')
+    // The notices are empty: the row does not say the Session waits, whatever the thread holds.
+    expect(turnRowOf([said, request], true, 'e2', false)?.state).not.toBe('waiting')
+    // Something waits in them: the row says so.
+    expect(turnRowOf([said, request], true, 'e2', true)?.state).toBe('waiting')
+  })
+
+  test('the row waits for the reader as long as the notices hold anything (#237)', () => {
+    const said = entry('e1', 'user', 'test')
+    const done = reported('e2', 'turn', 'The agent finished its turn.', 'end_turn')
+
+    // Proposals the turn left behind: the turn is over, and the Session still waits for the reader.
+    expect(turnRowOf([said, done], false, 'e2', true)).toEqual({ state: 'waiting' })
+    // A turn running while something waits: it waits, whatever else it is doing.
+    expect(turnRowOf([said], true, 'e1', true)?.state).toBe('waiting')
+    // Nothing waits any more: the row says how the turn ended again.
+    expect(turnRowOf([said, done], false, 'e2', false)?.state).toBe('done')
   })
 
   test('a prompt refused before any turn began leaves nothing running', async () => {
@@ -986,5 +1038,27 @@ describe('A section says it is being written (issue #185)', () => {
     const read = reported('e2', 'tool_call', 'mcp__hemera__spec_read', 'in_progress')
 
     expect(specWritingOf([said, read])).toBeNull()
+  })
+})
+
+describe('A one-off run without asking answers no other question', () => {
+  test('the Session still waits on a question asked before a one-off ran unasked', () => {
+    const request = {
+      ...reported('e2', 'permission_request', 'fs_write asks to act outside the Workspace'),
+      role: 'hemera' as const,
+      state: 'pending',
+      payload: JSON.stringify({ toolCallId: 'q-1', options: [] }),
+    }
+    const unasked = {
+      ...reported('e3', 'permission_decision', 'ran without asking, Auto mode', 'completed'),
+      role: 'hemera' as const,
+      payload: JSON.stringify({ toolCallId: 'u-1', optionId: 'allowed', unasked: true }),
+    }
+
+    expect(activityOf([entry('e1', 'user', 'Go'), request, unasked]).state).toBe('waiting')
+    // The Session page asks the same of each decision it walks back over.
+    expect(answersAQuestion(unasked)).toBe(false)
+    const answered = reported('e4', 'permission_decision', 'you allowed fs_write', 'completed')
+    expect(answersAQuestion(answered)).toBe(true)
   })
 })

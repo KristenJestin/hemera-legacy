@@ -23,6 +23,7 @@ import {
   failureNoteOf,
   foldedCallsOf,
   hemeraPermissionOf,
+  hemeraPlaceOf,
   hemeraToolCallOf,
   nativeSubjectOf,
   plainRefusal,
@@ -176,6 +177,34 @@ describe('A one-off command shows and is not promoted', () => {
     // `exited` is what the engine writes; `finished` is the word the block reads it as.
     expect(drawn?.state).toBe('finished')
   })
+
+  test('the block names the repository it runs in, and a plain folder as a folder', () => {
+    const at = (cwd: string) =>
+      entryOf(
+        'command_run',
+        'hemera',
+        'sleep 120',
+        JSON.stringify({
+          name: 'sleep 120',
+          line: 'sleep 120',
+          type: 'script',
+          state: 'running',
+          cwd,
+          oneOff: true,
+        }),
+      )
+    const repositories = [{ path: 'v2', icon: null }]
+    expect(commandRunOf(at('/w/v2'), [], '/w', repositories)).toMatchObject({
+      repository: { path: 'v2', icon: null },
+      folder: '.',
+    })
+    expect(commandRunOf(at('/w/tools'), [], '/w', repositories)).toMatchObject({
+      repository: undefined,
+      folder: 'tools',
+    })
+    // A root not known yet leaves the folder as the run was started in it.
+    expect(commandRunOf(at('/w/v2'))).toMatchObject({ repository: undefined, folder: '/w/v2' })
+  })
 })
 
 describe('A proposal enters the catalogue only when accepted', () => {
@@ -251,6 +280,23 @@ describe('A delivery shows in the timeline', () => {
     // One that could not be handed over yet is news, and is still said.
     const waiting = { ...handed, state: 'failed' }
     expect(contextDeliveryOf(waiting)?.waiting).toBe(true)
+  })
+})
+
+describe('A run handed to the agent draws nothing: the run has its own entry (#250)', () => {
+  test('neither the run handed over nor the one waiting to be is a line of the thread', () => {
+    const handed = entryOf(
+      'context_delivery',
+      'hemera',
+      'Hemera handed the agent the run of echo (exited, exit code 0).',
+      JSON.stringify({
+        kind: 'run',
+        fingerprint: 'dedc2f0504c2'.padEnd(64, '0'),
+        deliveredAt: null,
+      }),
+    )
+    expect(contextDeliveryOf(handed)).toBe(null)
+    expect(contextDeliveryOf({ ...handed, state: 'failed' })).toBe(null)
   })
 })
 
@@ -715,7 +761,94 @@ describe('Every tool shows its subject', () => {
         resolved: '/w/app',
         line: 'pnpm test',
       }),
-    ).toEqual({ label: 'Run command', subject: 'pnpm test', intent: 'asks to run in /w/app' })
+    ).toEqual({
+      label: 'Run command',
+      subject: 'pnpm test',
+      intent: 'asks to run a line the agent wrote',
+    })
+  })
+})
+
+describe('A one-off says truly where it runs', () => {
+  const repositories = [{ path: 'v2', icon: null }]
+
+  test('an inside one-off is said in its Workspace, never outside it', () => {
+    const asked = {
+      named: '.',
+      resolved: '/home/someone/media-library',
+      root: '/home/someone/media-library',
+      inside: true,
+      line: 'sleep 120',
+    }
+    // The card says in its head why it asks: the line is one the agent wrote.
+    expect(
+      hemeraPermissionOf(
+        'commands_run',
+        'commands_run asks to run sleep 120 in /home/someone/media-library',
+        asked,
+      ).intent,
+    ).toBe('asks to run a line the agent wrote')
+    // In the Workspace, and no path repeating its root; nothing says Outside.
+    expect(hemeraPlaceOf(asked, 'main', repositories)).toEqual([{ label: 'In', value: 'main' }])
+  })
+
+  test('an inside one-off in a repository names the repository and the path under it', () => {
+    expect(
+      hemeraPlaceOf(
+        {
+          resolved: '/home/someone/media-library/v2/scripts',
+          root: '/home/someone/media-library',
+          inside: true,
+          line: 'sleep 120',
+        },
+        'main',
+        repositories,
+      ),
+    ).toEqual([
+      { label: 'In', value: 'v2', repository: { path: 'v2', icon: null } },
+      { label: 'Path', value: 'scripts' },
+    ])
+  })
+
+  test('an outside one-off is said outside the Workspace, because the engine says so', () => {
+    const asked = {
+      resolved: '/home/someone/elsewhere',
+      root: '/home/someone/media-library',
+      inside: false,
+      line: 'sleep 120',
+    }
+    expect(
+      hemeraPermissionOf(
+        'commands_run',
+        'commands_run asks to run sleep 120 outside the Workspace, in /home/someone/elsewhere',
+        asked,
+      ).intent,
+    ).toBe('asks to run a line the agent wrote, outside the Workspace')
+    expect(hemeraPlaceOf(asked, 'main', repositories)).toEqual([
+      { label: 'Outside the Workspace', value: 'main' },
+      { label: 'Path', value: '/home/someone/elsewhere' },
+    ])
+  })
+
+  test('a file tool outside the root does not repeat the path its card already shows', () => {
+    expect(
+      hemeraPlaceOf(
+        { resolved: '/tmp/outside.txt', root: '/w', inside: false, line: null },
+        'main',
+        repositories,
+      ),
+    ).toEqual([{ label: 'Outside the Workspace', value: 'main' }])
+  })
+
+  test('a question written before the engine said where is read from its paths', () => {
+    // An inside one-off of an older thread: no `inside`, its place under the root.
+    expect(
+      hemeraPlaceOf({ resolved: '/w/v2', root: '/w', line: 'sleep 120' }, 'main', repositories),
+    ).toEqual([{ label: 'In', value: 'v2', repository: { path: 'v2', icon: null } }])
+    // A file tool is only ever asked outside.
+    expect(
+      hemeraPlaceOf({ resolved: '/w/notes.md', root: '/w', line: null }, 'main', repositories),
+    ).toEqual([{ label: 'Outside the Workspace', value: 'main' }])
   })
 })
 

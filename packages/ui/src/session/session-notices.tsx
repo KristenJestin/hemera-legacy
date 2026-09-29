@@ -189,6 +189,8 @@ export function SessionNotices({ groups, defaultOpen = false }: SessionNoticesPr
               // Opened by a press, it leaves the focus on the pill (review of #250): no answer is
               // picked out before the reader has read them all, and Tab goes on into the panel.
               keepFocus
+              // It comes out of the pill and closes back into it (review of #250).
+              grows
               open={open}
               onOpenChange={setOpen}
               trigger={

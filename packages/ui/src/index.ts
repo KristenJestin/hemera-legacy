@@ -263,6 +263,7 @@ export {
   type ArchivedSession,
   type ArchivedSessionsProps,
   type SessionHeaderProps,
+  type SessionRenaming,
 } from './session/session.tsx'
 
 /** A turn with an agent, drawn as it happens: what it thought, what it called, what it ran, and

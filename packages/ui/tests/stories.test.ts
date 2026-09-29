@@ -175,7 +175,10 @@ const NAMED_STATES = new Map([
       'Keyboard',
     ],
   ],
-  ['workspace/workspace-repositories', ['Ready', 'Empty', 'Cleaned', 'Loading', 'GitError']],
+  [
+    'workspace/workspace-repositories',
+    ['Ready', 'Empty', 'Cleaned', 'Loading', 'GitError', 'Preparing'],
+  ],
   [
     'workspace/create-workspace-dialog',
     [
@@ -485,6 +488,10 @@ describe('Catalogue, coquille et surfaces, et rien d’autre', () => {
       'HemeraToolCall',
       'CommandRun',
       'CommandProposal',
+      // #218: a change to the Project's setup the agent proposes, a row of the notices per
+      // change, and the quiet line the thread keeps of one whose call it cannot find.
+      'SetupProposal',
+      'SetupProposalRecord',
       'CallOutcome',
       'CallOutcomeDetails',
       'CommandProposalRecord',

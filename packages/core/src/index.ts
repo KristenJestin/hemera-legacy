@@ -104,6 +104,25 @@ export {
 } from './domain/commands.ts'
 export type { Command, CommandScope, CommandType } from './domain/commands.ts'
 export {
+  SETUP_CHANGE_KINDS,
+  setupChangeDetails,
+  setupChangeSubject,
+  setupChangeTitle,
+  setupChangeVerb,
+} from './domain/setup.ts'
+export type {
+  CommandChange,
+  RepositoryChange,
+  SetupChange,
+  SetupChangeKind,
+  SetupDetail,
+  SetupSubject,
+  StepChange,
+  VariableChange,
+  WorkspaceActChange,
+  WorkspaceCreateChange,
+} from './domain/setup.ts'
+export {
   AGENTS_FILE,
   CONTEXT_BASE,
   CONTEXT_REACHES,

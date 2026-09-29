@@ -22,11 +22,11 @@ import { collapse, expand, fold, POP, pop, RISE, rise, useTransition } from '../
  * and never opens it: the reader opens it.
  *
  * The kinds are the caller's, handed over as groups: a kind this component has never heard of is
- * one more group, with its icon and its items (the Project setup proposals to come, #222).
+ * one more group, with its icon and its items: the Project setup proposals are one (#218).
  */
 
 /** The tones a kind's tile is drawn in. */
-export type NoticeTone = 'warning' | 'primary' | 'info' | 'success'
+export type NoticeTone = 'warning' | 'primary' | 'info' | 'success' | 'build'
 
 /** One thing that waits: what answers it, already drawn, under the key it keeps while it waits. */
 export interface NoticeItem {
@@ -112,6 +112,9 @@ const TILES: Record<NoticeTone, string> = {
   info: 'flex size-control-sm shrink-0 items-center justify-center rounded-md bg-info-muted text-info-muted-foreground',
   success:
     'flex size-control-sm shrink-0 items-center justify-center rounded-md bg-success-muted text-success-muted-foreground',
+  // The Project's setup (#218): the build's teal, which no other kind wears.
+  build:
+    'flex size-control-sm shrink-0 items-center justify-center rounded-md bg-mission-build-muted text-mission-build-muted-foreground',
 }
 
 /** What a group of the list and an item of a group arrive and leave on: their height. */

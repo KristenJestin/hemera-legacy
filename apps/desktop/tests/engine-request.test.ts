@@ -27,6 +27,8 @@ import { acpTracesLayer } from '#engine/agents/trace.ts'
 import { heldWordsLayer } from '#engine/agents/held.ts'
 import { sessionModesLayer } from '#engine/agents/modes.ts'
 import { type Proposals, proposalsLayer } from '#engine/commands/proposals.ts'
+import { type SetupProposals, setupProposalsLayer } from '#engine/setup/proposals.ts'
+import { setupValuesLayer } from '#engine/setup/values.ts'
 import { type Commands, UnknownRunError, commandsLayer } from '#engine/commands/service.ts'
 import { type Context, contextLayer } from '#engine/context/service.ts'
 import { carriedMigrations, openProfile } from '#engine/migrate.ts'
@@ -103,6 +105,7 @@ function running<A, E>(
     | Preparation
     | Recipe
     | Proposals
+    | SetupProposals
     | Launches
   >,
   agent: FakeAgent = fakeAgent(),
@@ -192,6 +195,18 @@ function running<A, E>(
     Layer.provide(agents),
   )
 
+  const places = preparationLayer.pipe(
+    Layer.provideMerge(Layer.mergeAll(workspacesLayer, recipeLayer)),
+    Layer.provide(variablesLayer),
+    Layer.provide(gitLayer()),
+    Layer.provide(hostLinks),
+    Layer.provide(Layer.succeed(WorkspacesRoot, join(dataFolder, 'workspaces'))),
+    // A `run` step is a run of the very commands the tools run (Decided 11).
+    Layer.provide(lent),
+    Layer.provide(agents),
+    Layer.provideMerge(launches),
+  )
+
   const services: Layer.Layer<
     | Preferences
     | EngineStatus
@@ -209,6 +224,7 @@ function running<A, E>(
     | Preparation
     | Recipe
     | Proposals
+    | SetupProposals
     | Launches
     | Database
     | SqliteClient
@@ -224,16 +240,14 @@ function running<A, E>(
     proposalsLayer.pipe(Layer.provide(lent), Layer.provide(rows), Layer.provide(agents)),
     // The Workspaces of the Projects, made under the data folder over the machine's `git`, and
     // prepared in the scope of these services: what a background preparation runs in.
-    preparationLayer.pipe(
-      Layer.provideMerge(Layer.mergeAll(workspacesLayer, recipeLayer)),
-      Layer.provide(variablesLayer),
-      Layer.provide(gitLayer()),
-      Layer.provide(hostLinks),
-      Layer.provide(Layer.succeed(WorkspacesRoot, join(dataFolder, 'workspaces'))),
-      // A `run` step is a run of the very commands the tools run (Decided 11).
+    places,
+    // What a human decides of the setup changes the agent proposed, on the very Workspaces (#218).
+    setupProposalsLayer.pipe(
+      Layer.provide(places),
       Layer.provide(lent),
+      Layer.provide(rows),
       Layer.provide(agents),
-      Layer.provideMerge(launches),
+      Layer.provide(setupValuesLayer),
     ),
   ).pipe(
     Layer.provideMerge(
@@ -616,6 +630,7 @@ describe('Every Workspace channel reaches its use case', () => {
     expect(seen.status).toEqual([
       {
         relativePath: './sources/api',
+        step: null,
         git: expect.objectContaining({ ok: true, branch: 'atlas/HEM-7-login-form' }),
       },
     ])

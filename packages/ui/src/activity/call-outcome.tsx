@@ -45,8 +45,14 @@ const BOOKMARKS: Record<CommandProposalState, { word: string; tone: string }> = 
   declined: { word: 'declined', tone: 'flex text-muted-foreground' },
 }
 
+/** A mark on the call's line: the word it is heard by, and the tone it is drawn in. */
+interface Mark {
+  word: string
+  tone: string
+}
+
 /** The setup's mark: waiting while one change waits, else applied, declined, or how many were. */
-function setupMarkOf(states: readonly SetupProposalState[]): { word: string; tone: string } {
+function setupMarkOf(states: readonly SetupProposalState[]): Mark {
   const total = String(states.length)
   const waiting = states.filter((state) => state === 'pending').length
   const applied = states.filter((state) => state === 'accepted').length
@@ -56,7 +62,8 @@ function setupMarkOf(states: readonly SetupProposalState[]): { word: string; ton
       tone: 'flex text-warning-muted-foreground',
     }
   }
-  if (applied === states.length) return { word: 'applied', tone: 'flex text-success-muted-foreground' }
+  if (applied === states.length)
+    return { word: 'applied', tone: 'flex text-success-muted-foreground' }
   if (applied === 0) return { word: 'declined', tone: 'flex text-muted-foreground' }
   return {
     word: `${String(applied)} of ${total} changes applied`,

@@ -4,9 +4,11 @@ import { describe, expect, test } from 'vite-plus/test'
 
 import {
   AUR_PACKAGES,
+  arrayOf,
   expandedSource,
   renderPkgbuild,
   renderSrcinfo,
+  scalarOf,
   skippedWithout,
   versionOf,
 } from './aur-publish.ts'
@@ -117,5 +119,51 @@ describe('Publishing without the AUR key', () => {
 
   test('a key publishes', () => {
     expect(skippedWithout({ AUR_SSH_KEY: 'key' }, 'hemera-bin')).toBeNull()
+  })
+})
+
+describe('The release and the beta install to the same place', () => {
+  test.each(AUR_PACKAGES)('%s installs as hemera', (name) => {
+    expect(scalarOf(pkgbuildOf(name), '_app')).toBe('hemera')
+  })
+
+  test.each(AUR_PACKAGES)(
+    '%s provides and conflicts with hemera, so one replaces the other',
+    (name) => {
+      expect(arrayOf(pkgbuildOf(name), 'provides')).toEqual(['hemera'])
+      expect(arrayOf(pkgbuildOf(name), 'conflicts')).toEqual(['hemera'])
+    },
+  )
+
+  test.each(AUR_PACKAGES)('%s says so in its .SRCINFO too', (name) => {
+    expect(srcinfoOf(name)).toContain('\tprovides = hemera\n')
+    expect(srcinfoOf(name)).toContain('\tconflicts = hemera\n')
+  })
+
+  test.each(AUR_PACKAGES)(
+    '%s installs /opt/hemera, /usr/bin/hemera, hemera.desktop and the hemera icon',
+    (name) => {
+      const pkgbuild = pkgbuildOf(name)
+      expect(pkgbuild).toContain('"$pkgdir/opt/$_app"')
+      expect(pkgbuild).toMatch(/ln -s "\/opt\/\$_app\/\$\w+" "\$pkgdir\/usr\/bin\/\$_app"/)
+      expect(pkgbuild).toContain('"$pkgdir/usr/share/applications/$_app.desktop"')
+      expect(pkgbuild).toContain('Icon=$_app')
+      expect(pkgbuild).toMatch(/\/apps\/\$_app\./)
+    },
+  )
+
+  test('the beta still downloads its own deb, under its own name', () => {
+    expect(expandedSource(pkgbuildOf('hemera-beta-bin'))).toMatch(/^hemera-beta-.*Hemera\.Beta-/)
+  })
+})
+
+describe('A PKGBUILD array is read as makepkg reads it', () => {
+  test('its words are unquoted and expanded', () => {
+    const pkgbuild = '_app=hemera\nprovides=("$_app" \'other\' plain)\n'
+    expect(arrayOf(pkgbuild, 'provides')).toEqual(['hemera', 'other', 'plain'])
+  })
+
+  test('an array the PKGBUILD does not assign is refused', () => {
+    expect(() => arrayOf('_app=hemera\n', 'provides')).toThrow()
   })
 })

@@ -99,35 +99,7 @@ jobs:
       - name: Test
         working-directory: source
         timeout-minutes: 20
-        shell: bash
-        env:
-          HEMERA_SPAWN_TRACE: ${{ runner.temp }}/trace-full
-        run: bash .github/diagnostics/traced.sh
-
-      # Temporary (#253): the repository suites alone, twice, traced.
-      - name: Diagnostics · the repository project alone
-        if: always()
-        continue-on-error: true
-        timeout-minutes: 20
-        working-directory: source
-        shell: bash
-        env:
-          HEMERA_SPAWN_TRACE: ${{ runner.temp }}/trace-alone-1
-        run: bash .github/diagnostics/traced.sh --project repository
-      - name: Diagnostics · the repository project alone, again
-        if: always()
-        continue-on-error: true
-        timeout-minutes: 20
-        working-directory: source
-        shell: bash
-        env:
-          HEMERA_SPAWN_TRACE: ${{ runner.temp }}/trace-alone-2
-        run: bash .github/diagnostics/traced.sh --project repository
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: diagnostics-${{ runner.os }}
-          path: ${{ runner.temp }}/trace-*
+        run: pnpm test
 
   # The beta is the application the user runs every day, and it is built from every push to the
   # integration branch (design D3-10). It carries no tag: its version is what the repository

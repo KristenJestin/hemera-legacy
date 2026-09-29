@@ -57,15 +57,15 @@ export const Pending: Story = {
   play: async ({ canvasElement, args }) => {
     const canvas = within(canvasElement)
     await expect(canvas.getByText(args.name)).toBeVisible()
+    // Why is under the pointer on the name, not a sentence of the row.
+    await expect(canvas.getByText(args.name)).toHaveAttribute('title', args.why)
+    await expect(canvas.queryByText(args.why)).toBeNull()
     // Its whole line and where it runs are one press away, unfolding in place.
     await userEvent.click(canvas.getByRole('button', { name: 'Show the whole line' }))
     await expect(await canvas.findByText(args.line)).toBeVisible()
     await expect(canvas.getByText(args.folder)).toBeVisible()
-    // What accepting does is its group's head, not the card's (review of #250); why is under the
-    // pointer on the name.
+    await expect(canvas.getByText('Add command')).toBeVisible()
     await expect(canvas.queryByText('Add to the catalogue')).toBeNull()
-    await expect(canvas.getByText(args.name)).toHaveAttribute('title', args.why)
-    await expect(canvas.queryByText(args.why)).toBeNull()
     await userEvent.click(canvas.getByRole('button', { name: 'Add' }))
     await expect(args.onAccept).toHaveBeenCalledTimes(1)
     await expect(args.onDecline).not.toHaveBeenCalled()

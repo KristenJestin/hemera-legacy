@@ -85,48 +85,7 @@ jobs:
       - name: Test
         working-directory: source
         timeout-minutes: 20
-        if: runner.os == 'Linux'
         run: pnpm test
-
-      # Temporary (#253): whether the tests wait on the disk their temporary folders are on.
-      - name: Diagnostics · process and git costs, temp on C
-        if: always()
-        continue-on-error: true
-        working-directory: source
-        run: node .github/diagnostics/bench.mjs 15
-      - name: Diagnostics · process and git costs, temp on D
-        if: always() && runner.os == 'Windows'
-        continue-on-error: true
-        working-directory: source
-        env:
-          TEMP: ${{ runner.temp }}
-          TMP: ${{ runner.temp }}
-        run: node .github/diagnostics/bench.mjs 15
-      - name: Diagnostics · the repository project alone, temp on C
-        if: always()
-        continue-on-error: true
-        timeout-minutes: 20
-        working-directory: source
-        shell: bash
-        env:
-          HEMERA_SPAWN_TRACE: ${{ runner.temp }}/trace-c
-        run: bash .github/diagnostics/traced.sh --project repository
-      - name: Diagnostics · the repository project alone, temp on D
-        if: always() && runner.os == 'Windows'
-        continue-on-error: true
-        timeout-minutes: 20
-        working-directory: source
-        shell: bash
-        env:
-          HEMERA_SPAWN_TRACE: ${{ runner.temp }}/trace-d
-          TEMP: ${{ runner.temp }}
-          TMP: ${{ runner.temp }}
-        run: bash .github/diagnostics/traced.sh --project repository
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: diagnostics-${{ runner.os }}
-          path: ${{ runner.temp }}/trace-*
 
   # The beta is the application the user runs every day, and it is built from every push to the
   # integration branch (design D3-10). It carries no tag: its version is what the repository

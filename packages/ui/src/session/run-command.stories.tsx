@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
-import type { ReactNode } from 'react'
+import { type ReactNode, useEffect, useState } from 'react'
 import { expect, fn, screen, userEvent, waitFor, within } from 'storybook/test'
 
 import { TooltipProvider } from '../components/tooltip/tooltip.tsx'
@@ -34,7 +34,7 @@ function Frame(props: RunCommandProps): ReactNode {
 const meta = {
   title: 'Blocks/Session/RunCommand',
   component: Frame,
-  tags: ['autodocs', 'new'],
+  tags: ['autodocs', 'updated'],
   parameters: {
     layout: 'fullscreen',
     docs: { story: { inline: false, height: '28rem' } },
@@ -153,5 +153,55 @@ export const OneOffLikeACommand: Story = {
     )
     await expect(args.onRunOnce).toHaveBeenCalledWith(`node -e "console.log('once')"`)
     await expect(args.onRunCommand).not.toHaveBeenCalled()
+  },
+}
+
+/**
+ * A page that registers Run's keystroke, as the application's table does: pressed anywhere —
+ * the composer's box included — it asks Run to open.
+ */
+function WithTheKeystroke(props: RunCommandProps): ReactNode {
+  const [asked, setAsked] = useState(0)
+  useEffect(() => {
+    const listen = (event: KeyboardEvent): void => {
+      if (!(event.ctrlKey || event.metaKey) || !event.shiftKey || event.code !== 'KeyE') return
+      event.preventDefault()
+      setAsked((before) => before + 1)
+    }
+    document.addEventListener('keydown', listen)
+    return () => document.removeEventListener('keydown', listen)
+  }, [])
+  return (
+    <TooltipProvider>
+      <div className="flex flex-col gap-6 px-6 pt-6">
+        <RunCommand {...props} shortcut="Ctrl+Shift+E" asked={asked} />
+        <textarea
+          aria-label="Say something to claude…"
+          className="rounded-md border border-border p-2"
+        />
+      </div>
+    </TooltipProvider>
+  )
+}
+
+/**
+ * Run from the keyboard (review of #250): the keystroke opens Run's menu from the composer's box,
+ * its field taking the caret; Run's tooltip says the keystroke, in the keys of the others.
+ */
+export const FromTheKeyboard: Story = {
+  render: (args) => <WithTheKeystroke {...args} />,
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await userEvent.hover(canvas.getByRole('button', { name: 'Run' }))
+    const tip = await screen.findByRole('tooltip')
+    await expect(within(tip).getByText('Run a command')).toBeInTheDocument()
+    await expect(tip.querySelector('kbd')).not.toBeNull()
+    await userEvent.unhover(canvas.getByRole('button', { name: 'Run' }))
+    await userEvent.click(canvas.getByRole('textbox', { name: 'Say something to claude…' }))
+    await userEvent.keyboard('{Control>}{Shift>}E{/Shift}{/Control}')
+    const menu = await screen.findByRole('dialog', { name: 'Run a command' })
+    await waitFor(() => {
+      expect(within(menu).getByRole('textbox', { name: 'Command' })).toHaveFocus()
+    })
   },
 }

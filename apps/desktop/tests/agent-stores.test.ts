@@ -278,6 +278,7 @@ describe('La ligne au bout du fil dit ce que le tour fait', () => {
     expect(activityOf([said, thought, running])).toEqual({
       state: 'running',
       detail: 'cat recap.md',
+      face: 'running',
       thought: 'The file is probably at the root.',
     })
 
@@ -302,7 +303,11 @@ describe('La ligne au bout du fil dit ce que le tour fait', () => {
 
     // Answered, and the call it was about is what is running again.
     const decided = reported('e4', 'permission_decision', 'Allowed once', 'decided')
-    expect(activityOf([...thread, decided])).toEqual({ state: 'running', detail: 'git push' })
+    expect(activityOf([...thread, decided])).toEqual({
+      state: 'running',
+      detail: 'git push',
+      face: 'running',
+    })
   })
 
   test('the thought the row opens on is this turn’s and never the one before it', () => {
@@ -501,9 +506,9 @@ describe('Le tour tourne dès que la question est écrite', () => {
     }
     const said = entry('e1', 'user', 'Go')
     // The notices are empty: the row does not say the Session waits, whatever the thread holds.
-    expect(turnRowOf([said, request], true, 'e2', false)?.state).not.toBe('waiting')
+    expect(turnRowOf([said, request], true, 'e2', null)?.state).not.toBe('waiting')
     // Something waits in them: the row says so.
-    expect(turnRowOf([said, request], true, 'e2', true)?.state).toBe('waiting')
+    expect(turnRowOf([said, request], true, 'e2', 'permission')?.state).toBe('waiting')
   })
 
   test('the row waits for the reader as long as the notices hold anything (#237)', () => {
@@ -511,11 +516,14 @@ describe('Le tour tourne dès que la question est écrite', () => {
     const done = reported('e2', 'turn', 'The agent finished its turn.', 'end_turn')
 
     // Proposals the turn left behind: the turn is over, and the Session still waits for the reader.
-    expect(turnRowOf([said, done], false, 'e2', true)).toEqual({ state: 'waiting' })
+    expect(turnRowOf([said, done], false, 'e2', 'proposal')).toEqual({
+      state: 'waiting',
+      face: 'permission',
+    })
     // A turn running while something waits: it waits, whatever else it is doing.
-    expect(turnRowOf([said], true, 'e1', true)?.state).toBe('waiting')
+    expect(turnRowOf([said], true, 'e1', 'question')?.state).toBe('waiting')
     // Nothing waits any more: the row says how the turn ended again.
-    expect(turnRowOf([said, done], false, 'e2', false)?.state).toBe('done')
+    expect(turnRowOf([said, done], false, 'e2', null)?.state).toBe('done')
   })
 
   test('a prompt refused before any turn began leaves nothing running', async () => {
@@ -856,6 +864,7 @@ describe('The agent starts the app and the user opens it', () => {
     expect(activityOf([said, call, ended])).toEqual({
       state: 'running',
       doing: 'Running a command',
+      face: 'running',
     })
   })
 
@@ -863,7 +872,11 @@ describe('The agent starts the app and the user opens it', () => {
     const said = entry('e1', 'user', 'Write the problem')
     const call = reported('e2', 'tool_call', 'mcp__hemera__spec_write', 'in_progress')
 
-    expect(activityOf([said, call])).toEqual({ state: 'running', doing: 'Writing the Spec' })
+    expect(activityOf([said, call])).toEqual({
+      state: 'running',
+      doing: 'Writing the Spec',
+      face: 'writing',
+    })
   })
 
   test('an app left running is not what the turn is doing', () => {

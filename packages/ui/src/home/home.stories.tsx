@@ -152,7 +152,7 @@ function Writing(): ReactNode {
 }
 
 const meta = {
-  tags: ['autodocs'],
+  tags: ['autodocs', 'updated'],
   title: 'Surfaces/Home',
   component: ActivityFrame,
   parameters: { layout: 'padded' },
@@ -248,6 +248,26 @@ export const Variants: Story = {
       expect(canvas.getByRole('button', { name: 'Claude Code' })).toBeVisible()
     })
     expect(canvas.getByRole('button', { name: /Start chat/ })).not.toHaveAttribute('title')
+  },
+}
+
+/**
+ * A Project with no Session: Hemera's face at its hero size, asleep — no Session, so nothing runs
+ * — over the words that say so (issue #140).
+ */
+export const Empty: Story = {
+  parameters: { controls: { disable: true } },
+  render: (args) => <EmptyProject projectName="Atlas" onOpenJournal={args.onOpenJournal} />,
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const face = canvas.getByRole('img', { name: 'Hemera, asleep' })
+    await expect(face).toHaveAttribute('data-state', 'asleep')
+    // The hero of the page: the face's largest size, above the words, in the middle of them.
+    const words = canvas.getByText('No Session in Atlas').getBoundingClientRect()
+    const box = face.getBoundingClientRect()
+    await expect(box.width).toBeGreaterThan(words.height * 4)
+    await expect(box.bottom).toBeLessThanOrEqual(words.top)
+    await expect(box.left + box.width / 2).toBeCloseTo(words.left + words.width / 2, 0)
   },
 }
 

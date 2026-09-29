@@ -13,6 +13,18 @@ const SESSIONS: ShellSession[] = [
   { id: 'drizzle', title: 'Migrate to Drizzle 1.0' },
 ]
 
+/** Sessions whose agents are each doing something else, as the application hands them over. */
+const AT_WORK: ShellSession[] = [
+  { id: 'csv', title: 'CSV invoice export', agent: 'writing' },
+  { id: 'search', title: 'Full-text search', agent: 'question' },
+  { id: 'drizzle', title: 'Migrate to Drizzle 1.0', agent: 'permission' },
+  { id: 'tests', title: 'Flaky export tests', agent: 'running' },
+  { id: 'docs', title: 'Read the API docs', agent: 'reading' },
+  { id: 'lint', title: 'Lint the renderer', agent: 'thinking' },
+  { id: 'bump', title: 'Bump Electron', agent: 'error' },
+  { id: 'notes', title: 'Release notes' },
+]
+
 interface HarnessProps {
   collapsed?: boolean
   sessions?: ShellSession[]
@@ -158,5 +170,34 @@ export const MarkCrossing: Story = {
       'true',
     )
     expectNeverBuried(watched)
+  },
+}
+
+/**
+ * Each Session wears what its agent is doing (issue #140): at work, asking for an answer or a
+ * permission, failed, or asleep while nothing runs — the one that wants the reader is found at a
+ * glance, by its face rather than by its words.
+ */
+export const AgentsAtWork: Story = {
+  parameters: { controls: { disable: true } },
+  args: { sessions: AT_WORK },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const worn = AT_WORK.map((session) =>
+      canvas.getByRole('button', { name: session.title }).querySelector('[data-state]'),
+    ).map((face) => face?.getAttribute('data-state'))
+    await expect(worn).toEqual(AT_WORK.map((session) => session.agent ?? 'asleep'))
+  },
+}
+
+/** Folded to the rail, the faces are what is left of the rows, and still say who wants the reader. */
+export const AgentsOnTheRail: Story = {
+  parameters: { controls: { disable: true } },
+  args: { sessions: AT_WORK, collapsed: true },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const asking = canvas.getByRole('button', { name: 'Full-text search' })
+    await expect(asking.querySelector('[data-state]')).toHaveAttribute('data-state', 'question')
+    await expect(asking.querySelector('[data-state]')).toBeVisible()
   },
 }

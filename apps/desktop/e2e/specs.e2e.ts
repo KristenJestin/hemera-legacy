@@ -26,9 +26,11 @@ import { fakeWorkspace } from './agent/install.ts'
 import { AGENT, ANSWERS, MODELS, PROPOSAL, PROPOSE } from './agent/script.ts'
 import {
   addProject,
+  awaitsRecord,
   answerWith,
   awaits,
   control,
+  openNotices,
   press,
   pressIn,
   region,
@@ -161,7 +163,8 @@ describe('A free Session’s agent proposes a Spec, and Create makes the Session
     await write(ASKED)
     await press('Start chat')
     await awaits(ANSWERS[0])
-    await awaits('Create the Spec')
+    // The proposal waits among the Session's notices, closed until pressed (issue #237).
+    await openNotices('Spec proposed')
 
     // The agent proposed through Hemera's `spec_propose`: a Hemera call of the thread, wearing
     // the tool's own mark, and the proposal below it.
@@ -179,8 +182,9 @@ describe('A free Session’s agent proposes a Spec, and Create makes the Session
   })
 
   it('creates the Spec with its key, opens the panel and keeps the thread', async () => {
-    await pressIn(PROPOSAL_CARD, 'Create')
-    await awaits(`Created ${KEY}`)
+    await openNotices('Spec proposed')
+    await pressIn(PROPOSAL_CARD, 'Start')
+    await awaitsRecord(`Spec proposed, ${KEY} `)
     await browser.waitUntil(async () => (await region(PANEL)) !== '', {
       timeout: 10_000,
       timeoutMsg: 'the Spec panel never opened',
@@ -324,19 +328,20 @@ describe('A question is asked and answered in the chat', () => {
 
     const panel = await region(PANEL)
     expect(panel).toContain('Questions · 1 open')
-    // The card in the thread is where it is answered: the register offers no way there (#181).
+    // The notices on the composer's edge are where it is answered (#237): the register offers no
+    // way there (#181).
     expect(panel.toLowerCase()).not.toContain('answer in the chat')
   })
 
-  it('answers it in the block, which stays as it was asked, and resolves it in the register', async () => {
+  it('answers it in the notices, keeps its record in the thread, and resolves it in the register', async () => {
     await answerWith(ISSUE)
     await browser.pause(1200)
 
-    // The block stays where it was asked, every choice in it, and names itself after the answer,
-    // lettered as the card lettered it; the thread draws no answer of its own (issue #199).
+    // The thread keeps a quiet record where it was asked, the answer after the question, named
+    // after its answer, lettered as the card lettered it (issues #199, #237).
     const block = await region('[id^="ask-"]')
     expect(block).toContain(QUESTION)
-    expect(block).toContain('The payment date')
+    expect(block).toContain(`A, ${ISSUE}`)
     const chosen = await browser.execute(() =>
       [...document.querySelectorAll('[role="group"][aria-label^="You answered"]')].map(
         (group) =>

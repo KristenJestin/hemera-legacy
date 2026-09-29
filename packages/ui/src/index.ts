@@ -263,6 +263,7 @@ export {
   type ArchivedSession,
   type ArchivedSessionsProps,
   type SessionHeaderProps,
+  type SessionRenaming,
 } from './session/session.tsx'
 
 /** A turn with an agent, drawn as it happens: what it thought, what it called, what it ran, and
@@ -296,12 +297,27 @@ export {
   type HemeraToolStatus,
 } from './activity/hemera-tool-call.tsx'
 export { CommandRun, type CommandRunProps, type CommandState } from './activity/command-run.tsx'
+export {
+  CallOutcome,
+  CallOutcomeDetails,
+  type CallOutcomeDetailsProps,
+  type CallOutcomeProps,
+  type CallPermission,
+} from './activity/call-outcome.tsx'
 /** A command the agent proposes for the catalogue, and the human's answer (D8-11). */
 export {
   CommandProposal,
+  CommandProposalRecord,
   type CommandProposalProps,
+  type CommandProposalRecordProps,
   type CommandProposalState,
 } from './activity/command-proposal.tsx'
+/** What stays in the thread of something that waited for a human (issue #237). */
+export {
+  NoticeRecord,
+  type NoticeAnswer,
+  type NoticeRecordProps,
+} from './activity/notice-record.tsx'
 /** The seven types of a command and the icon the design system fixes for each (D8-07). */
 export {
   COMMAND_SCOPES,
@@ -314,7 +330,10 @@ export {
 
 /** The gate a turn stops at, and the one line the answer leaves behind. */
 export {
+  PermissionRecord,
   PermissionRequest,
+  type PermissionRecordProps,
+  type PermissionStanding,
   type PermissionOption,
   type PermissionOptionKind,
   type PermissionParameter,
@@ -373,11 +392,15 @@ export {
   type TouchedFile,
 } from './session/session-details.tsx'
 export {
-  CommandsPanel,
-  type CatalogueCommandLine,
-  type CommandPanelRun,
-  type CommandsPanelProps,
-} from './session/commands-panel.tsx'
+  type GoingOnAgent,
+  type GoingOnItem,
+  type GoingOnRun,
+  type GoingOnShell,
+  type GoingOnState,
+} from './session/going-on.ts'
+export { GoingOnLine, type GoingOnLineProps } from './session/going-on-line.tsx'
+export type { RunRepository } from './session/run-place.tsx'
+export { RunCommand, type RunCatalogueEntry, type RunCommandProps } from './session/run-command.tsx'
 export {
   ContextView,
   type ContextCommand,
@@ -403,6 +426,19 @@ export {
 } from './session/activity-row.tsx'
 /** The row above the box: what the turn is doing, and what it has spent. */
 export { TurnLine, type TurnLineProps } from './session/turn-line.tsx'
+export {
+  SessionHistory,
+  type HistoryItem,
+  type SessionHistoryProps,
+} from './session/session-history.tsx'
+export { SessionCatalogue, type SessionCatalogueProps } from './session/session-catalogue.tsx'
+export {
+  SessionNotices,
+  type NoticeGroup,
+  type NoticeItem,
+  type NoticeTone,
+  type SessionNoticesProps,
+} from './session/session-notices.tsx'
 export {
   ResumeFallbackBanner,
   type ResumeFallbackBannerProps,
@@ -462,12 +498,19 @@ export { QuestionsPart, type QuestionsPartProps } from './spec/questions-part.ts
 export { ReaderBar, type ReaderBarProps } from './spec/reader-bar.tsx'
 export { ReworkDialog, type ReworkDialogProps } from './spec/rework-dialog.tsx'
 export { MissionBrief, type MissionBriefProps } from './spec/mission-brief.tsx'
-export { SpecQuestion, type SpecQuestionProps } from './spec/spec-question.tsx'
+export {
+  SpecQuestion,
+  SpecQuestionRecord,
+  type SpecQuestionProps,
+  type SpecQuestionRecordProps,
+} from './spec/spec-question.tsx'
 export { WorkspaceActions, type WorkspaceActionsProps } from './spec/workspace-actions.tsx'
 export {
   CreateSpecProposal,
+  SpecProposalRecord,
   type CreateSpecProposalProps,
   type ProposalState,
+  type SpecProposalRecordProps,
 } from './spec/create-spec-proposal.tsx'
 export type {
   Author,

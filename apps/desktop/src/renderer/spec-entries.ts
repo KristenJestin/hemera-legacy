@@ -217,9 +217,9 @@ export function proposalIdOf(entry: SessionEntry): string {
 
 /**
  * Whether a Spec entry waits for the reader's answer (issue #130): a proposal of a `free` Session
- * still proposed, a question neither answered nor left behind by a Rework. The page pins it above
- * the composer while it waits — the agent's words go on under it and would scroll it out of
- * sight — and draws it back in the thread once it is answered.
+ * still proposed, a question neither answered nor left behind by a Rework. The page draws it among
+ * the Session's notices, on the composer's edge, while it waits — the agent's words go on under it
+ * and would scroll it out of sight — and the thread keeps its record (issue #237).
  */
 export function waitsForAnswer(
   entry: SessionEntry,

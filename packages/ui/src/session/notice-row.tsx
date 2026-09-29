@@ -1,9 +1,9 @@
-import { motion } from 'motion/react'
+import { AnimatePresence, motion } from 'motion/react'
 import { type ReactNode, useState } from 'react'
 
 import { Button, IconButton } from '../components/button/button.tsx'
 import { IconChevronDown } from '../icons.ts'
-import { fold, useTransition } from '../motion.ts'
+import { CROSSFADE, collapse, crossfade, expand, fold, useTransition } from '../motion.ts'
 
 /**
  * One thing that waits for the reader, as the Session's notices list it (variant A of the
@@ -15,10 +15,10 @@ import { fold, useTransition } from '../motion.ts'
  * - the answers, beside the text's first line and always in the same shape: a quiet text button
  *   that refuses, then the primary one that accepts, their verbs the kind's. A question has none:
  *   its choices are its answers, under its text;
- * - a chevron, when there is more to read, that unfolds the text in place: the one line becomes the
- *   whole of it, wrapped where it stands, with where it runs as a small line under it. There is one
- *   text, never a second block; the row grows by its height, and the answers and the chevron stay
- *   on the first line.
+ * - a chevron, when there is more to read. Unfolded, the cut line gives way, where it stands, to
+ *   the item's title — "Run command", "Add command", a tool's label — and the whole line opens
+ *   under it in its block, where it runs as a small line under that, growing by its height. The
+ *   line is said once either way: cut on the head, or whole under the title.
  *
  * No icon-only ✓ or ✕: an answer is a word.
  */
@@ -31,17 +31,19 @@ export interface NoticeAnswerButton {
 export interface NoticeRowProps {
   /** What the row is called to a screen reader. */
   name: string
-  /** What it is about: cut to one line, and whole once unfolded. */
+  /** What it is about, cut to one line: the line to run, a command's name. */
   head: ReactNode
-  /** Whether the text is a line to run, set in the terminal's letters. */
+  /** Whether the head is a line to run, set in the terminal's letters. */
   mono?: boolean | undefined
-  /** Whether the text is read whole at once, with nothing to unfold: a question. */
+  /** Whether the head is read whole, with nothing to unfold: a question. */
   wrap?: boolean | undefined
-  /** Whether there is more to read than one line holds; a line to run or a place says there is. */
-  unfolds?: boolean | undefined
-  /** Where it would run or act, the small line under the unfolded text. */
+  /** What the item is, which takes the head's place once unfolded: `Run command`. */
+  title?: string | undefined
+  /** The line whole, in its block under the title once unfolded. */
+  line?: string | undefined
+  /** Where it would run or act, the small line under the block. */
   place?: ReactNode
-  /** What the row always holds under its text: a question's choices, a Spec's type. */
+  /** What the row always holds under its head: a question's choices, a Spec's type. */
   children?: ReactNode
   /** The quiet answer that refuses. */
   refuse?: NoticeAnswerButton | undefined
@@ -53,28 +55,28 @@ export interface NoticeRowProps {
 
 const ROW = 'flex min-w-0 flex-col'
 
-const FIRST = 'flex min-w-0 items-start gap-2'
+const FIRST = 'flex min-h-control-sm min-w-0 items-center gap-2'
 
-/** The text's room, which is what grows: its first line sits on the answers' line. */
-const ROOM = 'min-w-0 flex-1 overflow-hidden'
+/** The head's one line, where the cut text and the title trade places. */
+const HEAD = 'relative min-w-0 flex-1'
 
-const TEXT = 'py-1.5 text-sm break-words text-foreground'
+const TEXT = 'truncate text-sm text-foreground'
 
-const MONO_TEXT = 'py-2 font-mono text-xs break-all whitespace-pre-wrap text-foreground'
+const MONO_TEXT = 'truncate font-mono text-xs text-foreground'
 
-/** The same texts cut to their first line, while folded. */
-const TEXT_CUT = 'line-clamp-1 py-1.5 text-sm break-words text-foreground'
+const WRAPPED = 'min-w-0 flex-1 py-1 text-sm text-foreground'
 
-const MONO_TEXT_CUT =
-  'line-clamp-1 py-2 font-mono text-xs break-all whitespace-pre-wrap text-foreground'
-
-const PLACE =
-  'flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 pb-1 text-xs text-muted-foreground'
+/** The title, laid over the cut line it replaces, so neither moves the row. */
+const TITLE = 'absolute inset-0 flex items-center truncate text-sm font-medium text-foreground'
 
 const ANSWERS = 'flex shrink-0 items-center gap-1'
 
-/** The height of the one line a row is folded to: a control's, the answers' beside it. */
-const ONE_LINE = 'var(--spacing-control-sm)'
+const WHOLE = 'flex flex-col gap-1 pt-1 pb-1'
+
+const LINE =
+  'rounded-md bg-muted px-2 py-1 font-mono text-xs break-all whitespace-pre-wrap text-foreground'
+
+const PLACE = 'flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground'
 
 const BODY = 'pt-1'
 
@@ -83,7 +85,8 @@ export function NoticeRow({
   head,
   mono = false,
   wrap = false,
-  unfolds = mono,
+  title,
+  line,
   place,
   children,
   refuse,
@@ -91,40 +94,41 @@ export function NoticeRow({
   accept,
 }: NoticeRowProps): ReactNode {
   const [open, setOpen] = useState(false)
-  // Cut while folded, and until the fold is over: the text stays whole while its room closes on
-  // it, and is cut once the room is one line again.
-  const [cut, setCut] = useState(true)
   const folding = useTransition(fold)
-  const more = !wrap && (unfolds || place !== undefined)
-
-  const toggle = (): void => {
-    if (!open) setCut(false)
-    setOpen(!open)
-  }
-
+  const fading = useTransition(crossfade)
+  const more = !wrap && (line !== undefined || place !== undefined)
   return (
     <div role="group" aria-label={name} className={ROW}>
       <div className={FIRST}>
-        <motion.div
-          className={ROOM}
-          initial={false}
-          // Folded, the room is one line — the height of the answers beside it, a control's —
-          // and unfolded, the text's own.
-          animate={{ height: open || wrap ? 'auto' : ONE_LINE }}
-          transition={folding}
-          onAnimationComplete={() => {
-            if (!open) setCut(true)
-          }}
-        >
-          <div>
-            <div
-              className={cut && !wrap ? (mono ? MONO_TEXT_CUT : TEXT_CUT) : mono ? MONO_TEXT : TEXT}
+        {wrap ? (
+          <div className={WRAPPED}>{head}</div>
+        ) : (
+          <div className={HEAD}>
+            <motion.div
+              className={mono ? MONO_TEXT : TEXT}
+              aria-hidden={open ? true : undefined}
+              initial={false}
+              animate={open ? CROSSFADE.from : CROSSFADE.to}
+              transition={fading}
             >
               {head}
-            </div>
-            {!cut && place !== undefined && <div className={PLACE}>{place}</div>}
+            </motion.div>
+            <AnimatePresence initial={false}>
+              {open && title !== undefined && (
+                <motion.div
+                  key="title"
+                  className={TITLE}
+                  initial={CROSSFADE.from}
+                  animate={CROSSFADE.to}
+                  exit={CROSSFADE.from}
+                  transition={fading}
+                >
+                  {title}
+                </motion.div>
+              )}
+            </AnimatePresence>
           </div>
-        </motion.div>
+        )}
         {(refuse !== undefined || accept !== undefined || others.length > 0) && (
           <span className={ANSWERS}>
             {refuse !== undefined && (
@@ -151,10 +155,27 @@ export function NoticeRow({
             icon={<IconChevronDown size="sm" />}
             aria-label={open ? 'Fold the whole line' : 'Show the whole line'}
             aria-expanded={open}
-            onClick={toggle}
+            onClick={() => setOpen(!open)}
           />
         )}
       </div>
+      <AnimatePresence initial={false}>
+        {open && (
+          <motion.div
+            key="whole"
+            className="overflow-hidden"
+            initial={collapse}
+            animate={expand}
+            exit={collapse}
+            transition={folding}
+          >
+            <div className={WHOLE}>
+              {line !== undefined && <pre className={LINE}>{line}</pre>}
+              {place !== undefined && <div className={PLACE}>{place}</div>}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
       {children !== undefined && <div className={BODY}>{children}</div>}
     </div>
   )

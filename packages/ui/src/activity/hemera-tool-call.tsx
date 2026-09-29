@@ -194,6 +194,11 @@ export interface HemeraToolCallProps {
   defaultOpen?: boolean | undefined
   /** What a press on a subject that is a path does: the reader goes there. */
   onOpenPath?: ((path: string) => void) | undefined
+  /**
+   * What became of the call, on its own line (review of #250): the permission it waited on, the
+   * run it asked for, the command it proposed — one entry for the call, not three.
+   */
+  outcome?: ReactNode
   /** What the call returned, handed over already drawn. */
   children?: ReactNode
   /** Where the block sits; never how it looks. */
@@ -227,6 +232,7 @@ export function HemeraToolCall({
   note,
   defaultOpen = false,
   onOpenPath,
+  outcome,
   children,
   className,
 }: HemeraToolCallProps): ReactNode {
@@ -258,6 +264,7 @@ export function HemeraToolCall({
           <span className={NAMED}>{label}</span>
           {subject !== undefined && <SubjectOnLine subject={subject} onOpen={onOpenPath} />}
           {note !== undefined && <span className={NOTE}>— {note}</span>}
+          {outcome}
           <StatusDot
             status={tone}
             size="sm"

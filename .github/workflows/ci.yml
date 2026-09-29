@@ -87,6 +87,67 @@ jobs:
         timeout-minutes: 20
         run: pnpm test
 
+      # Temporary (#253): what the runner is, what a process costs on it, and where a test's time goes.
+      - name: Diagnostics · runner
+        if: always() && runner.os == 'Windows'
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          Get-MpComputerStatus | Select-Object AMServiceEnabled, AntivirusEnabled, RealTimeProtectionEnabled, OnAccessProtectionEnabled, IoavProtectionEnabled, BehaviorMonitorEnabled | Format-List
+          "Exclusions: $((Get-MpPreference).ExclusionPath -join ', ')"
+          "TEMP: $env:TEMP"
+          Get-CimInstance Win32_Processor | Select-Object Name, NumberOfCores, NumberOfLogicalProcessors | Format-List
+          Get-PSDrive C, D -ErrorAction SilentlyContinue | Format-Table
+      - name: Diagnostics · process and git costs
+        if: always()
+        continue-on-error: true
+        working-directory: source
+        run: node .github/diagnostics/bench.mjs 15
+      - name: Diagnostics · the repository project alone, traced
+        if: always()
+        continue-on-error: true
+        timeout-minutes: 20
+        working-directory: source
+        shell: bash
+        env:
+          HEMERA_SPAWN_TRACE: ${{ runner.temp }}/trace-alone
+        run: |
+          mkdir -p "$HEMERA_SPAWN_TRACE"
+          node .github/diagnostics/cpu.mjs "$HEMERA_SPAWN_TRACE/cpu.txt" &
+          status=0
+          pnpm exec vp test run --project repository --reporter=verbose --reporter=json --outputFile.json="$HEMERA_SPAWN_TRACE/vitest.json" || status=$?
+          kill %1
+          exit $status
+      - name: Diagnostics · every project, traced
+        if: always()
+        continue-on-error: true
+        timeout-minutes: 20
+        working-directory: source
+        shell: bash
+        env:
+          HEMERA_SPAWN_TRACE: ${{ runner.temp }}/trace-full
+        run: |
+          mkdir -p "$HEMERA_SPAWN_TRACE"
+          node .github/diagnostics/cpu.mjs "$HEMERA_SPAWN_TRACE/cpu.txt" &
+          status=0
+          pnpm exec vp test run --reporter=default --reporter=json --outputFile.json="$HEMERA_SPAWN_TRACE/vitest.json" || status=$?
+          kill %1
+          exit $status
+      - name: Diagnostics · Defender excludes the folders, then the costs again
+        if: always() && runner.os == 'Windows'
+        continue-on-error: true
+        shell: pwsh
+        working-directory: source
+        run: |
+          Add-MpPreference -ExclusionPath $env:TEMP, $env:GITHUB_WORKSPACE, $env:RUNNER_TEMP
+          Add-MpPreference -ExclusionProcess git.exe, node.exe
+          node .github/diagnostics/bench.mjs 15
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: diagnostics-${{ runner.os }}
+          path: ${{ runner.temp }}/trace-*
+
   # The beta is the application the user runs every day, and it is built from every push to the
   # integration branch (design D3-10). It carries no tag: its version is what the repository
   # answers about itself, which is why the history is fetched whole rather than shallow.

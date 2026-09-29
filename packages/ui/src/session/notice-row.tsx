@@ -3,7 +3,7 @@ import { type ReactNode, useState } from 'react'
 
 import { Button, IconButton } from '../components/button/button.tsx'
 import { IconChevronDown } from '../icons.ts'
-import { collapse, expand, fold, useTransition } from '../motion.ts'
+import { CROSSFADE, collapse, crossfade, expand, fold, useTransition } from '../motion.ts'
 
 /**
  * One thing that waits for the reader, as the Session's notices list it (variant A of the
@@ -16,7 +16,7 @@ import { collapse, expand, fold, useTransition } from '../motion.ts'
  *   then the primary one that accepts, their verbs the kind's. A question has none: its choices
  *   are its answers, under its head;
  * - a chevron, when there is more to read, that unfolds the whole line and where it runs in place,
- *   by its height.
+ *   by its height, while the row's own cut line fades out where it stands: it is said once.
  *
  * No icon-only ✓ or ✕: an answer is a word.
  */
@@ -84,11 +84,23 @@ export function NoticeRow({
 }: NoticeRowProps): ReactNode {
   const [open, setOpen] = useState(false)
   const folding = useTransition(fold)
+  const fading = useTransition(crossfade)
   const unfolds = line !== undefined || place !== undefined
   return (
     <div role="group" aria-label={name} className={ROW}>
       <div className={LINE_ONE}>
-        <div className={wrap ? WRAPPED_HEAD : mono ? MONO_HEAD : HEAD}>{head}</div>
+        {/* Unfolded, the row's line gives way to the whole one under it: it fades where it stands,
+            keeping its room, so the answers and the chevron do not move, and nothing is said
+            twice. */}
+        <motion.div
+          className={wrap ? WRAPPED_HEAD : mono ? MONO_HEAD : HEAD}
+          aria-hidden={open ? true : undefined}
+          initial={false}
+          animate={open ? CROSSFADE.from : CROSSFADE.to}
+          transition={fading}
+        >
+          {head}
+        </motion.div>
         {(refuse !== undefined || accept !== undefined || others.length > 0) && (
           <span className={ANSWERS}>
             {refuse !== undefined && (

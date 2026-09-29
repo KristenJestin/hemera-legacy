@@ -68,6 +68,9 @@ const ONCE = [
 ]
 
 /** What answers one thing that waits, as the page draws it for the notices. */
+/** What a question was answered with, which the stories read. */
+const told = fn()
+
 function Answer({
   waiting,
   onAnswer,
@@ -111,7 +114,16 @@ function Answer({
         />
       )
     case 'question':
-      return <SpecQuestion question={waiting.question} onAnswer={answer} bare />
+      return (
+        <SpecQuestion
+          question={waiting.question}
+          onAnswer={(given) => {
+            told(given)
+            answer()
+          }}
+          bare
+        />
+      )
   }
 }
 
@@ -179,12 +191,14 @@ function groupsOf(
       title: 'Run once',
       icon: <IconShield size="md" aria-hidden="true" />,
       urgent: true,
+      tone: 'warning',
       items: of('permission'),
     },
     {
       kind: 'question',
       label: 'Questions',
       title: 'Questions',
+      tone: 'info',
       icon: <IconMessageQuestion size="md" aria-hidden="true" />,
       items: of('question'),
     },
@@ -192,6 +206,7 @@ function groupsOf(
       kind: 'spec',
       label: 'Spec proposed',
       title: 'Start a Spec',
+      tone: 'success',
       icon: <IconFlag size="md" aria-hidden="true" />,
       items: of('spec'),
     },
@@ -199,6 +214,7 @@ function groupsOf(
       kind: 'proposal',
       label: 'Proposed commands',
       title: 'Add to the catalogue',
+      tone: 'primary',
       icon: <IconBookmarkPlus size="md" aria-hidden="true" />,
       items: proposals,
       actions:
@@ -526,16 +542,61 @@ export const OpenOnSeveralKinds: Story = {
   },
   play: async () => {
     const panel = await screen.findByRole('dialog', { name: 'Waiting for your answer' })
-    const heads = within(panel)
-      .getAllByRole('region')
-      .map((group) => group.querySelector('header')?.textContent)
-    // A head a kind — what accepting does and how many — and Add all in the proposals' own head.
-    await expect(heads).toEqual(['Run once· 1', 'Questions· 1', 'Add to the catalogue· 3Add all'])
-    // The kind is said once, by its head: no card says it again (review of #250).
-    await expect(within(panel).getAllByText('Add to the catalogue')).toHaveLength(1)
-    await expect(within(panel).getAllByText('Run once')).toHaveLength(1)
+    // One row an item, each after its kind's tile: the kind is said nowhere else.
+    await expect(within(panel).queryByText('Add to the catalogue')).toBeNull()
+    await expect(within(panel).queryByText('Run once')).toBeNull()
     await expect(within(panel).getAllByRole('button', { name: 'Add' })).toHaveLength(3)
     await expect(within(panel).getAllByRole('button', { name: 'Decline' })).toHaveLength(3)
     await expect(within(panel).getByRole('button', { name: 'Add all' })).toBeVisible()
+    // The whole line is one press away, unfolding in place.
+    const row = within(panel).getByRole('group', { name: 'Permission for Run command' })
+    await userEvent.click(within(row).getByRole('button', { name: 'Show the whole line' }))
+    await expect(await within(row).findByText('api')).toBeVisible()
+  },
+}
+
+/**
+ * A question answered in the reader's own words (review of #250): `Other…` turns into its field in
+ * place, at its own height; typing in it picks no choice and closes nothing, Escape gives `Other…`
+ * back with the panel still open, and Enter sends the words — the question folds away with them.
+ */
+export const AnsweredInOwnWords: Story = {
+  args: { waiting: [QUESTION, ...PROPOSED], defaultOpen: true },
+  play: async ({ args }) => {
+    told.mockClear()
+    const panel = await screen.findByRole('dialog', { name: 'Waiting for your answer' })
+    const proposals = within(panel).getByRole('region', { name: 'Proposed commands' })
+    const question = within(panel).getByRole('region', { name: 'Questions' })
+    // Read against the question's own top: the panel may scroll the field into view.
+    const gap = (): number =>
+      proposals.getBoundingClientRect().top - question.getBoundingClientRect().top
+    const under = gap()
+    await userEvent.click(within(panel).getByRole('button', { name: /Other/ }))
+    const field = await within(panel).findByRole('textbox', { name: 'Other' })
+    await expect(field).toHaveFocus()
+    // Nothing under the question moved as `Other…` turned into its field.
+    await expect(gap()).toBe(under)
+    // Letters are the field's: B picks no choice.
+    await userEvent.type(field, 'B')
+    await expect(told).not.toHaveBeenCalled()
+    // Escape gives `Other…` back, and the panel stays open.
+    await userEvent.keyboard('{Escape}')
+    await waitFor(() => {
+      expect(within(panel).queryByRole('textbox', { name: 'Other' })).toBeNull()
+    })
+    await expect(screen.getByRole('dialog', { name: 'Waiting for your answer' })).toBeVisible()
+    await userEvent.click(within(panel).getByRole('button', { name: /Other/ }))
+    // What was typed before Escape is still there: nothing typed is lost.
+    const again = await within(panel).findByRole('textbox', { name: 'Other' })
+    await expect(again).toHaveValue('B')
+    await userEvent.clear(again)
+    await userEvent.type(again, 'One file a month{Enter}')
+    await expect(told).toHaveBeenCalledWith({ text: 'One file a month' })
+    await expect(args.onAnswer).toHaveBeenCalledWith(QUESTION.id)
+    await waitFor(() => {
+      expect(within(panel).queryByRole('region', { name: 'Questions' })).toBeNull()
+    })
+    // The panel is still open, on what is left.
+    await expect(screen.getByRole('dialog', { name: 'Waiting for your answer' })).toBeVisible()
   },
 }

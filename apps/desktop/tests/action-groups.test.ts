@@ -56,6 +56,7 @@ describe('Tool calls between two agent texts are one folded group', () => {
         count: 4,
         status: 'completed',
         latest: 'pnpm test',
+        unit: 'actions',
       },
       { kind: 'one', item: 'text-2' },
     ])
@@ -74,6 +75,7 @@ describe('Tool calls between two agent texts are one folded group', () => {
         count: 2,
         status: 'completed',
         latest: 'Read a file',
+        unit: 'actions',
       },
     ])
   })
@@ -120,7 +122,14 @@ describe('Tool calls between two agent texts are one folded group', () => {
       { item: 'a', grouping: HEMERA },
       { item: 'b', grouping: READ },
     ])
-    expect(Object.keys(group ?? {}).sort()).toEqual(['count', 'items', 'kind', 'latest', 'status'])
+    expect(Object.keys(group ?? {}).sort()).toEqual([
+      'count',
+      'items',
+      'kind',
+      'latest',
+      'status',
+      'unit',
+    ])
   })
 
   test('a folded group names its latest action, and follows it as calls arrive (issue #180)', () => {
@@ -252,6 +261,7 @@ describe('The quiet records fold into the work around them (#250)', () => {
         count: 2,
         status: 'completed',
         latest: 'Read a file',
+        unit: 'actions',
       },
     ])
   })
@@ -260,5 +270,56 @@ describe('The quiet records fold into the work around them (#250)', () => {
     expect(groupActions([{ item: 'question', grouping: 'member' }])).toEqual([
       { kind: 'one', item: 'question' },
     ])
+  })
+})
+
+describe('Runs one after the other between two messages are one group (#250)', () => {
+  const run = (state: string, name = 'v2 check'): SessionEntry =>
+    entryOf(
+      'command_run',
+      JSON.stringify({ name, line: 'bun run check', state }),
+      `run-${name}-${state}`,
+    )
+
+  test('a run is a member that says how it stands and what it is', () => {
+    expect(groupingOf(run('failed'))).toEqual({
+      member: 'run',
+      status: 'failed',
+      label: 'v2 check',
+    })
+    expect(groupingOf(run('exited', 'echo'))).toEqual({
+      member: 'run',
+      status: 'completed',
+      label: 'echo',
+    })
+  })
+
+  test('two runs or more with no call around them fold into `N runs`, failed if one failed', () => {
+    const failed: Grouping = { member: 'run', status: 'failed', label: 'v2 check' }
+    const done: Grouping = { member: 'run', status: 'completed', label: 'echo' }
+    const pieces = groupActions([
+      { item: 'said', grouping: null },
+      { item: 'run-1', grouping: failed },
+      { item: 'run-2', grouping: failed },
+      { item: 'run-3', grouping: done },
+      { item: 'next', grouping: null },
+    ])
+    expect(pieces).toEqual([
+      { kind: 'one', item: 'said' },
+      {
+        kind: 'group',
+        items: ['run-1', 'run-2', 'run-3'],
+        count: 3,
+        status: 'failed',
+        latest: 'echo',
+        unit: 'runs',
+      },
+      { kind: 'one', item: 'next' },
+    ])
+  })
+
+  test('a single run stays its own row', () => {
+    const done: Grouping = { member: 'run', status: 'completed', label: 'echo' }
+    expect(groupActions([{ item: 'run', grouping: done }])).toEqual([{ kind: 'one', item: 'run' }])
   })
 })

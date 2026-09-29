@@ -46,17 +46,17 @@ export function CommandProposal({
   return (
     <NoticeRow
       name={`Proposed command ${name}`}
-      unfolds
-      head={
+      head={<span title={why}>{name}</span>}
+      // Unfolded, what it is takes the name's place, and the whole line opens under it, with the
+      // name it would be kept under and where it would run, when that is not the Workspace root.
+      title="Add command"
+      line={line}
+      place={
         <>
-          <span className="font-medium" title={why}>
-            {name}
-          </span>{' '}
-          <span className="font-mono text-xs text-muted-foreground">{line}</span>
+          <span className="font-medium text-foreground">{name}</span>
+          {folder !== '.' && <span>{folder}</span>}
         </>
       }
-      // Where it would run, when it is not the Workspace root, where every line runs.
-      place={folder === '.' ? undefined : folder}
       refuse={{ label: 'Decline', onPress: onDecline }}
       accept={{ label: 'Add', onPress: onAccept }}
     />

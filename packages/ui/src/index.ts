@@ -428,6 +428,7 @@ export {
   SessionNotices,
   type NoticeGroup,
   type NoticeItem,
+  type NoticeTone,
   type SessionNoticesProps,
 } from './session/session-notices.tsx'
 export {

@@ -1,6 +1,6 @@
 import { cn } from 'cn'
-import { AnimatePresence, motion } from 'motion/react'
-import { type ReactNode, useId, useState } from 'react'
+import { AnimatePresence, motion, useIsPresent } from 'motion/react'
+import { type ReactNode, useId, useLayoutEffect, useRef, useState } from 'react'
 
 import { IconChevronDown } from '../icons.ts'
 import { arrival, collapse, expand, fold, useTransition } from '../motion.ts'
@@ -21,9 +21,9 @@ import { arrival, collapse, expand, fold, useTransition } from '../motion.ts'
  * **The body grows and folds, and the fold is the growth played backwards** — the `expand` and
  * `collapse` kinds of the preset, on the `fold` kind: `morph`, the spring made for a dimension,
  * with no speed to carry, so a press that catches the body still opening turns it round where it
- * is rather than on the frame after it (issue #64). Until
- * the trial of 22 September 2026 it opened with a `clip-path` walking down a body already laid
- * out at full height, and closed by vanishing: D0-06 forbade animating a height, so there was
+ * is rather than on the frame after it (issue #64). Until the trial of 22 September 2026 it
+ * opened with a `clip-path` walking down a body already laid out at full height, and closed by
+ * vanishing: D0-06 forbade animating a height, so there was
  * no opening to play backwards, and Base UI's `Collapsible` took the body out of the page the
  * moment the state changed — a panel only stays mounted for it while a *CSS* animation is
  * running, and a spring driven in JavaScript is not one. Two things had to go for the close to
@@ -34,6 +34,15 @@ import { arrival, collapse, expand, fold, useTransition } from '../motion.ts'
  * The body is mounted when it opens and gone once it has closed, which is what makes both ends
  * of that possible: a console re-reads its bottom when it is opened again, which is where a
  * live console belongs.
+ *
+ * A body on its way out is still in the page, and it is no longer the reader's: from the press
+ * that closes it the body is `inert`, so the keyboard does not walk into what has just been closed
+ * and nothing it holds is announced (issue #69). The row goes on naming it until it has left — a
+ * reference that resolves to nothing is a broken one — and the end of the exit is what says when
+ * that is, where a timer would be a guess at the length of a spring. A focus that was inside the
+ * body when it stopped being the reader's — at the press, or at a caller that lets go of `open` —
+ * goes back to the row rather than being dropped on the document the moment the browser reaches it
+ * (issue #78).
  *
  * What the fold moves is pushed rather than teleported: the room under the row is laid out at
  * every height it passes through, so the blocks under it travel with it instead of arriving
@@ -84,6 +93,28 @@ const ROOM = 'overflow-hidden'
 
 /** What is inside, indented under the line that announced it. */
 const BODY = 'pt-1 pb-0.5 pl-8'
+
+/**
+ * The body, which knows that it is on its way out.
+ *
+ * `inert` takes it out of the keyboard's reach and out of what a screen reader announces, from the
+ * press that closes the fold: what has just been closed is not a place the reader can still walk
+ * into, or land on a second press from (issue #69). It cannot be read off the fold's own state
+ * here — `AnimatePresence` renders the body it is taking out of the page from the props that body
+ * was last given, which are the ones of the render that still had it open, and the attribute is
+ * therefore never on it — but the presence motion hands a child on its way out arrives after those
+ * props, and is what the body can read. `useIsPresent` and not `usePresence`: the second one tells
+ * motion to wait for this body before taking the room out of the page, which is the room's own
+ * business, and a body that never says it is safe to remove keeps the fold in the page for good.
+ */
+function FoldingBody({ children }: { children: ReactNode }): ReactNode {
+  const present = useIsPresent()
+  return (
+    <div className={BODY} inert={!present}>
+      {children}
+    </div>
+  )
+}
 
 export interface DisclosureProps {
   /** The line read while the body is closed, handed over already drawn. */
@@ -136,15 +167,6 @@ export function Disclosure({
 }: DisclosureProps): ReactNode {
   const [asked, setAsked] = useState(open ?? defaultOpen)
   const [held, setHeld] = useState(open)
-  // A caller that lets go hands the fold back to where it starts: a block held open while it ran
-  // folds the moment it ends well, and stays open when it ends on something the reader has to
-  // read — which is the caller's `defaultOpen` (recette 5 of 24 September 2026). The fold plays on
-  // the same `collapse` a press plays: nothing snaps shut. Kept in step while rendering, so the
-  // hand-over is never a frame late.
-  if (held !== open) {
-    setHeld(open)
-    setAsked(open ?? defaultOpen)
-  }
   const shown = open ?? asked
   const transition = useTransition(arrival)
   // A dimension has a spring of its own: it arrives without ever turning round, and a body that
@@ -154,12 +176,63 @@ export function Disclosure({
   const folding = useTransition(fold)
   const body = useId()
   const named = useId()
-  // Named only while it is there: a reference that resolves to nothing is a broken one, and the
-  // body is taken out of the page once it has finished folding.
-  const controls = shown ? body : undefined
+  // The row, and the room the body is given: where a focus inside the body goes back to, and what
+  // the body is taken out of the page through.
+  const row = useRef<HTMLButtonElement>(null)
+  const room = useRef<HTMLDivElement>(null)
+  /**
+   * Whether the focus is inside the room the body is given, read off the page.
+   *
+   * What the focus is in is not what the fold decided, so it is not read off the fold's own state:
+   * where the reader is, only the page knows.
+   */
+  const holdsTheFocus = (): boolean => {
+    const holding = room.current
+    return holding !== null && holding.contains(holding.ownerDocument.activeElement)
+  }
+  /** Whether a focus the body held still has to go back to the row once the page has taken it. */
+  const handed = useRef(false)
+  // A caller that lets go hands the fold back to where it starts: a block held open while it ran
+  // folds the moment it ends well, and stays open when it ends on something the reader has to
+  // read — which is the caller's `defaultOpen` (recette 5 of 24 September 2026). The fold plays on
+  // the same `collapse` a press plays: nothing snaps shut. Kept in step while rendering, so the
+  // hand-over is never a frame late. A close the reader never pressed for is read here too: this
+  // render is the last one where a focus inside the body is still the body's, and the commit that
+  // follows is what makes the body `inert` (issue #78).
+  if (held !== open) {
+    if (shown && !(open ?? defaultOpen) && holdsTheFocus()) handed.current = true
+    setHeld(open)
+    setAsked(open ?? defaultOpen)
+  }
+  // Named only while it is there, and it is there for the whole of the exit: the fold is the
+  // opening played backwards, so the body outlives the state that closed it. What says it has
+  // left is the end of the exit and nothing else — a timer would be a guess at the length of a
+  // spring — and a reference that resolves to nothing is a broken one (issue #69). Kept in step
+  // while rendering, so opening it again names the body on the frame it comes back. Only a body
+  // that is there counts: shown with nothing to show, there is no room and so no exit to end.
+  const present = shown && children !== undefined
+  const [left, setLeft] = useState(!present)
+  if (present && left) setLeft(false)
+  // A body taken away where it stands leaves with no fold to play: the block is drawn with nothing
+  // to open the moment its children go, so there is no exit, and the end of an exit is the only
+  // thing that says a room has left. Counted as still there, a block that was then closed and
+  // handed a body again named, while it was closed, a room that was never in the page (issue #78).
+  if (children === undefined && !left) setLeft(true)
+  const controls = left ? undefined : body
+  // Where a focus the body held goes once the page has taken the body away: back to the row, which
+  // is where the reading was happening. A body that is `inert` drops what it holds on the document,
+  // and the fold hears no press for a caller that lets go (issue #78).
+  useLayoutEffect(() => {
+    if (!handed.current) return
+    handed.current = false
+    row.current?.focus()
+  }, [shown])
   // A controlled block is the caller's answer: the reader's press is reported and the shown state
   // stays whatever the caller said.
   const press = () => {
+    // A focus inside the body has nowhere to live once the body is `inert`: the browser drops it
+    // on the document. It goes back to the row, which is where the reading was happening.
+    if (shown && holdsTheFocus()) row.current?.focus()
     setAsked(!shown)
     onOpenChange?.(!shown)
   }
@@ -192,6 +265,7 @@ export function Disclosure({
           {holdsPress ? (
             <div className={HELD_LINE}>
               <button
+                ref={row}
                 type="button"
                 className={UNDER}
                 aria-expanded={shown}
@@ -207,6 +281,7 @@ export function Disclosure({
           ) : (
             <div className={LINE}>
               <button
+                ref={row}
                 type="button"
                 className={TRIGGER}
                 aria-expanded={shown}
@@ -224,17 +299,18 @@ export function Disclosure({
             page the frame the state changes, and there is nothing left to play the opening
             backwards on.
           */}
-          <AnimatePresence initial={false}>
+          <AnimatePresence initial={false} onExitComplete={() => setLeft(true)}>
             {shown && (
               <motion.div
                 id={body}
+                ref={room}
                 className={ROOM}
                 initial={collapse}
                 animate={expand}
                 exit={collapse}
                 transition={folding}
               >
-                <div className={BODY}>{children}</div>
+                <FoldingBody>{children}</FoldingBody>
               </motion.div>
             )}
           </AnimatePresence>

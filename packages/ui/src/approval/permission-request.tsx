@@ -1,4 +1,4 @@
-import type { KeyboardEvent, ReactNode } from 'react'
+import type { ReactNode } from 'react'
 
 import { type NoticeAnswer, NoticeRecord } from '../activity/notice-record.tsx'
 import { IconShield } from '../icons.ts'
@@ -22,7 +22,8 @@ import { DecisionSummary } from './decision-summary.tsx'
  *
  * The card does not take the keyboard: it arrives while the reader is somewhere else, and
  * stealing the caret from a half-written sentence is how a prompt stops being finished. Tab walks
- * the answers, Escape takes the refusal, and Enter is the focused button's own press. It is drawn
+ * the answers and Enter is the focused button's own press. Escape answers nothing: among the
+ * notices it closes them, and a reader putting the panel away has refused nothing. It is drawn
  * as every notice is (`NoticeCard`, review of #250): "Run once" for a one-off line, the label of
  * the call otherwise, then what it is about, the whole line and where, and the answers in the one
  * row every notice has — the refusal quiet, the one-shot permission primary, a standing rule
@@ -158,42 +159,39 @@ export function PermissionRequest({
   const standing = options
     .filter((option) => STANDING.includes(option.kind))
     .toSorted((left, right) => RISK[left.kind] - RISK[right.kind])
-  // What accepting does, as the title: a one-off line runs once; any other call is what it is.
-  const title = toolName === 'commands_run' ? 'Run once' : (label ?? toolName)
+  // What the call is, when it is not a line run once — which its group already says.
+  const what = toolName === 'commands_run' ? undefined : (label ?? toolName)
+  const about = subject !== undefined && subject !== command ? subject : undefined
   return (
-    // Escape takes the refusal when the agent offered one, and nothing when it did not: a client
-    // that answers for the reader is a client that decides for them.
-    <div
-      onKeyDown={(event: KeyboardEvent<HTMLDivElement>) => {
-        if (event.key === 'Escape' && refusal !== undefined) onDecide(refusal)
-      }}
+    <NoticeCard
+      name={`Permission for ${label ?? toolName}`}
+      subject={
+        // What the call is, and what it is about when the line is not already that: the path
+        // as the agent named it.
+        what === undefined && about === undefined ? undefined : (
+          <>
+            {what !== undefined && <span className="shrink-0 font-medium">{what}</span>}
+            {about !== undefined && (
+              <span className={SUBJECT} title={about}>
+                {about}
+              </span>
+            )}
+          </>
+        )
+      }
+      line={command}
+      place={
+        parameters === undefined || parameters.length === 0 ? undefined : (
+          <PermissionParameters parameters={parameters} />
+        )
+      }
+      refuse={refusal === undefined ? undefined : named(refusal)}
+      others={standing.map(named)}
+      accept={once === undefined ? undefined : named(once)}
     >
-      <NoticeCard
-        icon={<IconShield size="sm" />}
-        title={title}
-        name={`Permission for ${label ?? toolName}`}
-        subject={
-          // What it is about, when the line is not already that: the path as the agent named it.
-          subject !== undefined && subject !== command ? (
-            <span className={SUBJECT} title={subject}>
-              {subject}
-            </span>
-          ) : undefined
-        }
-        line={command}
-        place={
-          parameters === undefined || parameters.length === 0 ? undefined : (
-            <PermissionParameters parameters={parameters} />
-          )
-        }
-        refuse={refusal === undefined ? undefined : named(refusal)}
-        others={standing.map(named)}
-        accept={once === undefined ? undefined : named(once)}
-      >
-        {label === undefined && intent !== undefined && <p className={INTENT}>{intent}</p>}
-        {diff}
-      </NoticeCard>
-    </div>
+      {label === undefined && intent !== undefined && <p className={INTENT}>{intent}</p>}
+      {diff}
+    </NoticeCard>
   )
 }
 

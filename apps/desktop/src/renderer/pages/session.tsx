@@ -72,7 +72,7 @@ import {
 import { agentShellCallsOf, commandProposalOf, foldedCallsOf } from '../agent-tool-payloads.ts'
 import { whenOf } from '../journal-lines.ts'
 import { type CommandWrite, commandLineOf, commandWriteOf } from '../project-lines.ts'
-import { NOTICE_KINDS, type NoticeKind, waitingAs } from '../notices.ts'
+import { asksToRunALine, NOTICE_KINDS, type NoticeKind, waitingAs } from '../notices.ts'
 import {
   contextListsOf,
   detailsTabsOf,
@@ -583,6 +583,8 @@ export function SessionPage({
   const waitingByKind = new Map<NoticeKind, NoticeItem[]>(NOTICE_KINDS.map((kind) => [kind, []]))
   /** The proposals that wait, which `Add all` answers in one press. */
   const proposalsWaiting: string[] = []
+  /** Whether every permission that waits is a line to run once, which its group's head says. */
+  let linesOnly = true
   for (let at = 0; at < thread.length; at += 1) {
     const entry = thread[at]
     if (entry === undefined || folded.hidden.has(entry.id)) continue
@@ -619,6 +621,7 @@ export function SessionPage({
       if (notice !== null) waitingByKind.get(kind)?.push({ id: entry.id, content: notice })
       const proposal = kind === 'proposal' ? commandProposalOf(entry) : null
       if (proposal !== null) proposalsWaiting.push(proposal.proposalId)
+      if (kind === 'permission' && !asksToRunALine(entry)) linesOnly = false
     }
     const block = drawEntry(drawn, drawing)
     // No mark: the rail is navigated by what the reader wrote, and a tick for every block of a
@@ -652,6 +655,7 @@ export function SessionPage({
     {
       kind: 'permission',
       label: 'Permissions',
+      title: linesOnly ? 'Run once' : 'Allow once',
       icon: <IconShield size="md" aria-hidden="true" />,
       urgent: true,
       items: itemsOf('permission'),
@@ -659,23 +663,26 @@ export function SessionPage({
     {
       kind: 'question',
       label: 'Questions',
+      title: 'Questions',
       icon: <IconMessageQuestion size="md" aria-hidden="true" />,
       items: itemsOf('question'),
     },
     {
       kind: 'spec',
       label: 'Spec proposed',
+      title: 'Start a Spec',
       icon: <IconFlag size="md" aria-hidden="true" />,
       items: itemsOf('spec'),
     },
     {
       kind: 'proposal',
       label: 'Proposed commands',
+      title: 'Add to the catalogue',
       icon: <IconBookmarkPlus size="md" aria-hidden="true" />,
       items: itemsOf('proposal'),
       actions:
         proposalsWaiting.length > 1 ? (
-          <Button variant="secondary" size="sm" onClick={acceptAll}>
+          <Button variant="link" size="sm" onClick={acceptAll}>
             Add all
           </Button>
         ) : undefined,

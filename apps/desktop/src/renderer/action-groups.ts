@@ -51,7 +51,14 @@ export interface Action {
  * run, review of #250), or `null` for anything else, which ends the run. A member is not counted,
  * and, unlike a companion, stays in the group at either end of it.
  */
-export type Grouping = Action | 'companion' | 'member' | null
+/** A run the reader started, as a member of a run of work: how it stands, and its name. */
+export interface RunMember {
+  member: 'run'
+  status: ActionStatus
+  label: string
+}
+
+export type Grouping = Action | 'companion' | 'member' | RunMember | null
 
 /** What the agent's report of a call says of it, as far as counting it goes. */
 const reportSchema = z.object({
@@ -96,10 +103,20 @@ function hemeraLabelOf(label: string, subject: string | undefined): string {
   return subject === undefined ? label : `${label} ${subject}`
 }
 
-/**
- * What an entry of the thread is to a run of calls, read off the entry the page draws — Hemera's
- * own answer in place of the agent's report of it, where the thread holds both.
- */
+/** What a run's entry says of it, as far as grouping goes. */
+const runSchema = z.object({
+  name: z.string(),
+  state: z.enum(['running', 'exited', 'failed', 'stopped']),
+})
+
+/** A run's state, in the words the group's status reads. */
+const RUN_STATES = {
+  running: 'in_progress',
+  failed: 'failed',
+  exited: 'completed',
+  stopped: 'completed',
+} as const satisfies Record<z.infer<typeof runSchema>['state'], ActionStatus>
+
 /** The quiet records of the thread, which fold into the work around them (review of #250). */
 const MEMBERS: readonly SessionEntry['kind'][] = [
   'permission_request',
@@ -110,8 +127,16 @@ const MEMBERS: readonly SessionEntry['kind'][] = [
   'spec_question',
 ]
 
+/**
+ * What an entry of the thread is to a run of calls, read off the entry the page draws — Hemera's
+ * own answer in place of the agent's report of it, where the thread holds both.
+ */
 export function groupingOf(entry: SessionEntry): Grouping {
   if (entry.kind === 'thought' || entry.kind === 'diff') return 'companion'
+  if (entry.kind === 'command_run') {
+    const run = parsed(runSchema, entry.payload)
+    if (run !== null) return { member: 'run', status: RUN_STATES[run.state], label: run.name }
+  }
   if (MEMBERS.includes(entry.kind)) return 'member'
   if (entry.kind === 'hemera_tool_call') {
     const drawn = hemeraToolCallOf(entry)
@@ -143,8 +168,22 @@ export function groupingOf(entry: SessionEntry): Grouping {
   }
 }
 
+/** Whether a block is a call, which is what a group of work counts. */
+function isAction(grouping: Grouping): grouping is Action {
+  return (
+    grouping !== null && grouping !== 'companion' && grouping !== 'member' && 'kind' in grouping
+  )
+}
+
+/** Whether a block is a run the reader started. */
+function isRun(grouping: Grouping): grouping is RunMember {
+  return (
+    grouping !== null && grouping !== 'companion' && grouping !== 'member' && 'member' in grouping
+  )
+}
+
 /** Where a group stands: running while one of its calls runs, failed if one failed, else done. */
-export function groupStatusOf(actions: readonly Action[]): ActionStatus {
+export function groupStatusOf(actions: readonly { status: ActionStatus }[]): ActionStatus {
   if (actions.some((one) => one.status === 'in_progress')) return 'in_progress'
   if (actions.some((one) => one.status === 'failed')) return 'failed'
   return 'completed'
@@ -153,7 +192,15 @@ export function groupStatusOf(actions: readonly Action[]): ActionStatus {
 /** A piece of the thread once the runs are folded: a block as it was, or a group of them. */
 export type Piece<T> =
   | { kind: 'one'; item: T }
-  | { kind: 'group'; items: T[]; count: number; status: ActionStatus; latest: string }
+  | {
+      kind: 'group'
+      items: T[]
+      count: number
+      status: ActionStatus
+      latest: string
+      /** What it counts: the calls of a turn, or runs the reader started (review of #250). */
+      unit: 'actions' | 'runs'
+    }
 
 /**
  * The blocks of a thread with every run of two calls or more folded into one group.
@@ -169,21 +216,22 @@ export function groupActions<T>(blocks: readonly { item: T; grouping: Grouping }
   const close = (): void => {
     const first = run.findIndex((one) => one.grouping !== 'companion')
     const last = run.findLastIndex((one) => one.grouping !== 'companion')
-    const actions = run.flatMap((one) =>
-      one.grouping === null || one.grouping === 'companion' || one.grouping === 'member'
-        ? []
-        : [one.grouping],
-    )
-    if (actions.length < 2) {
+    const actions = run.flatMap((one) => (isAction(one.grouping) ? [one.grouping] : []))
+    const runs = run.flatMap((one) => (isRun(one.grouping) ? [one.grouping] : []))
+    // Runs the reader started one after the other, no call among them, are a group of runs.
+    const byRuns = actions.length === 0 && runs.length >= 2
+    if (actions.length < 2 && !byRuns) {
       for (const one of run) pieces.push({ kind: 'one', item: one.item })
     } else {
+      const counted = byRuns ? runs : actions
       for (const one of run.slice(0, first)) pieces.push({ kind: 'one', item: one.item })
       pieces.push({
         kind: 'group',
         items: run.slice(first, last + 1).map((one) => one.item),
-        count: actions.length,
-        status: groupStatusOf(actions),
-        latest: actions.at(-1)?.label ?? '',
+        count: counted.length,
+        status: groupStatusOf(counted),
+        latest: counted.at(-1)?.label ?? '',
+        unit: byRuns ? 'runs' : 'actions',
       })
       for (const one of run.slice(last + 1)) pieces.push({ kind: 'one', item: one.item })
     }

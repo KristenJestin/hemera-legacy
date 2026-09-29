@@ -87,7 +87,6 @@ export const InTheLine: Story = {
         <h1 className="text-2xl font-medium">Blank page after the merge</h1>
         <GoingOnLine
           items={GOING_ON.few}
-          emptyLabel="Nothing running in csv-export"
           onStop={fn()}
           onOpenUrl={fn()}
           onAddToCatalogue={fn()}

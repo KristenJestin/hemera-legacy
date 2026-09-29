@@ -83,15 +83,7 @@ function Harness({ title, renaming = false, ...rest }: HarnessProps) {
 
 /** What goes on in the Session, as the page hands it to the head (issue #219). */
 function Line({ items = GOING_ON.few }: { items?: typeof GOING_ON.few }) {
-  return (
-    <GoingOnLine
-      items={items}
-      emptyLabel="Nothing running in csv-export"
-      onStop={fn()}
-      onOpenUrl={fn()}
-      onAddToCatalogue={fn()}
-    />
-  )
+  return <GoingOnLine items={items} onStop={fn()} onOpenUrl={fn()} onAddToCatalogue={fn()} />
 }
 
 /**
@@ -201,16 +193,19 @@ export const WithChips: Story = {
   },
 }
 
-/** The same row with nothing going on: the line says where things would run, and stays one row. */
+/** The same row with nothing going on: the line is empty, and the row keeps its commands. */
 export const WithoutChips: Story = {
   args: { onOpenDetails: fn(), children: <Line items={[]} /> },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     expect(canvas.queryByRole('heading')).toBeNull()
-    const quiet = canvas.getByText('Nothing running in csv-export')
-    expect(onOneLine(quiet, canvas.getByRole('button', { name: 'Session details' }))).toBe(true)
+    // Nothing goes on: no sentence says so, and the row keeps its ⓘ and its `…`.
+    expect(canvas.queryByText(/Nothing running/)).toBeNull()
     expect(
-      onOneLine(quiet, canvas.getByRole('button', { name: 'Commands for CSV invoice export' })),
+      onOneLine(
+        canvas.getByRole('button', { name: 'Session details' }),
+        canvas.getByRole('button', { name: 'Commands for CSV invoice export' }),
+      ),
     ).toBe(true)
   },
 }

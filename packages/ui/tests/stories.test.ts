@@ -17,7 +17,7 @@
  */
 
 import { execFileSync } from 'node:child_process'
-import { readFileSync, readdirSync } from 'node:fs'
+import { existsSync, readFileSync, readdirSync } from 'node:fs'
 import { join, relative } from 'node:path'
 import { describe, expect, test } from 'vite-plus/test'
 
@@ -178,7 +178,10 @@ const NAMED_STATES = new Map([
       'Keyboard',
     ],
   ],
-  ['workspace/workspace-repositories', ['Ready', 'Empty', 'Cleaned', 'Loading', 'GitError']],
+  [
+    'workspace/workspace-repositories',
+    ['Ready', 'Empty', 'Cleaned', 'Loading', 'GitError', 'Preparing'],
+  ],
   [
     'workspace/create-workspace-dialog',
     [
@@ -419,8 +422,6 @@ describe('Catalogue, coquille et surfaces, et rien d’autre', () => {
       'MessageGroup',
       'MessageRow',
       'MessageText',
-      // #165: the reader's answer to a question, drawn as the choice they made.
-      'AnswerChoice',
       'MessageBubble',
       'MessageHeader',
       'MessageFooter',
@@ -458,6 +459,7 @@ describe('Catalogue, coquille et surfaces, et rien d’autre', () => {
       // #149: the calls of a turn between two things the agent said, folded into one row.
       'ActionGroup',
       'PermissionRequest',
+      'PermissionRecord',
       'DecisionSummary',
       // The agent, its model and its effort are one control since the trial of 22 September
       // 2026: three selectors in the foot of the composer, plus the agent's own at the far end
@@ -472,6 +474,9 @@ describe('Catalogue, coquille et surfaces, et rien d’autre', () => {
       'UsageMeter',
       // Issue #134: the two share the row above the box, and the meter stands at its foot.
       'TurnLine',
+      'SessionNotices',
+      'SessionHistory',
+      'SessionCatalogue',
       'BlockedBanner',
       'AgentsSection',
       'PlanPanel',
@@ -486,7 +491,21 @@ describe('Catalogue, coquille et surfaces, et rien d’autre', () => {
       'HemeraToolCall',
       'CommandRun',
       'CommandProposal',
-      'CommandsPanel',
+      // #218: a change to the Project's setup the agent proposes, a row of the notices per
+      // change, and the quiet line the thread keeps of one whose call it cannot find.
+      'SetupProposal',
+      'SetupProposalRecord',
+      'CallOutcome',
+      'CallOutcomeDetails',
+      'CommandProposalRecord',
+      'NoticeRecord',
+      // Issue #219: what goes on in a Session, as a line under its title — the commands Hemera
+      // runs, those the agent runs in its own shell, its sub-agents — which the Commands tab of
+      // the Session's details, and its panel, gave way to.
+      'GoingOnLine',
+      // The Run at the end of that line: the catalogue matched as it is typed, and any other line
+      // run once.
+      'RunCommand',
       'ContextView',
       'BareModeState',
       'CommandList',
@@ -517,7 +536,9 @@ describe('Catalogue, coquille et surfaces, et rien d’autre', () => {
       'ReworkDialog',
       'MissionBrief',
       'SpecQuestion',
+      'SpecQuestionRecord',
       'CreateSpecProposal',
+      'SpecProposalRecord',
       // The build of a frozen Spec: what it is launched in, and where that launch stands
       // (D8-12, D8-13).
       'WorkspaceActions',
@@ -637,6 +658,10 @@ describe('Les cinq racines du catalogue', () => {
     // The alphabet, asked for rather than hoped for: Storybook keeps the index's own order for
     // every name the list above does not mention, so the method is what makes the rule true.
     expect(settings).toContain("method: 'alphabetical'")
+  })
+
+  test('an exploration goes once the variant chosen is built: the questions, card B (#199)', () => {
+    expect(existsSync(join(designSystem, 'explorations', 'questions'))).toBe(false)
   })
 
   test('every story file is filed under one of the five roots', () => {

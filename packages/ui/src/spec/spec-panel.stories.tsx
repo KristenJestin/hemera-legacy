@@ -1,7 +1,9 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
 import { MotionConfig } from 'motion/react'
+import { type ReactNode, useState } from 'react'
 import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
 
+import { Button } from '../components/button/button.tsx'
 import { TooltipProvider } from '../components/tooltip/tooltip.tsx'
 import { swap } from '../motion.ts'
 import { LiveSpecPanel } from './spec-harness.tsx'
@@ -9,13 +11,17 @@ import {
   BUG,
   EMPTY,
   GATE_FULL,
+  JUST_CREATED,
   MAINTENANCE,
   MID_PLAN,
   OLDER_REVISION,
+  ONE_QUESTION_LEFT,
+  PROVISIONAL,
   READY,
   gate,
   phases,
 } from './spec-fixtures.ts'
+import { SpecPanel } from './spec-panel.tsx'
 import type { WorkspaceActionsProps } from './workspace-actions.tsx'
 
 /** The build of the Spec as the application hands it: nothing asked for yet, `main` to use. */
@@ -26,6 +32,7 @@ const BUILD: WorkspaceActionsProps = {
   onPrepareOnly: fn(),
   onUseWorkspace: fn(),
   onStart: fn(),
+  onResume: fn(),
   onRetry: fn(),
   onOpen: fn(),
 }
@@ -75,6 +82,14 @@ function markReadyOf(canvasElement: HTMLElement): HTMLElement {
   const foot = footOf(canvasElement, 'ready')
   if (foot === null) throw new Error('the footer holds no Mark ready')
   return within(foot).getByRole('button', { name: 'Mark ready' })
+}
+
+/**
+ * Whether the panel says nothing of what is left before ready: while `Mark ready` cannot be
+ * pressed, the footer counts nothing (issue #209).
+ */
+function saysNothingLeft(canvasElement: HTMLElement): boolean {
+  return !/left before ready/.test(dockOf(canvasElement).textContent ?? '')
 }
 
 /** Whether a button is drawn as the primary action, rather than a quiet one. */
@@ -138,7 +153,7 @@ function nextFrame(): Promise<void> {
 const meta = {
   title: 'Blocks/Spec/SpecPanel',
   component: LiveSpecPanel,
-  tags: ['autodocs', 'updated'],
+  tags: ['autodocs'],
   parameters: { layout: 'fullscreen' },
   decorators: [
     (Story) => (
@@ -250,7 +265,8 @@ export const Folded: Story = {
 
 /**
  * Open: a feature being planned, the head with no sentence under it and the fold at its end, the
- * Spec as one column — no band of phases and no tabs — and `Mark ready` in the footer.
+ * Spec as one column — no band of phases and no tabs — and nothing in the footer, since it cannot
+ * be marked ready yet.
  */
 export const Open: Story = {
   play: async ({ canvasElement }) => {
@@ -273,7 +289,9 @@ export const Open: Story = {
     await expect(headingOf(canvasElement, 'Plan')).toHaveTextContent('1 of 1 written')
     await expect(headingOf(canvasElement, 'Decompose')).toHaveTextContent('2 of 3 written')
     await expect(isStuck(canvasElement, 'Shape')).toBe(true)
-    await expect(markReadyOf(canvasElement)).toBeEnabled()
+    await expect(canvas.queryByRole('button', { name: 'Mark ready' })).toBeNull()
+    await expect(footOf(canvasElement, 'ready')).toBeNull()
+    await expect(saysNothingLeft(canvasElement)).toBe(true)
     await expect(buildFootOf(canvasElement)).toBeNull()
     await expect(canvas.queryByText('Prototype')).toBeNull()
   },
@@ -411,6 +429,86 @@ export const Arrives: Story = {
     await waitFor(() => expect(dock.getBoundingClientRect().width).toBeCloseTo(row * 0.45 + 12, 0))
     await expect(canvas.getByRole('heading', { name: 'CSV invoice export' })).toBeVisible()
     await expect(frameOf(canvasElement)).toHaveAttribute('aria-hidden', 'true')
+  },
+}
+
+/**
+ * New Spec's Spec before it exists (issue #198): the panel arrives open on a provisional Spec — no
+ * key yet, the request as its title, set apart, nothing written. No sentence under the head says it
+ * is not created: the placeholder and the badge do (issue #209). It offers nothing to press: there
+ * is nothing to mark ready.
+ */
+export const Provisional: Story = {
+  args: { spec: PROVISIONAL, arrives: true, defaultFolded: true },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const dock = canvas.getByRole('region', { name: 'Provisional Spec' })
+    const panel = dock.querySelector<HTMLElement>('[data-spec-panel]')!
+    await waitFor(() => expect(panel).not.toHaveAttribute('data-stowed'))
+    await expect(canvas.getByText('No key yet')).toBeVisible()
+    // The key placeholder and the badge say it is not created; no sentence explains it (#209).
+    await expect(canvas.getByRole('img', { name: 'Not created yet' })).toBeVisible()
+    await expect(canvas.queryByText(/^Not created yet./)).toBeNull()
+    await expect(canvas.queryByText(/checks the Project's Specs/)).toBeNull()
+    await expect(canvas.getByRole('heading', { name: /text reading tool/ })).toBeVisible()
+    await expect(canvas.queryByRole('button', { name: 'Mark ready' })).toBeNull()
+    await expect(within(panel).getAllByText('Nothing written yet.').length).toBeGreaterThan(3)
+  },
+}
+
+/**
+ * The provisional Spec and a button standing for the proposal's `Create`, which turns it into
+ * the Spec the engine created: the same panel, handed the real Spec in place.
+ */
+function ProvisionalThenCreated(): ReactNode {
+  const [created, setCreated] = useState(false)
+  return (
+    <div className="@container flex h-screen min-h-0 bg-background text-foreground">
+      <div className="flex min-w-0 flex-1 flex-col items-start gap-3 p-6 text-sm text-muted-foreground">
+        <p>The chat of the Session, where the agent proposed the Spec.</p>
+        <Button onClick={() => setCreated(true)}>Create</Button>
+      </div>
+      <SpecPanel
+        spec={created ? { ...JUST_CREATED, focus: undefined } : PROVISIONAL}
+        arrives
+        onMarkReady={fn()}
+        onRework={fn()}
+        onPickRevision={fn()}
+        onTakeOver={fn()}
+      />
+    </div>
+  )
+}
+
+/**
+ * The provisional Spec becomes the real one in place (issue #198): created from the proposal, it
+ * takes its key, its title and its type where the provisional ones stood, in the same panel,
+ * which neither moves nor arrives a second time.
+ */
+export const ProvisionalBecomesReal: Story = {
+  render: () => <ProvisionalThenCreated />,
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const dock = canvas.getByRole('region', { name: 'Provisional Spec' })
+    const row = dock.parentElement!.getBoundingClientRect().width
+    await waitFor(() => expect(dock.getBoundingClientRect().width).toBeCloseTo(row * 0.45 + 12, 0))
+    const panel = dock.querySelector<HTMLElement>('[data-spec-panel]')!
+    const before = panel.getBoundingClientRect()
+    await userEvent.click(canvas.getByRole('button', { name: 'Create' }))
+    await expect(canvas.getByRole('region', { name: 'Spec ATL-7' })).toBe(dock)
+    await expect(canvas.getByRole('heading', { name: 'CSV invoice export' })).toBeVisible()
+    await expect(canvas.queryByText('No key yet')).toBeNull()
+    await expect(canvas.queryByText(/^Not created yet./)).toBeNull()
+    // No jump: the panel is the one that was there, where it was, frame after frame.
+    await expect(panelOf(canvasElement)).toBe(panel)
+    for (const _ of [1, 2, 3, 4, 5]) {
+      // oxlint-disable-next-line no-await-in-loop -- one frame after the other
+      await nextFrame()
+      const now = panel.getBoundingClientRect()
+      // oxlint-disable-next-line no-await-in-loop -- read on each frame as it is drawn
+      await expect([now.left, now.width]).toEqual([before.left, before.width])
+    }
+    await expect(footOf(canvasElement, 'ready')).toBeNull()
   },
 }
 
@@ -594,11 +692,29 @@ export const SwapReplayed: Story = {
     await expect(opening.filter((frame) => frame.panelLeft < frame.chatRight - 0.5)).toEqual([])
     await expect(opening.at(-1)!.frame).toBe(0)
 
-    const closing = await framesOf(canvasElement, () =>
-      userEvent.click(canvas.getByRole('button', { name: 'Fold the Spec' })),
-    )
+    // Folding, the frame is back on the beat while the panel still has most of its way to go: a
+    // window of a couple of hundred milliseconds, which a machine busy with the rest of the run can
+    // step over between two frames. When no frame saw both, the Spec is unfolded and folded again,
+    // up to five times: a fold that never overlaps is never seen to.
+    const fold = (): Promise<Frame[]> =>
+      framesOf(canvasElement, () =>
+        userEvent.click(canvas.getByRole('button', { name: 'Fold the Spec' })),
+      )
+    const overlaps = (frames: Frame[]): boolean =>
+      frames.some((frame) => frame.frame > 0 && frame.panel > 0)
+    let closing = await fold()
+    for (let tries = 4; tries > 0 && !overlaps(closing); tries -= 1) {
+      // oxlint-disable-next-line no-await-in-loop -- one fold at a time: the retry is the point
+      await waitFor(() => expect(isStowed(canvasElement)).toBe(true))
+      // oxlint-disable-next-line no-await-in-loop -- one fold at a time: the retry is the point
+      await framesOf(canvasElement, () =>
+        userEvent.click(canvas.getByRole('button', { name: 'Unfold the Spec' })),
+      )
+      // oxlint-disable-next-line no-await-in-loop -- one fold at a time: the retry is the point
+      closing = await fold()
+    }
     await expect(closing.filter((frame) => frame.frame === 0 && frame.panel === 0)).toEqual([])
-    await expect(closing.some((frame) => frame.frame > 0 && frame.panel > 0)).toBe(true)
+    await expect(overlaps(closing)).toBe(true)
     const widening = moved(closing)
     const widest = widening.at(-1)!
     await expect(widest).toBeGreaterThan(widening[0]!)
@@ -613,26 +729,61 @@ export const SwapReplayed: Story = {
 /**
  * A fold asked while the panel is still coming in turns it round from where it is: the chat is
  * given its width back from the width it had reached, and is never pushed the rest of the way.
+ *
+ * The fold has to land while the panel is still on its way, and the panel comes in on a spring
+ * that is most of the way in within a quarter of a second. On a machine busy with the rest of the
+ * run a pointer's press can take longer than that, and land on a panel already in: nothing was
+ * left to turn round, so the chat was, rightly, the whole panel narrower. So the fold is pressed
+ * on the first frame the panel is part of the way in, the chat is read at the moment it lands,
+ * and when less than a tenth of the way was left by then, the Spec is folded back and the gesture
+ * done again, up to five times.
  */
 export const TurnsRoundMidWay: Story = {
   args: { defaultFolded: true },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    const frames = await framesOf(canvasElement, async () => {
-      await userEvent.click(canvas.getByRole('button', { name: 'Unfold the Spec' }))
-      // Part of the way in, and no further.
-      await waitFor(() => expect(measure(canvasElement).panel).toBeGreaterThan(40), {
-        interval: 5,
-      })
-      await userEvent.click(canvas.getByRole('button', { name: 'Fold the Spec' }))
-    })
-    const widths = frames.map((frame) => frame.chat)
     const row = dockOf(canvasElement).parentElement!.getBoundingClientRect().width
+    // The chat's width with the panel all the way in.
+    const full = row * 0.55 - 12
+    const turn = async (tries: number): Promise<{ frames: Frame[]; reached: number }> => {
+      const start = measure(canvasElement).chat
+      let reached = Number.NaN
+      const frames = await framesOf(canvasElement, async () => {
+        await userEvent.click(canvas.getByRole('button', { name: 'Unfold the Spec' }))
+        const fold = canvas.getByRole('button', { name: 'Fold the Spec' })
+        // The chat as it stands when the fold lands, before anything answers it.
+        const read = (): void => {
+          reached = measure(canvasElement).chat
+        }
+        fold.addEventListener('click', read, { capture: true, once: true })
+        // Part of the way in, and no further: pressed on the first frame the panel is 40 pixels
+        // in, rather than after a pointer's whole journey to the button, which a busy runner can
+        // stretch past the panel's own.
+        await new Promise<void>((resolve) => {
+          const look = (): void => {
+            if (measure(canvasElement).panel <= 40) {
+              requestAnimationFrame(look)
+              return
+            }
+            fold.click()
+            resolve()
+          }
+          requestAnimationFrame(look)
+        })
+      })
+      await waitFor(() => expect(isStowed(canvasElement)).toBe(true))
+      if (reached - full > (start - full) / 10 || tries === 1) return { frames, reached }
+      return turn(tries - 1)
+    }
+    const { frames, reached } = await turn(5)
+    await expect(reached, 'the fold never landed while the panel was coming in').toBeGreaterThan(
+      full + 1,
+    )
+    const widths = frames.map((frame) => frame.chat)
     // The panel's whole width was never taken from the chat.
-    await expect(Math.min(...widths)).toBeGreaterThan(row * 0.55 - 12 + 1)
+    await expect(Math.min(...widths)).toBeGreaterThan(full + 1)
     await expect(widths.at(-1)).toBe(widths[0])
     await expect(frames.at(-1)!.frame).toBe(1)
-    await waitFor(() => expect(isStowed(canvasElement)).toBe(true))
   },
 }
 
@@ -698,7 +849,7 @@ async function edgesOf(canvasElement: HTMLElement, action: () => Promise<void>):
  * stands where the footer puts it, on every frame and once the panel is in place (issue #183).
  */
 export const SlidesFromTheEdge: Story = {
-  args: { defaultFolded: true },
+  args: { spec: GATE_FULL, defaultFolded: true },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     const opening = await edgesOf(canvasElement, () =>
@@ -836,50 +987,28 @@ export const ReducedMotion: Story = {
 }
 
 /**
- * `Mark ready` pressed on a draft that still lacks something: refused, and what is left is said
- * beside it in the footer, in plain words (issues #135, #150). The Spec stays a draft.
+ * A draft that still lacks something (issues #205, #209): `Mark ready` is not offered, since the
+ * press could only be refused, and the footer shows nothing: no count of what is left, and nothing
+ * said in red.
  */
-export const MarkReadyRefused: Story = {
-  play: async ({ canvasElement, args }) => {
+export const NotReadyYet: Story = {
+  play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    await userEvent.click(markReadyOf(canvasElement))
-    await expect(args.onMarkReady).toHaveBeenCalledTimes(1)
-    const foot = within(footOf(canvasElement, 'ready')!)
-    await expect(foot.getByRole('alert')).toHaveTextContent(
-      /^ATL-7 is not ready yet. Still to do: .*the credit-note question/,
-    )
+    await expect(canvas.queryByRole('button', { name: 'Mark ready' })).toBeNull()
+    await expect(footOf(canvasElement, 'ready')).toBeNull()
+    await expect(saysNothingLeft(canvasElement)).toBe(true)
+    await expect(canvas.queryByRole('alert')).toBeNull()
     await expect(canvas.getByRole('img', { name: 'Draft' })).toBeVisible()
-    await expect(markReadyOf(canvasElement)).toBeVisible()
   },
 }
 
-/**
- * The refusal coming in beside `Mark ready` does not carry it (issue #183): the footer makes room
- * for the words and the button is where the footer puts it. A button used to measure where it had
- * been whenever it was drawn again and play the difference, so a sibling arriving made it jump
- * back to its old place and slide. Pressed, it is drawn around its centre and never moved.
- */
-export const MarkReadyStaysPut: Story = {
+/** One thing left: still nothing in the footer, and no `Mark ready` (issue #209). */
+export const OneThingLeft: Story = {
+  args: { spec: ONE_QUESTION_LEFT },
   play: async ({ canvasElement }) => {
-    const button = markReadyOf(canvasElement)
-    const moves: number[][] = []
-    let watching = true
-    const watch = (): void => {
-      moves.push(translationOf(button))
-      if (watching) requestAnimationFrame(watch)
-    }
-    watch()
-    await userEvent.click(button)
-    await expect(within(footOf(canvasElement, 'ready')!).getByRole('alert')).toBeVisible()
-    for (const _ of Array.from({ length: 30 })) {
-      // oxlint-disable-next-line no-await-in-loop -- the frames are waited for one after the other
-      await nextFrame()
-    }
-    watching = false
-    await expect(
-      moves.filter(([x, y]) => Math.abs(x!) > 0.01 || Math.abs(y!) > 0.01),
-      '`Mark ready` was carried from where it had been',
-    ).toEqual([])
+    await expect(within(canvasElement).queryByRole('button', { name: 'Mark ready' })).toBeNull()
+    await expect(footOf(canvasElement, 'ready')).toBeNull()
+    await expect(saysNothingLeft(canvasElement)).toBe(true)
   },
 }
 
@@ -917,19 +1046,17 @@ export const OlderRevision: Story = {
 
 /**
  * A draft half done (issue #150): shaped, the plan being written, nothing split into tasks. The
- * head says no sentence of the phase, and the footer offers `Mark ready` quietly — the agent has
- * not confirmed the Spec complete — on the rim under the column, at the panel's end.
+ * head says no sentence of the phase, and the footer shows nothing: no `Mark ready` and no count
+ * of what is left (issues #205, #209).
  */
 export const DraftHalfDone: Story = {
   play: async ({ canvasElement }) => {
     const header = canvasElement.querySelector('header')!
     await expect(within(header).queryByRole('button', { name: 'Mark ready' })).toBeNull()
     await expect(header.querySelectorAll('p')).toHaveLength(0)
-    const mark = markReadyOf(canvasElement)
-    await expect(isPrimary(mark)).toBe(false)
-    const foot = footOf(canvasElement, 'ready')!.getBoundingClientRect()
-    const column = columnOf(canvasElement).getBoundingClientRect()
-    await expect(foot.top).toBeGreaterThanOrEqual(column.bottom)
+    await expect(within(canvasElement).queryByRole('button', { name: 'Mark ready' })).toBeNull()
+    await expect(footOf(canvasElement, 'ready')).toBeNull()
+    await expect(saysNothingLeft(canvasElement)).toBe(true)
     await expect(buildFootOf(canvasElement)).toBeNull()
   },
 }
@@ -952,8 +1079,8 @@ export const DraftConfirmed: Story = {
 }
 
 /**
- * A draft the agent attested while a phase is still open: the attestation alone does not make
- * `Mark ready` the primary action, since the press would be refused on the rest of the gate.
+ * A draft the agent attested while a phase is still open: the attestation alone does not offer
+ * `Mark ready`, since the press would be refused on the rest of the gate.
  */
 export const AttestedWithAPhaseOpen: Story = {
   args: {
@@ -966,7 +1093,8 @@ export const AttestedWithAPhaseOpen: Story = {
     },
   },
   play: async ({ canvasElement }) => {
-    await expect(isPrimary(markReadyOf(canvasElement))).toBe(false)
+    await expect(within(canvasElement).queryByRole('button', { name: 'Mark ready' })).toBeNull()
+    await expect(footOf(canvasElement, 'ready')).toBeNull()
   },
 }
 
@@ -1002,8 +1130,8 @@ export const ReadyWithItsBuild: Story = {
 
 /**
  * The build's actions arrive when the Spec becomes ready: `Mark ready` pressed, it folds away as
- * they grow in its place; `Rework` confirmed, they fold away and `Mark ready` is back, quiet
- * again, since the agent has to confirm the reworked Spec anew.
+ * they grow in its place; `Rework` confirmed, they fold away and the footer is left empty, since
+ * the agent has to confirm the reworked Spec anew.
  */
 export const BuildArrivesWhenReady: Story = {
   args: { spec: GATE_FULL },
@@ -1030,13 +1158,15 @@ export const BuildArrivesWhenReady: Story = {
     await userEvent.click(within(dialog).getByRole('button', { name: 'Rework' }))
     await waitFor(() => expect(buildFootOf(canvasElement)).toBeNull())
     await expect(canvas.queryByRole('button', { name: 'Prepare and start the build' })).toBeNull()
-    await expect(isPrimary(markReadyOf(canvasElement))).toBe(false)
+    await expect(canvas.queryByRole('button', { name: 'Mark ready' })).toBeNull()
+    await waitFor(() => expect(footOf(canvasElement, 'ready')).toBeNull())
+    await expect(saysNothingLeft(canvasElement)).toBe(true)
   },
 }
 
 /**
  * A Rework while the build waits for its Workspace: the launch is taken back, and the draft it
- * leaves has its footer — `Mark ready`, with the cancelled launch said beside it, not in its place.
+ * leaves has its footer — the cancelled launch, and no count of what is left before ready.
  */
 export const ReworkWhileTheLaunchWaits: Story = {
   args: {
@@ -1052,23 +1182,28 @@ export const ReworkWhileTheLaunchWaits: Story = {
     await waitFor(() => expect(footOf(canvasElement, 'ready')).not.toBeNull())
     await waitFor(() => expect(buildFootOf(canvasElement)).toBeNull())
     const foot = within(footOf(canvasElement, 'ready')!)
-    await expect(foot.getByRole('button', { name: 'Mark ready' })).toBeVisible()
+    await expect(foot.queryByRole('button', { name: 'Mark ready' })).toBeNull()
+    await expect(saysNothingLeft(canvasElement)).toBe(true)
     await expect(foot.getByRole('status')).toHaveTextContent('Cancelled by the Rework')
   },
 }
 
 /**
- * A draft with a failed launch still on it: `Mark ready` holds the footer, the failure is said
- * beside it, and nothing offers to start the agent again on a Spec that is not ready.
+ * A draft with a failed launch still on it: the footer says the failure, no count of what is left,
+ * and nothing offers to start the agent again on a Spec that is not ready.
  */
 export const DraftWithAFailedLaunch: Story = {
   args: {
-    build: { ...BUILD, launch: { state: 'failed', cause: 'the agent exited with code 1' } },
+    build: {
+      ...BUILD,
+      launch: { state: 'failed', stage: 'agent', cause: 'the agent exited with code 1' },
+    },
   },
   play: async ({ canvasElement }) => {
     await expect(buildFootOf(canvasElement)).toBeNull()
     const foot = within(footOf(canvasElement, 'ready')!)
-    await expect(foot.getByRole('button', { name: 'Mark ready' })).toBeVisible()
+    await expect(foot.queryByRole('button', { name: 'Mark ready' })).toBeNull()
+    await expect(saysNothingLeft(canvasElement)).toBe(true)
     await expect(foot.getByText(/The agent did not start: the agent exited/)).toBeVisible()
     await expect(foot.queryByRole('button', { name: 'Retry' })).toBeNull()
   },

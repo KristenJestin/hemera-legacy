@@ -499,3 +499,36 @@ export function faceCarry(k: number): number {
   const q = Math.min(1, Math.max(0, k))
   return q * (1 - q) * (1 - q)
 }
+
+/**
+ * The `rise` kind: what comes out from behind the edge it is attached to, and goes back behind it
+ * — the Session's notices, rising out of the composer's top edge (issue #237).
+ *
+ * `RISE.hidden` is the element moved down by its whole height, which puts it entirely behind the
+ * surface it sits on; `RISE.shown` is its place. The spring is `arrival`'s, by name: it puts
+ * itself in place without overshooting, and the overshoot, when there is one, is `pop`'s.
+ */
+export const rise: Transition = arrival
+export const RISE = {
+  hidden: { y: '100%' },
+  shown: { y: 0 },
+} as const
+
+/**
+ * The `pop` kind: a scale past its size and back, once, for what must not be missed as it lands —
+ * the notices once they have risen, and again each time something new joins them (issue #237).
+ *
+ * It is the one thing of the catalogue that overshoots on purpose, which is why it is a kind of
+ * its own and not a spring of `arrival`'s: out to `POP_REACH`, a little under its size on the way
+ * back, and settled, on the theme's `slow` beat. A tween and not a spring, because it passes
+ * through three values and a spring only goes to one. A reader asking for less movement is
+ * answered `instant` by `useTransition`, which lands on the size it already has: no pop at all.
+ */
+export const POP_REACH = 1.18
+export const POP_SETTLE = 0.96
+export const POP = { scale: [1, POP_REACH, POP_SETTLE, 1] }
+export const pop: Transition = {
+  duration: durations.slow,
+  ease: easing,
+  times: [0, 0.4, 0.75, 1],
+}

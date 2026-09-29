@@ -436,7 +436,7 @@ function Controlled({
 }
 
 const meta = {
-  tags: ['autodocs', 'updated'],
+  tags: ['autodocs'],
   title: 'Surfaces/Project/Settings',
   component: ProjectSettings,
   render: (args) => <Controlled {...args} />,
@@ -951,7 +951,13 @@ export const Keyboard: Story = {
       'aria-selected',
       'true',
     )
-    // Tab leaves the navigation for the first control of the section.
+    // Tab leaves the navigation for the first control of the section, once the section passed
+    // on the way is gone. A section left stays in the page, inert, until the frame that says its
+    // leaving is over; the browser's own Tab passes over an inert control, the test's does not,
+    // and its focus lands nowhere.
+    await waitFor(() => {
+      expect(canvas.getAllByRole('tabpanel')).toHaveLength(1)
+    })
     await userEvent.tab()
     await expect(canvas.getByRole('button', { name: 'Add command' })).toHaveFocus()
 

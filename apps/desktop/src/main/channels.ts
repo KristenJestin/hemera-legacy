@@ -231,6 +231,7 @@ const RELAYED = [
   'agents.stop',
   'agents.decide',
   'agents.resume',
+  'agents.handOver',
   'agents.check',
   'agents.update',
   // What Hemera lends the agent: the commands of a Project and the runs they became, and what a
@@ -243,12 +244,16 @@ const RELAYED = [
   'commands.runs',
   'commands.run',
   'commands.stop',
+  'commands.runAgain',
   'commands.output',
   'commands.runOf',
   'commands.services',
   'commands.stopService',
   'commands.proposeAccept',
   'commands.proposeDecline',
+  'setup.accept',
+  'setup.acceptAll',
+  'setup.decline',
   'context.read',
   // The Workspaces of a Project, their preparation, the recipe and the variables: rows, worktrees
   // and steps the engine holds and runs (D8-01 to D8-06).
@@ -278,6 +283,7 @@ const RELAYED = [
   'specs.revisions',
   'specs.create',
   'specs.declineProposal',
+  'specs.acceptExisting',
   'specs.openSession',
   'specs.writeSection',
   'specs.writeStories',

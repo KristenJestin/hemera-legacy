@@ -38,12 +38,12 @@ import { AgentRuntime, type AgentRuntimeError } from './agents/runtime.ts'
 import { Agents, availabilityOf, type AgentUpdateRefusedError } from './agents/service.ts'
 import { type BareModeNotQualifiedError, refusedUnlessBare } from './agents/bare.ts'
 import { ADAPTERS, Discovery } from './agents/discovery.ts'
-import { requestedSpec } from './agents/spec-request.ts'
 import { runAtOpen } from './commands/at-open.ts'
 import {
   type NothingToRunError,
   type UnknownCommandFolderError,
   createCommand,
+  runAgain,
   runFromPanel,
   runsOf,
   updateCommand,
@@ -54,6 +54,7 @@ import {
   type UnknownProposalError,
 } from './commands/proposals.ts'
 import { Commands, type UnknownCommandError, type UnknownRunError } from './commands/service.ts'
+import { SetupProposals, type SetupRefusedError } from './setup/proposals.ts'
 import { type Context, type UnreadableInstructionsError } from './context/service.ts'
 import { contextOf } from './context/view.ts'
 import { type InvalidCursorError, Journal } from './journal.ts'
@@ -195,6 +196,7 @@ export function answer(
   | Launches
   | Recipe
   | Proposals
+  | SetupProposals
   | Specs
 > {
   return Effect.gen(function* () {
@@ -327,15 +329,9 @@ export function answer(
       return yield* runtime.setOption(sessionId, optionId, value)
     }
     if (decision.name === 'agents.prompt') {
+      // New Spec creates no Spec (#198): its request rides this turn, and the Spec is made from
+      // the agent's proposal once the user accepts it, or is the existing one they continue.
       const { sessionId, text, intent } = decision.argument
-      // New Spec: the Spec is created before the prompt goes out, so the agent starts `define`,
-      // with the Spec tools and the mission brief, and the window opens the panel before it
-      // answers (#179). A Session that already defines one is sent the message as it is.
-      if (intent === 'spec' && (yield* sessions.one(sessionId)).session.mission === 'free') {
-        yield* (yield* Specs).create({ sessionId, ...requestedSpec(text) })
-        // An agent already running holds the tools of a free Session: it is started again.
-        yield* runtime.releaseWhenIdle(sessionId)
-      }
       // What the page is waiting for is why the turn ended; everything else about it reached the
       // window as it happened, on the engine's own channel (design D5-12).
       const report = yield* runtime.prompt(sessionId, text, intent)
@@ -350,6 +346,8 @@ export function answer(
       const report = yield* runtime.resume(decision.argument.sessionId)
       return { state: report.state, reason: report.reason }
     }
+    if (decision.name === 'agents.handOver')
+      return yield* runtime.handOver(decision.argument.sessionId)
 
     // What the Agents section asks about the three agents of this machine, and the one thing it
     // does about the answer (design D5-18). The check is the only use case of this process that
@@ -381,6 +379,10 @@ export function answer(
     if (decision.name === 'commands.run') {
       const { sessionId, name, line } = decision.argument
       return yield* runFromPanel(sessionId, name, line)
+    }
+    if (decision.name === 'commands.runAgain') {
+      const { sessionId, runId } = decision.argument
+      return yield* runAgain(sessionId, runId)
     }
     if (decision.name === 'commands.stop') {
       const { sessionId, runId } = decision.argument
@@ -416,6 +418,20 @@ export function answer(
     if (decision.name === 'commands.proposeDecline') {
       const { sessionId, proposalId } = decision.argument
       return yield* (yield* Proposals).decline(sessionId, proposalId)
+    }
+    // What a human decides of a change to the Project's setup the agent proposed (#218): applied
+    // through the use case the settings call, one change or the whole batch at once.
+    if (decision.name === 'setup.accept') {
+      const { sessionId, proposalId } = decision.argument
+      return yield* (yield* SetupProposals).accept(sessionId, proposalId)
+    }
+    if (decision.name === 'setup.acceptAll') {
+      const { sessionId, batchId } = decision.argument
+      return yield* (yield* SetupProposals).acceptAll(sessionId, batchId)
+    }
+    if (decision.name === 'setup.decline') {
+      const { sessionId, proposalId } = decision.argument
+      return yield* (yield* SetupProposals).decline(sessionId, proposalId)
     }
     // What a Session was provided, may consult, and keeps to its agent (D6-10).
     if (decision.name === 'context.read') return yield* contextOf(decision.argument.sessionId)
@@ -525,6 +541,14 @@ export function answer(
         `Hemera told the agent you declined the ${declined.type} Spec “${declined.title}”.`,
       )
       return
+    }
+    if (decision.name === 'specs.acceptExisting') {
+      const { sessionId, proposalId } = decision.argument
+      const joined = yield* specs.acceptExisting(sessionId, proposalId)
+      // As a proposal accepted: the agent was granted the tools of a free Session, and is started
+      // again with those of a define one, and handed the mission brief in a turn of its own.
+      yield* runtime.briefWhenIdle(joined.session.id)
+      return joined
     }
     if (decision.name === 'specs.openSession') return yield* specs.openSession(decision.argument)
     if (decision.name === 'specs.writeSection') {
@@ -660,4 +684,5 @@ export type Refusal =
   | WorkspaceFixedError
   | UnknownProposalError
   | ProposalDecidedError
+  | SetupRefusedError
   | PathOutsideBaseError

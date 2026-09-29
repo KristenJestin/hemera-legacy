@@ -15,7 +15,7 @@ import { StartFrame, StartScreen } from './start-screen.tsx'
 const meta = {
   title: 'Shell/StartScreen',
   component: StartScreen,
-  tags: ['autodocs', 'new'],
+  tags: ['autodocs'],
   parameters: { layout: 'fullscreen' },
 } satisfies Meta<typeof StartScreen>
 
@@ -112,15 +112,10 @@ export const ReducedMotion: Story = {
 export const FirstPaintReducedMotion: Story = {
   render: () => <StartFrame />,
   play: async ({ canvasElement }) => {
-    const restore = await emulateReducedMotion()
-    if (restore === null) return
-    try {
-      const still = within(canvasElement).getByRole('img', { name: 'Starting Hemera' })
-      await waitFor(() => {
-        expect(getComputedStyle(still.firstElementChild!).animationName).toBe('none')
-      })
-    } finally {
-      await restore()
-    }
+    if (!(await emulateReducedMotion())) return
+    const still = within(canvasElement).getByRole('img', { name: 'Starting Hemera' })
+    await waitFor(() => {
+      expect(getComputedStyle(still.firstElementChild!).animationName).toBe('none')
+    })
   },
 }

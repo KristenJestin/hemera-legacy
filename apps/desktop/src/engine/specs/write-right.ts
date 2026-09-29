@@ -3,7 +3,8 @@
  *
  * A Session becomes `define` in two ways only. A `free` Session whose agent proposed a Spec, the
  * proposal accepted by the human: the Spec is created, the Session becomes its writer and turns
- * `define` in the same transaction. Or a new Session opened on an existing Spec from a list of
+ * `define` in the same transaction — or, when the proposal points to a Spec that exists (issue
+ * #198), the Session turns `define` on that one, its writer when it has none. Or a new Session opened on an existing Spec from a list of
  * Specs: it writes when the Spec has no writer, and reads otherwise. "Take the write right" moves
  * `writer_session_id` at once; the previous writer's next agent write is refused by `writable`,
  * which names the new writer.
@@ -134,6 +135,36 @@ export function openSessionIn(
         sessionId,
         payload: { title: NEW_SESSION_TITLE, mission: 'define', specId: spec.id },
       },
+      specEvent(spec, snapshot.revision.id, 'spec.joined', {
+        author: 'human',
+        sessionId,
+        payload: { writer },
+      }),
+    ]
+    return { sessionId, events }
+  })
+}
+
+/**
+ * A `free` Session turned `define` on a Spec that already exists (issue #198): New Spec's agent
+ * found the Project has it and pointed to it, and the human continued it. Of the Spec's Project
+ * only; the writer when the Spec has none, a reader otherwise, as a Session opened on it is.
+ */
+export function joinIn(transaction: EngineTransaction, snapshot: SpecSnapshot, sessionId: string) {
+  return Effect.gen(function* () {
+    const session = yield* definable(transaction, sessionId)
+    const { spec } = snapshot
+    if (session.projectId !== spec.projectId) {
+      return yield* Effect.fail(
+        new SpecAnchorRefusedError({
+          reason: `${spec.key} belongs to another Project: the Session "${session.title}" cannot define it.`,
+        }),
+      )
+    }
+    yield* define(transaction, sessionId, spec.id)
+    const writer = spec.writerSessionId === null
+    if (writer) yield* giveWriteRight(transaction, spec.id, sessionId)
+    const events: NewEvent[] = [
       specEvent(spec, snapshot.revision.id, 'spec.joined', {
         author: 'human',
         sessionId,

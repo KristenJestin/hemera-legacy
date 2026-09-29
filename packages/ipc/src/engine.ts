@@ -339,6 +339,7 @@ export const sessionEntryKindSchema = z.enum([
   'spec_answer',
   'spec_proposal',
   'command_proposal',
+  'setup_proposal',
 ])
 
 /**
@@ -644,6 +645,12 @@ export const ENGINE_REQUESTS = {
     arguments: z.object({ sessionId: z.string() }),
     response: z.object({ state: resumeStateSchema, reason: z.string().nullable() }),
   },
+  // What waits for a Session's agent, handed over again after a delivery it did not take: the
+  // Retry of the row that said so (issue #211). Answered at once; the delivery is a turn of its own.
+  'agents.handOver': {
+    arguments: z.object({ sessionId: z.string() }),
+    response: z.void(),
+  },
 
   // What the Agents section of the settings asks for, and what it does about the answer
   // (design D5-18). `check` is the one use case here that leaves the machine: it reads the
@@ -732,6 +739,12 @@ export const ENGINE_REQUESTS = {
     arguments: z.object({ sessionId: z.string(), runId: z.string() }),
     response: commandRunSchema,
   },
+  // A run of the Session run again, from its chip or the history (issue #237): a command of the
+  // catalogue as the command, a one-off as the same line in the same folder, by the reader.
+  'commands.runAgain': {
+    arguments: z.object({ sessionId: z.string(), runId: z.string() }),
+    response: commandRunSchema,
+  },
   'commands.output': {
     arguments: z.object({ sessionId: z.string(), runId: z.string() }),
     response: commandRunSchema,
@@ -761,6 +774,22 @@ export const ENGINE_REQUESTS = {
     response: commandSchema,
   },
   'commands.proposeDecline': {
+    arguments: z.object({ sessionId: z.string(), proposalId: z.string() }),
+    response: z.void(),
+  },
+  // What a human decides of a change to the Project's setup the agent proposed (#218): accepted,
+  // it is applied through the use case the settings call; `acceptAll` accepts every change still
+  // waiting of the batch it was proposed in, in order, and stops at the first one refused.
+  // Each answers the Project the changes were applied to, for the window to read it again.
+  'setup.accept': {
+    arguments: z.object({ sessionId: z.string(), proposalId: z.string() }),
+    response: z.object({ projectId: z.string(), accepted: z.number() }),
+  },
+  'setup.acceptAll': {
+    arguments: z.object({ sessionId: z.string(), batchId: z.string() }),
+    response: z.object({ projectId: z.string(), accepted: z.number() }),
+  },
+  'setup.decline': {
     arguments: z.object({ sessionId: z.string(), proposalId: z.string() }),
     response: z.void(),
   },
@@ -947,6 +976,13 @@ export const ENGINE_REQUESTS = {
     arguments: z.object({ sessionId: z.string(), proposalId: z.string() }),
     response: z.void(),
   },
+  'specs.acceptExisting': {
+    // The agent's proposal accepted when it points to a Spec that exists (issue #198): this
+    // `free` Session turns `define` on it, its writer when it has none and a reader otherwise.
+    // No Spec is created. A Session already `define` is refused.
+    arguments: z.object({ sessionId: z.string(), proposalId: z.string() }),
+    response: z.object({ session: sessionSchema, snapshot: specSnapshotSchema }),
+  },
   'specs.openSession': {
     // A new `define` Session on an existing Spec, from a list of Specs: the writer when the Spec
     // has none, a reader otherwise (D7-11). Its agent is chosen as `sessions.create` chooses it.
@@ -1045,11 +1081,17 @@ export const ENGINE_EVENTS = {
     specId: z.string(),
     projectId: z.string(),
   }),
+  /**
+   * What this machine has of the agents changed since the window last listed them: a version
+   * that answered after the list went without it, or an agent updated since. About the machine
+   * and nothing else, so it carries nothing: the window asks `agents.list` again.
+   */
+  agents_changed: z.object({ event: z.literal('agents.changed') }),
 } as const
 
 export type EngineEventName = keyof typeof ENGINE_EVENTS
 
-/** One pushed message, of whichever of the ten names it carries. */
+/** One pushed message, of whichever of the eleven names it carries. */
 export type EngineEvent = z.infer<(typeof ENGINE_EVENTS)[EngineEventName]>
 
 /**

@@ -49,6 +49,12 @@ export interface SpecState {
    * where it was pressed, and forgotten with the next act on the build that goes through (#132).
    */
   buildRefused: string | null
+  /**
+   * New Spec's provisional Spec, by Session: the title its request gave it (issue #198). Saved
+   * nowhere: the Spec exists once the user accepts the agent's proposal or continues the Spec it
+   * pointed to, and until then this is all there is of it. It outlives the Spec on screen.
+   */
+  provisional: ReadonlyMap<string, string>
 }
 
 const EMPTY: SpecState = {
@@ -61,6 +67,7 @@ const EMPTY: SpecState = {
   refusal: null,
   readyRefused: null,
   buildRefused: null,
+  provisional: new Map(),
 }
 
 /** How many lines of the Spec's Journal are read, which is the most one page may hold. */
@@ -172,14 +179,56 @@ async function acting(act: (specId: string) => Promise<void>): Promise<boolean> 
 
 /** Opens a Spec on its current revision; the same Spec is read again, not closed. */
 export async function openSpec(specId: string): Promise<void> {
-  if (shown !== specId) replace(EMPTY)
+  if (shown !== specId) replace({ ...EMPTY, provisional: state.provisional })
   shown = specId
   await refresh(specId)
 }
 
 export function closeSpec(): void {
   shown = null
-  replace(EMPTY)
+  replace({ ...EMPTY, provisional: state.provisional })
+}
+
+/** How long a provisional title may be, cut on a word. */
+const PROVISIONAL_CHARACTERS = 80
+
+/**
+ * The title a provisional Spec takes from New Spec's request (issue #198): its first line, the
+ * spaces folded, cut on a word when it is long.
+ */
+export function provisionalTitleOf(request: string): string {
+  const line = request
+    .split('\n')
+    .map((one) => one.replace(/\s+/g, ' ').trim())
+    .find((one) => one.length > 0)
+  const title = line ?? 'New Spec'
+  if (title.length <= PROVISIONAL_CHARACTERS) return title
+  const cut = title.slice(0, PROVISIONAL_CHARACTERS)
+  const space = cut.lastIndexOf(' ')
+  return `${space > 0 ? cut.slice(0, space) : cut}…`
+}
+
+/**
+ * New Spec, before the agent has said anything (issue #198): the Session shows a provisional
+ * Spec titled with the request, which nothing saves.
+ */
+export function holdProvisionalSpec(sessionId: string, request: string): void {
+  const provisional = new Map(state.provisional)
+  provisional.set(sessionId, provisionalTitleOf(request))
+  replace({ ...state, provisional })
+}
+
+/** The provisional Spec of a Session, by its title, or null when it has none. */
+export function provisionalSpecOf(sessionId: string): string | null {
+  return state.provisional.get(sessionId) ?? null
+}
+
+/** Lets go of a Session's provisional Spec: the real one took its place. */
+function forgetProvisional(sessionId: string): void {
+  if (!state.provisional.has(sessionId)) return
+  const provisional = new Map(state.provisional)
+  provisional.delete(sessionId)
+  replace({ ...state, provisional })
 }
 
 /** Picks a revision to read: an older one is shown as it was frozen (D7-05). */
@@ -202,6 +251,25 @@ export async function createSpec(
   try {
     const made = await window.hemera.invoke('specs.create', { sessionId, type, title })
     await openSpec(made.snapshot.spec.id)
+    // The provisional Spec became this one, in place (issue #198).
+    forgetProvisional(sessionId)
+    return true
+  } catch (cause) {
+    replace({ ...state, refusal: message(cause) })
+    return false
+  }
+}
+
+/**
+ * Continues the existing Spec the agent pointed to (issue #198): its proposal accepted, this
+ * `free` Session turns `define` on that Spec, and the panel shows it where the provisional Spec
+ * was. No Spec is created.
+ */
+export async function joinSpec(sessionId: string, proposalId: string): Promise<boolean> {
+  try {
+    const joined = await window.hemera.invoke('specs.acceptExisting', { sessionId, proposalId })
+    await openSpec(joined.snapshot.spec.id)
+    forgetProvisional(sessionId)
     return true
   } catch (cause) {
     replace({ ...state, refusal: message(cause) })
@@ -326,6 +394,22 @@ export async function retryBuild(): Promise<boolean> {
   })
 }
 
+/**
+ * Resumes the preparation of the Workspace the Spec is set on, after it failed (D8-05): what is
+ * left of it runs in the engine, and the panel follows the Workspace through its `workspace`
+ * event until it can start the build there.
+ */
+export async function resumeBuildWorkspace(): Promise<boolean> {
+  const workspaceId = state.launches?.workspace?.id
+  if (workspaceId === undefined) return false
+  return await building(RESUME_REFUSED, async () => {
+    await window.hemera.invoke('preparation.resume', { workspaceId })
+  })
+}
+
+/** What a preparation that could not be resumed is said as, before the engine's own words. */
+const RESUME_REFUSED = 'The preparation could not be resumed'
+
 /** What a build that could not be asked for is said as, before the engine's own words. */
 const ASK_REFUSED = 'The build could not be asked for'
 
@@ -371,6 +455,15 @@ export function listenToSpecs(changed: (projectId: string) => void): () => void 
     // The launch of the Spec on screen moved on: asked for, started, refused or taken back
     // (D8-13). Nothing else crosses — the panel reads the whole of it again, as it stands.
     if (event.event === 'launch.changed' && event.specId === shown) void refresh(event.specId)
+    // The Workspace the Spec is set on moved on — resumed, ready, failed again — and what the
+    // panel offers follows where it stands (D8-12).
+    if (
+      event.event === 'workspace' &&
+      shown !== null &&
+      event.workspaceId === state.launches?.workspace?.id
+    ) {
+      void refresh(shown)
+    }
     if (event.event !== 'spec.changed') return
     changed(event.projectId)
     if (event.specId === shown) void refresh(event.specId)

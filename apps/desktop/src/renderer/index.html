@@ -16,7 +16,9 @@
     <div id="root">
       <!-- The start screen of @hemera/ui (shell/start-screen.tsx, StartFrame), written out so it
            is on the first frame: a still of Hemera's face loading, its three dots where the face
-           draws them, turned by the stylesheet until the application draws the face itself. -->
+           draws them, turned by the stylesheet until the application draws the face itself. The
+           rules it is drawn with before the theme arrives are written into the head by the
+           renderer bundle (@hemera/ui/start-style). -->
       <div class="flex h-screen items-center justify-center bg-background text-muted-foreground">
         <span
           role="img"

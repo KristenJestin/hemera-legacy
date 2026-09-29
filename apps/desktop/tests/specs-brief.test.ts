@@ -546,6 +546,110 @@ describe('An answer resolves the question and reaches the agent at the next safe
   })
 })
 
+describe('An answer given after a restart reaches the agent', () => {
+  /** A define Session whose agent asked a question, in an application that then quit. */
+  const askedThenQuit = async (opened: ReturnType<typeof application>) => {
+    const asked = { sessionId: '', specId: '', questionId: '' }
+    await opened(fakeAgent())(
+      Effect.gen(function* () {
+        const { sessionId, specId } = yield* defining
+        yield* (yield* AgentRuntime).prompt(sessionId, 'First turn.')
+        const raised = yield* (yield* Specs).raiseQuestion(
+          { kind: 'agent', sessionId },
+          {
+            specId,
+            body: 'Which format?',
+            blocking: true,
+            phase: 'shape',
+            options: [
+              { id: 'csv', label: 'CSV', recommended: true },
+              { id: 'json', label: 'JSON' },
+            ],
+          },
+        )
+        asked.sessionId = sessionId
+        asked.specId = specId
+        asked.questionId = raised.questions[0]?.id ?? ''
+      }),
+    )
+    return asked
+  }
+
+  /** The answers the agent was handed, as it read them. */
+  const answersTo = (agent: FakeAgent) =>
+    deliveriesTo(agent).flatMap((one) => {
+      const text = one.get(contextUri('answer'))
+      return text === undefined ? [] : [text]
+    })
+
+  const ANSWERED = `${ANSWERS}\n\n- Which format?\n  The user answered: CSV`
+
+  test('an answer to a Session whose agent is not running starts it, and the agent is handed the answer in a turn', async () => {
+    const opened = application(dataFolder)
+    const { sessionId, specId, questionId } = await askedThenQuit(opened)
+
+    const reopened = fakeAgent()
+    await opened(reopened)(
+      Effect.gen(function* () {
+        // The answer is the first thing the user does after the restart: nothing started the agent.
+        yield* (yield* Specs).answerQuestion({ specId, questionId, optionId: 'csv' })
+        yield* (yield* AgentRuntime).specChanged(specId)
+
+        const thread = yield* heldInThread(sessionId, deliveredAlone)
+        expect(reopened.answers.resumes).toBe(1)
+        expect(answersTo(reopened)).toEqual([ANSWERED])
+        expect(thread.filter((entry) => entry.state === 'failed')).toEqual([])
+        expect(thread.at(-1)).toMatchObject({ kind: 'turn', state: 'end_turn' })
+      }),
+    )
+  })
+
+  test('an answer given while the agent is still taking its session back waits for it, and the agent is handed the answer in a turn', async () => {
+    const opened = application(dataFolder)
+    const { sessionId, specId, questionId } = await askedThenQuit(opened)
+
+    const takingBack = held()
+    const reopened = fakeAgent({ holdsTakeBack: () => takingBack.promise })
+    await opened(reopened)(
+      Effect.gen(function* () {
+        const runtime = yield* AgentRuntime
+        // The page reads what the agent offers, which starts it: it runs, and has not taken its
+        // session back yet when the user answers.
+        const reading = yield* Effect.forkScoped(runtime.options(sessionId))
+        for (let look = 0; look < 400 && reopened.answers.resumes === 0; look++) yield* pause(5)
+        yield* (yield* Specs).answerQuestion({ specId, questionId, optionId: 'csv' })
+        yield* runtime.specChanged(specId)
+        yield* pause(50)
+        takingBack.carryOn()
+        yield* Fiber.join(reading)
+
+        const thread = yield* heldInThread(sessionId, deliveredAlone)
+        expect(reopened.answers.resumes).toBe(1)
+        expect(answersTo(reopened)).toEqual([ANSWERED])
+        expect(thread.filter((entry) => entry.state === 'failed')).toEqual([])
+        expect(thread.at(-1)).toMatchObject({ kind: 'turn', state: 'end_turn' })
+      }),
+    )
+  })
+
+  test('Retry on a delivery that failed hands over what waits, the agent started if it is not running', async () => {
+    const opened = application(dataFolder)
+    const { sessionId, specId, questionId } = await askedThenQuit(opened)
+
+    const reopened = fakeAgent()
+    await opened(reopened)(
+      Effect.gen(function* () {
+        // The answer is recorded and nothing asked for its delivery: what a failed one leaves.
+        yield* (yield* Specs).answerQuestion({ specId, questionId, optionId: 'csv' })
+        yield* (yield* AgentRuntime).handOver(sessionId)
+
+        yield* heldInThread(sessionId, deliveredAlone)
+        expect(answersTo(reopened)).toEqual([ANSWERED])
+      }),
+    )
+  })
+})
+
 describe('A define Session whose agent lost its session is briefed again', () => {
   test('an agent that took its session back is not briefed again; one that lost it is', async () => {
     const opened = application(dataFolder)

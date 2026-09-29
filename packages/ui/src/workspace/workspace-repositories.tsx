@@ -2,6 +2,7 @@ import type { ReactNode } from 'react'
 
 import { Badge } from '../components/badge/badge.tsx'
 import { Card, CardRow } from '../components/card/card.tsx'
+import { StatusDot, type StatusTone } from '../components/status-dot/status-dot.tsx'
 import { IconGitFork } from '../icons.ts'
 import type { GitState, WorkspaceRepositoryLine } from './model.ts'
 
@@ -37,6 +38,21 @@ const READING_BAR = 'block h-3 w-24 rounded-sm bg-muted motion-safe:animate-brea
 /** Git's message, as it is: kept whole on as many lines as it needs. */
 const GIT_ERROR =
   'min-w-0 font-mono text-xs break-words whitespace-pre-wrap text-destructive-muted-foreground'
+
+/**
+ * What a row says while its worktree step is not done (#217): the step's state as a dot, in place
+ * of a Git read of a folder not made yet. Its sentence is the dot's name and its hover. A failed
+ * step's own words are the preparation's to say.
+ */
+const WORKTREE_STEP: Record<
+  NonNullable<WorkspaceRepositoryLine['step']>,
+  { tone: StatusTone; word: string }
+> = {
+  pending: { tone: 'pending', word: 'Waiting for its worktree' },
+  running: { tone: 'running', word: 'Making its worktree…' },
+  failed: { tone: 'failure', word: 'Its worktree was not made' },
+  skipped: { tone: 'cancelled', word: 'No worktree: no repository in main' },
+}
 
 export interface WorkspaceRepositoriesProps {
   /** The Workspace's name, which names the list to whatever reads the page. */
@@ -76,7 +92,21 @@ export function WorkspaceRepositories({
                 </span>
                 <span className={LINE}>
                   <span className={REPOSITORY}>{repository.path}</span>
-                  <GitLine git={repository.git} />
+                  {repository.step === undefined ? (
+                    <GitLine git={repository.git} />
+                  ) : (
+                    <span className={GIT}>
+                      {/* The line's own height, so Git's answer takes its place without moving it. */}
+                      <span className={READING}>
+                        <StatusDot
+                          status={WORKTREE_STEP[repository.step].tone}
+                          size="sm"
+                          label={WORKTREE_STEP[repository.step].word}
+                          title={WORKTREE_STEP[repository.step].word}
+                        />
+                      </span>
+                    </span>
+                  )}
                 </span>
               </CardRow>
             </li>

@@ -317,8 +317,15 @@ export const ATurnThatAsked: Story = {
         name: 'added to the catalogue',
       }),
     ).toBeInTheDocument()
+    // One dot on its line, the run's; no second one for the call.
+    await expect(within(run).getAllByRole('img', { name: /exited|completed|done/i })).toHaveLength(
+      1,
+    )
     await userEvent.click(run)
     await expect(await canvas.findByText('Allow once')).toBeVisible()
+    // Opened, only the answer and the output: no sentence of its own, no internal argument.
+    await expect(canvas.queryByText('bash is exited')).toBeNull()
+    await expect(canvas.queryByText('commands_run')).toBeNull()
     await expect(canvas.getByRole('log', { name: 'Output of run-bash' })).toBeVisible()
     // An answered question keeps what was chosen, read once the group is open.
     await expect(canvas.getByText('A, Negative rows in the same file')).toBeVisible()

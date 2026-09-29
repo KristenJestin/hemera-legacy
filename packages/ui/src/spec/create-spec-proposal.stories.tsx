@@ -121,7 +121,6 @@ export const ExistingSpec: Story = {
   play: async ({ canvasElement, args }) => {
     const canvas = within(canvasElement)
     const card = canvas.getByRole('group', { name: 'Continue a Spec' })
-    await expect(card).toHaveTextContent('Continue a Spec')
     await expect(card).toHaveTextContent('ATL-4')
     await expect(card).toHaveTextContent('CSV invoice export')
     await expect(canvas.queryByRole('textbox', { name: 'Title of the Spec' })).toBeNull()

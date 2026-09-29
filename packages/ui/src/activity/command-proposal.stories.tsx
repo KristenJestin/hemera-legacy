@@ -59,8 +59,9 @@ export const Pending: Story = {
     await expect(canvas.getByText(args.name)).toBeVisible()
     await expect(canvas.getByText(args.line)).toBeVisible()
     await expect(canvas.getByText(args.folder)).toBeVisible()
-    // Its title says what accepting does (review of #250); why is under the pointer on the name.
-    await expect(canvas.getByText('Add to the catalogue')).toBeVisible()
+    // What accepting does is its group's head, not the card's (review of #250); why is under the
+    // pointer on the name.
+    await expect(canvas.queryByText('Add to the catalogue')).toBeNull()
     await expect(canvas.getByText(args.name)).toHaveAttribute('title', args.why)
     await expect(canvas.queryByText(args.why)).toBeNull()
     await userEvent.click(canvas.getByRole('button', { name: 'Add' }))
@@ -71,11 +72,12 @@ export const Pending: Story = {
   },
 }
 
-/** At the Workspace root, the card says so, where it says where. */
+/** At the Workspace root, where every line runs, the card says nothing of where. */
 export const AtTheRoot: Story = {
   args: { name: 'test', line: 'pnpm test', type: 'test', folder: '.' },
   play: async ({ canvasElement }) => {
-    await expect(within(canvasElement).getByText('Workspace root')).toBeVisible()
+    await expect(within(canvasElement).queryByText('Workspace root')).toBeNull()
+    await expect(within(canvasElement).queryByText('.')).toBeNull()
   },
 }
 

@@ -17,9 +17,11 @@ import { hemeraToolCallOf, hemeraToolLabelOf, subjectOf } from './agent-tool-pay
  *
  * A thought or a diff inside such a run goes into the group with the calls around it: they are
  * part of the work, not something said, and a thought between two reads would otherwise cut one
- * run of work into two groups. They are not counted: an action is a call. Anything else — the
- * agent's text, the user's message, a question, a permission, a run, a proposal, Hemera's own
- * line — ends the run, and a run of a single call stays the row it is.
+ * run of work into two groups. They are not counted: an action is a call. The quiet records of
+ * what waited for the reader — a permission, a proposal, a question, the Spec proposed — and a run
+ * go into the group too, at its ends as well (review of #250); a call's own permission, run and
+ * proposal are drawn with the call and are not rows at all. Anything else — the agent's text, the
+ * user's message, Hemera's own line — ends the run, and a run of a single call stays the row it is.
  *
  * Folded, the group also names its latest call, in the words that call's own row says it — the
  * agent's title, or Hemera's label and what it is about (issue #180) — so the line says what the
@@ -45,9 +47,11 @@ export interface Action {
 
 /**
  * What a drawn block of the thread is to a run of calls: a call, a companion of the calls around
- * it (a thought, a diff), or `null` for anything else, which ends the run.
+ * it (a thought, a diff), a member of the run (what waited for the reader and was answered, or a
+ * run, review of #250), or `null` for anything else, which ends the run. A member is not counted,
+ * and, unlike a companion, stays in the group at either end of it.
  */
-export type Grouping = Action | 'companion' | null
+export type Grouping = Action | 'companion' | 'member' | null
 
 /** What the agent's report of a call says of it, as far as counting it goes. */
 const reportSchema = z.object({
@@ -96,8 +100,19 @@ function hemeraLabelOf(label: string, subject: string | undefined): string {
  * What an entry of the thread is to a run of calls, read off the entry the page draws — Hemera's
  * own answer in place of the agent's report of it, where the thread holds both.
  */
+/** The quiet records of the thread, which fold into the work around them (review of #250). */
+const MEMBERS: readonly SessionEntry['kind'][] = [
+  'permission_request',
+  'permission_decision',
+  'command_proposal',
+  'command_run',
+  'spec_proposal',
+  'spec_question',
+]
+
 export function groupingOf(entry: SessionEntry): Grouping {
   if (entry.kind === 'thought' || entry.kind === 'diff') return 'companion'
+  if (MEMBERS.includes(entry.kind)) return 'member'
   if (entry.kind === 'hemera_tool_call') {
     const drawn = hemeraToolCallOf(entry)
     return drawn === null
@@ -155,7 +170,9 @@ export function groupActions<T>(blocks: readonly { item: T; grouping: Grouping }
     const first = run.findIndex((one) => one.grouping !== 'companion')
     const last = run.findLastIndex((one) => one.grouping !== 'companion')
     const actions = run.flatMap((one) =>
-      one.grouping === null || one.grouping === 'companion' ? [] : [one.grouping],
+      one.grouping === null || one.grouping === 'companion' || one.grouping === 'member'
+        ? []
+        : [one.grouping],
     )
     if (actions.length < 2) {
       for (const one of run) pieces.push({ kind: 'one', item: one.item })

@@ -3,6 +3,9 @@ import type { CommandRun as Run, SessionEntry, SpecType } from '@hemera/ipc'
 import {
   AgentReport,
   AgentText,
+  CallOutcome,
+  CallOutcomeDetails,
+  type CallPermission,
   CommandProposal,
   CommandProposalRecord,
   CommandRun,
@@ -61,6 +64,7 @@ import {
   questionAnchor,
   questionEntryOf,
 } from './spec-entries.ts'
+import type { CallLink } from './call-links.ts'
 import { decidesARequest, decisionOf, permissionStandingOf } from './notices.ts'
 
 /**
@@ -341,6 +345,8 @@ export interface AgentContext {
   onHandOver: () => void
   /** The reader opened a run of the thread that is over: it has been seen, and may leave the line. */
   onSeenRun: (runId: string) => void
+  /** What became of a call of Hemera's, by the entry it is drawn from (review of #250). */
+  callLink: (drawnId: string) => CallLink | undefined
   /**
    * The agent's report of a call, by the identifier the agent gave it: what a question about
    * that call is headed by — the label and the subject of its line (recette 3 of 23 September
@@ -417,6 +423,7 @@ export function drawEntry(entry: SessionEntry, context: AgentContext): ReactNode
           // What the agent was answered, when Hemera never was asked: the call's only reason.
           error={reportedFailureOf(entry)}
           defaultOpen={false}
+          {...outcomeOf(context.callLink(entry.id), context)}
         />
       )
     }
@@ -584,7 +591,7 @@ export function drawEntry(entry: SessionEntry, context: AgentContext): ReactNode
   if (entry.kind === 'hemera_tool_call') {
     const drawn = hemeraToolCallOf(entry, context.runs)
     if (drawn === null) return null
-    return <HemeraToolCall {...drawn} />
+    return <HemeraToolCall {...drawn} {...outcomeOf(context.callLink(entry.id), context)} />
   }
 
   if (entry.kind === 'command_run') {
@@ -632,6 +639,70 @@ export function drawEntry(entry: SessionEntry, context: AgentContext): ReactNode
   }
 
   return null
+}
+
+/**
+ * What became of a call, drawn with the call (review of #250): the shield of the permission it
+ * waited on, the run's dot and exit code, the bookmark of the command it proposed on its line;
+ * the answer, what the run printed and what was proposed once it is opened.
+ */
+/** What a call is drawn with of what became of it: marks on its line, details in its body. */
+interface Outcome {
+  outcome?: ReactNode
+  children?: ReactNode
+}
+
+function outcomeOf(link: CallLink | undefined, context: AgentContext): Outcome {
+  if (link === undefined) return {}
+  const thread = context.spec.thread
+  const permission: CallPermission | undefined =
+    link.request !== undefined
+      ? permissionStandingOf(link.request, thread)
+      : link.decision === undefined
+        ? undefined
+        : 'unasked'
+  const run =
+    link.run === undefined
+      ? null
+      : commandRunOf(link.run, context.runs, context.root, context.repositories)
+  const proposed = link.proposal === undefined ? null : commandProposalOf(link.proposal)
+  const decision = link.decision
+  return {
+    outcome: (
+      <CallOutcome
+        permission={permission}
+        run={run === null ? undefined : { state: run.state, exitCode: run.exitCode }}
+        proposal={proposed?.state}
+      />
+    ),
+    children: (
+      <CallOutcomeDetails
+        decision={
+          decision === undefined
+            ? undefined
+            : {
+                answer: decision.body,
+                at: clockOf(decision.createdAt),
+                refused: permission === 'refused' || permission === 'stopped',
+              }
+        }
+        output={
+          run === null
+            ? undefined
+            : {
+                id: run.runId ?? link.run?.id ?? '',
+                text: run.output,
+                released: run.state !== 'running',
+              }
+        }
+        proposal={
+          proposed === null
+            ? undefined
+            : { line: proposed.line, folder: proposed.folder, why: proposed.why }
+        }
+      />
+    ),
+  }
 }
 
 /** When something was written, `HH:MM`, as the thread's lines say it. */

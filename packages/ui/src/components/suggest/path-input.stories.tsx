@@ -52,7 +52,7 @@ function Kept({ value = '', ...rest }: PathInputProps) {
 }
 
 const meta = {
-  tags: ['autodocs', 'new'],
+  tags: ['autodocs'],
   title: 'Components/PathInput',
   component: PathInput,
   render: (args) => <Kept {...args} />,

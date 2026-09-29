@@ -10,8 +10,13 @@
 import { describe, expect, test } from 'vite-plus/test'
 
 import type { SessionEntry } from '@hemera/ipc'
-import { callFaceOf } from '#renderer/agent-face.ts'
-import { type AgentSessionState, activityOf, sessionFaceOf } from '#renderer/agent-store.ts'
+import { callFaceOf, noticeFaceOf } from '#renderer/agent-face.ts'
+import {
+  type AgentSessionState,
+  activityOf,
+  sessionFaceOf,
+  turnRowOf,
+} from '#renderer/agent-store.ts'
 
 /** One entry of a thread, as the engine pushes it. */
 function entry(
@@ -101,13 +106,36 @@ describe('The row above the box wears the face of the work, not only of the stat
     expect(activityOf([SAID, call(null, 'mcp__hemera__spec_write')]).face).toBe('writing')
   })
 
-  test('a turn that ended on a question left unanswered is waiting for the answer', () => {
-    expect(activityOf([SAID, question('q1'), TURN])).toEqual({ state: 'question' })
-    // Answered, the turn is simply done.
-    expect(activityOf([SAID, question('q1'), TURN, answer('q1')]).state).toBe('done')
-    // A question of an earlier turn is not what this one ended on.
-    const again = entry('e5', 'message', 'Go on', { role: 'user' })
-    expect(activityOf([question('q0'), again, TURN]).state).toBe('done')
+  test('a turn that ended on an unanswered question is done, and the notices say it waits', () => {
+    // The row reads whether the Session waits off its notices alone (#250), and a question of the
+    // Spec waits there: the thread on its own says the turn is over.
+    expect(activityOf([SAID, question('q1'), TURN]).state).toBe('done')
+    expect(turnRowOf([SAID, question('q1'), TURN], false, null, 'question')).toEqual({
+      state: 'waiting',
+      face: 'question',
+    })
+  })
+})
+
+describe('The row that waits wears the face of what the notices hold', () => {
+  test('a permission asks leave, a question asks for an answer', () => {
+    expect(noticeFaceOf('permission')).toBe('permission')
+    expect(noticeFaceOf('question')).toBe('question')
+  })
+
+  test('a proposal to take or leave asks leave, like a permission', () => {
+    expect(noticeFaceOf('proposal')).toBe('permission')
+    expect(noticeFaceOf('setup')).toBe('permission')
+    expect(noticeFaceOf('spec')).toBe('permission')
+  })
+
+  test('the row wears the face of the kind the notices put first, a turn running or not', () => {
+    const asked = entry('e3', 'permission_request', 'git push')
+    const running = turnRowOf([SAID, call('read'), asked], true, 'e3', 'permission')
+    expect(running?.state).toBe('waiting')
+    expect(running?.face).toBe('permission')
+    expect(turnRowOf([SAID, TURN], false, 'e9', 'setup')?.face).toBe('permission')
+    expect(turnRowOf([SAID, TURN], false, 'e9', null)?.face).toBeUndefined()
   })
 })
 
@@ -134,5 +162,9 @@ describe('A Session in the sidebar wears what its agent is doing', () => {
     const failed = { ...TURN, state: 'failed' }
     expect(sessionFaceOf(agent([SAID, failed], false))).toBe('error')
     expect(sessionFaceOf(agent([SAID, question('q1'), TURN], false))).toBe('question')
+    // Answered, it is at rest; and a question of an earlier turn is not what this one ended on.
+    expect(sessionFaceOf(agent([SAID, question('q1'), TURN, answer('q1')], false))).toBe('asleep')
+    const again = entry('e5', 'message', 'Go on', { role: 'user' })
+    expect(sessionFaceOf(agent([question('q0'), again, TURN], false))).toBe('asleep')
   })
 })

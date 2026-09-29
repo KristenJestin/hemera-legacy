@@ -43,10 +43,15 @@ export interface SpecToolsNeeds {
   readonly sessions: SessionsService
   readonly held: HeldWordsService
   readonly inThread: (sessionId: string, entry: ThreadWrite) => ReturnType<SessionsService['write']>
+  /** Whether the Session was started by New Spec: its agent was handed New Spec's request. */
+  readonly askedForSpec: (sessionId: string) => Effect.Effect<boolean>
 }
 
 /** The phase a `phase_done` names, which its schema requires it to send. */
 const PHASE_NAMED = z.object({ phase: z.enum(PHASE_IDS) })
+
+/** The Spec an `existing` proposal points to, by the key its schema requires it to send. */
+const SPEC_POINTED = z.object({ spec: z.string() })
 
 /** The Spec a `spec` proposal names, which its schema requires it to send. */
 const SPEC_PROPOSED = z.object({ title: z.string(), type: z.enum(SPEC_TYPES) })
@@ -103,7 +108,7 @@ function pageOf(text: string, offset: number, limit: number) {
 }
 
 /** The three tools, over the services they need. */
-export function specTools({ specs, sessions, held, inThread }: SpecToolsNeeds) {
+export function specTools({ specs, sessions, held, inThread, askedForSpec }: SpecToolsNeeds) {
   /** The Session as its row says now, its mission and its Spec: read at every call. */
   const sessionNow = (sessionId: string) =>
     sessions.one(sessionId).pipe(
@@ -266,6 +271,10 @@ export function specTools({ specs, sessions, held, inThread }: SpecToolsNeeds) {
   /**
    * The Spec a `free` Session's agent proposes (D7-07): the entry the human accepts or not, and
    * nothing else — the Spec is created, and the Session turns `define`, only when they accept.
+   *
+   * A Session started by New Spec is the exception (issue #205): the user asked for a Spec
+   * already, so it is created at once as proposed, and the entry is the line that says so. Should
+   * that fail, the card asks as it would anywhere else.
    */
   const proposeSpec = (
     session: Session,
@@ -278,6 +287,28 @@ export function specTools({ specs, sessions, held, inThread }: SpecToolsNeeds) {
         )
       }
       const { title, type } = SPEC_PROPOSED.parse(call)
+      if (yield* askedForSpec(session.id)) {
+        const made = yield* specs.create({ sessionId: session.id, type, title }).pipe(Effect.result)
+        if (Result.isSuccess(made)) {
+          const { key } = made.success.snapshot.spec
+          // The Spec exists whether or not its line could be written: the panel shows it.
+          yield* inThread(session.id, {
+            role: 'hemera',
+            kind: 'spec_proposal',
+            body: title,
+            payload: JSON.stringify({ title, type, createdKey: key }),
+            correlationId: `proposal:${crypto.randomUUID()}`,
+            settled: true,
+          }).pipe(Effect.ignore)
+          return completed(
+            `created the ${type} Spec ${key} "${title}"`,
+            [
+              `Hemera created the ${type} Spec ${key} "${title}" at once: the user asked for a Spec with New Spec, so no card asks them. This Session defines it now.`,
+              "End this turn: you are then started again with the Spec tools and handed the Spec's mission brief. If you are unsure of its type, ask the user with a question once you hold them.",
+            ].join('\n'),
+          )
+        }
+      }
       const written = yield* inThread(session.id, {
         role: 'hemera',
         kind: 'spec_proposal',
@@ -300,6 +331,61 @@ export function specTools({ specs, sessions, held, inThread }: SpecToolsNeeds) {
       )
     })
 
+  /**
+   * The existing Spec a `free` Session's agent points to (issue #198): what New Spec asks for
+   * when the Project already has one. The entry the human continues or not, and nothing else —
+   * the Session turns `define` on it only when they continue it.
+   */
+  const proposeExisting = (
+    session: Session,
+    call: Extract<SpecCall, { tool: 'spec_propose' }>['arguments'],
+  ) =>
+    Effect.gen(function* () {
+      if (session.mission !== 'free') {
+        return refused(
+          `the Session "${session.title}" is ${session.mission}: only a free Session points to a Spec`,
+        )
+      }
+      const { spec: key } = SPEC_POINTED.parse(call)
+      const listed = yield* specs.list(session.projectId).pipe(Effect.result)
+      if (Result.isFailure(listed)) {
+        return {
+          ok: false,
+          summary: 'the Specs could not be read',
+          text: listed.failure.message,
+          paths: [],
+        }
+      }
+      const found = listed.success.find((one) => one.key.toLowerCase() === key.toLowerCase())
+      if (found === undefined) {
+        return refused(
+          `this Project has no Spec ${key}`,
+          `This Project has no Spec ${key}; project_get lists its Specs by key. Nothing was proposed.`,
+        )
+      }
+      const { id: specId, key: named, title, type } = found
+      const written = yield* inThread(session.id, {
+        role: 'hemera',
+        kind: 'spec_proposal',
+        body: title,
+        payload: JSON.stringify({ title, type, specId, key: named }),
+        correlationId: `proposal:${crypto.randomUUID()}`,
+        settled: true,
+      }).pipe(Effect.result)
+      if (Result.isFailure(written)) {
+        return {
+          ok: false,
+          summary: 'the proposal could not be written',
+          text: written.failure.message,
+          paths: [],
+        }
+      }
+      return completed(
+        `pointed to ${named} "${title}"`,
+        `The user is asked in the chat whether this Session continues ${named} "${title}"; it defines that Spec once they do.`,
+      )
+    })
+
   /** One call to a Spec tool, for the Session its token was minted for. */
   return (sessionId: string, call: SpecCall): Effect.Effect<Answer> =>
     Effect.gen(function* () {
@@ -307,11 +393,14 @@ export function specTools({ specs, sessions, held, inThread }: SpecToolsNeeds) {
       if (session !== null && call.tool === 'spec_propose' && call.arguments.kind === 'spec') {
         return yield* proposeSpec(session, call.arguments)
       }
+      if (session !== null && call.tool === 'spec_propose' && call.arguments.kind === 'existing') {
+        return yield* proposeExisting(session, call.arguments)
+      }
       const specId = session?.specId ?? null
       if (specId === null) {
         return refused(
           'this Session defines no Spec',
-          `${call.tool} acts on the Spec this Session defines, and it defines none: a free Session proposes one with spec_propose and kind spec.`,
+          `${call.tool} acts on the Spec this Session defines, and it defines none: a free Session proposes one with spec_propose and kind spec, or points to one that exists with kind existing.`,
         )
       }
       switch (call.tool) {

@@ -94,6 +94,7 @@ export const CHANNELS = {
   'specs.revisions': ENGINE_REQUESTS['specs.revisions'],
   'specs.create': ENGINE_REQUESTS['specs.create'],
   'specs.declineProposal': ENGINE_REQUESTS['specs.declineProposal'],
+  'specs.acceptExisting': ENGINE_REQUESTS['specs.acceptExisting'],
   'specs.openSession': ENGINE_REQUESTS['specs.openSession'],
   'specs.writeSection': ENGINE_REQUESTS['specs.writeSection'],
   'specs.writeStories': ENGINE_REQUESTS['specs.writeStories'],
@@ -124,6 +125,7 @@ export const CHANNELS = {
   'agents.stop': ENGINE_REQUESTS['agents.stop'],
   'agents.decide': ENGINE_REQUESTS['agents.decide'],
   'agents.resume': ENGINE_REQUESTS['agents.resume'],
+  'agents.handOver': ENGINE_REQUESTS['agents.handOver'],
   // The two the Agents section is drawn from: what this machine has, and the one thing that
   // changes it, which happens because somebody pressed a button and not on its own (D5-18).
   'agents.check': ENGINE_REQUESTS['agents.check'],
@@ -139,12 +141,17 @@ export const CHANNELS = {
   'commands.runs': ENGINE_REQUESTS['commands.runs'],
   'commands.run': ENGINE_REQUESTS['commands.run'],
   'commands.stop': ENGINE_REQUESTS['commands.stop'],
+  'commands.runAgain': ENGINE_REQUESTS['commands.runAgain'],
   'commands.output': ENGINE_REQUESTS['commands.output'],
   'commands.runOf': ENGINE_REQUESTS['commands.runOf'],
   'commands.services': ENGINE_REQUESTS['commands.services'],
   'commands.stopService': ENGINE_REQUESTS['commands.stopService'],
   'commands.proposeAccept': ENGINE_REQUESTS['commands.proposeAccept'],
   'commands.proposeDecline': ENGINE_REQUESTS['commands.proposeDecline'],
+  // What a human decides of the setup changes the agent proposed (#218).
+  'setup.accept': ENGINE_REQUESTS['setup.accept'],
+  'setup.acceptAll': ENGINE_REQUESTS['setup.acceptAll'],
+  'setup.decline': ENGINE_REQUESTS['setup.decline'],
   'context.read': ENGINE_REQUESTS['context.read'],
 
   // The Workspaces of a Project, their preparation, the Project's recipe and its variables,

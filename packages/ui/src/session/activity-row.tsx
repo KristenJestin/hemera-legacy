@@ -28,7 +28,7 @@ import type { FaceState } from '../components/face/states.ts'
  * wondering whether it had ended or died; the quiet line answers that, and goes when the next
  * message is sent. The page is what knows which of the two to draw.
  *
- * Collapsed it is one line: "Thinking…", "Running cat recap.md", "Waiting for your permission",
+ * Collapsed it is one line: "Thinking…", "Running cat recap.md", "Waiting for your answer",
  * "Writing…". The chevron opens the thought that is arriving *now*, and only that one: the
  * thoughts already in the thread are blocks of their own and stay where they are, because a row
  * that swallowed them would be a second copy of the turn.
@@ -78,15 +78,14 @@ const ACTIONS = 'flex shrink-0 items-center gap-1'
 const THOUGHT = 'max-w-3xl text-sm whitespace-pre-wrap text-muted-foreground'
 
 /**
- * The four things a turn is doing between one block of the thread and the next, and the four
- * ways it can have ended — one of which, `question`, is a turn that ended by asking the reader.
+ * The four things a turn is doing between one block of the thread and the next, and the three
+ * ways it can have ended.
  */
 export type ActivityState =
   | 'thinking'
   | 'running'
   | 'waiting'
   | 'streaming'
-  | 'question'
   | 'done'
   | 'stopped'
   | 'failed'
@@ -95,9 +94,8 @@ export type ActivityState =
 const SAID: Record<ActivityState, string> = {
   thinking: 'Thinking…',
   running: 'Running',
-  waiting: 'Waiting for your permission',
+  waiting: 'Waiting for your answer',
   streaming: 'Writing…',
-  question: 'Waiting for your answer',
   done: 'Done',
   stopped: 'Stopped',
   failed: 'Failed',
@@ -107,15 +105,15 @@ const SAID: Record<ActivityState, string> = {
  * The face each state wears when the caller says nothing finer (issue #140).
  *
  * `running` is a command until the caller knows better: a tool that reads wears `reading`, one
- * that writes wears `writing`, and only the caller knows which tool is running. A turn the reader
- * stopped is at rest, and rest is `asleep`.
+ * that writes wears `writing`, and only the caller knows which tool is running. `waiting` is a
+ * permission until the caller says a question waits instead. A turn the reader stopped is at
+ * rest, and rest is `asleep`.
  */
 export const ACTIVITY_FACES: Readonly<Record<ActivityState, FaceState>> = {
   thinking: 'thinking',
   running: 'running',
   waiting: 'permission',
   streaming: 'writing',
-  question: 'question',
   done: 'done',
   stopped: 'asleep',
   failed: 'error',
@@ -177,7 +175,8 @@ export interface ActivityRowProps {
   state: ActivityState
   /**
    * The face the line wears, when the caller knows more than the state says: `reading` or
-   * `writing` for a tool call that reads or writes, where the state only says `running`. The
+   * `writing` for a tool call that reads or writes, where the state only says `running`;
+   * `question` or `permission` for what the Session waits on, where the state says `waiting`. The
    * state's own face when left out; `asleep` whatever it is, once the turn has heard nothing
    * for `QUIET_AFTER_MS`.
    */

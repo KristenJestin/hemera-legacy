@@ -49,7 +49,7 @@ const AUTH: ServiceLine = {
 }
 
 const meta = {
-  tags: ['autodocs'],
+  tags: ['autodocs', 'updated'],
   title: 'Blocks/Workspace/ServiceList',
   component: ServiceList,
   parameters: { layout: 'padded' },
@@ -92,7 +92,8 @@ async function aUrlIsReadyOnlyAfterItAnswers({ canvasElement, args }: PlayContex
   const url = service!.url!
   await expect(canvas.getByText(url)).toBeVisible()
   if (service!.readiness === 'ready') {
-    await expect(canvas.getByText('ready')).toBeVisible()
+    // The link it is says it answers: no word beside it.
+    await expect(canvas.queryByText('starting')).toBeNull()
     await userEvent.click(canvas.getByRole('button', { name: url }))
     await expect(args.onOpenUrl).toHaveBeenCalledWith(url)
   } else {
@@ -117,7 +118,7 @@ export const Unanswered: Story = {
   args: { services: [{ ...DEV_LOGIN_FORM, readiness: 'unanswered' }] },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    await expect(canvas.getByText('No answer after a minute; still starting')).toBeVisible()
+    await expect(canvas.getByText('no answer after a minute; still starting')).toBeVisible()
     await expect(canvas.queryByRole('button', { name: 'http://localhost:3001' })).toBeNull()
   },
 }
@@ -155,7 +156,7 @@ const NO_PORTLESS = 'portless was not found on the PATH'
 async function portlessIsRefusedWhenItIsNotInstalled({ canvasElement }: PlayContext) {
   const auth = rowOf(canvasElement, 'auth', 'main')
   await expect(auth.getByText(NO_PORTLESS)).toBeVisible()
-  await expect(auth.getByText('Failed')).toBeVisible()
+  await expect(auth.getByRole('img', { name: 'Failed' })).toBeVisible()
   await expect(auth.queryByRole('button', { name: /^Stop/ })).toBeNull()
 }
 
@@ -179,7 +180,7 @@ export const Failed: Story = {
   },
   play: async (context) => {
     const dev = rowOf(context.canvasElement, 'dev', 'login-form')
-    await expect(dev.getByText('Failed')).toBeVisible()
+    await expect(dev.getByRole('img', { name: 'Failed' })).toBeVisible()
     await expect(
       dev.getByText('Error: listen EADDRINUSE: address already in use :::3000'),
     ).toBeVisible()

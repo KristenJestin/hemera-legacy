@@ -26,9 +26,11 @@ import { fakeWorkspace } from './agent/install.ts'
 import { AGENT, ANSWERS, MODELS, PROPOSAL, PROPOSE } from './agent/script.ts'
 import {
   addProject,
+  awaitsRecord,
   answerWith,
   awaits,
   control,
+  openNotices,
   press,
   pressIn,
   region,
@@ -161,7 +163,8 @@ describe('A free Session’s agent proposes a Spec, and Create makes the Session
     await write(ASKED)
     await press('Start chat')
     await awaits(ANSWERS[0])
-    await awaits('Create the Spec')
+    // The proposal waits among the Session's notices, closed until pressed (issue #237).
+    await openNotices('Spec proposed')
 
     // The agent proposed through Hemera's `spec_propose`: a Hemera call of the thread, wearing
     // the tool's own mark, and the proposal below it.
@@ -179,8 +182,9 @@ describe('A free Session’s agent proposes a Spec, and Create makes the Session
   })
 
   it('creates the Spec with its key, opens the panel and keeps the thread', async () => {
-    await pressIn(PROPOSAL_CARD, 'Create')
-    await awaits(`Created ${KEY}`)
+    await openNotices('Spec proposed')
+    await pressIn(PROPOSAL_CARD, 'Start')
+    await awaitsRecord(`Spec proposed, ${KEY} `)
     await browser.waitUntil(async () => (await region(PANEL)) !== '', {
       timeout: 10_000,
       timeoutMsg: 'the Spec panel never opened',
@@ -264,15 +268,22 @@ describe('The Session row never scrolls sideways', () => {
 })
 
 describe('The brief is part of the turn, never a human message', () => {
-  it('folds a mission brief titled with the phase in focus above the answer', async () => {
+  it('hands the mission brief with the turn, and draws no row of it in the thread', async () => {
     await write(DEFINING)
     await press('Send')
-    await awaits('What the agent was told · Shape')
     await awaits(ANSWERS[1])
 
-    // The sentence was written once, as the user's; the brief is Hemera's, and folded.
+    // The sentence was written once, as the user's; the brief is Hemera's, kept in the thread's
+    // entries for the Context tab, and drawn nowhere in the thread (issue #205).
     expect(await timesInThread(DEFINING)).toBe(1)
+    expect(await region(THREAD)).not.toContain('What the agent was told')
     expect(await region(THREAD)).not.toContain('# The Spec')
+    const { id } = await sessionOf(ASKED)
+    const briefs = await browser.execute(async (sessionId: string) => {
+      const read = await window.hemera.invoke('sessions.read', { sessionId })
+      return read.entries.filter((entry) => entry.kind === 'mission_brief').length
+    }, id)
+    expect(briefs).toBeGreaterThan(0)
   })
 })
 
@@ -317,25 +328,27 @@ describe('A question is asked and answered in the chat', () => {
 
     const panel = await region(PANEL)
     expect(panel).toContain('Questions · 1 open')
-    // The card in the thread is where it is answered: the register offers no way there (#181).
+    // The notices on the composer's edge are where it is answered (#237): the register offers no
+    // way there (#181).
     expect(panel.toLowerCase()).not.toContain('answer in the chat')
   })
 
-  it('answers it in the block, which folds to the answer, and resolves it in the register', async () => {
+  it('answers it in the notices, keeps its record in the thread, and resolves it in the register', async () => {
     await answerWith(ISSUE)
     await browser.pause(1200)
 
-    // The block folds to the question alone, and the answer is the reader's choice beside it,
-    // lettered as the card lettered it (issues #149 and #165).
+    // The thread keeps a quiet record where it was asked, the answer after the question, named
+    // after its answer, lettered as the card lettered it (issues #199, #237).
     const block = await region('[id^="ask-"]')
     expect(block).toContain(QUESTION)
-    expect(block).not.toContain('The payment date')
+    expect(block).toContain(`A, ${ISSUE}`)
     const chosen = await browser.execute(() =>
       [...document.querySelectorAll('[role="group"][aria-label^="You answered"]')].map(
-        (group) => group.getAttribute('aria-label') ?? '',
+        (group) =>
+          `${group.closest('[id^="ask-"]') === null ? 'thread' : 'card'}: ${group.getAttribute('aria-label') ?? ''}`,
       ),
     )
-    expect(chosen).toEqual([`You answered «${QUESTION}»: A, ${ISSUE}`])
+    expect(chosen).toEqual([`card: You answered «${QUESTION}»: A, ${ISSUE}`])
     const panel = await region(PANEL)
     expect(panel).toContain('Questions · 0 open')
     expect(panel).toContain('1 answered')
@@ -404,14 +417,13 @@ describe('A second Session reads but does not write', () => {
   })
 })
 
-describe('Mark ready is refused with what is left', () => {
-  it('is offered on the draft, and refused with what it still lacks', async () => {
-    // No readiness is drawn (issue #135): the press is offered, and the refusal says the rest.
+describe('Mark ready waits until the Spec can be marked ready', () => {
+  it('is not offered on a draft that still lacks something, whose footer says nothing', async () => {
+    // A press could only be refused (issues #205, #209): the footer says nothing instead.
     expect(await region(PANEL)).not.toContain('checks met')
-    await pressIn(PANEL, 'Mark ready')
-    await browser.pause(1200)
-
-    expect(await region(PANEL)).toContain(`${KEY} is not ready yet. Still to do:`)
+    expect(await control('Mark ready')).toBeNull()
+    expect(await region(PANEL)).not.toMatch(/left before ready/)
+    expect(await region(PANEL)).not.toContain('is not ready yet')
     const { specId } = await sessionOf(ASKED)
     const status = await browser.execute(async (spec: string) => {
       const read = await window.hemera.invoke('specs.read', { specId: spec })

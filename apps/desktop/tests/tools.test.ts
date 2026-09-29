@@ -37,6 +37,7 @@ import {
   processSupervisorLayer,
 } from '#engine/agents/supervisor.ts'
 import { heldWordsLayer } from '#engine/agents/held.ts'
+import { SessionModes, type StandingMode, sessionModesLayer } from '#engine/agents/modes.ts'
 import { NoNotices } from '#engine/agents/notices.ts'
 import { Commands, commandsLayer } from '#engine/commands/service.ts'
 import { Journal, journalLayer } from '#engine/journal.ts'
@@ -55,6 +56,7 @@ import { ToolAccess, toolAccessLayer } from '#engine/tools/access.ts'
 import { ToolPermissions } from '#engine/tools/permissions.ts'
 import type { OutsideAnswer, OutsideRequest } from '#engine/tools/permissions.ts'
 import { variablesLayer } from '#engine/workspaces/variables.ts'
+import { setupPlaces } from './application.ts'
 
 const SHIPPED = join(import.meta.dirname, '..', 'drizzle')
 
@@ -122,6 +124,7 @@ type Engine =
   | ToolCatalogue
   | ToolAccess
   | ToolPermissions
+  | SessionModes
   | Database
   | SqliteClient
 
@@ -143,6 +146,7 @@ function engine(human: Human) {
     Layer.provideMerge(Layer.succeed(ToolPermissions, human.service)),
     Layer.provideMerge(commandsLayer),
     Layer.provide(variablesLayer),
+    Layer.provide(setupPlaces(folder)),
     Layer.provideMerge(
       Layer.mergeAll(
         projectsLayer,
@@ -156,6 +160,8 @@ function engine(human: Human) {
     ),
     Layer.provide(processes),
     Layer.provide(heldWordsLayer),
+    // No agent runs here: a suite that needs a mode hands the reader over itself.
+    Layer.provideMerge(sessionModesLayer),
     // Nobody is watching: these suites read the thread and the runs, not what was pushed.
     Layer.provide(NoNotices),
   )
@@ -1124,5 +1130,158 @@ describe('A short command answers with its output; a long one is left running', 
     // Asked for in the background, it is answered as soon as it has started, not 30 s later.
     expect(seen.background.text).toContain('still running')
     expect(seen.waited).toBeLessThan(5_000)
+  })
+})
+
+/**
+ * The Session's agent standing on `standing`, as the runtime would report it, for as long as the
+ * suite leaves it there: the object is read at every call, so moving it is changing the mode.
+ */
+const standingOn = (standing: { current: StandingMode | null }) =>
+  Effect.gen(function* () {
+    const modes = yield* SessionModes
+    modes.heldBy(() => standing.current)
+  })
+
+const AUTO: StandingMode = { agent: 'claude', mode: 'auto', name: 'Auto' }
+const MANUAL: StandingMode = { agent: 'claude', mode: 'default', name: 'Manual' }
+
+describe('A one-off inside the Workspace in Auto runs without a question', () => {
+  it('starts the line, asks nothing, and leaves a quiet line saying why', async () => {
+    const human = humanSaying()
+    const seen = await engine(human)(
+      Effect.gen(function* () {
+        yield* standingOn({ current: AUTO })
+        const session = yield* opened
+        const answer = yield* calling({
+          sessionId: session.sessionId,
+          tool: 'commands_run',
+          arguments: { line: 'node -e console.log(1)', key: 'auto-1' },
+        })
+        const commands = yield* Commands
+        return {
+          answer,
+          recent: yield* commands.recent(session.sessionId),
+          entries: yield* threadEntries(session.sessionId),
+        }
+      }),
+    )
+
+    expect(human.asked).toHaveLength(0)
+    expect(seen.answer.ok).toBe(true)
+    expect(seen.recent).toHaveLength(1)
+    expect(seen.entries.some((entry) => entry.kind === 'permission_request')).toBe(false)
+    const record = seen.entries.find((entry) => entry.kind === 'permission_decision')
+    expect(record?.body).toBe('ran without asking, Auto mode')
+    expect(record?.role).toBe('hemera')
+    expect(JSON.parse(record?.payload ?? '{}')).toMatchObject({
+      inside: true,
+      mode: 'Auto',
+      unasked: true,
+    })
+  })
+})
+
+describe('The same one-off in Ask before edits asks', () => {
+  it('asks the human before the line runs', async () => {
+    const human = humanSaying('refused')
+    const seen = await engine(human)(
+      Effect.gen(function* () {
+        yield* standingOn({ current: MANUAL })
+        const session = yield* opened
+        const answer = yield* calling({
+          sessionId: session.sessionId,
+          tool: 'commands_run',
+          arguments: { line: 'node -e console.log(1)', key: 'manual-1' },
+        })
+        const commands = yield* Commands
+        return { answer, recent: yield* commands.recent(session.sessionId) }
+      }),
+    )
+
+    expect(human.asked).toHaveLength(1)
+    expect(seen.answer.ok).toBe(false)
+    expect(seen.recent).toHaveLength(0)
+  })
+})
+
+describe('A one-off outside the Workspace asks in every mode', () => {
+  it.each([
+    AUTO,
+    { agent: 'claude', mode: 'bypassPermissions', name: 'Bypass permissions' },
+    { agent: 'codex', mode: 'agent-full-access', name: 'Full access' },
+    MANUAL,
+  ] satisfies StandingMode[])('asks in $name', async (mode) => {
+    const human = humanSaying('refused')
+    const seen = await engine(human)(
+      Effect.gen(function* () {
+        yield* standingOn({ current: mode })
+        const session = yield* opened
+        const answer = yield* calling({
+          sessionId: session.sessionId,
+          tool: 'commands_run',
+          arguments: { line: 'node -e console.log(1)', folder: '../elsewhere', key: 'out-run' },
+        })
+        const commands = yield* Commands
+        return { answer, recent: yield* commands.recent(session.sessionId) }
+      }),
+    )
+
+    expect(human.asked).toHaveLength(1)
+    expect(seen.answer.ok).toBe(false)
+    expect(seen.recent).toHaveLength(0)
+  })
+})
+
+describe('An unknown mode asks', () => {
+  it.each([
+    { agent: 'claude', mode: 'something-new', name: 'Something new' },
+    { agent: 'someone-else', mode: 'auto', name: 'Auto' },
+    null,
+  ] satisfies (StandingMode | null)[])('asks when the Session stands on %o', async (mode) => {
+    const human = humanSaying('refused')
+    await engine(human)(
+      Effect.gen(function* () {
+        yield* standingOn({ current: mode })
+        const session = yield* opened
+        yield* calling({
+          sessionId: session.sessionId,
+          tool: 'commands_run',
+          arguments: { line: 'node -e console.log(1)', key: 'unknown-1' },
+        })
+      }),
+    )
+
+    expect(human.asked).toHaveLength(1)
+  })
+})
+
+describe('Changing the mode during a Session applies to the next call', () => {
+  it('asks in Manual, then runs on its own once the mode is Auto, then asks again', async () => {
+    const human = humanSaying('refused', 'refused')
+    const seen = await engine(human)(
+      Effect.gen(function* () {
+        const standing = { current: MANUAL }
+        yield* standingOn(standing)
+        const session = yield* opened
+        const run = (key: string) =>
+          calling({
+            sessionId: session.sessionId,
+            tool: 'commands_run',
+            arguments: { line: 'node -e console.log(1)', key },
+          })
+        const first = yield* run('switch-1')
+        standing.current = AUTO
+        const second = yield* run('switch-2')
+        standing.current = MANUAL
+        const third = yield* run('switch-3')
+        return { first, second, third }
+      }),
+    )
+
+    expect(seen.first.ok).toBe(false)
+    expect(seen.second.ok).toBe(true)
+    expect(seen.third.ok).toBe(false)
+    expect(human.asked).toHaveLength(2)
   })
 })

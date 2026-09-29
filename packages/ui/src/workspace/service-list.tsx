@@ -1,7 +1,8 @@
 import type { ReactNode } from 'react'
 
 import { COMMAND_TYPE_ICONS } from '../activity/command-type.ts'
-import { Badge, type BadgeProps } from '../components/badge/badge.tsx'
+import { Badge } from '../components/badge/badge.tsx'
+import { StatusDot, type StatusTone } from '../components/status-dot/status-dot.tsx'
 import { Button } from '../components/button/button.tsx'
 import { Card, CardRow } from '../components/card/card.tsx'
 import { IconAlertTriangle, IconGitFork, IconPlayerStop } from '../icons.ts'
@@ -44,20 +45,24 @@ const NOTE = 'text-sm text-muted-foreground'
 /** The address as text: what is shown while it cannot be opened yet. */
 const URL_TEXT = 'min-w-0 truncate font-mono text-xs text-foreground'
 
-/** How a run is read at a glance: the state is the word, the tone only repeats it. */
-const STATE: Record<ServiceLine['state'], { word: string; tone: NonNullable<BadgeProps['tone']> }> =
-  {
-    running: { word: 'Running', tone: 'info' },
-    stopped: { word: 'Stopped', tone: 'neutral' },
-    failed: { word: 'Failed', tone: 'destructive' },
-  }
-
-/** What each readiness says beside the address (D8-09). */
-const READINESS: Record<Readiness, { word: string; tone: NonNullable<BadgeProps['tone']> }> = {
-  starting: { word: 'starting', tone: 'info' },
-  ready: { word: 'ready', tone: 'success' },
-  unanswered: { word: 'No answer after a minute; still starting', tone: 'warning' },
+/** How a service stands: the dot's tone, and its word, which names the dot. */
+const STATE: Record<ServiceLine['state'], { word: string; tone: StatusTone }> = {
+  running: { word: 'Running', tone: 'running' },
+  stopped: { word: 'Stopped', tone: 'cancelled' },
+  failed: { word: 'Failed', tone: 'failure' },
 }
+
+/**
+ * What an address not answering yet says beside it (D8-09), quietly: a ready one says nothing, the
+ * link it is says it.
+ */
+const WAITING: Record<Exclude<Readiness, 'ready'>, string> = {
+  starting: 'starting',
+  unanswered: 'no answer after a minute; still starting',
+}
+
+/** The word beside an address not answering yet. */
+const WAITING_WORD = 'shrink-0 text-xs text-muted-foreground'
 
 const STARTED_BY: Record<ServiceLine['startedBy'], string> = {
   agent: 'Started by the agent',
@@ -111,12 +116,17 @@ export function ServiceList({
                   </span>
                   <div className={BODY}>
                     <div className={LINE}>
+                      <StatusDot
+                        status={state.tone}
+                        size="sm"
+                        label={state.word}
+                        title={state.word}
+                      />
                       <span className={NAME}>{service.name}</span>
                       <Badge tone="neutral" icon={<IconGitFork size="sm" aria-hidden="true" />}>
                         {service.workspace}
                       </Badge>
                       {service.scope === 'project' && <Badge tone="neutral">project</Badge>}
-                      <Badge tone={state.tone}>{state.word}</Badge>
                       {service.portless === true && <Badge tone="neutral">via portless</Badge>}
                     </div>
                     <span className={FOLDER}>{service.folder}</span>
@@ -205,11 +215,11 @@ export interface ServiceUrlProps {
 /**
  * A published address and its readiness, said the same way wherever a run shows one (D8-09).
  *
- * Only a `ready` address is a link: `starting` and `unanswered` are text, because nothing is
- * listening there yet.
+ * Only a `ready` address is a link, and being one is what says it answers: no badge beside it.
+ * `starting` and `unanswered` are text, because nothing is listening there yet, with a quiet word
+ * saying why.
  */
 export function ServiceUrl({ url, readiness, onOpenUrl }: ServiceUrlProps): ReactNode {
-  const said = readiness === undefined ? undefined : READINESS[readiness]
   return (
     <span className={LINE}>
       {readiness === 'ready' && onOpenUrl !== undefined ? (
@@ -219,7 +229,9 @@ export function ServiceUrl({ url, readiness, onOpenUrl }: ServiceUrlProps): Reac
       ) : (
         <span className={URL_TEXT}>{url}</span>
       )}
-      {said !== undefined && <Badge tone={said.tone}>{said.word}</Badge>}
+      {readiness !== undefined && readiness !== 'ready' && (
+        <span className={WAITING_WORD}>{WAITING[readiness]}</span>
+      )}
     </span>
   )
 }

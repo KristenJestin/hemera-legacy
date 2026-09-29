@@ -422,31 +422,89 @@ export function specViewOf({
 }
 
 /**
+ * New Spec's Spec before it exists (issue #198): the panel draws it with no key, the request as
+ * its title, nothing written and no phase begun. Nothing of it is saved: the Spec the agent
+ * proposes, or the one it points to, takes its place once the user answers the card.
+ */
+export function provisionalViewOf(title: string): SpecView {
+  return {
+    key: '',
+    title,
+    type: 'feature',
+    status: 'draft',
+    revision: 1,
+    revisions: [],
+    phases: PHASES.map((name) => ({
+      name,
+      state: name === 'prototype' ? 'unavailable' : 'pending',
+    })),
+    sections: [],
+    stories: [],
+    storiesMark: 'empty',
+    tasks: [],
+    tasksMark: 'empty',
+    questions: [],
+    questionsMark: 'empty',
+    readiness: {
+      checks: GATE_ORDER.map((check) => ({ check, passed: false })),
+      todo: [],
+    },
+    provisional: true,
+  }
+}
+
+/**
  * The launch of the Spec's build as the panel's head reads it (D8-13): where it stands, the step
  * its Workspace is preparing while it waits, and — refused — the engine's own words for it, which
  * are the only thing that says what to do about it. `null` while no launch has been asked for.
  *
  * The step belongs to the Workspace (D8-05) and is read beside the launch, not inside it: what a
  * preparation is doing is what the launch is waiting for, and it is named where it stands.
+ *
+ * A launch nothing can start again is said with what ended it, and offers a new build once the
+ * Spec it is read on allows one: one failed before any Session was made — Retry has no agent to
+ * start again — and one cancelled by the cleanup of its Workspace, or by a Rework whose revision
+ * is ready since, which is launched by hand (D8-13).
  */
-export function launchOf(launches: SpecLaunches | null): LaunchView | null {
+export function launchOf(
+  launches: SpecLaunches | null,
+  spec: Pick<SpecSnapshot['spec'], 'status' | 'currentRevisionId'>,
+): LaunchView | null {
   if (launches === null || launches.launch === null) return null
-  const { state, detail } = launches.launch
+  const { state, detail, sessionId, revisionId } = launches.launch
   switch (state) {
     case 'waiting':
       return launches.step === null ? { state } : { state, step: launches.step }
     case 'starting':
     case 'started':
-    case 'cancelled':
       return { state }
+    case 'cancelled':
+      return detail === REMOVED
+        ? { state, reason: 'removed', again: spec.status !== 'draft' }
+        : {
+            state,
+            reason: 'rework',
+            again: spec.status === 'ready' && revisionId !== spec.currentRevisionId,
+          }
     case 'failed':
-      return { state, cause: detail ?? 'the agent did not start' }
+      if (sessionId !== null) {
+        return { state, stage: 'agent', cause: detail ?? 'the agent did not start' }
+      }
+      return detail?.startsWith(NOT_PREPARED) === true
+        ? { state, stage: 'preparation', cause: detail.slice(NOT_PREPARED.length) }
+        : { state, stage: 'start', cause: detail ?? 'the build did not start' }
   }
 }
 
+/** What the engine says of a launch whose Workspace was cleaned up while it waited (D8-13). */
+const REMOVED = 'The Workspace was removed'
+
+/** What the engine puts before the cause of a launch whose Workspace failed its preparation. */
+const NOT_PREPARED = 'The Workspace could not be prepared: '
+
 /**
  * The Workspaces a build may be started in, and the one the Spec is set on (D8-12): `main` first,
- * as the engine orders them, then the ones made by hand. Absent while no Workspace is ready.
+ * as the engine orders them, then the ones made by hand, the first one with where it stands.
  */
 export function specWorkspacesOf(launches: SpecLaunches | null) {
   if (launches === null) return { workspace: undefined, workspaces: [] }

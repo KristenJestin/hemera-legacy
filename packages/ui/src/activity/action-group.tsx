@@ -1,7 +1,7 @@
 import { type ReactNode, useState } from 'react'
 
 import { StatusDot, type StatusTone } from '../components/status-dot/status-dot.tsx'
-import { IconTool } from '../icons.ts'
+import { IconTerminal2, IconTool } from '../icons.ts'
 import { Disclosure } from './disclosure.tsx'
 
 /**
@@ -56,6 +56,11 @@ export interface ActionGroupProps {
   latest?: string | undefined
   /** The rows of the calls, and the thoughts and diffs between them, in the order they came. */
   children: ReactNode
+  /**
+   * What the group holds: the calls of a turn, `12 actions`, or the runs the reader started one
+   * after the other between two messages, `6 runs` (review of #250).
+   */
+  unit?: 'actions' | 'runs' | undefined
   /** Whether it starts unfolded; folded unless a caller asks. */
   defaultOpen?: boolean | undefined
   /** Where the group sits; never how it looks. */
@@ -66,6 +71,7 @@ export function ActionGroup({
   count,
   status,
   latest,
+  unit = 'actions',
   children,
   defaultOpen = false,
   className,
@@ -81,9 +87,13 @@ export function ActionGroup({
       summary={
         <span className={SUMMARY}>
           <span className="flex shrink-0 text-muted-foreground">
-            <IconTool size="sm" aria-hidden="true" />
+            {unit === 'runs' ? (
+              <IconTerminal2 size="sm" aria-hidden="true" />
+            ) : (
+              <IconTool size="sm" aria-hidden="true" />
+            )}
           </span>
-          <span className={COUNT}>{`${String(count)} actions`}</span>
+          <span className={COUNT}>{`${String(count)} ${unit}`}</span>
           {!open && latest !== undefined && <span className={LATEST}>{`· ${latest}`}</span>}
           <StatusDot status={tone} size="sm" label={word} />
         </span>

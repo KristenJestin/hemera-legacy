@@ -1,6 +1,8 @@
 import type { JournalEntry } from '@hemera/ipc'
 import type { JournalFilter } from '@hemera/ui'
 
+import { patiently } from './patiently.ts'
+
 /**
  * The Journal of the Project being looked at, one page at a time (design D4-05, D4-11).
  *
@@ -76,7 +78,10 @@ export async function openJournal(projectId: string): Promise<void> {
   shown = projectId
   replace({ ...state, loading: true, refusal: null })
   try {
-    const page = await window.hemera.invoke('journal.read', { projectId, ...asked() })
+    // Asked again when it fails: a Project's Journal is read as the window opens on it.
+    const page = await patiently(
+      async () => await window.hemera.invoke('journal.read', { projectId, ...asked() }),
+    )
     if (shown !== projectId) return
     replace({ ...state, ...page, loading: false })
   } catch (cause) {

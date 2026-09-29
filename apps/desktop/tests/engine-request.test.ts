@@ -109,6 +109,9 @@ function running<A, E>(
   readVersion: (command: string) => Effect.Effect<string | undefined> = () =>
     Effect.succeed('1.0.0'),
 ) {
+  // The list this test reads: an engine an earlier test left running past its timeout still
+  // tells its own, never this one's.
+  const tellTo = told
   // The agents are the fake ones here: a suite that asks for a turn is asking whether the message
   // reaches the runtime, and the runtime itself is proved by its own suite, on the fake provider.
   const agents = Layer.mergeAll(
@@ -128,7 +131,7 @@ function running<A, E>(
       changed: () => undefined,
       ran: () => undefined,
       workspace: (projectId, workspaceId) => {
-        told.push({ projectId, workspaceId })
+        tellTo.push({ projectId, workspaceId })
       },
       launched: () => undefined,
       agents: () => undefined,

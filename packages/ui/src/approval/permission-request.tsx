@@ -173,7 +173,8 @@ export function PermissionRequest({
     <NoticeRow
       name={`Permission for ${label ?? toolName}`}
       mono={what === undefined}
-      unfolds
+      // Unfolded, what the call is takes the head's place, and the whole line opens under it.
+      title={what ?? 'Run command'}
       head={
         what === undefined ? (
           (command ?? toolName)
@@ -186,15 +187,10 @@ export function PermissionRequest({
           </>
         )
       }
+      line={command}
       place={
-        (parameters === undefined || parameters.length === 0) && about === undefined ? undefined : (
-          <>
-            <PermissionParameters parameters={parameters} />
-            {/* The path as it resolves, when the text says it as the agent named it. */}
-            {about !== undefined && command !== undefined && (
-              <span className="font-mono">{command}</span>
-            )}
-          </>
+        parameters === undefined || parameters.length === 0 ? undefined : (
+          <PermissionParameters parameters={parameters} />
         )
       }
       refuse={refusal === undefined ? undefined : named(refusal)}

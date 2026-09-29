@@ -28,12 +28,12 @@ const POPUP =
   'min-w-48 rounded-lg border border-border bg-card p-3 text-sm text-card-foreground shadow-lg outline-none translate-y-0 popup-motion data-starting-style:-translate-y-2 data-starting-style:opacity-0 data-ending-style:-translate-y-2 data-ending-style:opacity-0'
 
 /**
- * A popup that comes out of what opens it (issue #237, the Session's notices): it scales and fades
- * in from its anchor's side — the transform's origin is the point Base UI says the popup hangs
- * from — and closes back into it, rather than sliding in from beside it.
+ * A popup that comes out of what opens it (issue #237, the Session's notices): it rises from behind
+ * its anchor while it scales and fades in from the point Base UI says it hangs from, and sinks back
+ * behind it as it closes, rather than sliding in from beside it.
  */
 const POPUP_GROWS =
-  'min-w-48 rounded-lg border border-border bg-card p-3 text-sm text-card-foreground shadow-lg outline-none scale-100 opacity-100 popup-grows data-starting-style:scale-50 data-starting-style:opacity-0 data-ending-style:scale-50 data-ending-style:opacity-0'
+  'min-w-48 rounded-lg border border-border bg-card p-3 text-sm text-card-foreground shadow-lg outline-none translate-y-0 scale-100 opacity-100 popup-grows data-starting-style:translate-y-4 data-starting-style:scale-50 data-starting-style:opacity-0 data-ending-style:translate-y-4 data-ending-style:scale-50 data-ending-style:opacity-0'
 
 export interface PopoverProps {
   /** What opens it: the caller's own control, whatever shape it has. */
@@ -98,7 +98,15 @@ export function Popover({
         {anchorOnly ? trigger : <BasePopover.Trigger render={trigger} />}
       </span>
       <BasePopover.Portal container={container}>
-        <BasePopover.Positioner anchor={anchor} side={side} align={align} sideOffset={4}>
+        <BasePopover.Positioner
+          anchor={anchor}
+          side={side}
+          align={align}
+          sideOffset={4}
+          // What grows rises from behind what opens it: the part still below the anchor's edge is
+          // not drawn, so it reads as coming out from under it.
+          className={grows ? 'popup-emerges' : undefined}
+        >
           <BasePopover.Popup
             className={grows ? POPUP_GROWS : POPUP}
             aria-label={title === undefined ? label : undefined}

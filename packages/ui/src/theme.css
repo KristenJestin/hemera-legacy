@@ -843,11 +843,18 @@
    A popup comes down from its trigger and folds back up into it rather than growing out of a
    corner: a scale from an origin reads as a direction nobody asked for, and the direction a
    list opens in is the first thing the eye uses to find where it came from. */
+/* Where a popup that grows is drawn: everything but what is still below its anchor's edge, so it
+   rises from behind the anchor. Its shadow is kept on the three other sides; the fourth is the
+   anchor's edge, the `sideOffset` under the popup. Written for a popup that opens upwards. */
+@utility popup-emerges {
+  clip-path: inset(-3rem -3rem -0.25rem -3rem);
+}
+
 /* What comes out of what opens it: the same beat as `popup-motion`, scaling from the point the
    popup hangs from, which Base UI writes as `--transform-origin` (issue #237). */
 @utility popup-grows {
   transform-origin: var(--transform-origin);
-  transition-property: opacity, scale;
+  transition-property: opacity, scale, translate;
   transition-duration: var(--duration-base);
   transition-timing-function: var(--ease-calm);
   @media (prefers-reduced-motion: reduce) {

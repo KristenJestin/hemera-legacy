@@ -1,7 +1,7 @@
 import { AnimatePresence, motion } from 'motion/react'
 import type { ReactNode } from 'react'
 
-import { Button } from '../components/button/button.tsx'
+import { Button, IconButton } from '../components/button/button.tsx'
 import { Kbd } from '../components/kbd/kbd.tsx'
 import { IconArrowUp, IconPencil, IconPlayerStop } from '../icons.ts'
 import { MARK_SCALE, arrival, useTransition } from '../motion.ts'
@@ -92,7 +92,6 @@ export function ComposerActions({
   onStop,
   sendDisabledReason,
 }: ComposerActionsProps): ReactNode {
-  const transition = useTransition(arrival)
   const morphs = sending || running
   // A write in flight is a wait, and a wait that only took the press away would look like a
   // control that stopped working. The indicator the button draws is what says so; the word and
@@ -140,35 +139,91 @@ export function ComposerActions({
           aria-keyshortcuts={running ? 'Escape' : undefined}
           onClick={running ? onStop : onSend}
         >
-          <span className={MORPH}>
-            <AnimatePresence initial={false} mode="popLayout">
-              {morphs ? (
-                <motion.span
-                  key="stop"
-                  initial={{ opacity: 0, scale: MARK_SCALE }}
-                  animate={{ opacity: 1, scale: 1 }}
-                  exit={{ opacity: 0, scale: MARK_SCALE }}
-                  transition={transition}
-                >
-                  <IconPlayerStop size="sm" />
-                </motion.span>
-              ) : (
-                <motion.span
-                  key="send"
-                  initial={{ opacity: 0, scale: MARK_SCALE }}
-                  animate={{ opacity: 1, scale: 1 }}
-                  exit={{ opacity: 0, scale: MARK_SCALE }}
-                  transition={transition}
-                >
-                  <IconArrowUp size="sm" />
-                </motion.span>
-              )}
-            </AnimatePresence>
-          </span>
+          <SendGlyph morphs={morphs} />
           {running ? (forcing ? 'Force stop' : 'Stop') : action}
           {running ? null : <Kbd keys="Enter" />}
         </Button>
       </span>
     </>
+  )
+}
+
+/**
+ * The arrow, or the square once a write is in flight or a turn runs: two icons crossing in
+ * opacity and scale, in the same box, so the control never changes size under the hand.
+ */
+function SendGlyph({ morphs }: { morphs: boolean }): ReactNode {
+  const transition = useTransition(arrival)
+  return (
+    <span className={MORPH}>
+      <AnimatePresence initial={false} mode="popLayout">
+        {morphs ? (
+          <motion.span
+            key="stop"
+            initial={{ opacity: 0, scale: MARK_SCALE }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: MARK_SCALE }}
+            transition={transition}
+          >
+            <IconPlayerStop size="sm" />
+          </motion.span>
+        ) : (
+          <motion.span
+            key="send"
+            initial={{ opacity: 0, scale: MARK_SCALE }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: MARK_SCALE }}
+            transition={transition}
+          >
+            <IconArrowUp size="sm" />
+          </motion.span>
+        )}
+      </AnimatePresence>
+    </span>
+  )
+}
+
+export type ComposerSendProps = Pick<
+  ComposerActionsProps,
+  | 'ready'
+  | 'sending'
+  | 'running'
+  | 'forcing'
+  | 'action'
+  | 'onSend'
+  | 'onStop'
+  | 'sendDisabledReason'
+>
+
+/**
+ * The send of a Session's composer (issue #241): the arrow alone, at the end of the box's own
+ * row, and the Stop in the same place and at the same size while a turn runs. No word and no
+ * key drawn beside it: the name is the control's `aria-label`, the key its `aria-keyshortcuts`.
+ * A write in flight is the square, off until the engine has answered.
+ */
+export function ComposerSend({
+  ready,
+  sending,
+  running = false,
+  forcing = false,
+  action,
+  onSend,
+  onStop,
+  sendDisabledReason,
+}: ComposerSendProps): ReactNode {
+  const busy = sending && !running
+  const blocked = !running && sendDisabledReason !== undefined
+  return (
+    <IconButton
+      variant={running ? 'destructive' : 'primary'}
+      size="sm"
+      icon={<SendGlyph morphs={sending || running} />}
+      aria-label={running ? (forcing ? 'Force stop' : 'Stop') : action}
+      disabled={running ? false : busy || !ready}
+      aria-disabled={busy || blocked ? true : undefined}
+      title={running ? undefined : sendDisabledReason}
+      aria-keyshortcuts={running ? 'Escape' : 'Enter'}
+      onClick={running ? onStop : onSend}
+    />
   )
 }

@@ -1,7 +1,8 @@
 import { cn } from 'cn'
 import { type ReactNode, useState } from 'react'
 
-import { Button } from '../components/button/button.tsx'
+import { type NoticeAnswer, NoticeRecord } from '../activity/notice-record.tsx'
+import { NoticeRow } from '../session/notice-row.tsx'
 import { InPlaceText } from './in-place-text.tsx'
 import type { SpecType } from './model.ts'
 import { SPEC_TYPE_ICONS } from './spec-icons.ts'
@@ -25,10 +26,6 @@ import { SPEC_TYPE_ICONS } from './spec-icons.ts'
  * In a Session New Spec started, the user asked for a Spec already: a new one the agent proposes
  * is created at once, and the card is only ever the quiet line that says so (issue #205).
  */
-
-const CARD = 'flex flex-col gap-2.5 rounded-lg border border-border bg-card p-3'
-
-const ASK = 'text-sm text-muted-foreground'
 
 const TYPES = 'flex gap-1.5'
 
@@ -104,25 +101,21 @@ export function CreateSpecProposal({
       )
     }
     return (
-      <div role="group" aria-label="Continue a Spec" className={CARD}>
-        <p className={ASK}>This Spec already exists</p>
-        <p className={EXISTING}>
-          <span className={EXISTING_KEY}>{existingKey}</span>
-          <span className={EXISTING_TITLE}>{proposed}</span>
-          <span className={EXISTING_TYPE}>
-            <TypeIcon type={understood} />
-            {understood}
+      <NoticeRow
+        name="Continue a Spec"
+        head={
+          <span className={EXISTING}>
+            <span className={EXISTING_KEY}>{existingKey}</span>
+            <span className={EXISTING_TITLE}>{proposed}</span>
+            <span className={EXISTING_TYPE}>
+              <TypeIcon type={understood} />
+              {understood}
+            </span>
           </span>
-        </p>
-        <div className="flex justify-end gap-2">
-          <Button variant="ghost" size="sm" onClick={onDecline}>
-            Not now
-          </Button>
-          <Button variant="primary" size="sm" onClick={onContinue}>
-            Continue it
-          </Button>
-        </div>
-      </div>
+        }
+        refuse={{ label: 'Not now', onPress: onDecline }}
+        accept={{ label: 'Continue it', onPress: () => onContinue?.() }}
+      />
     )
   }
   if (state === 'created' && atOnce) {
@@ -144,9 +137,15 @@ export function CreateSpecProposal({
     return <p className={FOLDED}>{`Not now: « ${title} » was not created.`}</p>
   }
   return (
-    <div role="group" aria-label="Create a Spec" className={CARD}>
-      <p className={ASK}>Create the Spec</p>
-      <InPlaceText label="Title of the Spec" value={title} onCommit={setTitle} />
+    <NoticeRow
+      name="Create a Spec"
+      head={<InPlaceText label="Title of the Spec" value={title} onCommit={setTitle} />}
+      refuse={{ label: 'Not now', onPress: onDecline }}
+      accept={{
+        label: 'Start',
+        onPress: () => onCreate(title.trim() === '' ? proposed : title.trim(), type),
+      }}
+    >
       <div role="radiogroup" aria-label="Type" className={TYPES}>
         {ALL_TYPES.map((one) => (
           <button
@@ -162,19 +161,7 @@ export function CreateSpecProposal({
           </button>
         ))}
       </div>
-      <div className="flex justify-end gap-2">
-        <Button variant="ghost" size="sm" onClick={onDecline}>
-          Not now
-        </Button>
-        <Button
-          variant="primary"
-          size="sm"
-          onClick={() => onCreate(title.trim() === '' ? proposed : title.trim(), type)}
-        >
-          Create
-        </Button>
-      </div>
-    </div>
+    </NoticeRow>
   )
 }
 
@@ -182,4 +169,42 @@ export function CreateSpecProposal({
 function TypeIcon({ type }: { type: SpecType }): ReactNode {
   const Icon = SPEC_TYPE_ICONS[type]
   return <Icon size="sm" aria-hidden="true" />
+}
+
+const STATES: Record<ProposalState, { answer: NoticeAnswer; word: string }> = {
+  proposed: { answer: 'pending', word: 'waiting' },
+  created: { answer: 'accepted', word: 'created' },
+  declined: { answer: 'refused', word: 'not now' },
+}
+
+export interface SpecProposalRecordProps {
+  title: string
+  type: SpecType
+  state: ProposalState
+  /** The key the Spec was given, once created, or the key of the Spec it points to. */
+  specKey?: string | undefined
+}
+
+/**
+ * The agent's proposal of a Spec as the thread keeps it (issue #237): one closed line — the
+ * Spec's type, a dot for the answer, its key once it has one, and its title. It is answered among
+ * the Session's notices, never here.
+ */
+export function SpecProposalRecord({
+  title,
+  type,
+  state,
+  specKey,
+}: SpecProposalRecordProps): ReactNode {
+  const { answer, word } = STATES[state]
+  return (
+    <NoticeRecord
+      icon={<TypeIcon type={type} />}
+      answer={answer}
+      answerLabel={word}
+      label={specKey}
+      subject={title}
+      name={`Spec proposed, ${specKey === undefined ? '' : `${specKey} `}«${title}», ${word}`}
+    />
+  )
 }

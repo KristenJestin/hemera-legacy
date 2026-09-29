@@ -53,6 +53,31 @@ export const relativePathSchema = z
   )
   .refine((path) => !climbsOut(path.trim()), 'That path climbs out of the Workspace.')
 
+/**
+ * A folder under the one something runs from, as a command's folder is (#109): the same refusals
+ * as a location of the Project, said about where it runs from rather than about the Workspace.
+ * An empty folder is that folder itself, so nothing here asks for one to be typed.
+ */
+export const underBaseSchema = z
+  .string()
+  .refine(
+    (path) => !/^([\\/]|[a-zA-Z]:)/.test(path.trim()),
+    'That path is absolute: write it from where it runs.',
+  )
+  .refine((path) => !climbsOut(path.trim()), 'That path climbs above where it runs from.')
+
+/**
+ * The file or the folder a preparation step copies or links, under the step's base (#104): the
+ * same refusals as a command's folder, said about the base the step works from.
+ */
+export const stepPathSchema = z
+  .string()
+  .refine(
+    (path) => !/^([\\/]|[a-zA-Z]:)/.test(path.trim()),
+    'That path is absolute: write it from its base.',
+  )
+  .refine((path) => !climbsOut(path.trim()), 'That path climbs above its base.')
+
 function climbsOut(candidate: string): boolean {
   let depth = 0
   for (const segment of candidate.replaceAll('\\', '/').split('/')) {
@@ -67,11 +92,18 @@ function climbsOut(candidate: string): boolean {
   return false
 }
 
-/** What the creation dialog and the identity of the settings both hold. */
+/**
+ * What the creation dialog and the identity of the settings both hold.
+ *
+ * The folder of dedicated Workspaces and the branch prefix are optional (D8-02, D8-04): null is
+ * Hemera's own folder and the Project's slug, which is what an empty field says.
+ */
 export const projectFormSchema = z.object({
   name: nameSchema,
   tone: tonesSchema,
   mainPath: folderSchema,
+  workspacesRoot: z.string().nullable(),
+  branchPrefix: z.string().nullable(),
 })
 
 /**

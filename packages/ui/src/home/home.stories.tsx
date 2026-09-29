@@ -107,7 +107,7 @@ const MODES: ModeChoice[] = [
  * cannot wrap onto a line the frame would have to grow for.
  *
  * The Home is also the one place `New Spec` is drawn: a Spec is made from the question that
- * starts a Session, so the Session's own composer is handed no `spec` at all.
+ * starts a Session, so the Session's own composer is handed no `onSpec` at all.
  */
 function Writing(): ReactNode {
   const [value, setValue] = useState('')
@@ -125,7 +125,7 @@ function Writing(): ReactNode {
       onSearchFiles={() => Promise.resolve([])}
       onSend={() => Promise.resolve(null)}
       sendDisabledReason={agent === null ? 'Choose an agent first' : undefined}
-      spec
+      onSpec={() => Promise.resolve(null)}
       agentMenu={
         <AgentModelMenu
           agents={AGENTS}
@@ -152,7 +152,7 @@ function Writing(): ReactNode {
 }
 
 const meta = {
-  tags: ['autodocs'],
+  tags: ['autodocs', 'updated'],
   title: 'Surfaces/Home',
   component: ActivityFrame,
   parameters: { layout: 'padded' },
@@ -202,9 +202,15 @@ export const Variants: Story = {
   ),
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    await waitFor(() => {
-      expect(canvas.getByRole('heading', { level: 1 }).parentElement).toHaveStyle({ opacity: '1' })
-    })
+    // A loaded runner plays the journey slowly: the second given can end while it is in flight.
+    await waitFor(
+      () => {
+        expect(canvas.getByRole('heading', { level: 1 }).parentElement).toHaveStyle({
+          opacity: '1',
+        })
+      },
+      { timeout: 10_000 },
+    )
     expect(canvas.getByRole('heading', { name: 'What are we doing in Atlas?' })).toBeInTheDocument()
     expect(canvas.getByText('Repository ./sources/api added')).toBeInTheDocument()
     expect(canvas.getByText('No Session in Atlas')).toBeInTheDocument()
@@ -224,7 +230,7 @@ export const Variants: Story = {
     const at = canvas.getByRole('button', { name: 'Mention a file of the Project' })
     expect(onOneLine(at, menu), 'the agent menu left the box’s own row').toBe(true)
     expect(
-      onOneLine(canvas.getByRole('combobox', { name: 'Workspace' }), send),
+      onOneLine(canvas.getByRole('combobox', { name: /^Workspace:/ }), send),
       'the foot of the composer wrapped',
     ).toBe(true)
 
@@ -245,6 +251,26 @@ export const Variants: Story = {
   },
 }
 
+/**
+ * A Project with no Session: Hemera's face at its hero size, asleep — no Session, so nothing runs
+ * — over the words that say so (issue #140).
+ */
+export const Empty: Story = {
+  parameters: { controls: { disable: true } },
+  render: (args) => <EmptyProject projectName="Atlas" onOpenJournal={args.onOpenJournal} />,
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const face = canvas.getByRole('img', { name: 'Hemera, asleep' })
+    await expect(face).toHaveAttribute('data-state', 'asleep')
+    // The hero of the page: the face's largest size, above the words, in the middle of them.
+    const words = canvas.getByText('No Session in Atlas').getBoundingClientRect()
+    const box = face.getBoundingClientRect()
+    await expect(box.width).toBeGreaterThan(words.height * 4)
+    await expect(box.bottom).toBeLessThanOrEqual(words.top)
+    await expect(box.left + box.width / 2).toBeCloseTo(words.left + words.width / 2, 0)
+  },
+}
+
 /** A Project nothing has happened in yet: the frame says so without inventing an entry. */
 export const States: Story = {
   args: { entries: [] },
@@ -260,9 +286,15 @@ export const FirstLaunchPage: Story = {
   render: (args) => <FirstLaunch onCreateProject={args.onOpenJournal} commandShortcut="Ctrl+K" />,
   play: async ({ canvasElement, args }) => {
     const canvas = within(canvasElement)
-    await waitFor(() => {
-      expect(canvas.getByRole('heading', { level: 1 }).parentElement).toHaveStyle({ opacity: '1' })
-    })
+    // A loaded runner plays the journey slowly: the second given can end while it is in flight.
+    await waitFor(
+      () => {
+        expect(canvas.getByRole('heading', { level: 1 }).parentElement).toHaveStyle({
+          opacity: '1',
+        })
+      },
+      { timeout: 10_000 },
+    )
 
     expect(canvas.getByRole('heading', { name: 'Welcome to Hemera' })).toBeInTheDocument()
     // One action, and the palette said to be there too.

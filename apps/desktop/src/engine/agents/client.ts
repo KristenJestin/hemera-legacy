@@ -20,6 +20,7 @@
  */
 
 import {
+  type AnyMessage,
   ClientSideConnection,
   PROTOCOL_VERSION,
   ndJsonStream,
@@ -163,9 +164,10 @@ export interface WindowReport {
  *
  * The kinds are the thread's own (design D5-11): a message, a thought, a tool call and a plan
  * are what a turn can be said to be doing at any moment, and the window it is filling is what
- * the agent announced it against; everything else the protocol publishes — the commands it
- * offers, the mode it is in, a compaction — is an update this lot does not draw and so does not
- * carry.
+ * the agent announced it against. `options` says the agent moved one of its options by itself —
+ * a mode it left, a configuration it changed — and carries nothing: what the options now are is
+ * the connection's `options()`. Everything else the protocol publishes — the commands it offers,
+ * a compaction — is an update this lot does not draw and so does not carry.
  *
  * `replay` is true for what the agent sends back while a session is being continued: ACP asks it
  * to stream the whole history again, and those turns are already in Hemera's thread. A replay is
@@ -188,6 +190,7 @@ export type AgentEvent =
   | { readonly type: 'tool_call'; readonly call: ToolCallReport; readonly replay: boolean }
   | { readonly type: 'plan'; readonly entries: readonly PlanLine[]; readonly replay: boolean }
   | { readonly type: 'usage'; readonly window: WindowReport; readonly replay: boolean }
+  | { readonly type: 'options'; readonly replay: boolean }
 
 /** What the agent published about itself at `initialize`. */
 export interface AgentHandshake {
@@ -352,6 +355,51 @@ export interface ConnectionOptions {
   readonly adapter: AgentAdapter
   readonly onEvent: (event: AgentEvent) => void
   readonly onPermission: (question: PermissionQuestion) => Promise<PermissionAnswer>
+  /**
+   * Every message of the conversation, both ways, as it crosses (issue #131).
+   *
+   * What the SDK does with a message is its own, and what this hears is the wire: a request the
+   * SDK refused on its own is heard here with its refusal, which no handler above ever sees.
+   */
+  readonly onMessage?: ((direction: 'in' | 'out', message: AnyMessage) => void) | undefined
+}
+
+/**
+ * The SDK's stream of messages, with every message handed to a listener on its way through.
+ *
+ * Two pass-through transforms and nothing else: the SDK reads and writes exactly what it would
+ * have, and the listener hears it first. A listener that throws is a listener that heard nothing,
+ * never a message lost.
+ */
+function tapped(
+  stream: {
+    readonly readable: ReadableStream<AnyMessage>
+    readonly writable: WritableStream<AnyMessage>
+  },
+  onMessage: ((direction: 'in' | 'out', message: AnyMessage) => void) | undefined,
+) {
+  if (onMessage === undefined) return stream
+  const hear = (direction: 'in' | 'out', message: AnyMessage) => {
+    try {
+      onMessage(direction, message)
+    } catch {
+      // What was said goes on to be said: a trace that failed is not a conversation that did.
+    }
+  }
+  const inbound = new TransformStream<AnyMessage, AnyMessage>({
+    transform: (message, controller) => {
+      hear('in', message)
+      controller.enqueue(message)
+    },
+  })
+  const outbound = new TransformStream<AnyMessage, AnyMessage>({
+    transform: (message, controller) => {
+      hear('out', message)
+      controller.enqueue(message)
+    },
+  })
+  void outbound.readable.pipeTo(stream.writable).catch(() => undefined)
+  return { readable: stream.readable.pipeThrough(inbound), writable: outbound.writable }
 }
 
 /** One text Hemera provides an agent, named by the address it is known by (D6-07). */
@@ -650,6 +698,25 @@ function resolvedDefault(values: readonly AgentOptionValue[], current: string) {
   return { values: kept, current: current === DEFAULT_VALUE ? named.id : current }
 }
 
+/** What the protocol calls the option of an agent's modes, as a category and as an id. */
+const MODE = 'mode'
+
+/** Whether an option is the agent's mode. */
+function isMode(option: AgentOption | undefined): boolean {
+  return option !== undefined && (option.category === MODE || option.id === MODE)
+}
+
+/**
+ * What an agent lets a Session choose, once what is not the user's to choose is left out.
+ *
+ * An agent left no mode of its own by its bare means offers none (issue #128): what it announces
+ * as its modes is either what a bare session refuses or Hemera's own agent.
+ */
+function offered(adapter: AgentAdapter, announced: readonly AgentOption[]): readonly AgentOption[] {
+  if (adapter.modeless !== true) return announced
+  return announced.filter((option) => !isMode(option))
+}
+
 /** What an agent lets a Session choose, in Hemera's words. */
 function optionsOf(
   announced: readonly SessionConfigOption[] | null | undefined,
@@ -744,6 +811,22 @@ export function connect(
           : { outcome: { outcome: 'selected' as const, optionId: answer.optionId } }
       },
       sessionUpdate: (notification) => {
+        // An option the agent moved by itself — Claude Code leaving plan mode once its plan is
+        // approved — is one the options held here have to follow, or the composer and what a
+        // restart puts back would both keep the value the agent left.
+        const update = notification.update
+        if (update.sessionUpdate === 'config_option_update') {
+          announced = optionsOf(update.configOptions)
+          options.onEvent({ type: 'options', replay: replaying })
+          return
+        }
+        if (update.sessionUpdate === 'current_mode_update') {
+          announced = announced.map((option) =>
+            isMode(option) ? { ...option, value: update.currentModeId } : option,
+          )
+          options.onEvent({ type: 'options', replay: replaying })
+          return
+        }
         const event = eventOf(notification, replaying)
         if (event !== null) options.onEvent(event)
       },
@@ -751,7 +834,7 @@ export function connect(
 
     const connection = new ClientSideConnection(
       () => client,
-      ndJsonStream(options.output, options.input),
+      tapped(ndJsonStream(options.output, options.input), options.onMessage),
     )
 
     const handshake = yield* Effect.tryPromise({
@@ -789,12 +872,23 @@ export function connect(
         resumes: handshake.agentCapabilities?.sessionCapabilities?.resume != null,
       },
 
-      options: () => announced,
+      options: () => offered(adapter, announced),
 
       setOption: (optionId, value) =>
         Effect.gen(function* () {
           const open = yield* named(sessionId ?? '', 'setSessionConfigOption')
           const chosen = announced.find((option) => option.id === optionId)
+          // A mode is never sent to an agent left none by its bare means, whatever asked for it:
+          // a choice remembered from before, or a session opened without Hemera's configuration
+          // that announced modes the bare one refuses (issue #128).
+          if (adapter.modeless === true && (optionId === MODE || isMode(chosen))) {
+            return yield* Effect.fail(
+              new AgentProtocolError({
+                what: 'setSessionConfigOption',
+                cause: `${adapter.label} has no mode to choose when it runs bare`,
+              }),
+            )
+          }
           const answered = yield* Effect.tryPromise({
             try: () =>
               connection.setSessionConfigOption(
@@ -811,7 +905,7 @@ export function connect(
               new AgentProtocolError({ what: 'setSessionConfigOption', cause: String(cause) }),
           })
           announced = optionsOf(answered.configOptions)
-          return announced
+          return offered(adapter, announced)
         }),
 
       open: (workingDirectory, mcpServers, meta) =>

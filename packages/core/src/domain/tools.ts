@@ -33,7 +33,10 @@ export const TOOL_NAMES = [
   'commands_run',
   'commands_output',
   'commands_stop',
+  'commands_propose',
   'project_get',
+  'setup_read',
+  'setup_propose',
   'session_get',
   'spec_read',
   'spec_write',
@@ -57,16 +60,25 @@ export type ToolMark =
   | 'stop-command'
   | 'list-commands'
   | 'command-output'
+  | 'propose-command'
   | 'project'
+  | 'read-setup'
+  | 'propose-setup'
   | 'session'
   | 'read-spec'
   | 'write-spec'
   | 'propose-spec'
 
-/** What a reader calls a tool, and the mark it wears. */
+/** What a reader calls a tool, the mark it wears, and what the turn is doing while it runs. */
 export interface ToolLabel {
   readonly label: string
   readonly mark: ToolMark
+  /**
+   * What the turn is doing while the tool runs, as a phrase of its own: "Writing the Spec". The
+   * row above the box reads it whole, where "Running" and the label read "Running Write Spec"
+   * (issue #170).
+   */
+  readonly doing: string
 }
 
 /**
@@ -76,20 +88,35 @@ export interface ToolLabel {
  * reader's, and it is what the line is read by.
  */
 export const TOOL_LABELS: Readonly<Record<ToolName, ToolLabel>> = {
-  fs_read: { label: 'Read file', mark: 'read-file' },
-  fs_list: { label: 'List folder', mark: 'list-folder' },
-  search: { label: 'Search', mark: 'search' },
-  fs_write: { label: 'Write file', mark: 'write-file' },
-  fs_edit: { label: 'Edit file', mark: 'edit-file' },
-  commands_run: { label: 'Run command', mark: 'run-command' },
-  commands_stop: { label: 'Stop command', mark: 'stop-command' },
-  commands_list: { label: 'List commands', mark: 'list-commands' },
-  commands_output: { label: 'Command output', mark: 'command-output' },
-  project_get: { label: 'Project', mark: 'project' },
-  session_get: { label: 'Session', mark: 'session' },
-  spec_read: { label: 'Read Spec', mark: 'read-spec' },
-  spec_write: { label: 'Write Spec', mark: 'write-spec' },
-  spec_propose: { label: 'Propose', mark: 'propose-spec' },
+  fs_read: { label: 'Read file', mark: 'read-file', doing: 'Reading a file' },
+  fs_list: { label: 'List folder', mark: 'list-folder', doing: 'Listing a folder' },
+  search: { label: 'Search', mark: 'search', doing: 'Searching the code' },
+  fs_write: { label: 'Write file', mark: 'write-file', doing: 'Writing a file' },
+  fs_edit: { label: 'Edit file', mark: 'edit-file', doing: 'Editing a file' },
+  commands_run: { label: 'Run command', mark: 'run-command', doing: 'Running a command' },
+  commands_stop: { label: 'Stop command', mark: 'stop-command', doing: 'Stopping a command' },
+  commands_list: { label: 'List commands', mark: 'list-commands', doing: 'Listing the commands' },
+  commands_output: {
+    label: 'Command output',
+    mark: 'command-output',
+    doing: 'Reading the output of a command',
+  },
+  commands_propose: {
+    label: 'Propose command',
+    mark: 'propose-command',
+    doing: 'Proposing a command',
+  },
+  project_get: { label: 'Project', mark: 'project', doing: 'Reading the Project' },
+  setup_read: { label: 'Project setup', mark: 'read-setup', doing: 'Reading the Project setup' },
+  setup_propose: {
+    label: 'Propose setup',
+    mark: 'propose-setup',
+    doing: 'Proposing changes to the Project setup',
+  },
+  session_get: { label: 'Session', mark: 'session', doing: 'Reading the Session' },
+  spec_read: { label: 'Read Spec', mark: 'read-spec', doing: 'Reading the Spec' },
+  spec_write: { label: 'Write Spec', mark: 'write-spec', doing: 'Writing the Spec' },
+  spec_propose: { label: 'Propose', mark: 'propose-spec', doing: 'Proposing a Spec' },
 }
 
 /** The most `fs_read` hands back in one call, and the page a long file is read in. */
@@ -151,9 +178,10 @@ const READ_ONLY_CODE_TOOLS = [
  * The tools of a Session, by its mission.
  *
  * A `free` Session is offered the code tools, and of the Spec's only `spec_propose`: it has no
- * Spec to read or write, and proposes one to the human through it (D7-07). A `define` Session produces a Spec and not code (D7-14): it reads the Workspace, never writes
- * to it nor runs anything, and writes its Spec through the three Spec tools. `build` has no
- * Session to offer anything to yet.
+ * Spec to read or write, and proposes one to the human through it (D7-07). A `define` Session
+ * produces a Spec and not code (D7-14): it reads the Workspace, never writes to it nor runs
+ * anything, and writes its Spec through the three Spec tools. A `build` Session is offered what a
+ * `free` one is until its own set is written: an agent with no tool at all is not a build.
  */
 export function offeredTools(mission: Mission): readonly ToolName[] {
   switch (mission) {
@@ -162,7 +190,7 @@ export function offeredTools(mission: Mission): readonly ToolName[] {
     case 'define':
       return [...READ_ONLY_CODE_TOOLS, 'spec_read', 'spec_write', 'spec_propose']
     case 'build':
-      return []
+      return TOOL_NAMES.filter((name) => name !== 'spec_read' && name !== 'spec_write')
   }
 }
 

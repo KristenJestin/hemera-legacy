@@ -4,6 +4,7 @@ import { type ReactNode, useState } from 'react'
 
 import { onOneLine } from '../../.storybook/one-line.ts'
 import { emulateReducedMotion } from '../../.storybook/reduced-motion.ts'
+import { Button } from '../components/button/button.tsx'
 import { AgentModelMenu, type ModelChoice, type OfferedAgent } from './agent-model-menu.tsx'
 import { BlockedBanner } from './blocked-banner.tsx'
 import { Composer, type ComposerProps } from './composer.tsx'
@@ -166,7 +167,7 @@ function frameOf(box: HTMLElement): HTMLElement {
 }
 
 const meta = {
-  tags: ['autodocs'],
+  tags: ['autodocs', 'updated'],
   title: 'Blocks/Composer/Composer',
   component: Composer,
   render: (args) => <Controlled {...args} />,
@@ -174,7 +175,7 @@ const meta = {
   args: {
     value: '',
     files: [],
-    workspaces: ['main'],
+    workspaces: [{ name: 'main' }],
     action: 'Start chat',
     placeholder: 'Ask anything, think out loud, or describe what you want to do…',
     onValueChange: fn(),
@@ -183,12 +184,20 @@ const meta = {
     onSearchFiles: fn(async (query: string) => await Promise.resolve(lookUp(query))),
     onSend: fn(async (): Promise<string | null> => await Promise.resolve(null)),
     agentMenu: <Menu start="opencode" />,
-    spec: true,
+    onSpec: fn(async (): Promise<string | null> => await Promise.resolve(null)),
   },
   argTypes: {
     value: { control: 'text', description: 'What is written; the page holds it.' },
     files: { control: 'object', description: 'The files attached, as paths of the Workspace.' },
-    workspaces: { control: 'object', description: 'The Workspaces on offer; lot 4 has one.' },
+    workspaces: {
+      control: 'object',
+      description: 'The Workspaces in state ready, main first.',
+    },
+    workspaceFixed: {
+      control: 'boolean',
+      description: 'Whether the agent has started, which fixes the Workspace.',
+      table: { defaultValue: { summary: 'false' } },
+    },
     action: {
       control: 'text',
       description: 'The word on the button that sends.',
@@ -197,7 +206,8 @@ const meta = {
     variant: {
       control: 'inline-radio',
       options: ['hero', 'inline'],
-      description: 'The shape of the box: the Home greets with a hero, a Session sends inline.',
+      description:
+        'The Home greets with a hero; a Session sends inline, with no foot and the send as an icon.',
       table: { defaultValue: { summary: 'hero' } },
     },
     placeholder: { control: 'text' },
@@ -214,10 +224,10 @@ const meta = {
       description:
         'The agent, its model, its effort and its mode, at the end of the box’s own row.',
     },
-    spec: {
-      control: 'boolean',
-      description: 'Whether the foot offers a Spec: the Home does, a Session does not.',
-      table: { defaultValue: { summary: 'false' } },
+    onSpec: {
+      action: 'spec asked',
+      description:
+        'Starts a Session that writes a Spec from the sentence: the Home hands it over, a Session does not.',
     },
     sendDisabledReason: {
       control: 'text',
@@ -253,7 +263,7 @@ export const Empty: Story = {
     expect(canvas.queryByText('Choose an agent first')).toBeNull()
     expect(canvas.getByRole('button', { name: /New Spec/ })).toBeDisabled()
     // The Workspace is a real choice, drawn as one.
-    expect(canvas.getByRole('combobox', { name: 'Workspace' })).toHaveTextContent('main')
+    expect(canvas.getByRole('combobox', { name: /^Workspace:/ })).toHaveTextContent('main')
     // Nothing is attached, so the header is not there at all.
     expect(canvas.queryByText('Attached')).toBeNull()
 
@@ -266,7 +276,7 @@ export const Empty: Story = {
     expect(canvas.queryByRole('combobox', { name: 'Mode' })).toBeNull()
 
     // The foot below it: the Workspace, and the two buttons at the other end. One line.
-    const pill = canvas.getByRole('combobox', { name: 'Workspace' })
+    const pill = canvas.getByRole('combobox', { name: /^Workspace:/ })
     expect(onOneLine(pill, send), 'the foot of the composer wrapped').toBe(true)
     // And the foot is below the box, not beside it.
     expect(menu.getBoundingClientRect().bottom).toBeLessThanOrEqual(
@@ -368,13 +378,108 @@ export const Blocked: Story = {
   },
 }
 
-/** The other shape: the foot of a Session, where the box gives itself its own two lines. */
+/**
+ * The other shape: the foot of a Session (issue #241). The box gives itself its own two lines,
+ * and there is no foot under it: the Workspace is the Session's details' to say, and the send is
+ * the arrow alone, at the end of the box's own row, right of the agent's menu.
+ */
 export const InASession: Story = {
   args: { variant: 'inline', action: 'Send', value: 'Ask Marie before turning this into a Spec' },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     expect(canvas.getByRole('textbox')).toHaveTextContent('Ask Marie')
-    expect(canvas.getByRole('button', { name: /Send/ })).toBeEnabled()
+    const send = canvas.getByRole('button', { name: 'Send' })
+    expect(send).toBeEnabled()
+    // The arrow alone: no word, no key drawn beside it.
+    expect(send).toHaveTextContent('')
+    expect(canvas.queryByText('Enter')).toBeNull()
+    // No foot: no Workspace, no second row of buttons.
+    expect(canvas.queryByRole('combobox', { name: /^Workspace:/ })).toBeNull()
+    expect(canvas.queryByRole('button', { name: /New Spec/ })).toBeNull()
+    // On the box's own row, right of the agent's menu.
+    const at = canvas.getByRole('button', { name: 'Mention a file of the Project' })
+    const menu = canvas.getByRole('button', { name: /DeepSeek V4\.1 Flash/ })
+    expect(onOneLine(at, send), 'the send left the box’s own row').toBe(true)
+    expect(menu.getBoundingClientRect().right).toBeLessThanOrEqual(
+      send.getBoundingClientRect().left,
+    )
+    // And it is the last thing in the frame: nothing is drawn under the row.
+    const frame = frameOf(canvas.getByRole('textbox'))
+    expect(frame.getBoundingClientRect().bottom - send.getBoundingClientRect().bottom).toBeLessThan(
+      send.getBoundingClientRect().height,
+    )
+  },
+}
+
+/** A Session's box with a long sentence in it: the box grows and scrolls, the row stays one row. */
+export const InASessionWithLongText: Story = {
+  args: {
+    variant: 'inline',
+    action: 'Send',
+    value: Array.from(
+      { length: 12 },
+      (_, index) =>
+        `Line ${String(index + 1)}: the export writes the invoice date in the column of the amount, and the totals no longer match the bank statement.`,
+    ).join(' '),
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const box = canvas.getByRole('textbox')
+    const send = canvas.getByRole('button', { name: 'Send' })
+    const at = canvas.getByRole('button', { name: 'Mention a file of the Project' })
+    const menu = canvas.getByRole('button', { name: /DeepSeek V4\.1 Flash/ })
+    expect(onOneLine(at, send), 'the send left the box’s own row').toBe(true)
+    expect(onOneLine(menu, send), 'the send wrapped under the agent’s menu').toBe(true)
+    // Under the sentence, never beside it.
+    expect(send.getBoundingClientRect().top).toBeGreaterThanOrEqual(
+      box.getBoundingClientRect().bottom,
+    )
+  },
+}
+
+/**
+ * A turn that starts and ends under the hand: the send becomes the Stop and the Stop the send,
+ * in the same place and at the same size, and nothing else in the row moves (issue #241).
+ */
+function Turn(props: ComposerProps): ReactNode {
+  const [running, setRunning] = useState(false)
+  return (
+    <div className="flex flex-col">
+      <div className="mx-auto flex max-w-2xl px-6 pt-6">
+        <Button variant="secondary" size="sm" onClick={() => setRunning(!running)}>
+          {running ? 'End the turn' : 'Start a turn'}
+        </Button>
+      </div>
+      <Controlled {...props} running={running} />
+    </div>
+  )
+}
+
+export const SendAndStopSwap: Story = {
+  args: { variant: 'inline', action: 'Send', value: 'And the credit notes', onStop: fn() },
+  render: (args) => <Turn {...args} />,
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const menu = canvas.getByRole('button', { name: /DeepSeek V4\.1 Flash/ })
+    const send = canvas.getByRole('button', { name: 'Send' })
+    const place = send.getBoundingClientRect()
+    const beside = menu.getBoundingClientRect()
+    const frame = frameOf(canvas.getByRole('textbox')).getBoundingClientRect()
+
+    await userEvent.click(canvas.getByRole('button', { name: 'Start a turn' }))
+    const stop = await canvas.findByRole('button', { name: 'Stop' })
+    // The same control, where the send was, at its size; the row and the frame are as they were.
+    expect(stop).toBe(send)
+    expect(stop.getBoundingClientRect().toJSON()).toEqual(place.toJSON())
+    expect(menu.getBoundingClientRect().toJSON()).toEqual(beside.toJSON())
+    expect(frameOf(canvas.getByRole('textbox')).getBoundingClientRect().toJSON()).toEqual(
+      frame.toJSON(),
+    )
+    expect(stop).toHaveTextContent('')
+
+    await userEvent.click(canvas.getByRole('button', { name: 'End the turn' }))
+    const back = await canvas.findByRole('button', { name: 'Send' })
+    expect(back.getBoundingClientRect().toJSON()).toEqual(place.toJSON())
   },
 }
 
@@ -432,13 +537,17 @@ export const ForceStop: Story = {
  * A popup on its way out still has Base UI's focus guards in the page, and a guard is a
  * focusable node inside something marked hidden — which is a violation the accessibility pass
  * is right to report. Every story that chooses from the menu waits it out before it ends.
+ * A loaded runner plays the leave slowly: the second the wait gives can end while it is in flight.
  */
 async function menuGone() {
-  await waitFor(() => {
-    expect(
-      within(document.body).queryByRole('listbox', { name: 'Files of the Project' }),
-    ).toBeNull()
-  })
+  await waitFor(
+    () => {
+      expect(
+        within(document.body).queryByRole('listbox', { name: 'Files of the Project' }),
+      ).toBeNull()
+    },
+    { timeout: 10_000 },
+  )
 }
 
 /**
@@ -607,11 +716,15 @@ export const AttachAFile: Story = {
     // separately and the story waits for both: a colour read while either is still fading is
     // two colours mixed with what is behind them, and a contrast the accessibility pass is
     // right to refuse.
-    await waitFor(() => {
-      const chip = canvas.getByTitle(attached)
-      expect(chip).toHaveStyle({ opacity: '1' })
-      expect(chip.parentElement).toHaveStyle({ opacity: '1' })
-    })
+    // A loaded runner plays the rise slowly: the second it gives can end while it is in flight.
+    await waitFor(
+      () => {
+        const chip = canvas.getByTitle(attached)
+        expect(chip).toHaveStyle({ opacity: '1' })
+        expect(chip.parentElement).toHaveStyle({ opacity: '1' })
+      },
+      { timeout: 10_000 },
+    )
     // And in the sentence, as the same chip a mention leaves: one gesture, read as one.
     const chip = canvas.getByRole('textbox').querySelector('[data-file]')
     expect(chip).toHaveAttribute('data-file', attached)
@@ -623,9 +736,13 @@ export const AttachAFile: Story = {
 
     // The send comes out of the quiet it was in while there was nothing to send, and the story
     // waits for it: a colour read halfway through a fade is a contrast axe refuses.
-    await waitFor(() => {
-      expect(canvas.getByRole('button', { name: /Start chat/ })).toHaveStyle({ opacity: '1' })
-    })
+    // A loaded runner plays the rise slowly: the second it gives can end while it is in flight.
+    await waitFor(
+      () => {
+        expect(canvas.getByRole('button', { name: /Start chat/ })).toHaveStyle({ opacity: '1' })
+      },
+      { timeout: 10_000 },
+    )
 
     await menuGone()
   },
@@ -677,7 +794,13 @@ export const ShiftEnterBreaksTheLine: Story = {
   },
 }
 
-/** A chip taken back: the header goes with the last of them, and nothing is left behind. */
+/**
+ * A chip taken back: the header goes with the last of them, and nothing is left behind.
+ *
+ * A chip lands on the field small — a `MARK_SCALE` on the `arrival` preset, which is what it
+ * always was, and no longer a name taken from the press: nothing gives by a share of itself since
+ * issue #108.
+ */
 export const Attachments: Story = {
   args: { files: ['sources/api/AGENTS.md'] },
   play: async ({ canvasElement }) => {
@@ -757,35 +880,81 @@ export const WriteRefused: Story = {
   },
 }
 
+/**
+ * `New Spec` starts the Session with the intent of writing a Spec (issue #128).
+ *
+ * The same sentence as `Start chat`, through the page's other door: off while the box is empty,
+ * alive once something is written, and what it wrote leaves the box as a send's does. What it
+ * does is said on the control, in plain words.
+ */
+export const NewSpec: Story = {
+  play: async ({ canvasElement, args }) => {
+    args.onSend.mockClear()
+    const canvas = within(canvasElement)
+    const box = canvas.getByRole('textbox')
+    const spec = canvas.getByRole('button', { name: /New Spec/ })
+    // "New Spec is off while there is nothing to write a Spec from"
+    expect(spec).toBeDisabled()
+    expect(spec).toHaveAttribute('title', 'Start a Session that writes a Spec from this')
+
+    await userEvent.type(box, 'Export the invoices with HT and TTC')
+    // "New Spec is on once something is written, like Start chat"
+    await waitFor(() => {
+      expect(spec).toBeEnabled()
+    })
+    await userEvent.click(spec)
+
+    await waitFor(() => {
+      expect(args.onSpec).toHaveBeenCalledWith('Export the invoices with HT and TTC')
+    })
+    expect(args.onSend).not.toHaveBeenCalled()
+    await waitFor(() => {
+      expect(box.textContent).toBe('')
+    })
+  },
+}
+
+/**
+ * The page asks for the caret, and the box takes it (issue #128): the sidebar's `+` goes to the
+ * Home and the next key typed is already in the composer.
+ */
+export const TakesTheFocus: Story = {
+  args: { takeFocus: true, onFocusTaken: fn() },
+  play: async ({ canvasElement, args }) => {
+    const box = within(canvasElement).getByRole('textbox')
+    await waitFor(() => {
+      expect(document.activeElement).toBe(box)
+    })
+    // Said back once, so the page lets go of the request and the next one is a new one.
+    expect(args.onFocusTaken).toHaveBeenCalledTimes(1)
+  },
+}
+
 /** Scenario « Mouvement réduit » of `specs/shell-navigation/spec.md`. */
 export const ReducedMotion: Story = {
   play: async ({ canvasElement }) => {
-    const restore = await emulateReducedMotion()
-    try {
-      const canvas = within(canvasElement)
+    await emulateReducedMotion()
+    const canvas = within(canvasElement)
 
-      await userEvent.click(canvas.getByRole('button', { name: 'Attach a file' }))
-      const menu = await within(document.body).findByRole('listbox', {
-        name: 'Files of the Project',
-      })
-      await userEvent.click(within(menu).getAllByRole('option')[0]!)
+    await userEvent.click(canvas.getByRole('button', { name: 'Attach a file' }))
+    const menu = await within(document.body).findByRole('listbox', {
+      name: 'Files of the Project',
+    })
+    await userEvent.click(within(menu).getAllByRole('option')[0]!)
 
-      // In their end state, with nothing in between: the chip is opaque and in place the
-      // moment it exists.
-      await waitFor(() => {
-        const chip = canvas.getByTitle('AGENTS.md')
-        expect(chip).toHaveStyle({ opacity: '1', transform: 'none' })
-        expect(chip.parentElement).toHaveStyle({ opacity: '1', transform: 'none' })
-      })
-      // The send leaves the quiet it was in the same way, which is to say at once.
-      await waitFor(() => {
-        expect(canvas.getByRole('button', { name: /Start chat/ })).toHaveStyle({ opacity: '1' })
-      })
+    // In their end state, with nothing in between: the chip is opaque and in place the
+    // moment it exists.
+    await waitFor(() => {
+      const chip = canvas.getByTitle('AGENTS.md')
+      expect(chip).toHaveStyle({ opacity: '1', transform: 'none' })
+      expect(chip.parentElement).toHaveStyle({ opacity: '1', transform: 'none' })
+    })
+    // The send leaves the quiet it was in the same way, which is to say at once.
+    await waitFor(() => {
+      expect(canvas.getByRole('button', { name: /Start chat/ })).toHaveStyle({ opacity: '1' })
+    })
 
-      await menuGone()
-    } finally {
-      await restore?.()
-    }
+    await menuGone()
   },
 }
 

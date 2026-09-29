@@ -2,12 +2,15 @@ import type { ReactNode } from 'react'
 
 import { StatusDot, type StatusTone } from '../components/status-dot/status-dot.tsx'
 import {
+  IconAdjustments,
+  IconBookmarkPlus,
   IconFileDescription,
   IconFilePlus,
   IconFileText,
   IconFlag,
   IconFolder,
   IconFolders,
+  IconListCheck,
   IconListDetails,
   IconMessages,
   IconPencil,
@@ -51,6 +54,12 @@ import { MARKS, SubjectOnLine, type ToolSubject, pressable } from './tool-call-c
  * ran. The reason is read on the line it left, and the body opens on it, because a refusal
  * nobody can read is a refusal that will be asked again.
  *
+ * A call Hemera answered "not yet" is quieter still (recette of 26 September 2026, issue #134):
+ * a phase proposed finished while a question is open is not a mistake to read, it is a call made
+ * a little early, and the agent carries on. It is folded like a call that is done, the few words
+ * of why on its line — "not yet: a question is open" — and the whole reason in the body, in the
+ * colour of a caption rather than a warning's.
+ *
  * What is held open is what is still happening: a call in flight is what the reader is waiting
  * on, and a call waiting for a human decision is the one thing in the thread that is asking for
  * something. A call that ends done folds itself at that moment (recette 5 of 24 September 2026):
@@ -66,6 +75,7 @@ const STATUS: Record<HemeraToolStatus, { word: string; tone: StatusTone }> = {
   completed: { word: 'Done', tone: 'success' },
   failed: { word: 'Failed', tone: 'failure' },
   refused: { word: 'Refused', tone: 'cancelled' },
+  deferred: { word: 'Not yet', tone: 'cancelled' },
 }
 
 /** The line that is read: whose call it is, the tool, what it is about and where it stands. */
@@ -86,7 +96,10 @@ export type HemeraToolMark =
   | 'stop-command'
   | 'list-commands'
   | 'command-output'
+  | 'propose-command'
   | 'project'
+  | 'read-setup'
+  | 'propose-setup'
   | 'session'
   | 'read-spec'
   | 'write-spec'
@@ -102,7 +115,10 @@ const HEMERA_MARKS: Record<HemeraToolMark, ReactNode> = {
   'stop-command': <IconPlayerStop size="sm" aria-hidden="true" />,
   'list-commands': <IconListDetails size="sm" aria-hidden="true" />,
   'command-output': <IconTerminal2 size="sm" aria-hidden="true" />,
+  'propose-command': <IconBookmarkPlus size="sm" aria-hidden="true" />,
   project: <IconFolders size="sm" aria-hidden="true" />,
+  'read-setup': <IconAdjustments size="sm" aria-hidden="true" />,
+  'propose-setup': <IconListCheck size="sm" aria-hidden="true" />,
   session: <IconMessages size="sm" aria-hidden="true" />,
   'read-spec': <IconFileDescription size="sm" aria-hidden="true" />,
   'write-spec': <IconWriting size="sm" aria-hidden="true" />,
@@ -130,6 +146,9 @@ const REFUSAL = 'mb-1 text-sm text-warning-muted-foreground'
 
 const FAILURE = 'mb-1 text-sm text-destructive-muted-foreground'
 
+/** What the line says of how a call ended, when a few words say it: after the subject, quiet. */
+const NOTE = 'min-w-0 truncate text-muted-foreground'
+
 /** The arguments as they were bounded, one pair per line. */
 const ARGUMENTS = 'flex flex-col gap-0.5'
 
@@ -140,7 +159,13 @@ const LABEL = 'shrink-0 font-mono text-xs text-muted-foreground'
 const VALUE = 'min-w-0 truncate font-mono text-xs text-foreground'
 
 /** Where a call stands in its life, which is what says whether the reader may fold it. */
-export type HemeraToolStatus = 'pending' | 'in_progress' | 'completed' | 'failed' | 'refused'
+export type HemeraToolStatus =
+  | 'pending'
+  | 'in_progress'
+  | 'completed'
+  | 'failed'
+  | 'refused'
+  | 'deferred'
 
 /** One argument of the call, already bounded and shortened by the engine. */
 export interface HemeraToolArgument {
@@ -164,16 +189,33 @@ export interface HemeraToolCallProps {
   arguments?: readonly HemeraToolArgument[] | undefined
   /** How long the call took, once it is over: the dot's hover and description, not the line. */
   ms?: number | undefined
-  /** Why the call failed, or why it was refused. */
+  /** Why the call failed, or why it was refused or answered "not yet": the whole reason. */
   error?: string | undefined
+  /**
+   * How the call ended, in a few words on its line after the subject: `not yet: a question is
+   * open`. The whole reason stays in the body, in `error`.
+   */
+  note?: string | undefined
   /** Whether a reader who has not touched it finds it open. */
   defaultOpen?: boolean | undefined
   /** What a press on a subject that is a path does: the reader goes there. */
   onOpenPath?: ((path: string) => void) | undefined
+  /**
+   * What became of the call, on its own line (review of #250): the permission it waited on, the
+   * run it asked for, the command it proposed — one entry for the call, not three.
+   */
+  outcome?: ReactNode
   /** What the call returned, handed over already drawn. */
   children?: ReactNode
   /** Where the block sits; never how it looks. */
   className?: string | undefined
+}
+
+/** The reason, in the tone of how the call ended: a failure, a refusal, or a quiet "not yet". */
+function errorClass(status: HemeraToolStatus): string {
+  if (status === 'refused') return REFUSAL
+  if (status === 'deferred') return ANSWER
+  return FAILURE
 }
 
 /** Whether the summary only says the error again: the same sentence, or one opening with it. */
@@ -193,8 +235,10 @@ export function HemeraToolCall({
   arguments: args,
   ms,
   error,
+  note,
   defaultOpen = false,
   onOpenPath,
+  outcome,
   children,
   className,
 }: HemeraToolCallProps): ReactNode {
@@ -225,29 +269,38 @@ export function HemeraToolCall({
           <span className={WHOSE}>Hemera</span>
           <span className={NAMED}>{label}</span>
           {subject !== undefined && <SubjectOnLine subject={subject} onOpen={onOpenPath} />}
-          <StatusDot
-            status={tone}
-            size="sm"
-            label={word}
-            title={ms === undefined ? undefined : `${ms} ms`}
-          />
+          {note !== undefined && <span className={NOTE}>— {note}</span>}
+          {outcome}
+          {/* A call that carries what became of it says it by those marks, and by no second dot. */}
+          {outcome === undefined && (
+            <StatusDot
+              status={tone}
+              size="sm"
+              label={word}
+              title={ms === undefined ? undefined : `${ms} ms`}
+            />
+          )}
         </span>
       }
     >
-      {error !== undefined && <p className={status === 'refused' ? REFUSAL : FAILURE}>{error}</p>}
+      {error !== undefined && <p className={errorClass(status)}>{error}</p>}
       {/* Said once (recette 4 of 23 September 2026): a summary that is the error again, or opens
           with it, is the red line a second time in grey. */}
-      {!repeats(summary, error) && <p className={ANSWER}>{summary}</p>}
+      {/* Said once: a call carrying what became of it shows that alone once opened — the answer,
+          what ran — and not its own sentence and arguments a second time (review of #250). */}
+      {outcome === undefined && !repeats(summary, error) && <p className={ANSWER}>{summary}</p>}
       {/* The catalogue's name heads the arguments (recette 5 of 24 September 2026): it is for
           the eye that reads the thread against a log, and that eye opens the call first. */}
-      <dl className={ARGUMENTS}>
-        {[{ label: 'tool', value: tool }, ...(args ?? [])].map((argument) => (
-          <div key={argument.label} className={PAIR}>
-            <dt className={LABEL}>{argument.label}</dt>
-            <dd className={VALUE}>{argument.value}</dd>
-          </div>
-        ))}
-      </dl>
+      {outcome === undefined && (
+        <dl className={ARGUMENTS}>
+          {[{ label: 'tool', value: tool }, ...(args ?? [])].map((argument) => (
+            <div key={argument.label} className={PAIR}>
+              <dt className={LABEL}>{argument.label}</dt>
+              <dd className={VALUE}>{argument.value}</dd>
+            </div>
+          ))}
+        </dl>
+      )}
       {children}
     </Disclosure>
   )

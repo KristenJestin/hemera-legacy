@@ -41,17 +41,22 @@ import {
   specKey,
   taskGraph,
   writable,
+  SPEC_TYPES,
 } from '@hemera/core'
 import { and, asc, desc, eq, inArray, sql } from 'drizzle-orm'
 import { Context, Data, Effect, Layer } from 'effect'
+import { z } from 'zod'
 
+import { DomainEvents } from '../domain-events.ts'
 import type { NewEvent } from '../journal.ts'
 import { UnknownProjectError } from '../projects.ts'
-import type { Session, UnknownSessionError } from '../sessions.ts'
+import { UnknownWorkspaceError, WorkspaceTakenError, takenBy } from '../workspaces/described.ts'
+import { type Session, type UnknownSessionError, entryOf } from '../sessions.ts'
 import { Database, type DatabaseError, type EngineTransaction } from '../storage/database.ts'
 import {
   acceptanceCriteria,
   projects,
+  sessionEntries,
   specEditBuffers,
   specQuestions,
   specRevisions,
@@ -62,9 +67,17 @@ import {
   taskSets,
   taskStories,
   userStories,
+  workspaces,
 } from '../storage/schema.ts'
 import { mutate } from '../transaction.ts'
-import { type Gate, type ReadyRefusedError, type ReadyRequest, gateOf, markReady } from './gate.ts'
+import {
+  type Gate,
+  type ReadyRefusedError,
+  type ReadyRequest,
+  attestable,
+  gateOf,
+  markReady,
+} from './gate.ts'
 import { SpecNotices } from './notices.ts'
 import {
   type Declaration,
@@ -93,6 +106,7 @@ import {
   type SpecAnchorRefusedError,
   define,
   definable,
+  joinIn,
   openSessionIn,
   sessionNow,
   sessionRow,
@@ -162,6 +176,17 @@ export interface TaskWrite {
   stories: readonly string[]
 }
 
+/**
+ * The title or the type of the current draft, rewritten (issue #179): a Spec New Spec created
+ * starts on the first line of the request and the type `feature`, which the agent settles with
+ * the user. One of the two per write.
+ */
+export interface HeadingWrite {
+  specId: string
+  title?: string | undefined
+  type?: SpecType | undefined
+}
+
 export interface QuestionRaise {
   specId: string
   body: string
@@ -205,9 +230,71 @@ export class UnknownSpecItemError extends Data.TaggedError('UnknownSpecItemError
   }
 }
 
+/**
+ * A proposal of the agent declined that its Session does not hold, or that no longer waits for
+ * an answer: declined already, or the Session defines a Spec since (issue #130).
+ */
+export class ProposalRefusedError extends Data.TaggedError('ProposalRefusedError')<{
+  readonly proposalId: string
+  readonly why: 'unknown' | 'answered'
+}> {
+  override get message(): string {
+    return this.why === 'unknown'
+      ? `This Session has no proposal "${this.proposalId}".`
+      : 'This proposal was already answered.'
+  }
+}
+
+/** A proposal declined, as the agent proposed it: what it is told it was refused. */
+export interface DeclinedProposal {
+  title: string
+  type: SpecType
+}
+
+/**
+ * What the agent is handed when the user declined its proposal (issue #130): Hemera's words,
+ * never the user's, so that it goes on in the Session it is in rather than waiting for an answer.
+ */
+export function declinedNotice(proposal: DeclinedProposal): string {
+  return [
+    '# Proposal declined',
+    '',
+    `The user declined your proposal to create the ${proposal.type} Spec "${proposal.title}": no Spec was created, and this Session stays free.`,
+    "This is a note from Hemera, not a message of the user's. Carry on with the conversation where it was, and do not propose that Spec again unless the user asks for it.",
+  ].join('\n')
+}
+
+/** What a `spec_proposal` entry carries, as `spec_propose` wrote it. */
+const PROPOSED = z.object({ title: z.string(), type: z.enum(SPEC_TYPES) })
+
+/** The proposal an entry holds; one whose payload does not read is named by its body alone. */
+/** The Spec a proposal points to, when it points to one that exists (issue #198). */
+const POINTED = z.object({ specId: z.string() })
+
+/** The id of the existing Spec a proposal points to, or null for a Spec to create. */
+function pointedIn(payload: string): string | null {
+  try {
+    const read = POINTED.safeParse(JSON.parse(payload))
+    return read.success ? read.data.specId : null
+  } catch {
+    return null
+  }
+}
+
+function proposedIn(payload: string, body: string): DeclinedProposal {
+  try {
+    const read = PROPOSED.safeParse(JSON.parse(payload))
+    if (read.success) return read.data
+  } catch {
+    // Falls through to the body, which is the title the entry was written with.
+  }
+  return { title: body, type: 'feature' }
+}
+
 /** Everything a Spec use case can be refused with. */
 export type SpecRefusal =
   | DatabaseError
+  | ProposalRefusedError
   | UnknownSpecError
   | UnknownRevisionError
   | UnknownSessionError
@@ -222,6 +309,8 @@ export type SpecRefusal =
   | PhaseRefusedError
   | ReadyRefusedError
   | ReopenRefusedError
+  | UnknownWorkspaceError
+  | WorkspaceTakenError
 
 type Answer<A> = Effect.Effect<A, SpecRefusal>
 
@@ -236,6 +325,17 @@ export interface SpecsService {
    * was proposed in becomes its writer and turns `define`, in one transaction.
    */
   readonly create: (input: NewSpec) => Answer<DefiningSession>
+  /**
+   * The agent's proposal declined (issue #130): its entry is kept `declined`, which the thread
+   * draws, and the Session stays `free`. Telling the agent is the runtime's.
+   */
+  readonly declineProposal: (sessionId: string, proposalId: string) => Answer<DeclinedProposal>
+  /**
+   * The agent's proposal accepted when it points to a Spec that exists (issue #198): the `free`
+   * Session it was made in turns `define` on that Spec, its writer if it has none, a reader
+   * otherwise. No Spec is created.
+   */
+  readonly acceptExisting: (sessionId: string, proposalId: string) => Answer<DefiningSession>
   /** A new `define` Session on a Spec: the writer if it has none, a reader otherwise (D7-11). */
   readonly openSession: (input: SessionOpening) => Answer<DefiningSession>
   readonly writeSection: (actor: SpecWriter, input: SectionWrite) => Answer<SpecSnapshot>
@@ -249,6 +349,8 @@ export interface SpecsService {
     actor: SpecWriter,
     input: { specId: string; tasks: readonly TaskWrite[] },
   ) => Answer<SpecSnapshot>
+  /** Renames the draft or changes its type; a new type brings the empty sections it requires. */
+  readonly writeHeading: (actor: SpecWriter, input: HeadingWrite) => Answer<SpecSnapshot>
   /** Kept in the Spec, and asked in the chat of the actor's Session when it has one (D7-01). */
   readonly raiseQuestion: (actor: SpecWriter, input: QuestionRaise) => Answer<SpecSnapshot>
   /** Human only, answered beside the question in the chat it was asked in (D7-03). */
@@ -266,6 +368,12 @@ export interface SpecsService {
   readonly markReady: (request: ReadyRequest) => Answer<SpecSnapshot>
   /** Human only: Rework (D7-05). */
   readonly reopen: (request: ReopenRequest) => Answer<SpecSnapshot>
+  /**
+   * Human only (D8-12): the Workspace the Spec's build will run in, given without asking for a
+   * build — what "Prepare a Workspace only" writes. The launch proposes itself from the panel
+   * once the Workspace is ready.
+   */
+  readonly useWorkspace: (specId: string, workspaceId: string) => Answer<SpecSnapshot>
   /**
    * Human only: "Take the write right" (D7-11). `running` says whether a Session has a turn
    * running, which the agents know and the Spec does not (Decided 14).
@@ -516,6 +624,72 @@ function writeSectionIn(
         payload: { name: input.name, version: version + 1, author: actor.kind },
       }),
       ...phases,
+    ]
+  })
+}
+
+/**
+ * Writes the title or the type of the current revision (issue #179). A title renames the Spec's
+ * slug with it: a draft has no branch yet. A type adds the empty sections its contract requires
+ * and the revision does not hold, as `createIn` does (D7-06); what the other type had stays.
+ */
+function writeHeadingIn(
+  transaction: EngineTransaction,
+  snapshot: SpecSnapshot,
+  actor: SpecWriter,
+  input: HeadingWrite,
+) {
+  return Effect.gen(function* () {
+    const title = input.title?.trim()
+    if (title !== undefined) {
+      const slug = yield* slugged(title)
+      yield* transaction
+        .update(specRevisions)
+        .set({ title })
+        .where(eq(specRevisions.id, snapshot.revision.id))
+        .pipe(Effect.mapError(failed('renaming the revision')))
+      yield* transaction
+        .update(specs)
+        .set({ slug })
+        .where(eq(specs.id, snapshot.spec.id))
+        .pipe(Effect.mapError(failed('renaming the Spec')))
+    }
+    const type = input.type
+    if (type !== undefined) {
+      yield* transaction
+        .update(specRevisions)
+        .set({ type })
+        .where(eq(specRevisions.id, snapshot.revision.id))
+        .pipe(Effect.mapError(failed('changing the type')))
+      const held = new Set(snapshot.sections.map((section) => section.name))
+      const missing = contractOf(type).filter((name) => !held.has(name))
+      if (missing.length > 0) {
+        const at = now()
+        yield* transaction
+          .insert(specSections)
+          .values(
+            missing.map((name) => ({
+              id: crypto.randomUUID(),
+              revisionId: snapshot.revision.id,
+              name,
+              author: actor.kind,
+              sessionId: actor.sessionId,
+              updatedAt: at,
+            })),
+          )
+          .pipe(Effect.mapError(failed('writing the sections')))
+      }
+    }
+    return [
+      specEvent(snapshot.spec, snapshot.revision.id, 'spec.heading_written', {
+        author: actor.kind,
+        sessionId: actor.sessionId,
+        phaseId: 'shape',
+        payload: {
+          title: title ?? snapshot.revision.title,
+          type: type ?? snapshot.revision.type,
+        },
+      }),
     ]
   })
 }
@@ -878,13 +1052,15 @@ export const specsLayer = Layer.effect(
   Effect.gen(function* () {
     const database = yield* Database
     const notices = yield* SpecNotices
+    const domainEvents = yield* DomainEvents
 
     const withDatabase = <A, E>(effect: Effect.Effect<A, E, Database>): Effect.Effect<A, E> =>
       effect.pipe(Effect.provideService(Database, database))
 
     /**
      * One mutation of a Spec: its step, then the snapshot it leaves, then the window told — of
-     * the Spec, and of every entry the step wrote into a thread.
+     * the Spec, and of every entry the step wrote into a thread — then the events it committed
+     * handed to the services that follow them (#113).
      */
     const stepping = <S extends Step, A, E>(
       doing: string,
@@ -901,7 +1077,10 @@ export const specsLayer = Layer.effect(
             const step = yield* body(transaction)
             const snapshot = yield* readSnapshot(transaction, step.specId)
             const result = yield* answering(transaction, step, snapshot)
-            return { result: { result, snapshot, wrote: step.wrote ?? [] }, events: step.events }
+            return {
+              result: { result, snapshot, wrote: step.wrote ?? [], events: step.events },
+              events: step.events,
+            }
           }),
         ),
       ).pipe(
@@ -911,6 +1090,7 @@ export const specsLayer = Layer.effect(
             for (const { sessionId, entry } of wrote) notices.wrote(sessionId, entry)
           }),
         ),
+        Effect.tap(({ events }) => domainEvents.committed(events)),
         Effect.map(({ result }) => result),
       )
 
@@ -1016,6 +1196,88 @@ export const specsLayer = Layer.effect(
 
       create: (input) => defining('creating a Spec', (transaction) => createIn(transaction, input)),
 
+      declineProposal: (sessionId, proposalId) =>
+        withDatabase(
+          mutate('declining a proposal', (transaction) =>
+            Effect.gen(function* () {
+              const found = yield* transaction
+                .select()
+                .from(sessionEntries)
+                .where(
+                  and(
+                    eq(sessionEntries.sessionId, sessionId),
+                    eq(sessionEntries.kind, 'spec_proposal'),
+                    eq(sessionEntries.correlationId, `proposal:${proposalId}`),
+                  ),
+                )
+                .limit(1)
+                .pipe(Effect.mapError(failed('reading the proposal')))
+              const row = found[0]
+              if (row === undefined) {
+                return yield* Effect.fail(new ProposalRefusedError({ proposalId, why: 'unknown' }))
+              }
+              const session = yield* sessionRow(transaction, sessionId)
+              // A Session that defines a Spec answered every proposal it held when it was made.
+              if (row.state === 'declined' || session.mission !== 'free') {
+                return yield* Effect.fail(new ProposalRefusedError({ proposalId, why: 'answered' }))
+              }
+              const rows = yield* transaction
+                .update(sessionEntries)
+                .set({ state: 'declined' })
+                .where(eq(sessionEntries.id, row.id))
+                .returning()
+                .pipe(Effect.mapError(failed('declining the proposal')))
+              const entry = entryOf(rows[0] ?? row)
+              const event: NewEvent = {
+                type: 'session.entry_written',
+                entityKind: 'session',
+                entityId: sessionId,
+                source: 'ui',
+                author: 'human',
+                projectId: session.projectId,
+                sessionId,
+                payload: { seq: row.seq, kind: 'spec_proposal', role: 'hemera', state: 'declined' },
+              }
+              return {
+                result: { entry, proposal: proposedIn(row.payload, row.body) },
+                events: [event],
+              }
+            }),
+          ),
+        ).pipe(
+          Effect.tap(({ entry }) => Effect.sync(() => notices.wrote(sessionId, entry))),
+          Effect.map(({ proposal }) => proposal),
+        ),
+
+      acceptExisting: (sessionId, proposalId) =>
+        defining('continuing a Spec', (transaction) =>
+          Effect.gen(function* () {
+            const found = yield* transaction
+              .select()
+              .from(sessionEntries)
+              .where(
+                and(
+                  eq(sessionEntries.sessionId, sessionId),
+                  eq(sessionEntries.kind, 'spec_proposal'),
+                  eq(sessionEntries.correlationId, `proposal:${proposalId}`),
+                ),
+              )
+              .limit(1)
+              .pipe(Effect.mapError(failed('reading the proposal')))
+            const row = found[0]
+            const specId = row === undefined ? null : pointedIn(row.payload)
+            if (row === undefined || specId === null) {
+              return yield* Effect.fail(new ProposalRefusedError({ proposalId, why: 'unknown' }))
+            }
+            if (row.state === 'declined') {
+              return yield* Effect.fail(new ProposalRefusedError({ proposalId, why: 'answered' }))
+            }
+            const snapshot = yield* readSnapshot(transaction, specId)
+            const joined = yield* joinIn(transaction, snapshot, sessionId)
+            return { specId, ...joined }
+          }),
+        ),
+
       openSession: (input) =>
         defining('opening a Session on a Spec', (transaction) =>
           Effect.gen(function* () {
@@ -1040,6 +1302,11 @@ export const specsLayer = Layer.effect(
           writeTasksIn(transaction, snapshot, actor, input.tasks).pipe(Effect.map(only)),
         ),
 
+      writeHeading: (actor, input) =>
+        onContent('writing the heading', input.specId, actor, (transaction, snapshot) =>
+          writeHeadingIn(transaction, snapshot, actor, input).pipe(Effect.map(only)),
+        ),
+
       raiseQuestion: (actor, input) =>
         onContent('raising a question', input.specId, actor, (transaction, snapshot) =>
           raiseIn(transaction, snapshot, actor, input),
@@ -1062,6 +1329,7 @@ export const specsLayer = Layer.effect(
         onSpec('attesting the Spec', specId, (transaction, snapshot) =>
           Effect.gen(function* () {
             yield* guard(transaction, snapshot, agent(sessionId))
+            yield* attestable(snapshot)
             return only(yield* attestIn(transaction, snapshot, agent(sessionId)))
           }),
         ),
@@ -1077,6 +1345,45 @@ export const specsLayer = Layer.effect(
       reopen: (request) =>
         onSpec('reworking the Spec', request.specId, (transaction, snapshot) =>
           reopen(transaction, snapshot, request),
+        ),
+
+      useWorkspace: (specId, workspaceId) =>
+        onSpec('giving the Spec a Workspace', specId, (transaction, snapshot) =>
+          Effect.gen(function* () {
+            const found = yield* transaction
+              .select({ id: workspaces.id, name: workspaces.name })
+              .from(workspaces)
+              .where(
+                and(
+                  eq(workspaces.id, workspaceId),
+                  eq(workspaces.projectId, snapshot.spec.projectId),
+                ),
+              )
+              .limit(1)
+              .pipe(Effect.mapError(failed('reading the Workspace')))
+            const workspace = found[0]
+            if (workspace === undefined) {
+              return yield* Effect.fail(new UnknownWorkspaceError(workspaceId))
+            }
+            // One Spec, one Workspace (D8-12): one made for another Spec is refused here too.
+            const taken = yield* takenBy(transaction, workspace.id, specId)
+            if (taken !== null) {
+              return yield* Effect.fail(new WorkspaceTakenError(workspace.name, taken))
+            }
+            const at = now()
+            yield* transaction
+              .update(specs)
+              .set({ workspaceId: workspace.id, updatedAt: at })
+              .where(eq(specs.id, specId))
+              .pipe(Effect.mapError(failed('giving the Spec a Workspace')))
+            return only([
+              specEvent(snapshot.spec, snapshot.revision.id, 'spec.workspace_used', {
+                author: 'human',
+                sessionId: null,
+                payload: { workspaceId: workspace.id, name: workspace.name },
+              }),
+            ])
+          }),
         ),
 
       transferWrite: (input, running) =>

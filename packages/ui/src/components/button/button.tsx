@@ -1,18 +1,11 @@
 import { Button as BaseButton } from '@base-ui/react/button'
 import { type VariantProps, cva } from 'class-variance-authority'
 import { cn } from 'cn'
-import { AnimatePresence, motion } from 'motion/react'
+import { AnimatePresence, motion, useIsPresent } from 'motion/react'
 import type { ReactNode } from 'react'
 
 import { IconAlertTriangle, IconCheck } from '../../icons.ts'
-import {
-  HOVERED,
-  MARK_TRAVEL,
-  PRESSED,
-  PRESSED_COMPACT,
-  press,
-  useTransition,
-} from '../../motion.ts'
+import { MARK_TRAVEL, press, useHand, useTransition } from '../../motion.ts'
 import { Loading } from '../loading/loading.tsx'
 
 /**
@@ -25,9 +18,10 @@ import { Loading } from '../loading/loading.tsx'
  *
  * Everything it does answers the hand, so everything it does is on the `press` preset: the
  * hover, the press, the width following what the button now says, and going quiet when it is
- * disabled. A button that is working says so where its label was and keeps its focus while it
- * does — `focusableWhenDisabled` is what stops the keyboard from falling back to the top of
- * the page under the user's hands.
+ * disabled. The hover and the press move its edges by the same pixels whatever its size is,
+ * which is what `useHand` works out from the box the button took. A button that is working says
+ * so where its label was and keeps its focus while it does — `focusableWhenDisabled` is what
+ * stops the keyboard from falling back to the top of the page under the user's hands.
  */
 const buttonVariants = cva(
   'inline-flex items-center justify-center gap-1.5 overflow-hidden border font-medium whitespace-nowrap outline-none focus-ring',
@@ -37,7 +31,10 @@ const buttonVariants = cva(
         primary:
           'border-primary bg-primary text-primary-foreground hover:border-primary-strong hover:bg-primary-strong',
         secondary: 'border-input bg-card text-foreground hover:bg-muted',
-        ghost: 'border-transparent bg-transparent text-foreground hover:bg-accent',
+        // A ghost that is the current place draws no fill under the hand: it is drawn over its
+        // list's mark, which is its fill already (issue #127).
+        ghost:
+          'border-transparent bg-transparent text-foreground hover:bg-accent aria-[current=true]:hover:bg-transparent',
         // What a frame's header and a panel's corner offer: the accent colour and nothing
         // else. A control that is a place to go rather than a thing to press reads as text.
         link: 'border-transparent bg-transparent text-primary-muted-foreground hover:bg-transparent hover:text-primary',
@@ -85,8 +82,6 @@ export interface ButtonProps
     Omit<BaseButton.Props, 'render' | 'className' | 'style' | 'children'>,
     VariantProps<typeof buttonVariants> {
   state?: ButtonState | undefined
-  /** How deep the press goes. Square controls set it themselves; nobody else needs to. */
-  pressScale?: number | undefined
   children?: ReactNode
   /** Where the button sits; never how it looks. */
   className?: string | undefined
@@ -98,12 +93,12 @@ export function Button({
   size,
   state = 'idle',
   disabled = false,
-  pressScale = PRESSED,
   children,
   className,
   ...rest
 }: ButtonProps) {
   const transition = useTransition(press)
+  const hand = useHand()
   const working = state === 'loading'
   return (
     <BaseButton
@@ -116,9 +111,13 @@ export function Button({
           // The width and the press are on the same element: `layout` and `whileTap` both project
           // a transform onto whatever carries them, and nesting one inside the other leaves the
           // inner one spending the press correcting for the outer one.
-          layout
-          whileHover={{ scale: HOVERED }}
-          whileTap={{ scale: pressScale }}
+          ref={hand.element}
+          // Its size and nothing else (issue #183): what is animated is the width following what
+          // it says. A button carried to wherever its row put it replayed its old place each time
+          // it was drawn again after something beside it changed, and popped where it stood.
+          layout="size"
+          whileHover={hand.hover}
+          whileTap={hand.tap}
           // Going quiet is a change like any other: it fades rather than switching off, which
           // is why the opacity lives here and not in a class the browser applies at once.
           animate={{ opacity: disabled || working ? 0.5 : 1 }}
@@ -144,7 +143,6 @@ export function IconButton({ variant, size = 'md', icon, className, ...rest }: I
       {...rest}
       variant={variant}
       size={size}
-      pressScale={PRESSED_COMPACT}
       className={cn(ICON_ONLY[size ?? 'md'], className)}
     >
       {icon}
@@ -168,20 +166,40 @@ function Content({ state, children }: { state: ButtonState; children: ReactNode 
     <>
       <AnimatePresence mode="popLayout" initial={false}>
         {mark !== null && (
-          <motion.span
-            key={state}
-            className="inline-flex"
-            initial={{ opacity: 0, y: MARK_TRAVEL, scale: 0.7 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: -MARK_TRAVEL, scale: 0.7 }}
-            transition={transition}
-          >
+          <Mark key={state} transition={transition}>
             {mark}
-          </motion.span>
+          </Mark>
         )}
       </AnimatePresence>
       {children}
     </>
+  )
+}
+
+/**
+ * The mark of a state, in front of the label. The moment it starts leaving it is hidden from
+ * assistive technology: the state it said is over, and a loader still read while it fades out
+ * named the button `Working Create` once the work was done.
+ */
+function Mark({
+  transition,
+  children,
+}: {
+  transition: ReturnType<typeof useTransition>
+  children: ReactNode
+}) {
+  const present = useIsPresent()
+  return (
+    <motion.span
+      className="inline-flex"
+      aria-hidden={present ? undefined : true}
+      initial={{ opacity: 0, y: MARK_TRAVEL, scale: 0.7 }}
+      animate={{ opacity: 1, y: 0, scale: 1 }}
+      exit={{ opacity: 0, y: -MARK_TRAVEL, scale: 0.7 }}
+      transition={transition}
+    >
+      {children}
+    </motion.span>
   )
 }
 

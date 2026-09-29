@@ -29,13 +29,19 @@ import {
   agentOf,
   chooseOption,
   forgetAgentRefusal,
+  hasTrace,
+  heardSince,
   listenToAgents,
+  openTrace,
   offerAgent,
   offeringOf,
   optionsOf,
   readOptions,
   say,
   setOffered,
+  specWritingOf,
+  turnRowOf,
+  answersAQuestion,
 } from '#renderer/agent-store.ts'
 import {
   archiveSession,
@@ -44,6 +50,7 @@ import {
   sessionsSnapshot,
   writeMessage,
 } from '#renderer/sessions-store.ts'
+import { listenToTools, runsOf, toolsSnapshot } from '#renderer/tools-store.ts'
 
 /** One Session, as the engine answers with one. */
 function session(id: string, version = 1): Session {
@@ -55,6 +62,8 @@ function session(id: string, version = 1): Session {
     provider: 'claude',
     model: null,
     nativeState: 'none',
+    workspaceId: null,
+    workspaceFixed: false,
     mission: 'free',
     specId: null,
     archivedAt: null,
@@ -269,6 +278,7 @@ describe('La ligne au bout du fil dit ce que le tour fait', () => {
     expect(activityOf([said, thought, running])).toEqual({
       state: 'running',
       detail: 'cat recap.md',
+      face: 'running',
       thought: 'The file is probably at the root.',
     })
 
@@ -293,7 +303,11 @@ describe('La ligne au bout du fil dit ce que le tour fait', () => {
 
     // Answered, and the call it was about is what is running again.
     const decided = reported('e4', 'permission_decision', 'Allowed once', 'decided')
-    expect(activityOf([...thread, decided])).toEqual({ state: 'running', detail: 'git push' })
+    expect(activityOf([...thread, decided])).toEqual({
+      state: 'running',
+      detail: 'git push',
+      face: 'running',
+    })
   })
 
   test('the thought the row opens on is this turn’s and never the one before it', () => {
@@ -459,6 +473,59 @@ describe('Le tour tourne dès que la question est écrite', () => {
     expect(agentOf('session-6').stopReason).toBe('end_turn')
   })
 
+  test('the turn entry pushed ends the turn, in the same state that holds it', () => {
+    push({ event: 'turn_start', sessionId: 'session-7', entry: null })
+    push({ event: 'entry', sessionId: 'session-7', entry: entry('e1', 'user', 'test') })
+    const done = reported('e2', 'turn', 'The agent finished its turn.', 'end_turn')
+    push({ event: 'entry', sessionId: 'session-7', entry: done })
+
+    // The row reads "Done" off this entry, and the composer draws Send from this flag: the
+    // `turn` event that follows is a second message, and a frame drawn between the two had both.
+    const held = agentOf('session-7')
+    expect(held.running).toBe(false)
+    expect(turnRowOf(held.entries, held.running, held.latest)?.state).toBe('done')
+  })
+
+  test('a message said after a turn ended is thinking, never the last turn done', () => {
+    const said = entry('e1', 'user', 'test')
+    const done = reported('e2', 'turn', 'The agent finished its turn.', 'end_turn')
+
+    // The next message is said: the Session runs before the engine has echoed it, and the thread
+    // still ends on the turn before, which is the entry pushed last. That end is not what the
+    // turn just asked for is doing.
+    expect(turnRowOf([said, done], true, 'e2')).toEqual({ state: 'thinking' })
+    expect(turnRowOf([said], false)).toBeNull()
+  })
+
+  test('the row says it waits only when the notices hold something (#250)', () => {
+    const request = {
+      ...reported('e2', 'permission_request', 'fs_write asks to act outside the Workspace'),
+      role: 'hemera' as const,
+      state: 'pending',
+      payload: JSON.stringify({ toolCallId: 'q-1', options: [] }),
+    }
+    const said = entry('e1', 'user', 'Go')
+    // The notices are empty: the row does not say the Session waits, whatever the thread holds.
+    expect(turnRowOf([said, request], true, 'e2', null)?.state).not.toBe('waiting')
+    // Something waits in them: the row says so.
+    expect(turnRowOf([said, request], true, 'e2', 'permission')?.state).toBe('waiting')
+  })
+
+  test('the row waits for the reader as long as the notices hold anything (#237)', () => {
+    const said = entry('e1', 'user', 'test')
+    const done = reported('e2', 'turn', 'The agent finished its turn.', 'end_turn')
+
+    // Proposals the turn left behind: the turn is over, and the Session still waits for the reader.
+    expect(turnRowOf([said, done], false, 'e2', 'proposal')).toEqual({
+      state: 'waiting',
+      face: 'permission',
+    })
+    // A turn running while something waits: it waits, whatever else it is doing.
+    expect(turnRowOf([said], true, 'e1', 'question')?.state).toBe('waiting')
+    // Nothing waits any more: the row says how the turn ended again.
+    expect(turnRowOf([said, done], false, 'e2', null)?.state).toBe('done')
+  })
+
   test('a prompt refused before any turn began leaves nothing running', async () => {
     answers.set('agents.prompt', new Error('the engine is not running'))
 
@@ -496,7 +563,12 @@ describe('Le titre proposé paraît sans rechargement', () => {
     })
     await readSessions('atlas')
 
-    expect(asked.map((one) => one.name)).toEqual(['sessions.list', 'sessions.list'])
+    // Opening the Project reads its Workspaces too, which the composer's pill offers (D8-08).
+    expect(asked.map((one) => one.name)).toEqual([
+      'workspaces.list',
+      'sessions.list',
+      'sessions.list',
+    ])
     expect(sessionsSnapshot().sessions.map((one) => one.id)).toEqual(['session-2', 'session-1'])
     // The list alone: a read that dropped the thread would close a page nobody asked to close.
     expect(sessionsSnapshot().thread).toEqual([])
@@ -763,7 +835,7 @@ describe('A new model lands the effort on its recommended level', () => {
 
 describe('The agent starts the app and the user opens it', () => {
   /** A run of a command, as the thread holds its entry. */
-  function aRun(id: string, name: string, kind: 'app' | 'check', state: string): SessionEntry {
+  function aRun(id: string, name: string, type: 'serve' | 'test', state: string): SessionEntry {
     return {
       ...reported(id, 'command_run', name, state, null),
       role: 'hemera',
@@ -771,7 +843,7 @@ describe('The agent starts the app and the user opens it', () => {
         runId: `run-${id}`,
         name,
         line: `pnpm ${name}`,
-        kind,
+        type,
         state,
         cwd: '/home/ana/atlas',
         url: null,
@@ -784,22 +856,222 @@ describe('The agent starts the app and the user opens it', () => {
   test('a check Hemera is running for the turn is what the row names', () => {
     const said = entry('e1', 'user', 'Check it')
     const call = reported('e2', 'tool_call', 'mcp__hemera__commands_run', 'in_progress')
-    const check = aRun('e3', 'check', 'check', 'running')
+    const check = aRun('e3', 'check', 'test', 'running')
 
-    expect(activityOf([said, call, check])).toEqual({ state: 'running', detail: 'Running check' })
+    expect(activityOf([said, call, check])).toEqual({ state: 'running', detail: 'check' })
     // Once it has ended, the row goes back to what the turn is doing.
-    const ended = aRun('e3', 'check', 'check', 'exited')
+    const ended = aRun('e3', 'check', 'test', 'exited')
     expect(activityOf([said, call, ended])).toEqual({
       state: 'running',
-      detail: 'mcp__hemera__commands_run',
+      doing: 'Running a command',
+      face: 'running',
+    })
+  })
+
+  test("one of Hemera's tools running says what it is doing (issues #159, #170)", () => {
+    const said = entry('e1', 'user', 'Write the problem')
+    const call = reported('e2', 'tool_call', 'mcp__hemera__spec_write', 'in_progress')
+
+    expect(activityOf([said, call])).toEqual({
+      state: 'running',
+      doing: 'Writing the Spec',
+      face: 'writing',
     })
   })
 
   test('an app left running is not what the turn is doing', () => {
     const said = entry('e1', 'user', 'Start the app')
-    const app = aRun('e2', 'dev', 'app', 'running')
+    const app = aRun('e2', 'dev', 'serve', 'running')
     const answer = reported('e3', 'message', 'It is up.')
 
     expect(activityOf([said, app, answer], 'e3').state).toBe('streaming')
+  })
+})
+
+describe("A run no Session asked for is in no Session's panel", () => {
+  test("a preparation's run is heard without being kept for a Session (Decided 11)", () => {
+    // The tools store listens in place of the agent store: the stand-in bridge holds one listener.
+    const stopTools = listenToTools()
+    const before = toolsSnapshot()
+    push({
+      event: 'run',
+      sessionId: null,
+      run: {
+        id: 'run-1',
+        projectId: 'atlas',
+        sessionId: null,
+        commandId: 'install',
+        name: 'install',
+        line: 'pnpm install',
+        type: 'configure',
+        scope: 'workspace',
+        cwd: '/home/ana/workspaces/login-form',
+        folder: null,
+        workspaceId: 'login-form',
+        workspaceName: 'login-form',
+        startedBy: 'user',
+        environment: {},
+        state: 'exited',
+        pid: null,
+        url: null,
+        readyAt: null,
+        readiness: null,
+        portConflict: null,
+        heldAgainst: [],
+        exitCode: 1,
+        output: 'ERR_PNPM_NO_LOCKFILE',
+        dropped: 0,
+        startedAt: '2026-09-24T08:00:00.000Z',
+        endedAt: '2026-09-24T08:00:01.000Z',
+        joined: false,
+      },
+    })
+    expect(toolsSnapshot()).toBe(before)
+    expect(runsOf(null)).toEqual([])
+    stopTools()
+  })
+})
+
+describe('A running turn that hears nothing says so (#131)', () => {
+  test('what the window heard last is when the silence is counted from', () => {
+    const before = Date.now()
+    push({ event: 'turn_start', sessionId: 'session-9', entry: null })
+    const started = agentOf('session-9').heardAt ?? 0
+    expect(started).toBeGreaterThanOrEqual(before)
+
+    push({ event: 'entry', sessionId: 'session-9', entry: entry('e1', 'agent', 'Sai') })
+    const heard = agentOf('session-9').heardAt ?? 0
+    expect(heard).toBeGreaterThanOrEqual(started)
+    expect(heardSince(agentOf('session-9'), [])).toBe(heard)
+  })
+
+  test('a Session opened while its turn ran counts from the last entry of its thread', () => {
+    const quiet = agentOf('session-never-heard')
+    expect(quiet.heardAt).toBeNull()
+    expect(heardSince(quiet, [{ ...entry('e1', 'user', 'go'), createdAt: 1_000 }])).toBe(1_000)
+    expect(heardSince(quiet, [])).toBeNull()
+  })
+})
+
+describe('Silence does not count while Hemera works for the turn (#170)', () => {
+  /** A run of a command Hemera runs for the turn, as the thread holds its entry. */
+  function aCheck(state: string, type: 'serve' | 'test' = 'test'): SessionEntry {
+    return {
+      ...reported('e3', 'command_run', 'test', state, null),
+      role: 'hemera',
+      createdAt: 2_000,
+      payload: JSON.stringify({ runId: 'run-e3', name: 'test', line: 'pnpm test', type, state }),
+    }
+  }
+
+  const said: SessionEntry = { ...entry('e1', 'user', 'Run the tests'), createdAt: 1_000 }
+  const aCall = (state: string, body = 'mcp__hemera__commands_run'): SessionEntry => ({
+    ...reported('e2', 'tool_call', body, state),
+    createdAt: 1_500,
+  })
+
+  test('a command Hemera is running for the turn is no silence of the agent', () => {
+    const quiet = agentOf('session-never-heard')
+    expect(heardSince(quiet, [said, aCall('in_progress'), aCheck('running')])).toBeNull()
+    // Once it has ended, the silence counts again, from what was written last.
+    expect(heardSince(quiet, [said, aCall('completed'), aCheck('exited')])).toBe(2_000)
+  })
+
+  test("one of Hemera's tools that has not answered is no silence of the agent", () => {
+    const quiet = agentOf('session-never-heard')
+    expect(heardSince(quiet, [said, aCall('in_progress', 'mcp__hemera__spec_write')])).toBeNull()
+    // The agent's own tool is the agent's, and its silence is counted.
+    expect(heardSince(quiet, [said, aCall('in_progress', 'Bash')])).toBe(1_500)
+  })
+
+  test('an app left running is not what the turn waits on', () => {
+    const quiet = agentOf('session-never-heard')
+    expect(heardSince(quiet, [said, aCall('completed'), aCheck('running', 'serve')])).toBe(2_000)
+  })
+})
+
+describe('The trace of a Session is asked about by the Session, never by a path (#131)', () => {
+  test('the trace is asked about and opened by its Session, never by a path', async () => {
+    answers.set('trace.exists', true)
+    expect(await hasTrace('session-1')).toBe(true)
+    await openTrace('session-1')
+    expect(asked).toEqual([
+      { name: 'trace.exists', argument: { sessionId: 'session-1' } },
+      { name: 'trace.open', argument: { sessionId: 'session-1' } },
+    ])
+  })
+
+  test('a trace the main process cannot answer about is no trace', async () => {
+    answers.set('trace.exists', new Error('no such channel'))
+    expect(await hasTrace('session-1')).toBe(false)
+  })
+})
+
+describe('A section says it is being written (issue #185)', () => {
+  /** The agent's report of a `spec_write` call, with the arguments it sent. */
+  function aWrite(id: string, input: string, state: string): SessionEntry {
+    return {
+      ...reported(id, 'tool_call', 'mcp__hemera__spec_write', state),
+      payload: JSON.stringify({ call: { rawInput: { text: input } } }),
+    }
+  }
+
+  test('a spec_write in flight names the section it writes', () => {
+    const said = entry('e1', 'user', 'Write the problem')
+    const call = aWrite('e2', '{"section":"problem","body":"The export"}', 'in_progress')
+
+    expect(specWritingOf([said, call])).toBe('problem')
+  })
+
+  test('a spec_write that failed or finished writes nothing any more', () => {
+    const said = entry('e1', 'user', 'Write the problem')
+    for (const state of ['failed', 'completed']) {
+      expect(specWritingOf([said, aWrite('e2', '{"section":"problem"}', state)])).toBeNull()
+    }
+  })
+
+  test('the stories, the tasks and a question are the parts they write', () => {
+    const said = entry('e1', 'user', 'Go on')
+    expect(specWritingOf([said, aWrite('e2', '{"stories":[]}', 'pending')])).toBe('stories')
+    expect(specWritingOf([said, aWrite('e2', '{"tasks":[]}', 'pending')])).toBe('tasks')
+    expect(specWritingOf([said, aWrite('e2', '{"question":"Which?"}', 'pending')])).toBe(
+      'questions',
+    )
+  })
+
+  test('a call a dead turn left in flight is not a write that is happening', () => {
+    const call = aWrite('e2', '{"section":"problem"}', 'in_progress')
+    const later = entry('e3', 'user', 'Are you there?')
+
+    expect(specWritingOf([entry('e1', 'user', 'Write'), call, later])).toBeNull()
+  })
+
+  test('another tool in flight writes nothing of the Spec', () => {
+    const said = entry('e1', 'user', 'Read it')
+    const read = reported('e2', 'tool_call', 'mcp__hemera__spec_read', 'in_progress')
+
+    expect(specWritingOf([said, read])).toBeNull()
+  })
+})
+
+describe('A one-off run without asking answers no other question', () => {
+  test('the Session still waits on a question asked before a one-off ran unasked', () => {
+    const request = {
+      ...reported('e2', 'permission_request', 'fs_write asks to act outside the Workspace'),
+      role: 'hemera' as const,
+      state: 'pending',
+      payload: JSON.stringify({ toolCallId: 'q-1', options: [] }),
+    }
+    const unasked = {
+      ...reported('e3', 'permission_decision', 'ran without asking, Auto mode', 'completed'),
+      role: 'hemera' as const,
+      payload: JSON.stringify({ toolCallId: 'u-1', optionId: 'allowed', unasked: true }),
+    }
+
+    expect(activityOf([entry('e1', 'user', 'Go'), request, unasked]).state).toBe('waiting')
+    // The Session page asks the same of each decision it walks back over.
+    expect(answersAQuestion(unasked)).toBe(false)
+    const answered = reported('e4', 'permission_decision', 'you allowed fs_write', 'completed')
+    expect(answersAQuestion(answered)).toBe(true)
   })
 })

@@ -75,6 +75,8 @@ export interface PopoverProps {
   anchorOnly?: boolean | undefined
   /** Whether it comes out of what opens it, scaling from its side, rather than sliding in. */
   grows?: boolean | undefined
+  /** Said once it has finished closing, its exit played: what waits for it to be gone. */
+  onClosed?: (() => void) | undefined
 }
 
 export function Popover({
@@ -89,11 +91,18 @@ export function Popover({
   label,
   anchorOnly = false,
   grows = false,
+  onClosed,
 }: PopoverProps): ReactNode {
   const anchor = useRef<HTMLSpanElement>(null)
   const container = useOverlayContainer()
   return (
-    <BasePopover.Root open={open} onOpenChange={(next) => onOpenChange?.(next)}>
+    <BasePopover.Root
+      open={open}
+      onOpenChange={(next) => onOpenChange?.(next)}
+      onOpenChangeComplete={(next) => {
+        if (!next) onClosed?.()
+      }}
+    >
       <span ref={anchor} className="inline-flex">
         {anchorOnly ? trigger : <BasePopover.Trigger render={trigger} />}
       </span>

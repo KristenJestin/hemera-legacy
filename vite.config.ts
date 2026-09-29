@@ -5,7 +5,7 @@ const OUTSIDE_THE_WORKSPACE = ['reports/**', 'dist/**']
 /** The HTML prototypes are references to read, not code to keep in shape. */
 const REFERENCES = ['docs/prototypes/**']
 /** Vendored lint rules keep their upstream style so a resync stays a readable diff. */
-const VENDORED = ['tools/oxlint/**']
+const VENDORED = ['tools/oxlint/**', '.github/diagnostics/**']
 
 export default defineConfig({
   lint: {
@@ -111,6 +111,8 @@ export default defineConfig({
           // default. Thirty is not a budget anything here spends; it is what keeps a cold
           // machine from failing a test the code never failed.
           testTimeout: 30_000,
+          // Temporary (#253): traces every child process when HEMERA_SPAWN_TRACE names a folder.
+          setupFiles: ['./.github/diagnostics/spawn-trace.ts'],
         },
       },
       './packages/ui/vitest.config.ts',

@@ -141,6 +141,7 @@ export const CHANNELS = {
   'commands.runs': ENGINE_REQUESTS['commands.runs'],
   'commands.run': ENGINE_REQUESTS['commands.run'],
   'commands.stop': ENGINE_REQUESTS['commands.stop'],
+  'commands.runAgain': ENGINE_REQUESTS['commands.runAgain'],
   'commands.output': ENGINE_REQUESTS['commands.output'],
   'commands.runOf': ENGINE_REQUESTS['commands.runOf'],
   'commands.services': ENGINE_REQUESTS['commands.services'],

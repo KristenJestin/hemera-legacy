@@ -2,13 +2,8 @@ import type { Meta, StoryObj } from '@storybook/react-vite'
 import { type ReactNode, useState } from 'react'
 import { expect, fn, screen, userEvent, waitFor, within } from 'storybook/test'
 
-import { Button } from '../components/button/button.tsx'
-import { Composer } from '../composer/composer.tsx'
-import { AgentText } from '../message/agent-text.tsx'
-import { MessageScroller, type ScrollerEntry } from '../message/scroller/scroller.tsx'
-import { TurnLine } from '../session/turn-line.tsx'
 import { CREDIT_NOTES } from './spec-fixtures.ts'
-import { SpecQuestion } from './spec-question.tsx'
+import { SpecQuestion, SpecQuestionRecord } from './spec-question.tsx'
 
 /**
  * A question of the Spec asked in the thread (issue #199, card B of the exploration of issue
@@ -37,11 +32,6 @@ type Story = StoryObj<typeof meta>
 function rowsOf(canvasElement: HTMLElement): HTMLElement[] {
   const canvas = within(canvasElement)
   return within(canvas.getByRole('list', { name: 'Answers' })).getAllByRole('listitem')
-}
-
-/** Resolves on the next frame, once whatever was asked has been drawn. */
-function nextFrame(): Promise<void> {
-  return new Promise((resolve) => requestAnimationFrame(() => resolve()))
 }
 
 /**
@@ -342,215 +332,51 @@ export const AnsweredJustNow: Story = {
 }
 
 /**
- * Pinned: while it waits, the page draws the card above the composer (issue #130), where the
- * agent's words going on under it cannot carry it away.
+ * What the thread keeps of a question answered among the Session's notices (issue #237): one
+ * closed line, the question and what was chosen, named after its answer; opened, every choice,
+ * the one taken checked.
  */
-export const Pinned: Story = {
-  render: (args) => (
-    <Composer
-      value=""
-      onValueChange={fn()}
-      files={[]}
-      onFilesChange={fn()}
-      onSearchFiles={async () => await Promise.resolve([])}
-      onSend={async () => await Promise.resolve(null)}
-      variant="inline"
-      action="Send"
-      placeholder="Say something to claude…"
-      pinned={[{ id: args.question.id, content: <SpecQuestion {...args} /> }]}
-    />
-  ),
+export const KeptAnswered: Story = {
+  args: { question: { ...CREDIT_NOTES, answer: { optionId: 'negative' } } },
+  render: (args) => <SpecQuestionRecord question={args.question} />,
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    const area = canvas.getByRole('region', { name: 'Waiting for your answer' })
-    await expect(within(area).getByRole('group', { name: /^Question: / })).toBeVisible()
-    await expect(within(area).getByText(/^Blocking · /)).toBeVisible()
+    const record = canvas.getByRole('group', {
+      name: `You answered «${CREDIT_NOTES.body}»: A, Negative rows in the same file`,
+    })
+    await expect(within(record).getByText('A, Negative rows in the same file')).toBeVisible()
+    // Closed: no choice to press, and none drawn until it is opened.
+    await expect(within(record).queryByRole('list', { name: 'Answers' })).toBeNull()
+    await userEvent.click(within(record).getByRole('button'))
+    const answers = await within(record).findByRole('list', { name: 'Answers' })
+    await expect(within(answers).getAllByRole('listitem')).toHaveLength(3)
+    await expect(within(answers).getByLabelText('chosen')).toBeVisible()
   },
 }
 
-/** What the agent wrote before it asked, enough of it for the thread to overflow its room. */
-const EARLIER = Array.from({ length: 12 }, (_, index) => ({
-  id: `earlier-${String(index)}`,
-  content: (
-    <AgentText
-      text={`Step ${String(index + 1)} of the plan: the export reuses the invoice query of \`export.service.ts\`, streams its rows in the order the ledger imports them, and writes one line per invoice with its number, its date, its customer and its amount, the totals checked against the billing page before the file is handed over.`}
-    />
-  ),
-}))
-
-/**
- * A Session's chat as the page lays it out: the thread, the row of the turn under it, and the
- * composer with the question pinned above its box. Answered, the card leaves the pin and comes
- * back to its place in the thread, and the turn starts thinking again, as the page does. Asked
- * later, the question arrives in the pin on a press of `Ask`, which stands over the page and takes
- * none of its room.
- */
-function ThreadWithAPinnedQuestion({
-  asksLater = false,
-  ...props
-}: Parameters<typeof SpecQuestion>[0] & { asksLater?: boolean }): ReactNode {
-  const [asked, setAsked] = useState(!asksLater)
-  const [answer, setAnswer] = useState(props.question.answer)
-  const card = (
-    <SpecQuestion
-      {...props}
-      question={{ ...props.question, answer }}
-      arrives
-      onAnswer={(given) => {
-        props.onAnswer(given)
-        setAnswer(given)
-      }}
-    />
-  )
-  const entries: ScrollerEntry[] = [
-    ...EARLIER,
-    ...(answer === null ? [] : [{ id: props.question.id, content: card }]),
-    {
-      id: 'after',
-      content: <AgentText text="One question blocks the plan; I wait for your answer." />,
-    },
-  ]
-  return (
-    <div className="relative flex h-screen min-h-0 flex-col bg-background text-foreground">
-      {asksLater && (
-        <div className="absolute top-2 right-2 z-1">
-          <Button size="sm" onClick={() => setAsked(true)}>
-            Ask
-          </Button>
-        </div>
-      )}
-      <MessageScroller className="flex-1" label="The thread of this Session" entries={entries} />
-      <div className="mx-auto flex w-full max-w-3xl flex-col gap-2 px-6 pb-4">
-        <TurnLine
-          activity={answer === null ? { state: 'done', elapsedMs: 12_000 } : { state: 'thinking' }}
-          usage={null}
-        />
-        <Composer
-          value=""
-          onValueChange={fn()}
-          files={[]}
-          onFilesChange={fn()}
-          onSearchFiles={async () => await Promise.resolve([])}
-          onSend={async () => await Promise.resolve(null)}
-          variant="inline"
-          action="Send"
-          placeholder="Say something to claude…"
-          running={answer !== null}
-          pinned={asked && answer === null ? [{ id: props.question.id, content: card }] : []}
-        />
-      </div>
-    </div>
-  )
-}
-
-/**
- * Answered from the pin (issue #209): a press on a choice takes the card from above the composer
- * back to its place in the thread, and the thread does not move — no jump down and back.
- */
-export const AnsweredFromThePin: Story = {
-  parameters: { layout: 'fullscreen' },
-  render: (args) => <ThreadWithAPinnedQuestion {...args} />,
+/** What the thread keeps of a question still waiting: its line, its dot waiting, nothing to press. */
+export const KeptWaiting: Story = {
+  render: (args) => <SpecQuestionRecord question={args.question} />,
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    const area = canvas.getByRole('region', { name: 'Waiting for your answer' })
-    await expect(within(area).getByRole('group', { name: /^Question: / })).toBeVisible()
-    const thread = canvas.getByRole('log', { name: 'The thread of this Session' })
-    // The reader follows the end of the thread, the card pinned under it.
-    await waitFor(() =>
-      expect(thread.scrollHeight - thread.scrollTop - thread.clientHeight).toBeLessThanOrEqual(1),
-    )
-    const before = thread.scrollTop
-    const tops = await topsThrough(thread, async () => {
-      await userEvent.click(within(area).getByRole('button', { name: /Negative rows/ }))
-      await waitFor(() =>
-        expect(within(thread).getByRole('group', { name: /^You answered / })).toBeVisible(),
-      )
-    })
-    // Never scrolled down: the thread did not jump by the card it took back.
-    await expect(Math.max(...tops), 'the thread jumped down').toBeLessThanOrEqual(before)
-    // And never slid back: from the frame the card is in the thread, the position holds. All the
-    // thread gives is, at once, what the pin gave back beyond what the card takes in the thread.
-    const settled = tops.at(-1)!
     await expect(
-      tops.filter((top) => top !== before && top !== settled),
-      'the thread slid',
-    ).toEqual([])
-    await expect(thread.scrollHeight - settled - thread.clientHeight).toBeLessThanOrEqual(1)
+      canvas.getByRole('group', { name: `Question: ${CREDIT_NOTES.body}, waiting` }),
+    ).toBeVisible()
+    await expect(canvas.queryByRole('button', { name: /Negative rows/ })).toBeNull()
   },
 }
 
 /**
- * Where the thread is scrolled, read on every frame while `act` runs and for 45 frames after it,
- * longer than any fold or fade of the preset.
+ * Among the Session's notices (review of #250): a notice like every other kind — the question is
+ * its title, its choices are its answers, and it wears no frame of its own.
  */
-async function topsThrough(thread: HTMLElement, act: () => Promise<void>): Promise<number[]> {
-  const tops: number[] = []
-  let reading = true
-  const read = (): void => {
-    tops.push(thread.scrollTop)
-    if (reading) requestAnimationFrame(read)
-  }
-  requestAnimationFrame(read)
-  await act()
-  for (const _ of Array.from({ length: 45 })) {
-    // oxlint-disable-next-line no-await-in-loop -- one frame after the other
-    await nextFrame()
-  }
-  reading = false
-  return tops
-}
-
-/**
- * Asked while the reader follows the thread (issue #209): the question takes its place in the pin
- * above the composer at once and fades in. The thread keeps its end in sight by moving once, in
- * the frame the card arrives, and never again: it is not dragged up the height of a card growing
- * under it frame by frame.
- */
-export const ArrivesInThePin: Story = {
-  parameters: { layout: 'fullscreen' },
-  render: (args) => <ThreadWithAPinnedQuestion {...args} asksLater />,
-  play: async ({ canvasElement }) => {
+export const AsANotice: Story = {
+  args: { bare: true },
+  play: async ({ canvasElement, args }) => {
     const canvas = within(canvasElement)
-    const thread = canvas.getByRole('log', { name: 'The thread of this Session' })
-    await waitFor(() =>
-      expect(thread.scrollHeight - thread.scrollTop - thread.clientHeight).toBeLessThanOrEqual(1),
-    )
-    const before = thread.scrollTop
-    const tops = await topsThrough(thread, async () => {
-      await userEvent.click(canvas.getByRole('button', { name: 'Ask' }))
-      // The pinned area is hidden while it is empty: it is found once the question is in it.
-      const area = await canvas.findByRole('region', { name: 'Waiting for your answer' })
-      await expect(within(area).getByRole('group', { name: /^Question: / })).toBeInTheDocument()
-    })
-    const settled = tops.at(-1)!
-    await expect(
-      tops.filter((top) => top !== before && top !== settled),
-      'the thread was dragged',
-    ).toEqual([])
-    // Still following: the end of the thread is in sight above the card.
-    await expect(thread.scrollHeight - settled - thread.clientHeight).toBeLessThanOrEqual(1)
-  },
-}
-
-/**
- * Asked while the reader reads further up (issue #209): the card takes its place in the pin, and
- * what the reader is reading does not move at all.
- */
-export const ArrivesInThePinScrolledUp: Story = {
-  parameters: { layout: 'fullscreen' },
-  render: (args) => <ThreadWithAPinnedQuestion {...args} asksLater />,
-  play: async ({ canvasElement }) => {
-    const canvas = within(canvasElement)
-    const thread = canvas.getByRole('log', { name: 'The thread of this Session' })
-    await waitFor(() => expect(thread.scrollHeight).toBeGreaterThan(thread.clientHeight + 200))
-    thread.scrollTop = 100
-    await waitFor(() => expect(thread.scrollTop).toBe(100))
-    const tops = await topsThrough(thread, async () => {
-      await userEvent.click(canvas.getByRole('button', { name: 'Ask' }))
-      // The pinned area is hidden while it is empty: it is found once the question is in it.
-      const area = await canvas.findByRole('region', { name: 'Waiting for your answer' })
-      await expect(within(area).getByRole('group', { name: /^Question: / })).toBeInTheDocument()
-    })
-    await expect(new Set(tops), 'the thread moved').toEqual(new Set([100]))
+    const card = canvas.getByRole('group', { name: `Question: ${CREDIT_NOTES.body}` })
+    await expect(within(card).queryByText('The agent asks')).toBeNull()
+    await userEvent.click(within(card).getByRole('button', { name: /Negative rows/ }))
+    await expect(args.onAnswer).toHaveBeenCalledWith({ optionId: 'negative' })
   },
 }

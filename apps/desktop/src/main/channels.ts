@@ -244,6 +244,7 @@ const RELAYED = [
   'commands.runs',
   'commands.run',
   'commands.stop',
+  'commands.runAgain',
   'commands.output',
   'commands.runOf',
   'commands.services',

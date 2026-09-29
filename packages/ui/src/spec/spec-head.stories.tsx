@@ -13,7 +13,7 @@ import { SpecHead } from './spec-head.tsx'
 const meta = {
   title: 'Blocks/Spec/SpecHead',
   component: SpecHead,
-  tags: ['autodocs', 'updated'],
+  tags: ['autodocs'],
   parameters: { layout: 'padded' },
   decorators: [
     (Story) => (

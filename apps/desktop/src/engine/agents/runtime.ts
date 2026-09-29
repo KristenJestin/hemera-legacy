@@ -67,13 +67,15 @@ import {
 import { AgentDirectories, bareModeOf, bareOptionsOf, writtenFiles } from './bare.ts'
 import { Discovery, type ResolvedAgent, type UnusableAgentError } from './discovery.ts'
 import { HeldWords } from './held.ts'
+import { SessionModes } from './modes.ts'
 import { AgentNotices } from './notices.ts'
 import { Pool, SWEEP_EVERY } from './pool.ts'
 import { rebuiltContext } from './resume.ts'
 import { provisionsOf } from './spec-request.ts'
 import { ProcessSupervisor, StderrSink, type SupervisedProcess } from './supervisor.ts'
 import { AcpTraces, type Heard, type RequestBook, requestBook, traceLine } from './trace.ts'
-import { Commands } from '../commands/service.ts'
+import { Commands, type RunView } from '../commands/service.ts'
+import { runSaid, runText } from '../commands/told.ts'
 import { Context as AgentContext, type QueuedResult, fingerprintOf } from '../context/service.ts'
 import { Preferences } from '../preferences.ts'
 import { Projects } from '../projects.ts'
@@ -433,6 +435,8 @@ function rankOf(category: string | null): number {
 /** One running agent, as the runtime keeps it. */
 interface Live {
   readonly connection: AgentConnection
+  /** Whose agent this is, which is what its modes are read against (#242). */
+  readonly provider: AgentProvider
   readonly process: SupervisedProcess
   /**
    * The agent's events, waiting to be written.
@@ -714,6 +718,7 @@ export const runtimeLayer = Layer.effect(
     const commands = yield* Commands
     const permissions = yield* ToolPermissions
     const heldWords = yield* HeldWords
+    const sessionModes = yield* SessionModes
     const pool = yield* Pool
     // The variables of a Session's Workspace, which its agent is started with (D8-06).
     const variables = yield* Variables
@@ -860,6 +865,19 @@ export const runtimeLayer = Layer.effect(
         if (held !== undefined) yield* flush(sessionId, held, true).pipe(Effect.ignore)
       }),
     )
+
+    // Hemera's own tools follow the mode the agent stands on (#242): what it last reported, which
+    // a `current_mode_update` and a choice in the composer both move, read at every call.
+    sessionModes.heldBy((sessionId) => {
+      const held = live.get(sessionId)
+      if (held === undefined) return null
+      const mode = held.connection
+        .options()
+        .find((option) => option.category === 'mode' || option.id === 'mode')
+      if (mode === undefined) return null
+      const name = mode.values.find((value) => value.id === mode.value)?.name ?? mode.value
+      return { agent: held.provider, mode: mode.value, name }
+    })
 
     /** One line, written as a `note`: what Hemera did that the agent did not say. */
     const note = (sessionId: string, turn: Turn | undefined, body: string, reason: string) =>
@@ -1873,6 +1891,7 @@ export const runtimeLayer = Layer.effect(
 
         const started: Live = {
           connection,
+          provider,
           process,
           queue,
           cwd,
@@ -2534,13 +2553,56 @@ export const runtimeLayer = Layer.effect(
     }
 
     /**
+     * The runs of the Session its agent was not told of as they now stand (issue #238): whoever
+     * started them — the user from the line or a chip, the agent in the background — each a
+     * resource in the order they happened, and a line of Hemera's. What the agent read in the
+     * answer of its own tool is not among them. Counted as told only once the agent took them.
+     */
+    const runsParcel = (sessionId: string, runs: readonly RunView[]): Parcel => {
+      const correlation = crypto.randomUUID()
+      const texts = runs.map((run, index) => runText(run, index === runs.length - 1))
+      const lines = (turnId: string | null, handed: boolean) =>
+        Effect.forEach(
+          runs,
+          (run, index) =>
+            deliveryLine(
+              sessionId,
+              `delivery:${correlation}:${index}`,
+              turnId,
+              handed
+                ? runSaid(run)
+                : `Not handed over, waiting for the next safe point: the run of ${run.name}.`,
+              handed ? null : 'failed',
+              {
+                kind: 'run',
+                runId: run.id,
+                fingerprint: fingerprintOf(texts[index] ?? ''),
+                deliveredAt: handed ? new Date().toISOString() : null,
+                reached: 'delivery_prompt',
+              },
+            ),
+          { discard: true },
+        )
+      return {
+        provisions: runs.map((run, index) => ({
+          uri: contextUri(`run/${run.id}`),
+          text: texts[index] ?? '',
+          mimeType: 'text/markdown',
+        })),
+        announce: (turnId) => lines(turnId, true),
+        taken: attempt('recording the runs handed over', commands.told(sessionId, runs)),
+        missed: (turnId) => lines(turnId, false),
+      }
+    }
+
+    /**
      * What waits for a Session's next safe point, in the order it is handed over.
      *
      * The Workspace's instructions are read only when asked for: a change of the file waits for
      * it to settle, which is the watcher's to know, and a safe point the Spec asked for does not
      * hand over a file an editor is still writing.
      */
-    const waitingOf = (sessionId: string, held: Live, instructions: boolean) =>
+    const waitingOf = (sessionId: string, held: Live, instructions: boolean, runsAlone: boolean) =>
       Effect.gen(function* () {
         const parcels: Parcel[] = []
         const changed = instructions
@@ -2559,6 +2621,13 @@ export const runtimeLayer = Layer.effect(
           context.queuedInternal(sessionId),
         )
         if (queued.length > 0) parcels.push(internalParcel(sessionId, queued))
+        // The runs go last, right before the prompt they are read with (issue #238). A run is no
+        // reason for a turn of its own: it goes with the next prompt, or with a delivery that
+        // goes anyway.
+        const runs = yield* attempt('reading the runs of the Session', commands.owed(sessionId))
+        if (runs.length > 0 && (runsAlone || parcels.length > 0)) {
+          parcels.push(runsParcel(sessionId, runs))
+        }
         return parcels
       })
 
@@ -2607,7 +2676,7 @@ export const runtimeLayer = Layer.effect(
      */
     const handOver = (sessionId: string, held: Live) =>
       Effect.gen(function* () {
-        const parcels = yield* waitingOf(sessionId, held, true)
+        const parcels = yield* waitingOf(sessionId, held, true, true)
         if (parcels.length === 0) return
         const sent = yield* sendDelivery(sessionId, held, parcels, null)
         if (Result.isFailure(sent)) {
@@ -2637,7 +2706,7 @@ export const runtimeLayer = Layer.effect(
           const held = live.get(sessionId)
           if (held === undefined || held.death !== null) return
           if (turns.has(sessionId) || starting.has(sessionId)) return
-          const parcels = yield* waitingOf(sessionId, held, instructions).pipe(
+          const parcels = yield* waitingOf(sessionId, held, instructions, false).pipe(
             Effect.orElseSucceed(() => []),
           )
           if (parcels.length === 0) return

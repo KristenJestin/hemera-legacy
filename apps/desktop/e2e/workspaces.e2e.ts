@@ -610,7 +610,7 @@ describe('A proposal enters the catalogue only when accepted', () => {
     // Proposed is not added: the catalogue is the human's to write (D8-11).
     expect(await catalogue()).not.toContain(COMMAND_PROPOSAL.name)
 
-    await $(proposal).$(`button[aria-label="Accept ${COMMAND_PROPOSAL.name}"]`).click()
+    await $(proposal).$('button=Add').click()
     await awaitsRecord(`Proposed command ${COMMAND_PROPOSAL.name}, added to the catalogue`)
 
     await settings('Commands')

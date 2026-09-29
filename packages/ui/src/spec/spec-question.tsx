@@ -8,6 +8,7 @@ import { Tick } from '../components/checkbox/checkbox.tsx'
 import { Frame, FrameFooter, FrameHeader } from '../components/frame/frame.tsx'
 import { Tooltip } from '../components/tooltip/tooltip.tsx'
 import { NoticeRecord } from '../activity/notice-record.tsx'
+import { NoticeCard } from '../session/notice-card.tsx'
 import { IconArrowUp, IconCheck, IconLock, IconMessageQuestion, IconSparkles } from '../icons.ts'
 import { AgentText } from '../message/agent-text.tsx'
 import { CROSSFADE, collapse, crossfade, expand, fold, useTransition } from '../motion.ts'
@@ -180,6 +181,8 @@ export interface SpecQuestionProps {
   arrives?: boolean | undefined
   /** The answer: an option pressed, or the reader's own words. */
   onAnswer: (answer: SpecAnswer) => void
+  /** Drawn as one of the Session's notices, the question as its title, with no frame of its own. */
+  bare?: boolean | undefined
 }
 
 export function SpecQuestion({
@@ -187,6 +190,7 @@ export function SpecQuestion({
   cancelled = false,
   arrives = false,
   onAnswer,
+  bare = false,
 }: SpecQuestionProps): ReactNode {
   const [writing, setWriting] = useState(false)
   const [own, setOwn] = useState('')
@@ -210,6 +214,144 @@ export function SpecQuestion({
     answer !== null &&
     answer.text !== undefined &&
     !question.options.some((option) => option.id === answer.optionId)
+  const choices = (
+    <ul aria-label="Answers" className={CHOICES}>
+      {question.options.map((option, index) => {
+        const chosen = answer?.optionId === option.id
+        const row = (
+          <button
+            type="button"
+            className={chosen ? CHOSEN : CHOICE}
+            disabled={closed}
+            aria-pressed={answer === null ? undefined : chosen}
+            onClick={() => onAnswer({ optionId: option.id })}
+          >
+            <span className={chosen ? LETTER_CHOSEN : LETTER}>{letterOf(index)}</span>
+            <span className="min-w-0 flex-1">
+              {option.label}
+              {option.recommended === true && (
+                <>
+                  <span className={MARK}>
+                    <IconSparkles size="sm" aria-hidden="true" />
+                  </span>
+                  <span className="sr-only">, recommended by the agent</span>
+                </>
+              )}
+            </span>
+            <span className={CHECK}>
+              <Tick checked={chosen} arrives={drawsItsCheck} />
+            </span>
+          </button>
+        )
+        return (
+          <li key={option.id}>
+            {option.recommended === true ? (
+              <Tooltip label="Recommended by the agent" disabled={closed}>
+                {row}
+              </Tooltip>
+            ) : (
+              row
+            )}
+          </li>
+        )
+      })}
+      {/* Always there, always last: the answer nobody offered is the reader's to give. */}
+      <li>
+        <AnimatePresence initial={false} mode="wait">
+          {chosenOwn ? (
+            <motion.button
+              key="given"
+              type="button"
+              className={CHOSEN}
+              disabled
+              aria-pressed
+              initial={CROSSFADE.from}
+              animate={CROSSFADE.to}
+              transition={fading}
+            >
+              <span className={LETTER_CHOSEN}>{ownLetter}</span>
+              <span className="min-w-0 flex-1 break-words">{answer?.text}</span>
+              <span className={CHECK}>
+                <Tick checked arrives={drawsItsCheck} />
+              </span>
+            </motion.button>
+          ) : writing && !closed ? (
+            <motion.div
+              key="writing"
+              className={WRITING}
+              initial={CROSSFADE.from}
+              animate={CROSSFADE.to}
+              exit={CROSSFADE.from}
+              transition={fading}
+            >
+              <span className={LETTER}>{ownLetter}</span>
+              <span className={FIELD_BOX}>
+                <input
+                  // The caret goes where the press sent it.
+                  autoFocus
+                  aria-label="Other"
+                  className={FIELD}
+                  placeholder="Your own answer…"
+                  value={own}
+                  onChange={(event) => setOwn(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Escape') {
+                      event.preventDefault()
+                      setWriting(false)
+                      setLeft(true)
+                      return
+                    }
+                    if (event.key !== 'Enter') return
+                    event.preventDefault()
+                    give()
+                  }}
+                />
+                <IconButton
+                  variant="ghost"
+                  size="sm"
+                  aria-label="Send your answer"
+                  icon={<IconArrowUp size="sm" />}
+                  disabled={said === ''}
+                  onClick={give}
+                />
+              </span>
+            </motion.div>
+          ) : (
+            <motion.button
+              key="other"
+              type="button"
+              className={CHOICE}
+              disabled={closed}
+              aria-pressed={answer === null ? undefined : false}
+              autoFocus={left}
+              initial={CROSSFADE.from}
+              animate={CROSSFADE.to}
+              exit={CROSSFADE.from}
+              transition={fading}
+              onClick={() => setWriting(true)}
+            >
+              <span className={LETTER}>{ownLetter}</span>
+              {/* Once answered it is no longer a door to a field: the choice it was. */}
+              <span className="min-w-0 flex-1">{answer === null ? 'Other…' : 'Other'}</span>
+            </motion.button>
+          )}
+        </AnimatePresence>
+      </li>
+    </ul>
+  )
+  // Among the Session's notices, it is a notice as every other kind is (review of #250): the
+  // question is its title, the choices its answers, and no frame of its own.
+  if (bare) {
+    return (
+      <NoticeCard
+        icon={<IconMessageQuestion size="sm" />}
+        title={<AgentText text={question.body} />}
+        name={`Question: ${question.body}`}
+      >
+        {choices}
+      </NoticeCard>
+    )
+  }
   return (
     <div
       role="group"
@@ -259,129 +401,7 @@ export function SpecQuestion({
         <div className={ASKED}>
           <AgentText text={question.body} />
         </div>
-        <ul aria-label="Answers" className={CHOICES}>
-          {question.options.map((option, index) => {
-            const chosen = answer?.optionId === option.id
-            const row = (
-              <button
-                type="button"
-                className={chosen ? CHOSEN : CHOICE}
-                disabled={closed}
-                aria-pressed={answer === null ? undefined : chosen}
-                onClick={() => onAnswer({ optionId: option.id })}
-              >
-                <span className={chosen ? LETTER_CHOSEN : LETTER}>{letterOf(index)}</span>
-                <span className="min-w-0 flex-1">
-                  {option.label}
-                  {option.recommended === true && (
-                    <>
-                      <span className={MARK}>
-                        <IconSparkles size="sm" aria-hidden="true" />
-                      </span>
-                      <span className="sr-only">, recommended by the agent</span>
-                    </>
-                  )}
-                </span>
-                <span className={CHECK}>
-                  <Tick checked={chosen} arrives={drawsItsCheck} />
-                </span>
-              </button>
-            )
-            return (
-              <li key={option.id}>
-                {option.recommended === true ? (
-                  <Tooltip label="Recommended by the agent" disabled={closed}>
-                    {row}
-                  </Tooltip>
-                ) : (
-                  row
-                )}
-              </li>
-            )
-          })}
-          {/* Always there, always last: the answer nobody offered is the reader's to give. */}
-          <li>
-            <AnimatePresence initial={false} mode="wait">
-              {chosenOwn ? (
-                <motion.button
-                  key="given"
-                  type="button"
-                  className={CHOSEN}
-                  disabled
-                  aria-pressed
-                  initial={CROSSFADE.from}
-                  animate={CROSSFADE.to}
-                  transition={fading}
-                >
-                  <span className={LETTER_CHOSEN}>{ownLetter}</span>
-                  <span className="min-w-0 flex-1 break-words">{answer?.text}</span>
-                  <span className={CHECK}>
-                    <Tick checked arrives={drawsItsCheck} />
-                  </span>
-                </motion.button>
-              ) : writing && !closed ? (
-                <motion.div
-                  key="writing"
-                  className={WRITING}
-                  initial={CROSSFADE.from}
-                  animate={CROSSFADE.to}
-                  exit={CROSSFADE.from}
-                  transition={fading}
-                >
-                  <span className={LETTER}>{ownLetter}</span>
-                  <span className={FIELD_BOX}>
-                    <input
-                      // The caret goes where the press sent it.
-                      autoFocus
-                      aria-label="Other"
-                      className={FIELD}
-                      placeholder="Your own answer…"
-                      value={own}
-                      onChange={(event) => setOwn(event.target.value)}
-                      onKeyDown={(event) => {
-                        if (event.key === 'Escape') {
-                          event.preventDefault()
-                          setWriting(false)
-                          setLeft(true)
-                          return
-                        }
-                        if (event.key !== 'Enter') return
-                        event.preventDefault()
-                        give()
-                      }}
-                    />
-                    <IconButton
-                      variant="ghost"
-                      size="sm"
-                      aria-label="Send your answer"
-                      icon={<IconArrowUp size="sm" />}
-                      disabled={said === ''}
-                      onClick={give}
-                    />
-                  </span>
-                </motion.div>
-              ) : (
-                <motion.button
-                  key="other"
-                  type="button"
-                  className={CHOICE}
-                  disabled={closed}
-                  aria-pressed={answer === null ? undefined : false}
-                  autoFocus={left}
-                  initial={CROSSFADE.from}
-                  animate={CROSSFADE.to}
-                  exit={CROSSFADE.from}
-                  transition={fading}
-                  onClick={() => setWriting(true)}
-                >
-                  <span className={LETTER}>{ownLetter}</span>
-                  {/* Once answered it is no longer a door to a field: the choice it was. */}
-                  <span className="min-w-0 flex-1">{answer === null ? 'Other…' : 'Other'}</span>
-                </motion.button>
-              )}
-            </AnimatePresence>
-          </li>
-        </ul>
+        {choices}
       </Frame>
     </div>
   )

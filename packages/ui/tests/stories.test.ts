@@ -486,6 +486,7 @@ describe('Catalogue, coquille et surfaces, et rien d’autre', () => {
       'CommandRun',
       'CommandProposal',
       'CallOutcome',
+      'CallOutcomeDetails',
       'CommandProposalRecord',
       'NoticeRecord',
       // Issue #219: what goes on in a Session, as a line under its title — the commands Hemera

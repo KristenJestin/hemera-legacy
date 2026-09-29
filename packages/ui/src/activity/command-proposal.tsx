@@ -46,8 +46,15 @@ export function CommandProposal({
   return (
     <NoticeRow
       name={`Proposed command ${name}`}
-      head={<span title={why}>{name}</span>}
-      line={line}
+      unfolds
+      head={
+        <>
+          <span className="font-medium" title={why}>
+            {name}
+          </span>{' '}
+          <span className="font-mono text-xs text-muted-foreground">{line}</span>
+        </>
+      }
       // Where it would run, when it is not the Workspace root, where every line runs.
       place={folder === '.' ? undefined : folder}
       refuse={{ label: 'Decline', onPress: onDecline }}

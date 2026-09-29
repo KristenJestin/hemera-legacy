@@ -5,11 +5,17 @@ Two packages install Hemera on Arch Linux from its GitHub releases:
 | Package | Follows | Installs |
 |---|---|---|
 | `hemera-bin` | the release of each `vX.Y.Z` tag on `main` | `/opt/hemera`, `/usr/bin/hemera` |
-| `hemera-beta-bin` | the newest `beta-<version>` pre-release, one per push to `dev` | `/opt/hemera-beta`, `/usr/bin/hemera-beta` |
+| `hemera-beta-bin` | the newest `beta-<version>` pre-release, one per push to `dev` | `/opt/hemera`, `/usr/bin/hemera` |
 
 Both repackage the release's deb: it already holds the application, its `.desktop` entry and its
 icons, and it is unpacked with `bsdtar` without running anything. The AppImage would have to be
-executed to be extracted. The two packages share no file, so they install side by side.
+executed to be extracted.
+
+The two install to the same place — `/opt/hemera`, `/usr/bin/hemera`, `hemera.desktop` and the
+`hemera` icon — and both `provide` and `conflict` with `hemera`, so installing one replaces the
+other. They share one data folder (`~/.hemera`) and one Electron profile, so only one of them is
+ever installed. The beta's deb names its files `hemera-beta`; `hemera-beta-bin` installs them
+under `hemera`, and its launcher keeps the name the deb gives it, "Hemera Beta".
 
 A beta's `pkgver` is its `git describe` without dashes: `beta-0.4.0-3-gabc1234` becomes
 `0.4.0.r3.gabc1234`, which pacman orders after `0.4.0` and before `0.4.1`.

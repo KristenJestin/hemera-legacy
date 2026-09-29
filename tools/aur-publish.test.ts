@@ -148,9 +148,12 @@ describe('The release and the beta install to the same place', () => {
       expect(pkgbuild).toMatch(/ln -s "\/opt\/\$_app\/\$\w+" "\$pkgdir\/usr\/bin\/\$_app"/)
       expect(pkgbuild).toContain('"$pkgdir/usr/share/applications/$_app.desktop"')
       expect(pkgbuild).toContain('Icon=$_app')
-      expect(pkgbuild).toMatch(/\/apps\/\$_app\./)
     },
   )
+
+  test('the beta renames the icon its deb names hemera-beta', () => {
+    expect(pkgbuildOf('hemera-beta-bin')).toMatch(/\/apps\/\$_app\./)
+  })
 
   test('the beta still downloads its own deb, under its own name', () => {
     expect(expandedSource(pkgbuildOf('hemera-beta-bin'))).toMatch(/^hemera-beta-.*Hemera\.Beta-/)

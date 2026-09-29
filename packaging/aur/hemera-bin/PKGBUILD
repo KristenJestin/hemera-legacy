@@ -1,7 +1,8 @@
 # Maintainer: Kristen Jestin <kristen.jestin@pm.me>
 #
 # Hemera as released: the version semantic-release tags on `main`, from the deb attached to its
-# GitHub release. `hemera-beta-bin` installs beside it under its own names.
+# GitHub release. `hemera-beta-bin` installs to the same place and conflicts with it, so
+# installing one replaces the other: the two share one data folder.
 pkgname=hemera-bin
 _app=hemera
 _product=Hemera
@@ -36,7 +37,8 @@ package() {
 
   install -Dm644 "$srcdir/usr/share/applications/$_app.desktop" \
     "$pkgdir/usr/share/applications/$_app.desktop"
-  sed -i "s|^Exec=.*|Exec=/usr/bin/$_app %U|" "$pkgdir/usr/share/applications/$_app.desktop"
+  sed -i -e "s|^Exec=.*|Exec=/usr/bin/$_app %U|" -e "s|^Icon=.*|Icon=$_app|" \
+    "$pkgdir/usr/share/applications/$_app.desktop"
 
   install -d "$pkgdir/usr/share/icons"
   cp -a "$srcdir/usr/share/icons/hicolor" "$pkgdir/usr/share/icons/hicolor"

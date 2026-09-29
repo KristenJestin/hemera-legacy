@@ -492,6 +492,32 @@ describe('Le tour tourne dès que la question est écrite', () => {
     expect(turnRowOf([said], false)).toBeNull()
   })
 
+  test('the row says it waits only when the notices hold something (#250)', () => {
+    const request = {
+      ...reported('e2', 'permission_request', 'fs_write asks to act outside the Workspace'),
+      role: 'hemera' as const,
+      state: 'pending',
+      payload: JSON.stringify({ toolCallId: 'q-1', options: [] }),
+    }
+    const said = entry('e1', 'user', 'Go')
+    // The notices are empty: the row does not say the Session waits, whatever the thread holds.
+    expect(turnRowOf([said, request], true, 'e2', false)?.state).not.toBe('waiting')
+    // Something waits in them: the row says so.
+    expect(turnRowOf([said, request], true, 'e2', true)?.state).toBe('waiting')
+  })
+
+  test('the row waits for the reader as long as the notices hold anything (#237)', () => {
+    const said = entry('e1', 'user', 'test')
+    const done = reported('e2', 'turn', 'The agent finished its turn.', 'end_turn')
+
+    // Proposals the turn left behind: the turn is over, and the Session still waits for the reader.
+    expect(turnRowOf([said, done], false, 'e2', true)).toEqual({ state: 'waiting' })
+    // A turn running while something waits: it waits, whatever else it is doing.
+    expect(turnRowOf([said], true, 'e1', true)?.state).toBe('waiting')
+    // Nothing waits any more: the row says how the turn ended again.
+    expect(turnRowOf([said, done], false, 'e2', false)?.state).toBe('done')
+  })
+
   test('a prompt refused before any turn began leaves nothing running', async () => {
     answers.set('agents.prompt', new Error('the engine is not running'))
 

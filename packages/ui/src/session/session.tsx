@@ -1,7 +1,7 @@
 import { cn } from 'cn'
 import { motion } from 'motion/react'
 import type { Transition } from 'motion/react'
-import { type ReactNode, useEffect, useRef, useState } from 'react'
+import { type ReactNode, useRef, useState } from 'react'
 
 import { Button, IconButton } from '../components/button/button.tsx'
 import { Card } from '../components/card/card.tsx'
@@ -61,9 +61,6 @@ const FIELD = 'focus-ring flex min-w-0 flex-1'
 const INPUT =
   'w-full min-w-0 border-b-2 border-primary bg-transparent text-sm font-medium text-foreground outline-none'
 
-/** How the field ends, said where the keystrokes are read rather than in a tooltip. */
-const HINT = 'text-xs text-muted-foreground'
-
 export interface SessionHeaderProps {
   /**
    * What the Session is called: what the `…` is named after, and what the field opens on.
@@ -72,30 +69,13 @@ export interface SessionHeaderProps {
    * prototype's `Untitled` — and this file never invents one.
    */
   title: string
-  /**
-   * What goes on in the Session, on the head's own row (issue #241): the page's `GoingOnLine`.
-   * The field takes its place while the name is typed.
-   */
+  /** What goes on in the Session, on the head's own row (issue #241): the page's `GoingOnLine`. */
   children?: ReactNode
   /**
-   * What the title becomes, once it is saved.
-   *
-   * Required, and never called on a keystroke: a page that wrote a version of the Session per
-   * character typed would be a page the engine refuses as stale, which is the same reason the
-   * Project's settings save on a press and not as they are typed.
+   * Renames the Session: the Session's row in the sidebar turns into its field, since the title
+   * lives there (review of #250). The head itself never changes.
    */
-  onRename: (title: string) => void
-  /**
-   * Whether the name is being typed right now.
-   *
-   * The page opens it: a Session that has just been created opens on it, because the name is
-   * the one thing a new Session has to say about itself. The Rename command opens it too.
-   */
-  editing?: boolean | undefined
-  /** Opens the field, which is what the Rename control does. */
-  onStartEditing?: (() => void) | undefined
-  /** Closes it without keeping what was typed. */
-  onCancelEditing?: (() => void) | undefined
+  onRename?: (() => void) | undefined
   /** Takes the Session out of the sidebar. Nothing is deleted, and nothing asks twice here. */
   onArchive?: (() => void) | undefined
   /**
@@ -119,8 +99,8 @@ export interface SessionHeaderProps {
  * The head of a Session: what goes on in it, and what can be done to it.
  *
  * One row (issue #241): what goes on — the page's line of chips and its Run — and the ⓘ and the
- * `…` at the end of the same row. The title is not drawn, since the sidebar says it; Rename opens
- * a field in the line's place, on the same row, and the line comes back once it is done.
+ * `…` at the end of the same row. The title is not drawn, since the sidebar says it; Rename edits
+ * it there, in the Session's own row of the sidebar, and the head never changes (review of #250).
  *
  * Rename and Archive sit behind one `…` menu instead of standing open at the end of the line: two
  * words at the top of every thread are two words to read on the way to the content, and a command
@@ -134,28 +114,13 @@ export function SessionHeader({
   title,
   children,
   onRename,
-  editing = false,
-  onStartEditing,
-  onCancelEditing,
   onArchive,
   archiveDisabled = false,
   onOpenDetails,
 }: SessionHeaderProps): ReactNode {
-  const commandsAt = useRef<HTMLSpanElement>(null)
-  const wasEditing = useRef(false)
-  // Where the keyboard goes when the field closes. It goes back to the `…` whose Rename opened it
-  // and not to the top of the page: a field that takes the caret and then drops it on `<body>`
-  // is a page the keyboard has to walk again from its first control.
-  useEffect(() => {
-    if (wasEditing.current && !editing) commandsAt.current?.querySelector('button')?.focus()
-    wasEditing.current = editing
-  }, [editing])
-  // What the menu holds, in the order it is read. While the title is being typed there is no
-  // Rename to offer: the field is the renaming, and a command that opened the same field a second
-  // time would be a command that does nothing.
   const commands: MenuItem[] = []
-  if (!editing && onStartEditing !== undefined) {
-    commands.push({ label: 'Rename', icon: <IconPencil size="sm" />, onSelect: onStartEditing })
+  if (onRename !== undefined) {
+    commands.push({ label: 'Rename', icon: <IconPencil size="sm" />, onSelect: onRename })
   }
   if (onArchive !== undefined) {
     commands.push({
@@ -167,13 +132,7 @@ export function SessionHeader({
   }
   return (
     <div className={HEAD}>
-      <div className={COLUMN}>
-        {editing ? (
-          <TitleField initial={title} onCommit={onRename} onCancel={onCancelEditing} />
-        ) : (
-          children
-        )}
-      </div>
+      <div className={COLUMN}>{children}</div>
       <div className={ACTIONS}>
         {onOpenDetails !== undefined && (
           <Tooltip label="Session details">
@@ -187,7 +146,7 @@ export function SessionHeader({
           </Tooltip>
         )}
         {commands.length > 0 && (
-          <span ref={commandsAt} className="inline-flex">
+          <span className="inline-flex">
             <Menu
               label={`Commands for ${title}`}
               icon={<IconDots size="sm" />}
@@ -206,8 +165,8 @@ export function SessionHeader({
  * It is a field and not a dialog, and it ends on Enter, on Escape, and on the click that goes
  * somewhere else on the page — a question left open in the head of a page asks itself again every
  * time the eye passes over it, and a field that stays open after the person is done with it is a
- * field that never got its answer. Both of the answers it takes are written under the field: a
- * keystroke explained in a tooltip arrives after the keystroke. What is typed is kept by the page,
+ * field that never got its answer. Nothing explains its keys beside it (review of #250): Enter
+ * keeps, Escape drops, as every field of the window does. What is typed is kept by the page,
  * not here: this holds a draft and hands it over once, which is what keeps the engine from being
  * asked to write a version per character.
  */
@@ -282,7 +241,6 @@ function TitleField({
           }}
         />
       </span>
-      <span className={HINT}>Enter to save · Esc to cancel</span>
     </div>
   )
 }
@@ -400,6 +358,13 @@ export function ArchivedSessions({ sessions, onRestore }: ArchivedSessionsProps)
   )
 }
 
+/** A Session being renamed in its row: which, and what its field keeps or drops. */
+export interface SessionRenaming {
+  id: string
+  onCommit: (title: string) => void
+  onCancel: () => void
+}
+
 /**
  * The sidebar's line for one Session.
  *
@@ -427,6 +392,7 @@ export function SidebarSessionEntry({
   onSelect,
   onRename,
   onArchive,
+  renaming,
 }: {
   /** Which Session it is: what the sidebar's mark finds the row by. */
   id: string
@@ -437,10 +403,16 @@ export function SidebarSessionEntry({
   /** Whether the panel is folded to its rail, where a row is its icon and nothing else. */
   collapsed: boolean
   onSelect: () => void
-  /** Renames it, in place, in the head of its page. */
+  /** Renames it: its row turns into its field, here, in place. */
   onRename?: (() => void) | undefined
   /** Takes it out of the sidebar. */
   onArchive?: (() => void) | undefined
+  /**
+   * The row's title field, open while the Session is renamed (review of #250): what is kept on
+   * Enter or a click elsewhere, and what closes it on Escape. The title lives here, and so does
+   * its renaming.
+   */
+  renaming?: SessionRenaming | undefined
 }): ReactNode {
   const transition = useTransition(morph)
   // `useTransition` hands back this very object when the system asks for less movement, and a
@@ -448,6 +420,16 @@ export function SidebarSessionEntry({
   const still = transition === instant
   const labels = collapsed || still ? transition : { ...transition, delay: LABEL_DELAY }
   const commands = !collapsed && (onRename !== undefined || onArchive !== undefined)
+  if (renaming !== undefined && !collapsed) {
+    return (
+      <div data-mark={id} className={cn(EDITING_ROW, active && OVER_MARK)}>
+        <span className={cn('relative z-1 flex shrink-0', active ? ICON_ACTIVE : ICON)}>
+          <IconMessages size="md" />
+        </span>
+        <TitleField initial={title} onCommit={renaming.onCommit} onCancel={renaming.onCancel} />
+      </div>
+    )
+  }
   return (
     <div data-mark={id} className={cn('group relative flex w-full', active && OVER_MARK)}>
       <Tooltip label={title} side="right" disabled={!collapsed}>
@@ -513,6 +495,9 @@ const ENTRY = 'w-full shrink-0 justify-start'
 const ICON_PLACE = 'relative z-1 ml-1 flex shrink-0'
 
 const ICON = 'text-muted-foreground'
+
+/** A row while its Session is renamed: its icon where it stands, and the field in its title's place. */
+const EDITING_ROW = 'relative flex h-control-md w-full items-center gap-3 px-3'
 
 const ICON_ACTIVE = 'text-sidebar-accent-foreground'
 

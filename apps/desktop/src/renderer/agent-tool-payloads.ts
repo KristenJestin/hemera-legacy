@@ -697,6 +697,9 @@ function waitingWords(kind: string | undefined): string {
 export function contextDeliveryOf(entry: SessionEntry): ContextDeliveryDrawn | null {
   const read = readPayload(contextDeliveryPayloadSchema, entry.payload)
   if (read === null) return null
+  // A run handed to the agent, or waiting to be, draws nothing (review of #250): the run is an
+  // entry of the thread already, and the Context tab keeps what was delivered.
+  if (read.kind === 'run') return null
   if (entry.state === 'failed') {
     return { id: entry.id, body: waitingWords(read.kind), waiting: true }
   }

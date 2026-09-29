@@ -22,7 +22,7 @@ export type NoticeKind = (typeof NOTICE_KINDS)[number]
 /**
  * The kind an entry waits for a human as, or null when it waits for nobody.
  *
- * A permission while the engine holds it open; a command the agent proposes while nobody answered
+ * A permission while the engine holds it open and its turn runs; a command the agent proposes while nobody answered
  * it; the Spec a `free` Session's agent proposes while it is proposed; a question of the Spec
  * neither answered nor left behind by a Rework.
  */
@@ -33,7 +33,10 @@ export function waitingAs(
   asked: ReadonlySet<string> | null,
 ): NoticeKind | null {
   if (entry.kind === 'permission_request') {
-    return questionOpen(entry) && decisionOf(entry, thread) === null ? 'permission' : null
+    // Open, undecided, and in a turn that still runs: a request a turn left behind when it ended
+    // — the agent gave up on the call, the engine never rewrote it — waits for nobody.
+    const open = questionOpen(entry) && decisionOf(entry, thread) === null
+    return open && !endedAfter(entry, thread) ? 'permission' : null
   }
   if (entry.kind === 'command_proposal') {
     return commandProposalOf(entry)?.state === 'pending' ? 'proposal' : null
@@ -45,6 +48,12 @@ export function waitingAs(
     return waitsForAnswer(entry, thread, specId, asked) ? 'question' : null
   }
   return null
+}
+
+/** Whether a turn ended after this entry was written: what it belonged to is over. */
+function endedAfter(entry: SessionEntry, thread: readonly SessionEntry[]): boolean {
+  const at = thread.findIndex((one) => one.id === entry.id)
+  return at !== -1 && thread.slice(at + 1).some((one) => one.kind === 'turn')
 }
 
 const requestSchema = z.object({

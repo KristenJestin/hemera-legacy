@@ -257,13 +257,15 @@ be designed.
 The agent can also set the Project up, as the human does in its settings. It reads the whole
 setup freely through `setup_read` — repositories with their Git state, Workspaces with their
 state and preparation, the recipe, the commands and services, and the variables by name only —
-and changes nothing of it: `setup_propose` draws each change it wants as a card of its Session,
-applied only when a human accepts it, through the very use case the settings call. The changes
-proposed together are accepted one by one or all at once, in the order proposed. What the
+and changes nothing of it: each change `setup_propose` proposes waits among the Session's
+notices, one row a change, applied only when a human accepts it, through the very use case the
+settings call; the thread keeps the call, with each change and its answer. The changes waiting
+are accepted one by one or all at once, in the order proposed. What the
 settings refuse is refused to the agent with the same reason, and each accepted change is
 journaled as the human's acceptance of the agent's proposal. The agent may write a variable's
 value when it has it — the user gave it, or it is in the Project's files — and that value is
-never shown back, in the thread or in the Journal: only that it was set.
+never shown back, in the notices, the thread, the Context tab, the Journal or a log: only that
+it was set.
 
 ## Spec
 

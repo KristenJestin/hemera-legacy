@@ -149,7 +149,7 @@ function Harness({
 }
 
 const meta = {
-  tags: ['autodocs', 'updated'],
+  tags: ['autodocs'],
   title: 'Shell/CommandPalette',
   component: Harness,
   parameters: { layout: 'fullscreen' },

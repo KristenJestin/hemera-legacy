@@ -739,6 +739,12 @@ export const ENGINE_REQUESTS = {
     arguments: z.object({ sessionId: z.string(), runId: z.string() }),
     response: commandRunSchema,
   },
+  // A run of the Session run again, from its chip or the history (issue #237): a command of the
+  // catalogue as the command, a one-off as the same line in the same folder, by the reader.
+  'commands.runAgain': {
+    arguments: z.object({ sessionId: z.string(), runId: z.string() }),
+    response: commandRunSchema,
+  },
   'commands.output': {
     arguments: z.object({ sessionId: z.string(), runId: z.string() }),
     response: commandRunSchema,

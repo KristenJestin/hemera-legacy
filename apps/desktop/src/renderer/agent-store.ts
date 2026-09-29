@@ -12,6 +12,7 @@ import type {
 } from '@hemera/ipc'
 import { TOOL_LABELS, hemeraToolNamed } from '@hemera/core'
 import type { ActivityState, AgentListing, SpecTarget } from '@hemera/ui'
+import { z } from 'zod'
 
 import { effortStage, effortToLand, modelStage } from './agent-options.ts'
 import { commandRunOf, specWriteOf } from './agent-tool-payloads.ts'
@@ -264,11 +265,13 @@ function lastEnd(entries: readonly SessionEntry[]): number {
  * is what an agent between two blocks is doing.
  *
  * `latest` is the entry the engine pushed last. Absent — a Session opened on a thread read back
- * rather than watched — the last entry of the thread stands in for it.
+ * rather than watched — the last entry of the thread stands in for it. `asksItself` false leaves
+ * the permissions out: the Session's row reads whether it waits off the notices instead (#250).
  */
 export function activityOf(
   entries: readonly SessionEntry[],
   latest: string | null = null,
+  asksItself = true,
 ): Activity {
   const said = lastSaid(entries)
   const end = lastEnd(entries)
@@ -286,7 +289,7 @@ export function activityOf(
     (latest === null ? undefined : running.find((entry) => entry.id === latest)) ?? running.at(-1)
   const thought = thoughtOf(running, newest?.turnId ?? null)
 
-  if (waiting(running)) return { state: 'waiting', thought }
+  if (asksItself && waiting(running)) return { state: 'waiting', thought }
 
   // A command Hemera is running for the turn — a test, a script — is what the turn waits on,
   // and its name says more than the tool call that asked for it (D6-12). A server is left running
@@ -314,6 +317,38 @@ export function activityOf(
   }
 
   return { state: 'thinking', thought }
+}
+
+/** What a turn that has just been asked for is doing, before anything of it has arrived. */
+const THINKING: Activity = { state: 'thinking' }
+
+/**
+ * What the row beside the meter says (design D17-04): what the running turn is doing, or how the
+ * last one ended, or nothing in a thread no turn has ended in yet.
+ *
+ * A Session is never running on a thread that ends on a `turn` entry it just heard: that entry
+ * ends the turn in the same state (issue #223). So an end read while running is the turn before
+ * the message just said, which the engine has not echoed yet: the turn asked for is thinking.
+ *
+ * `waitsForYou` is whether the Session's notices hold anything (issue #237): the row then says the
+ * Session waits for the reader, and keeps saying it until nothing does.
+ */
+export function turnRowOf(
+  thread: readonly SessionEntry[],
+  running: boolean,
+  latest: string | null = null,
+  waitsForYou = false,
+): Activity | null {
+  // Whether the Session waits for the reader is the notices' answer and nobody else's (#250): the
+  // row and the pill read one list, so the row never says it waits while the pill holds nothing.
+  const read = activityOf(thread, latest, false)
+  // Whatever waits for the reader in the Session's notices — a permission, a proposal, a question
+  // — is what the row says for as long as anything does, a turn running or not (issue #237).
+  if (waitsForYou) {
+    return { state: 'waiting', thought: running && !hasEnded(read) ? read.thought : undefined }
+  }
+  if (running) return hasEnded(read) ? THINKING : read
+  return hasEnded(read) ? read : null
 }
 
 /**
@@ -349,12 +384,27 @@ function waitsOnHemera(entries: readonly SessionEntry[]): boolean {
   })
 }
 
+/**
+ * Whether a decision closes a question: every one does but the line a one-off leaves when the
+ * Session's mode let it run without asking (#242), which answers nothing another call asked.
+ */
+export function answersAQuestion(entry: SessionEntry): boolean {
+  if (entry.kind !== 'permission_decision') return false
+  try {
+    return !UNASKED_DECISION.safeParse(JSON.parse(entry.payload)).success
+  } catch {
+    return true
+  }
+}
+
+const UNASKED_DECISION = z.object({ unasked: z.literal(true) })
+
 /** Whether the agent is waiting on an answer: a request with no decision written after it. */
 function waiting(entries: readonly SessionEntry[]): boolean {
   for (let at = entries.length - 1; at >= 0; at -= 1) {
     const entry = entries[at]
     if (entry === undefined) continue
-    if (entry.kind === 'permission_decision') return false
+    if (answersAQuestion(entry)) return false
     if (entry.kind === 'permission_request') return true
   }
   return false
@@ -429,10 +479,15 @@ export function listenToAgents(): () => void {
   const stop = window.hemera.on((event: EngineEvent) => {
     if (event.event === 'entry' && event.entry !== null) {
       const held = state.sessions.get(event.sessionId) ?? QUIET
+      // A `turn` entry is the turn over, and the row says "Done" from it: the Stop goes in the
+      // same state, never one message later with the `turn` event that follows it (issue #223).
+      const ended = event.entry.kind === 'turn'
+      if (ended) announced.delete(event.sessionId)
       changed(event.sessionId, {
         entries: withEntry(held.entries, event.entry),
         latest: event.entry.id,
         heardAt: Date.now(),
+        running: held.running && !ended,
       })
       return
     }

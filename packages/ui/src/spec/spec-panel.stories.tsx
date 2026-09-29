@@ -153,7 +153,7 @@ function nextFrame(): Promise<void> {
 const meta = {
   title: 'Blocks/Spec/SpecPanel',
   component: LiveSpecPanel,
-  tags: ['autodocs', 'updated'],
+  tags: ['autodocs'],
   parameters: { layout: 'fullscreen' },
   decorators: [
     (Story) => (
@@ -692,11 +692,29 @@ export const SwapReplayed: Story = {
     await expect(opening.filter((frame) => frame.panelLeft < frame.chatRight - 0.5)).toEqual([])
     await expect(opening.at(-1)!.frame).toBe(0)
 
-    const closing = await framesOf(canvasElement, () =>
-      userEvent.click(canvas.getByRole('button', { name: 'Fold the Spec' })),
-    )
+    // Folding, the frame is back on the beat while the panel still has most of its way to go: a
+    // window of a couple of hundred milliseconds, which a machine busy with the rest of the run can
+    // step over between two frames. When no frame saw both, the Spec is unfolded and folded again,
+    // up to five times: a fold that never overlaps is never seen to.
+    const fold = (): Promise<Frame[]> =>
+      framesOf(canvasElement, () =>
+        userEvent.click(canvas.getByRole('button', { name: 'Fold the Spec' })),
+      )
+    const overlaps = (frames: Frame[]): boolean =>
+      frames.some((frame) => frame.frame > 0 && frame.panel > 0)
+    let closing = await fold()
+    for (let tries = 4; tries > 0 && !overlaps(closing); tries -= 1) {
+      // oxlint-disable-next-line no-await-in-loop -- one fold at a time: the retry is the point
+      await waitFor(() => expect(isStowed(canvasElement)).toBe(true))
+      // oxlint-disable-next-line no-await-in-loop -- one fold at a time: the retry is the point
+      await framesOf(canvasElement, () =>
+        userEvent.click(canvas.getByRole('button', { name: 'Unfold the Spec' })),
+      )
+      // oxlint-disable-next-line no-await-in-loop -- one fold at a time: the retry is the point
+      closing = await fold()
+    }
     await expect(closing.filter((frame) => frame.frame === 0 && frame.panel === 0)).toEqual([])
-    await expect(closing.some((frame) => frame.frame > 0 && frame.panel > 0)).toBe(true)
+    await expect(overlaps(closing)).toBe(true)
     const widening = moved(closing)
     const widest = widening.at(-1)!
     await expect(widest).toBeGreaterThan(widening[0]!)
@@ -711,26 +729,61 @@ export const SwapReplayed: Story = {
 /**
  * A fold asked while the panel is still coming in turns it round from where it is: the chat is
  * given its width back from the width it had reached, and is never pushed the rest of the way.
+ *
+ * The fold has to land while the panel is still on its way, and the panel comes in on a spring
+ * that is most of the way in within a quarter of a second. On a machine busy with the rest of the
+ * run a pointer's press can take longer than that, and land on a panel already in: nothing was
+ * left to turn round, so the chat was, rightly, the whole panel narrower. So the fold is pressed
+ * on the first frame the panel is part of the way in, the chat is read at the moment it lands,
+ * and when less than a tenth of the way was left by then, the Spec is folded back and the gesture
+ * done again, up to five times.
  */
 export const TurnsRoundMidWay: Story = {
   args: { defaultFolded: true },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    const frames = await framesOf(canvasElement, async () => {
-      await userEvent.click(canvas.getByRole('button', { name: 'Unfold the Spec' }))
-      // Part of the way in, and no further.
-      await waitFor(() => expect(measure(canvasElement).panel).toBeGreaterThan(40), {
-        interval: 5,
-      })
-      await userEvent.click(canvas.getByRole('button', { name: 'Fold the Spec' }))
-    })
-    const widths = frames.map((frame) => frame.chat)
     const row = dockOf(canvasElement).parentElement!.getBoundingClientRect().width
+    // The chat's width with the panel all the way in.
+    const full = row * 0.55 - 12
+    const turn = async (tries: number): Promise<{ frames: Frame[]; reached: number }> => {
+      const start = measure(canvasElement).chat
+      let reached = Number.NaN
+      const frames = await framesOf(canvasElement, async () => {
+        await userEvent.click(canvas.getByRole('button', { name: 'Unfold the Spec' }))
+        const fold = canvas.getByRole('button', { name: 'Fold the Spec' })
+        // The chat as it stands when the fold lands, before anything answers it.
+        const read = (): void => {
+          reached = measure(canvasElement).chat
+        }
+        fold.addEventListener('click', read, { capture: true, once: true })
+        // Part of the way in, and no further: pressed on the first frame the panel is 40 pixels
+        // in, rather than after a pointer's whole journey to the button, which a busy runner can
+        // stretch past the panel's own.
+        await new Promise<void>((resolve) => {
+          const look = (): void => {
+            if (measure(canvasElement).panel <= 40) {
+              requestAnimationFrame(look)
+              return
+            }
+            fold.click()
+            resolve()
+          }
+          requestAnimationFrame(look)
+        })
+      })
+      await waitFor(() => expect(isStowed(canvasElement)).toBe(true))
+      if (reached - full > (start - full) / 10 || tries === 1) return { frames, reached }
+      return turn(tries - 1)
+    }
+    const { frames, reached } = await turn(5)
+    await expect(reached, 'the fold never landed while the panel was coming in').toBeGreaterThan(
+      full + 1,
+    )
+    const widths = frames.map((frame) => frame.chat)
     // The panel's whole width was never taken from the chat.
-    await expect(Math.min(...widths)).toBeGreaterThan(row * 0.55 - 12 + 1)
+    await expect(Math.min(...widths)).toBeGreaterThan(full + 1)
     await expect(widths.at(-1)).toBe(widths[0])
     await expect(frames.at(-1)!.frame).toBe(1)
-    await waitFor(() => expect(isStowed(canvasElement)).toBe(true))
   },
 }
 

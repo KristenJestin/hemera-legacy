@@ -12,7 +12,7 @@ import { StartScreen } from './start-screen.tsx'
 const meta = {
   title: 'Shell/StartScreen',
   component: StartScreen,
-  tags: ['autodocs', 'new'],
+  tags: ['autodocs'],
   parameters: { layout: 'fullscreen' },
 } satisfies Meta<typeof StartScreen>
 
@@ -47,16 +47,10 @@ export const Starting: Story = {
 /** Under a system that asked for less movement: the three dots stand still, and still say it. */
 export const ReducedMotion: Story = {
   play: async ({ canvasElement }) => {
-    const restore = await emulateReducedMotion()
-    if (restore === null) return
-    try {
-      const ring = within(canvasElement).getByRole('status', { name: 'Starting Hemera' })
-        .children[0]!
-      await waitFor(() => {
-        expect(getComputedStyle(ring).animationName).toBe('none')
-      })
-    } finally {
-      await restore()
-    }
+    if (!(await emulateReducedMotion())) return
+    const ring = within(canvasElement).getByRole('status', { name: 'Starting Hemera' }).children[0]!
+    await waitFor(() => {
+      expect(getComputedStyle(ring).animationName).toBe('none')
+    })
   },
 }

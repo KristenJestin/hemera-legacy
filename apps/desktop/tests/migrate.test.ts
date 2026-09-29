@@ -105,10 +105,16 @@ const RUN_AT_OPEN_MIGRATION = '20260926185430_run_at_open'
 const CONTEXT_WORDS_MIGRATION = '20260926224349_context_notices'
 
 /**
- * The migration that lets a thread hold a change to the Project's setup the agent proposed
- * (#218): the one a profile that ran the context notices' has never heard of.
+ * The migration that records what a Session's agent was told of each run (issue #238): the one a
+ * profile that ran the context notices' has never heard of.
  */
-const SETUP_MIGRATION = '20260927204443_setup_proposals'
+const RUN_TOLD_MIGRATION = '20260928202306_run_told'
+
+/**
+ * The migration that lets a thread hold a change to the Project's setup the agent proposed
+ * (#218): the one a profile that ran the run told's has never heard of.
+ */
+const SETUP_MIGRATION = '20260929153321_setup_proposals'
 
 /** A folder carrying the shipped migrations up to one of them, as an older version did. */
 function shippedUpTo(last: string): string {
@@ -542,6 +548,7 @@ describe('A profile of lot 6 is migrated to lot 19 (specs)', () => {
       QUEUED_MIGRATION,
       RUN_AT_OPEN_MIGRATION,
       CONTEXT_WORDS_MIGRATION,
+      RUN_TOLD_MIGRATION,
       SETUP_MIGRATION,
     ])
     expect(readdirSync(join(dataFolder, BACKUPS_FOLDER))).toEqual([`${SPECS_MIGRATION}.sqlite`])
@@ -917,6 +924,7 @@ describe('Un profil du lot 5 est migré vers le lot 6', () => {
       QUEUED_MIGRATION,
       RUN_AT_OPEN_MIGRATION,
       CONTEXT_WORDS_MIGRATION,
+      RUN_TOLD_MIGRATION,
       SETUP_MIGRATION,
     ])
     expect(readdirSync(join(dataFolder, BACKUPS_FOLDER))).toEqual([`${TOOLS_MIGRATION}.sqlite`])
@@ -1062,6 +1070,7 @@ describe('A profile of lot 19 is migrated to lot 20', () => {
       QUEUED_MIGRATION,
       RUN_AT_OPEN_MIGRATION,
       CONTEXT_WORDS_MIGRATION,
+      RUN_TOLD_MIGRATION,
       SETUP_MIGRATION,
     ])
     expect(readdirSync(join(dataFolder, BACKUPS_FOLDER))).toEqual([
@@ -1390,6 +1399,7 @@ describe('A profile that ran the Workspaces gains the choices of its Sessions', 
       QUEUED_MIGRATION,
       RUN_AT_OPEN_MIGRATION,
       CONTEXT_WORDS_MIGRATION,
+      RUN_TOLD_MIGRATION,
       SETUP_MIGRATION,
     ])
     expect(readdirSync(join(dataFolder, BACKUPS_FOLDER))).toEqual([`${CHOICES_MIGRATION}.sqlite`])
@@ -1443,6 +1453,7 @@ describe('A profile that ran the choices keeps a queued result across a quit', (
       QUEUED_MIGRATION,
       RUN_AT_OPEN_MIGRATION,
       CONTEXT_WORDS_MIGRATION,
+      RUN_TOLD_MIGRATION,
       SETUP_MIGRATION,
     ])
     expect(readdirSync(join(dataFolder, BACKUPS_FOLDER))).toEqual([`${QUEUED_MIGRATION}.sqlite`])
@@ -1491,6 +1502,7 @@ describe('A profile that ran the queued results keeps its commands, none run at 
     expect(standing.behind).toEqual([
       RUN_AT_OPEN_MIGRATION,
       CONTEXT_WORDS_MIGRATION,
+      RUN_TOLD_MIGRATION,
       SETUP_MIGRATION,
     ])
     expect(readdirSync(join(dataFolder, BACKUPS_FOLDER))).toEqual([
@@ -1531,7 +1543,7 @@ describe('A profile that ran the commands at open keeps what its Sessions were p
     )
 
     const standing = await on(dataFolder, openProfile(dataFolder, SHIPPED, '0.4.0'))
-    expect(standing.behind).toEqual([CONTEXT_WORDS_MIGRATION, SETUP_MIGRATION])
+    expect(standing.behind).toEqual([CONTEXT_WORDS_MIGRATION, RUN_TOLD_MIGRATION, SETUP_MIGRATION])
     expect(readdirSync(join(dataFolder, BACKUPS_FOLDER))).toEqual([
       `${CONTEXT_WORDS_MIGRATION}.sqlite`,
     ])
@@ -1558,10 +1570,53 @@ describe('A profile that ran the commands at open keeps what its Sessions were p
   })
 })
 
-describe('A profile that ran the context notices keeps its threads, and holds a setup proposal', () => {
-  test('an entry is kept whole, and a setup proposal can be written beside it', async () => {
+describe('A profile that ran the context notices keeps its runs, none owed to an agent', () => {
+  test('a run of before is kept whole and counts as told, and a new one can be written as not', async () => {
     const dataFolder = join(workspace, 'from-context-notices')
     await on(dataFolder, openProfile(dataFolder, shippedUpTo(CONTEXT_WORDS_MIGRATION), '0.4.0'))
+    await on(
+      dataFolder,
+      Effect.gen(function* () {
+        const sql = yield* SqliteClient
+        const at = '2026-09-27T10:00:00.000Z'
+        yield* sql`INSERT INTO projects (id, name, tone, created_at, updated_at, version)
+          VALUES ('atlas', 'Atlas', 'primary', ${at}, ${at}, 1)`
+        yield* sql`INSERT INTO sessions (id, project_id, title, title_source, provider, native_session_id, native_state, cwd, created_at, last_written_at, version)
+          VALUES ('session-1', 'atlas', 'Shape the export', 'derived', 'claude', 'native-1', 'attached', '/work/atlas', ${at}, ${at}, 3)`
+        yield* sql`INSERT INTO command_runs (id, session_id, name, line, type, cwd, state, exit_code, output, started_by, started_at, ended_at)
+          VALUES ('run-1', 'session-1', 'check', 'v2 check', 'test', '/work/atlas', 'failed', 1, 'uv not found', 'user', ${at}, ${at})`
+      }),
+    )
+
+    const standing = await on(dataFolder, openProfile(dataFolder, SHIPPED, '0.4.0'))
+    expect(standing.behind).toEqual([RUN_TOLD_MIGRATION, SETUP_MIGRATION])
+    expect(readdirSync(join(dataFolder, BACKUPS_FOLDER))).toEqual([`${RUN_TOLD_MIGRATION}.sqlite`])
+
+    const runs = await on(
+      dataFolder,
+      Effect.gen(function* () {
+        const sql = yield* SqliteClient
+        yield* sql`INSERT INTO command_runs (id, session_id, name, line, type, cwd, state, started_by, started_at, told)
+          VALUES ('run-2', 'session-1', 'check', 'v2 check', 'test', '/work/atlas', 'running', 'user', '2026-09-28T10:00:00.000Z', 'none')`
+        return yield* sql<{
+          id: string
+          output: string
+          told: string
+        }>`SELECT id, output, told FROM command_runs ORDER BY id`
+      }),
+    )
+    // A run of before was never handed over, and is not handed over all at once after an update.
+    expect(runs).toEqual([
+      { id: 'run-1', output: 'uv not found', told: 'ended' },
+      { id: 'run-2', output: '', told: 'none' },
+    ])
+  })
+})
+
+describe('A profile that ran the run told keeps its threads, and holds a setup proposal', () => {
+  test('an entry is kept whole, and a setup proposal can be written beside it', async () => {
+    const dataFolder = join(workspace, 'from-run-told')
+    await on(dataFolder, openProfile(dataFolder, shippedUpTo(RUN_TOLD_MIGRATION), '0.4.0'))
     await on(
       dataFolder,
       Effect.gen(function* () {

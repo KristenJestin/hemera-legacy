@@ -453,6 +453,7 @@ describe('Catalogue, coquille et surfaces, et rien d’autre', () => {
       // #149: the calls of a turn between two things the agent said, folded into one row.
       'ActionGroup',
       'PermissionRequest',
+      'PermissionRecord',
       'DecisionSummary',
       // The agent, its model and its effort are one control since the trial of 22 September
       // 2026: three selectors in the foot of the composer, plus the agent's own at the far end
@@ -467,6 +468,9 @@ describe('Catalogue, coquille et surfaces, et rien d’autre', () => {
       'UsageMeter',
       // Issue #134: the two share the row above the box, and the meter stands at its foot.
       'TurnLine',
+      'SessionNotices',
+      'SessionHistory',
+      'SessionCatalogue',
       'BlockedBanner',
       'AgentsSection',
       'PlanPanel',
@@ -483,7 +487,17 @@ describe('Catalogue, coquille et surfaces, et rien d’autre', () => {
       'CommandProposal',
       // #218: a change to the Project's setup the agent proposes, one card per change.
       'SetupProposal',
-      'CommandsPanel',
+      'CallOutcome',
+      'CallOutcomeDetails',
+      'CommandProposalRecord',
+      'NoticeRecord',
+      // Issue #219: what goes on in a Session, as a line under its title — the commands Hemera
+      // runs, those the agent runs in its own shell, its sub-agents — which the Commands tab of
+      // the Session's details, and its panel, gave way to.
+      'GoingOnLine',
+      // The Run at the end of that line: the catalogue matched as it is typed, and any other line
+      // run once.
+      'RunCommand',
       'ContextView',
       'BareModeState',
       'CommandList',
@@ -514,7 +528,9 @@ describe('Catalogue, coquille et surfaces, et rien d’autre', () => {
       'ReworkDialog',
       'MissionBrief',
       'SpecQuestion',
+      'SpecQuestionRecord',
       'CreateSpecProposal',
+      'SpecProposalRecord',
       // The build of a frozen Spec: what it is launched in, and where that launch stands
       // (D8-12, D8-13).
       'WorkspaceActions',

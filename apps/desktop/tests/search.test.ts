@@ -9,6 +9,7 @@
  */
 
 import { mkdirSync, mkdtempSync, rmSync, unlinkSync, writeFileSync } from 'node:fs'
+import { rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
@@ -52,8 +53,10 @@ describe('A search is bounded and says so, however large what it walks', () => {
     root = mkdtempSync(join(tmpdir(), 'hemera-search-'))
   })
 
-  afterEach(() => {
-    rmSync(root, { recursive: true, force: true })
+  afterEach(async () => {
+    // Removed side by side: one at a time, the twelve thousand files of the largest walk take a
+    // Windows machine busy with something else longer than the ten seconds a hook is given.
+    await rm(root, { recursive: true, force: true })
   })
 
   test('stops inside a file larger than its budget, and the cursor continues in that file', async () => {
@@ -101,15 +104,28 @@ describe('A search is bounded and says so, however large what it walks', () => {
   test('resumes past ten thousand files without walking them one call deep each', async () => {
     const folder = join(root, 'many')
     mkdirSync(folder)
-    for (let index = 0; index < 12_000; index += 1) {
-      writeFileSync(join(folder, `f${String(index).padStart(5, '0')}.txt`), 'hay\n')
+    // Written a batch at a time, side by side: one at a time, a Windows machine busy with something
+    // else spends most of the test's thirty seconds creating them, and the walk this test is about
+    // is not what is slow.
+    const names = Array.from(
+      { length: 12_000 },
+      (_, index) => `f${String(index).padStart(5, '0')}.txt`,
+    )
+    for (let first = 0; first < names.length; first += 64) {
+      // oxlint-disable-next-line no-await-in-loop -- a batch at a time: all twelve thousand at once open more files than the system allows (EMFILE)
+      await Promise.all(
+        names.slice(first, first + 64).map((name) => writeFile(join(folder, name), 'hay\n')),
+      )
     }
     writeFileSync(join(folder, 'z.txt'), 'needle\n')
 
     const result = await searchIn({ root, query: 'needle', cursor: 'many/f11998.txt:1' })
 
     expect(result.hits).toEqual([{ path: 'many/z.txt', line: 1, text: 'needle' }])
-  })
+    // Twelve thousand files are slow to create on Windows, side by side or not: 7 to 18 seconds
+    // in a run of the repository suites, and past the thirty a test is given with the catalogue
+    // running beside them.
+  }, 90_000)
 
   test('stops when its caller gave up on it', async () => {
     writeFileSync(join(root, 'a.txt'), 'needle\n')

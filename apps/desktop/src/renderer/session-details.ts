@@ -91,7 +91,7 @@ export function goingOnOf(
   root: string | null,
   workspace: string = MAIN_WORKSPACE,
   repositories: readonly RunRepository[] = [],
-): GoingOnItem[] {
+): (GoingOnRun | GoingOnShell)[] {
   const began = [
     ...runs.map((run) => ({
       at: Date.parse(run.startedAt),
@@ -100,6 +100,83 @@ export function goingOnOf(
     ...shells.map((call) => ({ at: call.at, item: shellOf(call, workspace) })),
   ]
   return began.toSorted((one, other) => one.at - other.at).map(({ item }) => item)
+}
+
+/**
+ * What the reader did to the line of a Session (issue #237): the chips they took out by hand; and
+ * what was already over when the Session was opened. Reading a chip — its glance, its details —
+ * is not taking it out (review of #250).
+ */
+export interface LineMarks {
+  readonly removed: ReadonlySet<string>
+  readonly before: ReadonlySet<string>
+}
+
+/** How an item stands, as its dot says it: a run the reader stopped is over. */
+function standingOf(item: GoingOnItem): 'running' | 'finished' | 'failed' {
+  if (item.kind !== 'run') return item.state
+  if (item.state === 'running') return 'running'
+  return item.state === 'failed' ? 'failed' : 'finished'
+}
+
+/**
+ * Where an item sits on the line: a command of the catalogue by its name, a line run once — or
+ * in the agent's own shell — by its line, which a new run of the same line takes over; a
+ * sub-agent alone.
+ */
+function slotOf(item: GoingOnItem): string {
+  if (item.kind === 'run')
+    return item.oneOff === true ? `line:${item.command}` : `command:${item.name}`
+  if (item.kind === 'shell') return `line:${item.command}`
+  return item.id
+}
+
+/**
+ * The line's lifecycle (issue #237, review of #250): what runs is a chip; a command of the
+ * catalogue that ran stays as the shortcut to run it again, one chip for its newest run; what
+ * failed stays until the reader takes it out or runs it again; a one-off — and a command of the
+ * agent's own shell, a sub-agent — over and well stays until it is taken out, until the same line
+ * runs as a command of the catalogue, or until the Session is opened again. Whatever the reader
+ * took out by hand is gone, and stays in the history; a command of the catalogue taken out comes
+ * back when it runs again. Reading a chip never takes it out.
+ */
+export function lineOf(items: readonly GoingOnItem[], marks: LineMarks): GoingOnItem[] {
+  const newest = new Map<string, GoingOnItem>()
+  for (const item of items) {
+    const slot = slotOf(item)
+    newest.delete(slot)
+    newest.set(slot, item)
+  }
+  const inCatalogue = (command: string, after: GoingOnItem): boolean => {
+    const at = items.indexOf(after)
+    return items
+      .slice(at + 1)
+      .some((one) => one.kind === 'run' && one.oneOff !== true && one.command === command)
+  }
+  return [...newest.values()].filter((item) => {
+    if (marks.removed.has(item.id)) return false
+    const standing = standingOf(item)
+    if (standing === 'running') return true
+    if (item.kind === 'run' && item.oneOff !== true) return true
+    // Run again as a command of the catalogue: the one-off gives it its place, failed or not.
+    if (item.kind === 'run' && inCatalogue(item.command, item)) return false
+    if (standing === 'failed') return true
+    return !marks.before.has(item.id)
+  })
+}
+
+/** What was over when the Session was opened: its runs ended, and its shell commands done. */
+export function overBefore(
+  runs: readonly CommandRun[],
+  shells: readonly AgentShellCall[],
+  opened: number,
+): ReadonlySet<string> {
+  return new Set([
+    ...runs
+      .filter((run) => run.endedAt !== null && Date.parse(run.endedAt) < opened)
+      .map((run) => run.id),
+    ...shells.filter((call) => call.state !== 'running' && call.at < opened).map((call) => call.id),
+  ])
 }
 
 /**

@@ -1,9 +1,9 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
-import type { ReactNode } from 'react'
+import { type ReactNode, useState } from 'react'
 import { expect, fn, screen, userEvent, waitFor, within } from 'storybook/test'
 
 import { TooltipProvider } from '../components/tooltip/tooltip.tsx'
-import { GOING_ON } from './going-on-fixtures.ts'
+import { GOING_ON, ONE_OFF_DONE } from './going-on-fixtures.ts'
 import { GoingOnLine, type GoingOnLineProps } from './going-on-line.tsx'
 
 /**
@@ -28,17 +28,18 @@ function Line(props: GoingOnLineProps): ReactNode {
 const meta = {
   title: 'Blocks/Session/GoingOnLine',
   component: Line,
-  tags: ['autodocs', 'new'],
+  tags: ['autodocs', 'updated'],
   parameters: {
     layout: 'fullscreen',
     docs: { story: { inline: false, height: '32rem' } },
   },
   args: {
     items: GOING_ON.few,
-    emptyLabel: 'Nothing running in csv-export',
     onStop: fn(),
     onOpenUrl: fn(),
     onAddToCatalogue: fn(),
+    onRunAgain: fn(),
+    onRemove: fn(),
   },
 } satisfies Meta<typeof Line>
 
@@ -46,7 +47,14 @@ export default meta
 
 type Story = StoryObj<typeof meta>
 
-export const Empty: Story = { args: { items: [] } }
+/** Nothing goes on: the line is its Run alone, and says nothing (review of #250). */
+export const Empty: Story = {
+  args: { items: [] },
+  play: async ({ canvasElement }) => {
+    const line = within(canvasElement).getByRole('group', { name: 'What goes on in this Session' })
+    await expect(line).toHaveTextContent('')
+  },
+}
 
 export const Few: Story = {}
 
@@ -141,7 +149,10 @@ export const RoundTrip: Story = {
     await expect(args.onStop).toHaveBeenCalledWith(expect.objectContaining({ id: 'run-test' }))
     await userEvent.click(within(glanced).getByRole('button', { name: 'Details of test' }))
     const details = await screen.findByRole('dialog', { name: 'test' })
-    await expect(within(details).getByText(/by the agent through Hemera/)).toBeVisible()
+    // It opens by the dialog's own motion, as every dialog of the window does (review of #250).
+    await waitFor(() =>
+      expect(within(details).getByText(/by the agent through Hemera/)).toBeVisible(),
+    )
     await userEvent.keyboard('{Escape}')
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
   },
@@ -157,8 +168,103 @@ export const ManyRoundTrip: Story = {
       within(list).getByRole('button', { name: 'Sub-agent Review, done, details' }),
     )
     const details = await screen.findByRole('dialog', { name: 'Sub-agent · Review' })
-    await expect(within(details).getByText(/No row is written twice/)).toBeVisible()
+    await waitFor(() => expect(within(details).getByText(/No row is written twice/)).toBeVisible())
     await userEvent.keyboard('{Escape}')
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+  },
+}
+
+/**
+ * A glance's head (issue #237): Stop while it runs, Run again once it is over, the one-off's
+ * `Add to catalogue`, then the ⓘ and the ✕ that takes the chip out of the line — icons named by
+ * their tooltips, in that order. Closing the glance of something over is having seen it.
+ */
+export const GlanceActs: Story = {
+  args: {
+    items: [ONE_OFF_DONE],
+  },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement)
+    const chip = canvas.getByRole('button', { name: /done$/ })
+    await userEvent.click(chip)
+    const glanced = await screen.findByRole('dialog', { name: /done$/ })
+    const acts = within(glanced)
+      .getAllByRole('button')
+      .map((one) => one.getAttribute('aria-label') ?? '')
+    await expect(acts.map((one) => one.split(' ')[0])).toEqual(['Run', 'Add', 'Details', 'Remove'])
+    await expect(within(glanced).queryByRole('button', { name: /^Stop/ })).toBeNull()
+    await userEvent.click(
+      within(glanced).getByRole('button', { name: /^Add .* to the catalogue$/ }),
+    )
+    await expect(args.onAddToCatalogue).toHaveBeenCalledTimes(1)
+    await userEvent.keyboard('{Escape}')
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog', { name: /done$/ })).toBeNull()
+    })
+    // Read and put away, the chip stays: reading is not taking out (review of #250).
+    await expect(chip).toBeInTheDocument()
+    await expect(args.onRemove).not.toHaveBeenCalled()
+    await userEvent.click(chip)
+    const again = await screen.findByRole('dialog', { name: /done$/ })
+    await userEvent.click(within(again).getByRole('button', { name: /again$/ }))
+    await expect(args.onRunAgain).toHaveBeenCalledTimes(1)
+  },
+}
+
+/** The ✕ of a glance takes the chip out of the line; the page decides what the line holds. */
+export const RemovedByHand: Story = {
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement)
+    await userEvent.click(canvas.getByRole('button', { name: 'test, running' }))
+    const glanced = await screen.findByRole('dialog', { name: 'test, running' })
+    // What runs is stopped from here, not run again.
+    await expect(within(glanced).queryByRole('button', { name: /again$/ })).toBeNull()
+    await userEvent.click(
+      within(glanced).getByRole('button', { name: 'Remove test from the line' }),
+    )
+    // The glance closes first; the chip is taken out once it is gone.
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog', { name: 'test, running' })).toBeNull()
+    })
+    await waitFor(() => {
+      expect(args.onRemove).toHaveBeenCalledWith(expect.objectContaining({ id: 'run-test' }))
+    })
+  },
+}
+
+/** A line that takes out what its glance's ✕ asks it to, as the page does. */
+function Removing(props: GoingOnLineProps): ReactNode {
+  const [items, setItems] = useState(props.items)
+  return (
+    <Line
+      {...props}
+      items={items}
+      onRemove={(gone) => setItems((before) => before.filter((one) => one.id !== gone.id))}
+    />
+  )
+}
+
+/**
+ * Taken out from its glance (review of #250): the glance closes with its own motion first, and
+ * the chip leaves the line by its width once the glance is gone — never a glance left anchored to
+ * a chip that is going away.
+ */
+export const RemovedFromItsGlance: Story = {
+  render: (args) => <Removing {...args} />,
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await userEvent.click(canvas.getByRole('button', { name: 'test, running' }))
+    const glanced = await screen.findByRole('dialog', { name: 'test, running' })
+    await userEvent.click(
+      within(glanced).getByRole('button', { name: 'Remove test from the line' }),
+    )
+    // While the glance is still there, the chip it hangs from is too.
+    await expect(canvas.getByRole('button', { name: 'test, running' })).toBeInTheDocument()
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog', { name: 'test, running' })).toBeNull()
+    })
+    await waitFor(() => {
+      expect(canvas.queryByRole('button', { name: 'test, running' })).toBeNull()
+    })
   },
 }

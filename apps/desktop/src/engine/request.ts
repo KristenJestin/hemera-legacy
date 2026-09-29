@@ -43,6 +43,7 @@ import {
   type NothingToRunError,
   type UnknownCommandFolderError,
   createCommand,
+  runAgain,
   runFromPanel,
   runsOf,
   updateCommand,
@@ -376,6 +377,10 @@ export function answer(
     if (decision.name === 'commands.run') {
       const { sessionId, name, line } = decision.argument
       return yield* runFromPanel(sessionId, name, line)
+    }
+    if (decision.name === 'commands.runAgain') {
+      const { sessionId, runId } = decision.argument
+      return yield* runAgain(sessionId, runId)
     }
     if (decision.name === 'commands.stop') {
       const { sessionId, runId } = decision.argument

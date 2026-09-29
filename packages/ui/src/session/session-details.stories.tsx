@@ -6,8 +6,13 @@ import { movesLess } from '../../.storybook/reduced-motion.ts'
 import { IconButton } from '../components/button/button.tsx'
 import { Tooltip, TooltipProvider } from '../components/tooltip/tooltip.tsx'
 import { IconInfoCircle } from '../icons.ts'
+import type { CommandLine } from '../project/model.ts'
 import { ContextView } from './context-view.tsx'
+import { GOING_ON, ONE_OFF_DONE } from './going-on-fixtures.ts'
+import type { GoingOnItem } from './going-on.ts'
+import { SessionCatalogue } from './session-catalogue.tsx'
 import { SessionDetails, type SessionDetailsProps } from './session-details.tsx'
+import { type HistoryItem, SessionHistory } from './session-history.tsx'
 
 /**
  * The two things a reader checks on while an agent works, one press away from the thread.
@@ -75,7 +80,7 @@ const meta = {
     context: { control: false, description: 'The Context view of this Session, already drawn.' },
     defaultTab: {
       control: 'inline-radio',
-      options: ['activity', 'context'],
+      options: ['activity', 'history', 'catalogue', 'context'],
       description: 'The tab the dialog opens on.',
     },
     onSelectFile: { description: 'Opens a file, when the reader presses its path.' },
@@ -253,6 +258,118 @@ export const Context: Story = {
     await expect(inside.getByRole('button', { name: 'Tools · 1' })).toBeVisible()
     // A short one makes a shorter dialog, with nothing to spare under it either.
     await hugsTheTab(dialog, clicking(dialog))
+  },
+}
+
+/** What the Session ran, from the line's fixtures: the runs Hemera held and the agent's shell. */
+const RAN: HistoryItem[] = [...GOING_ON.many, ONE_OFF_DONE].filter(
+  (item: GoingOnItem): item is HistoryItem => item.kind !== 'agent',
+)
+
+const onRunAgain = fn()
+const onStop = fn()
+
+/**
+ * The History tab (issue #237): everything the Session ran, in order, whoever started it — a row
+ * a run, its time, its dot, its exit code, who started it, and Run again or Stop — and what it
+ * printed once a row is opened. The agent's own shell has no press: Hemera holds nothing of it.
+ */
+export const History: Story = {
+  args: {
+    defaultTab: 'history',
+    history: <SessionHistory items={RAN} onRunAgain={onRunAgain} onStop={onStop} />,
+    catalogue: <p>The catalogue</p>,
+  },
+  play: async ({ canvasElement }) => {
+    const dialog = await opened(canvasElement)
+    const inside = within(dialog)
+    const list = inside.getByRole('list', { name: 'What this Session ran' })
+    await expect(within(list).getAllByRole('listitem')).toHaveLength(RAN.length)
+    await expect(
+      within(list).getAllByRole('img', { name: 'by the agent, in its own shell' }).length,
+    ).toBeGreaterThan(0)
+    await userEvent.click(inside.getByRole('button', { name: 'Stop test' }))
+    await expect(onStop).toHaveBeenCalledWith(expect.objectContaining({ id: 'run-test' }))
+    await userEvent.click(inside.getByRole('button', { name: `Run ${ONE_OFF_DONE.name} again` }))
+    await expect(onRunAgain).toHaveBeenCalledWith(expect.objectContaining({ id: ONE_OFF_DONE.id }))
+    // The presses in a row's line did not open it: every row is still closed.
+    await expect(within(list).queryAllByRole('button', { expanded: true })).toEqual([])
+  },
+}
+
+const COMMANDS: CommandLine[] = [
+  {
+    id: 'dev',
+    name: 'dev',
+    command: 'pnpm dev',
+    lineWindows: null,
+    lineLinux: null,
+    type: 'serve',
+    scope: 'workspace',
+    portless: false,
+    portlessName: null,
+    runAtOpen: false,
+    folderBase: null,
+    folder: '',
+  },
+  {
+    id: 'test',
+    name: 'test',
+    command: 'pnpm vitest run',
+    lineWindows: null,
+    lineLinux: null,
+    type: 'test',
+    scope: 'workspace',
+    portless: false,
+    portlessName: null,
+    runAtOpen: false,
+    folderBase: null,
+    folder: '',
+  },
+]
+
+const onRun = fn()
+const onAdd = fn(async () => await Promise.resolve(null))
+const onRemove = fn()
+
+/**
+ * The Catalogue tab (issue #237): the Project's commands, seen, run, added to, changed and taken
+ * from without leaving the Session; Add and the pencil open the catalogue's own dialog.
+ */
+export const Catalogue: Story = {
+  args: {
+    defaultTab: 'catalogue',
+    history: <p>The history</p>,
+    catalogue: (
+      <SessionCatalogue
+        commands={COMMANDS}
+        running={['dev']}
+        repositories={[]}
+        portlessInstalled={false}
+        projectName="atlas"
+        onRun={onRun}
+        onAdd={onAdd}
+        onUpdate={onAdd}
+        onRemove={onRemove}
+      />
+    ),
+  },
+  play: async ({ canvasElement }) => {
+    const dialog = await opened(canvasElement)
+    const inside = within(dialog)
+    const list = inside.getByRole('list', { name: 'The catalogue' })
+    await expect(within(list).getAllByRole('listitem')).toHaveLength(2)
+    await expect(within(list).getByRole('img', { name: 'running' })).toBeVisible()
+    await userEvent.click(inside.getByRole('button', { name: 'Run test' }))
+    await expect(onRun).toHaveBeenCalledWith(expect.objectContaining({ name: 'test' }))
+    await userEvent.click(inside.getByRole('button', { name: 'Remove test from the catalogue' }))
+    await expect(onRemove).toHaveBeenCalledWith(expect.objectContaining({ name: 'test' }))
+    // The catalogue's own dialog, over the Session.
+    await userEvent.click(inside.getByRole('button', { name: 'Edit dev' }))
+    const editor = await within(document.body).findByRole('dialog', { name: 'Edit command' })
+    await waitFor(() => {
+      expect(editor).toBeVisible()
+    })
   },
 }
 

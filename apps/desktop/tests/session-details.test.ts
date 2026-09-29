@@ -23,7 +23,9 @@ import {
   contextListsOf,
   detailsTabsOf,
   goingOnOf,
+  lineOf,
   openingTabOf,
+  overBefore,
 } from '#renderer/session-details.ts'
 import { contextOf, listenToTools, readContext, runCommand, runsOf } from '#renderer/tools-store.ts'
 
@@ -714,5 +716,90 @@ describe('A run is said in the repository it runs in', () => {
     )
     expect(items[0]).toMatchObject({ repository: undefined, folder: 'tools' })
     expect(items[1]).toMatchObject({ repository: undefined, folder: 'v2-old' })
+  })
+})
+
+/** How a run ended, by how it stands: 1 for a failure, 0 for the rest, nothing while it runs. */
+const EXITS: Record<CommandRun['state'], number | null> = {
+  running: null,
+  exited: 0,
+  failed: 1,
+  stopped: 0,
+}
+
+describe('The line keeps what matters now (#237)', () => {
+  const ATLAS = '/home/ana/atlas'
+  /** A run of the catalogue or a one-off, running, over or failed. */
+  const ran = (
+    id: string,
+    state: CommandRun['state'],
+    commandId: string | null,
+    name = 'dev',
+    line = 'pnpm dev',
+  ): CommandRun => ({
+    ...aRun(id, ATLAS, state, commandId),
+    name,
+    line,
+    exitCode: EXITS[state],
+    endedAt: state === 'running' ? null : '2026-09-23T08:01:00.000Z',
+  })
+  const nothing = { removed: new Set<string>(), before: new Set<string>() }
+  const ids = (runs: readonly CommandRun[], marks = nothing): string[] =>
+    lineOf(goingOnOf(runs, [], ATLAS), marks).map((item) => item.id)
+
+  test('what runs is a chip, and a one-off over stays until it is taken out (#250)', () => {
+    const runs = [ran('sleep', 'exited', null, 'sleep', 'sleep 120'), ran('dev', 'running', 'c1')]
+    // Its glance or its details read change nothing: reading is not taking out.
+    expect(ids(runs)).toEqual(['sleep', 'dev'])
+    expect(ids(runs, { ...nothing, removed: new Set(['sleep']) })).toEqual(['dev'])
+  })
+
+  test('a one-off that ended before the Session was opened is not on the line', () => {
+    const runs = [ran('sleep', 'exited', null, 'sleep', 'sleep 120')]
+    expect(ids(runs, { ...nothing, before: new Set(['sleep']) })).toEqual([])
+  })
+
+  test('a one-off leaves once the same line runs as a command of the catalogue (#250)', () => {
+    const runs = [
+      ran('once', 'exited', null, 'bun', 'bun run check'),
+      ran('named', 'exited', 'c9', 'check', 'bun run check'),
+    ]
+    expect(ids(runs)).toEqual(['named'])
+  })
+
+  test('a failed run stays until it is taken out, or run again, whenever it failed (#250)', () => {
+    const runs = [ran('check', 'failed', null, 'check', 'bun run check')]
+    expect(ids(runs, { ...nothing, before: new Set(['check']) })).toEqual(['check'])
+    expect(ids(runs, { ...nothing, removed: new Set(['check']) })).toEqual([])
+    // Run again, the same line: the new run takes its place.
+    const again = [...runs, ran('check-2', 'running', null, 'check', 'bun run check')]
+    expect(ids(again)).toEqual(['check-2'])
+  })
+
+  test('a catalogue command that ran stays as its shortcut, one chip for its newest run', () => {
+    const runs = [ran('lint-1', 'exited', 'c2', 'lint'), ran('lint-2', 'exited', 'c2', 'lint')]
+    expect(ids(runs)).toEqual(['lint-2'])
+  })
+
+  test('a chip taken out by hand leaves, and comes back when its command runs again', () => {
+    const once = [ran('lint-1', 'exited', 'c2', 'lint')]
+    expect(ids(once, { ...nothing, removed: new Set(['lint-1']) })).toEqual([])
+    const again = [...once, ran('lint-2', 'running', 'c2', 'lint')]
+    expect(ids(again, { ...nothing, removed: new Set(['lint-1']) })).toEqual(['lint-2'])
+    // What runs can be taken out too: it stays in the history.
+    expect(ids([ran('dev', 'running', 'c1')], { ...nothing, removed: new Set(['dev']) })).toEqual(
+      [],
+    )
+  })
+
+  test('what was over when the Session opened is read off when each ended', () => {
+    const opened = Date.parse('2026-09-23T08:05:00.000Z')
+    const runs = [
+      ran('old', 'exited', null),
+      { ...ran('new', 'exited', null), endedAt: '2026-09-23T08:06:00.000Z' },
+      ran('live', 'running', 'c1'),
+    ]
+    const shells = [aShell('s1', opened - 1000, 'finished'), aShell('s2', opened - 1000, 'running')]
+    expect([...overBefore(runs, shells, opened)]).toEqual(['old', 's1'])
   })
 })

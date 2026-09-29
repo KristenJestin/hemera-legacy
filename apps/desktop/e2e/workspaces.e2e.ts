@@ -36,9 +36,12 @@ import { AGENT, ANSWERS, COMMAND_PROPOSAL, COMMAND_PROPOSE_ANSWER, MODELS } from
 import {
   addProject,
   awaits,
+  awaitsRecord,
   choose,
   control,
   fill,
+  NOTICES,
+  openNotices,
   press,
   pressIn,
   pressTab,
@@ -592,20 +595,23 @@ describe('Stopping one instance leaves the other running', () => {
 })
 
 describe('A proposal enters the catalogue only when accepted', () => {
-  it('shows the proposal in the thread, and writes the catalogue on Accept only', async () => {
+  it('shows the proposal in the notices, and writes the catalogue on Accept only', async () => {
     await press('Serve the app in main.')
     await browser.pause(900)
     await write(`Keep the ${COMMAND_PROPOSAL.name} command, please.`)
     await press('Send')
     await awaits(COMMAND_PROPOSE_ANSWER)
 
-    const proposal = `section[aria-label="Proposed command ${COMMAND_PROPOSAL.name}"]`
+    // It waits among the Session's notices, on the composer's edge, closed until pressed; the
+    // thread keeps its record (issue #237).
+    await openNotices('Proposed commands')
+    const proposal = `${NOTICES} [role="group"][aria-label="Proposed command ${COMMAND_PROPOSAL.name}"]`
     expect(await $(proposal).isExisting()).toBe(true)
     // Proposed is not added: the catalogue is the human's to write (D8-11).
     expect(await catalogue()).not.toContain(COMMAND_PROPOSAL.name)
 
-    await $(proposal).$('button=Accept').click()
-    await awaitsIn(proposal, 'Added to the catalogue')
+    await $(proposal).$('button=Add').click()
+    await awaitsRecord(`Proposed command ${COMMAND_PROPOSAL.name}, added to the catalogue`)
 
     await settings('Commands')
     expect(await $(`button[aria-label="Remove ${COMMAND_PROPOSAL.name}"]`).isExisting()).toBe(true)

@@ -96,12 +96,13 @@ import {
   saveCommand,
   readRuns,
   runCommand,
+  runAgain,
   stopRun,
   subscribeToTools,
   toolsSnapshot,
 } from './tools-store.ts'
 import { lineOf, linesOf, whenOf } from './journal-lines.ts'
-import { repositoryLinesOf } from './project-lines.ts'
+import { folderBasePath, repositoryLinesOf } from './project-lines.ts'
 import { repositoriesOf } from './run-place.ts'
 import {
   addRecipeStep,
@@ -396,6 +397,8 @@ export function Application() {
   const [putAway, setPutAway] = useState<Session[]>([])
   /** The Session whose title is being typed into, when one is. */
   const [naming, setNaming] = useState<string | null>(null)
+  /** How many times Run's keystroke was pressed: the Session on screen opens Run on each. */
+  const [runAsked, setRunAsked] = useState(0)
   /** Whether a new Session was asked for and the Home's composer has not taken the caret yet. */
   const [focusHome, setFocusHome] = useState(false)
   /** Which Project the window has already decided where to look in. */
@@ -871,6 +874,17 @@ export function Application() {
     [shell.activeProjectId],
   )
 
+  /**
+   * Renames a Session in its row of the sidebar, where its title lives (review of #250): the row
+   * turns into its field, the sidebar unfolding first when it is folded to its rail.
+   */
+  const startRenaming = (id: string): void => {
+    if (shell.collapsed) setCollapsed(false)
+    setNaming(id)
+  }
+  /** The Session whose row is its title field, while one is. */
+  const renaming = sessions.sessions.find((one) => one.id === naming)
+
   /** Puts a Session away, which takes the window off it when it was the one on screen. */
   const archive = useCallback(
     async (session: Session) => {
@@ -898,6 +912,11 @@ export function Application() {
       }
       if (action.kind === 'session') {
         void newSession()
+        return
+      }
+      if (action.kind === 'run') {
+        // Run's menu of the Session on screen, when there is one (review of #250).
+        setRunAsked((before) => before + 1)
         return
       }
       // Back to the Project, wherever the window was: a rank asks for a Project, and answering
@@ -997,10 +1016,17 @@ export function Application() {
       settingsActive={place === 'settings'}
       sessions={shellSessions}
       onNewSession={() => void newSession()}
-      onRenameSession={(id) => {
-        setNaming(id)
-        goTo(id)
-      }}
+      onRenameSession={startRenaming}
+      // The row being renamed turns into its title field, where the title lives (review of #250).
+      renamingSession={
+        renaming === undefined
+          ? null
+          : {
+              id: renaming.id,
+              onCommit: (title) => void renameTo(renaming, title),
+              onCancel: () => setNaming(null),
+            }
+      }
       onArchiveSession={(id) => {
         const one = sessions.sessions.find((session) => session.id === id)
         if (one !== undefined) void archive(one)
@@ -1311,7 +1337,6 @@ export function Application() {
           // rather than saying it is empty, which is a thing it does not know yet.
           loaded={sessions.open === open.id && sessions.loaded}
           now={Date.now()}
-          editing={naming === open.id}
           // A prompt, a Stop or a decision the engine refused is said here too: the composer does
           // not wait for a turn, and a refusal nobody draws is a message that just goes unanswered.
           refusal={sessions.refusal ?? agents.refusal}
@@ -1325,9 +1350,7 @@ export function Application() {
           onStop={() => void stopTurn(open.id)}
           onDecide={(toolCallId, option) => void decide(open.id, toolCallId, option.optionId)}
           onChooseOption={(optionId, value) => void chooseOption(open.id, optionId, value)}
-          onRename={(title) => void renameTo(open, title)}
-          onStartEditing={() => setNaming(open.id)}
-          onCancelEditing={() => setNaming(null)}
+          onRename={() => startRenaming(open.id)}
           onArchive={() => void archive(open)}
           onSearchFiles={async (query: string) => await searchIn(open.workspaceId, query)}
           onPickFiles={async () => await pickIn(open.workspaceId)}
@@ -1338,6 +1361,7 @@ export function Application() {
             window.open(url, '_blank', 'noopener')
           }}
           onStopRun={(runId) => void stopRun(open.id, runId)}
+          onRunAgain={(runId) => void runAgain(open.id, runId)}
           onHandOver={() => void handOver(open.id)}
           root={root}
           repositories={repositoriesOf(current)}
@@ -1353,6 +1377,24 @@ export function Application() {
           onAcceptProposal={async (proposalId) => await acceptProposal(open.id, proposalId)}
           onDeclineProposal={async (proposalId) => await declineProposal(open.id, proposalId)}
           onAddToCatalogue={addToCatalogue}
+          runAsked={runAsked}
+          runShortcut={keysOf('run')}
+          catalogueEditing={{
+            // What the Project declares of its repositories, which is all a command's base needs.
+            repositories: repositoryLinesOf(
+              current?.repositories.map((path) => ({ path, git: null, exists: true })) ?? [],
+              current ?? { included: [], repositoryIcons: {} },
+            ),
+            portlessInstalled: tools.portlessInstalled,
+            projectName: current?.name ?? '',
+            onSave: async (command, existing) =>
+              await saveCommand({ projectId: open.projectId, ...command }, existing),
+            onRemove: (name) => void removeCommand(open.projectId, name),
+            onListFolder: async ({ base, relative, kinds }) =>
+              current === null
+                ? []
+                : await listEntries(folderBasePath(current.mainPath, base), relative, kinds),
+          }}
         />
       )
     }

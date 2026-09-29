@@ -265,11 +265,13 @@ function lastEnd(entries: readonly SessionEntry[]): number {
  * is what an agent between two blocks is doing.
  *
  * `latest` is the entry the engine pushed last. Absent — a Session opened on a thread read back
- * rather than watched — the last entry of the thread stands in for it.
+ * rather than watched — the last entry of the thread stands in for it. `asksItself` false leaves
+ * the permissions out: the Session's row reads whether it waits off the notices instead (#250).
  */
 export function activityOf(
   entries: readonly SessionEntry[],
   latest: string | null = null,
+  asksItself = true,
 ): Activity {
   const said = lastSaid(entries)
   const end = lastEnd(entries)
@@ -287,7 +289,7 @@ export function activityOf(
     (latest === null ? undefined : running.find((entry) => entry.id === latest)) ?? running.at(-1)
   const thought = thoughtOf(running, newest?.turnId ?? null)
 
-  if (waiting(running)) return { state: 'waiting', thought }
+  if (asksItself && waiting(running)) return { state: 'waiting', thought }
 
   // A command Hemera is running for the turn — a test, a script — is what the turn waits on,
   // and its name says more than the tool call that asked for it (D6-12). A server is left running
@@ -327,13 +329,24 @@ const THINKING: Activity = { state: 'thinking' }
  * A Session is never running on a thread that ends on a `turn` entry it just heard: that entry
  * ends the turn in the same state (issue #223). So an end read while running is the turn before
  * the message just said, which the engine has not echoed yet: the turn asked for is thinking.
+ *
+ * `waitsForYou` is whether the Session's notices hold anything (issue #237): the row then says the
+ * Session waits for the reader, and keeps saying it until nothing does.
  */
 export function turnRowOf(
   thread: readonly SessionEntry[],
   running: boolean,
   latest: string | null = null,
+  waitsForYou = false,
 ): Activity | null {
-  const read = activityOf(thread, latest)
+  // Whether the Session waits for the reader is the notices' answer and nobody else's (#250): the
+  // row and the pill read one list, so the row never says it waits while the pill holds nothing.
+  const read = activityOf(thread, latest, false)
+  // Whatever waits for the reader in the Session's notices — a permission, a proposal, a question
+  // — is what the row says for as long as anything does, a turn running or not (issue #237).
+  if (waitsForYou) {
+    return { state: 'waiting', thought: running && !hasEnded(read) ? read.thought : undefined }
+  }
   if (running) return hasEnded(read) ? THINKING : read
   return hasEnded(read) ? read : null
 }

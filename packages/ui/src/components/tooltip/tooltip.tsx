@@ -1,6 +1,6 @@
 import { Tooltip as BaseTooltip } from '@base-ui/react/tooltip'
 import { cn } from 'cn'
-import type { ReactElement, ReactNode } from 'react'
+import type { HTMLAttributes, ReactElement, ReactNode, Ref } from 'react'
 
 import { useOverlayContainer } from '../../overlay.ts'
 import { Kbd } from '../kbd/kbd.tsx'
@@ -40,7 +40,16 @@ export const TOOLTIP_DELAY = 0
 /** Which side of the control the name appears on. */
 export type TooltipSide = 'top' | 'right' | 'bottom' | 'left'
 
-export interface TooltipProps {
+/**
+ * What a tooltip hands on to the control it wraps: whatever a caller around it gave it — the
+ * popover whose trigger the control also is gives it its press, its state and its ref — so a
+ * control can open a panel and carry a tooltip at once.
+ */
+type Handed = Omit<HTMLAttributes<HTMLButtonElement>, 'children'> & {
+  ref?: Ref<HTMLButtonElement> | undefined
+}
+
+export interface TooltipProps extends Handed {
   /** The name of the control, which is the whole of what a tooltip says. */
   label: string
   /** The keystroke that does the same thing, drawn as keys beside the name. */
@@ -72,6 +81,7 @@ export function Tooltip({
   quote = false,
   disabled = false,
   children,
+  ...handed
 }: TooltipProps): ReactNode {
   const container = useOverlayContainer()
   const refused = refusedTag(children.type)
@@ -80,7 +90,7 @@ export function Tooltip({
   }
   return (
     <BaseTooltip.Root disabled={disabled}>
-      <BaseTooltip.Trigger render={children} />
+      <BaseTooltip.Trigger render={children} {...handed} />
       <BaseTooltip.Portal container={container}>
         <BaseTooltip.Positioner side={side} sideOffset={4}>
           <BaseTooltip.Popup role="tooltip" className={cn(POPUP, quote && QUOTE)}>

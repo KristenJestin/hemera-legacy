@@ -397,6 +397,8 @@ export function Application() {
   const [putAway, setPutAway] = useState<Session[]>([])
   /** The Session whose title is being typed into, when one is. */
   const [naming, setNaming] = useState<string | null>(null)
+  /** How many times Run's keystroke was pressed: the Session on screen opens Run on each. */
+  const [runAsked, setRunAsked] = useState(0)
   /** Whether a new Session was asked for and the Home's composer has not taken the caret yet. */
   const [focusHome, setFocusHome] = useState(false)
   /** Which Project the window has already decided where to look in. */
@@ -912,6 +914,11 @@ export function Application() {
         void newSession()
         return
       }
+      if (action.kind === 'run') {
+        // Run's menu of the Session on screen, when there is one (review of #250).
+        setRunAsked((before) => before + 1)
+        return
+      }
       // Back to the Project, wherever the window was: a rank asks for a Project, and answering
       // it while staying on the settings of the application answers something else.
       setPlace('entry')
@@ -1370,6 +1377,8 @@ export function Application() {
           onAcceptProposal={async (proposalId) => await acceptProposal(open.id, proposalId)}
           onDeclineProposal={async (proposalId) => await declineProposal(open.id, proposalId)}
           onAddToCatalogue={addToCatalogue}
+          runAsked={runAsked}
+          runShortcut={keysOf('run')}
           catalogueEditing={{
             // What the Project declares of its repositories, which is all a command's base needs.
             repositories: repositoryLinesOf(

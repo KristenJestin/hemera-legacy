@@ -350,6 +350,10 @@ export interface SessionPageProps {
    * command may run from, whether Portless is here, the Project's name, and the writes.
    */
   catalogueEditing: CatalogueEditing
+  /** Bumped each time Run's keystroke is pressed: Run opens (review of #250). */
+  runAsked: number
+  /** That keystroke, written for the platform, which Run's tooltip says. */
+  runShortcut: string
 }
 
 /** What the Catalogue tab of the details needs to edit the Project's catalogue (issue #237). */
@@ -399,6 +403,8 @@ export function SessionPage({
   onDeclineProposal,
   onAddToCatalogue,
   catalogueEditing,
+  runAsked,
+  runShortcut,
 }: SessionPageProps): ReactNode {
   const [value, setValue] = useState('')
   const [files, setFiles] = useState<string[]>([])
@@ -914,6 +920,8 @@ export function SessionPage({
                     workspace={workspace?.name ?? 'main'}
                     onRunCommand={(entry) => onRunCommand(entry.name)}
                     onRunOnce={onRunCommand}
+                    shortcut={runShortcut}
+                    asked={runAsked}
                   />
                 )
               }

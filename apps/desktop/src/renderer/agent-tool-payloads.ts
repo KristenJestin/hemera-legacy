@@ -4,7 +4,9 @@ import {
   type ToolMark,
   hemeraToolNamed,
   setupChangeDetails,
+  setupChangeSubject,
   setupChangeTitle,
+  setupChangeVerb,
 } from '@hemera/core'
 import {
   type CommandRun,
@@ -659,13 +661,22 @@ export function commandProposalOf(entry: SessionEntry): CommandProposalDrawn | n
   return { ...read, folder: read.folder ?? '.' }
 }
 
-/** What `SetupProposal` needs, read off a `setup_proposal` entry (#218). */
+/** What a setup change is drawn from, read off a `setup_proposal` entry (#218). */
 export interface SetupProposalDrawn {
   /** What Accept and Decline name the proposal by. */
   readonly proposalId: string
   /** What Accept all names the changes proposed together by. */
   readonly batchId: string
+  /** The change in one line, as the Journal and the agent's answer say it. */
   readonly title: string
+  /** What accepting it does, which the notices unfold: `Add service`. */
+  readonly verb: string
+  /** What it is about: a name, or a path. */
+  readonly subject: string
+  readonly mono: boolean
+  /** The line a command or a step would run, which opens in its block. */
+  readonly line: string | undefined
+  /** Every other field it would write; never a variable's value. */
   readonly details: readonly SetupProposalDetail[]
   readonly why: string
   readonly state: SetupProposalState
@@ -673,36 +684,27 @@ export interface SetupProposalDrawn {
 
 /**
  * `null` when the payload does not parse: the entry is left out rather than drawn from a guess.
- * The title and the fields are said by the domain, as the Journal says them.
+ * Everything said is said by the domain, as the Journal says it; the schema reads the change's
+ * fields and nothing else, so a value written into the entry by mistake never reaches the window.
  */
 export function setupProposalOf(entry: SessionEntry): SetupProposalDrawn | null {
   const read = readPayload(setupProposalSchema, entry.payload)
   if (read === null) return null
+  const details = setupChangeDetails(read.change)
+  const subject = setupChangeSubject(read.change)
   return {
     proposalId: read.proposalId,
     batchId: read.batchId,
     title: setupChangeTitle(read.change),
-    details: setupChangeDetails(read.change),
+    verb: setupChangeVerb(read.change),
+    subject: subject.text,
+    mono: subject.path,
+    line: details.find((detail) => detail.label === 'Line')?.value,
+    // The line opens in its block, and what the change is about is its head: neither twice.
+    details: details.filter((detail) => detail.label !== 'Line' && detail.value !== subject.text),
     why: read.why,
     state: read.state,
   }
-}
-
-/**
- * How many changes of a batch still wait, told to the last card of that batch in the thread and
- * to no other: the one that offers Accept all (Decided 1 of #218). Undefined for every other card.
- */
-export function waitingInBatch(
-  thread: readonly SessionEntry[],
-  entry: SessionEntry,
-  drawn: SetupProposalDrawn,
-): number | undefined {
-  const batch = thread
-    .filter((one) => one.kind === 'setup_proposal')
-    .map((one) => ({ one, read: setupProposalOf(one) }))
-    .filter(({ read }) => read?.batchId === drawn.batchId)
-  if (batch.at(-1)?.one.id !== entry.id) return undefined
-  return batch.filter(({ read }) => read?.state === 'pending').length
 }
 
 /**

@@ -9,11 +9,13 @@ import { decisionOf, toolCallOf } from './notices.ts'
 /**
  * What became of each of Hemera's calls, found in the thread (review of #250): a one-off asked
  * for leaves the call, the permission it waited on, the decision, and the run — three rows for one
- * act — and a command proposed leaves the call and the proposal. The thread draws one entry a call,
+ * act — a command proposed leaves the call and the proposal, and a setup proposed (#218) the call
+ * and one entry a change. The thread draws one entry a call,
  * carrying what became of it, and the entries it absorbed are drawn no more on their own.
  *
  * The engine names none of these after the call, so they are paired by what they share: the line a
- * one-off runs, a run's id in the call's answer, a proposal's name; and, of several calls that
+ * one-off runs, a run's id in the call's answer, a proposal's name, a setup change's title in the
+ * list the call answered; and, of several calls that
  * share it — a line asked again after a refusal — the one written nearest. What finds no call — a
  * run the reader started, a question the agent asked about its own tool — stays a row of its own.
  *
@@ -30,6 +32,8 @@ export interface CallLink {
   run?: SessionEntry | undefined
   /** The command it proposed. */
   proposal?: SessionEntry | undefined
+  /** The changes to the Project's setup it proposed, in the order proposed (#218). */
+  setup?: readonly SessionEntry[] | undefined
 }
 
 export interface CallLinks {
@@ -125,7 +129,11 @@ export function callLinksOf(thread: readonly SessionEntry[], folded: FoldedCalls
   })
   const byCall = new Map<string, CallLink>()
   const absorbed = new Set<string>()
-  const link = (call: Call, part: keyof CallLink, entry: SessionEntry): void => {
+  const link = (
+    call: Call,
+    part: 'request' | 'decision' | 'run' | 'proposal',
+    entry: SessionEntry,
+  ): void => {
     const held = byCall.get(call.id) ?? {}
     // A call carries one of each: a second of a kind is left to be a row of its own.
     if (held[part] !== undefined) return
@@ -175,6 +183,19 @@ export function callLinksOf(thread: readonly SessionEntry[], folded: FoldedCalls
         (one) => one.tool === 'commands_propose' && one.name === proposed.name,
       )
       if (call !== null) link(call, 'proposal', entry)
+      return
+    }
+    if (entry.kind === 'setup_proposal') {
+      // A call proposes several changes, each an entry: the call carries them all. Its answer
+      // lists each by its title, which is the entry's body; failing that, the nearest call.
+      const listed = `- ${entry.body}`
+      const call =
+        nearest(calls, at, (one) => one.tool === 'setup_propose' && one.said.includes(listed)) ??
+        nearest(calls, at, (one) => one.tool === 'setup_propose')
+      if (call === null) return
+      const held = byCall.get(call.id) ?? {}
+      byCall.set(call.id, { ...held, setup: [...(held.setup ?? []), entry] })
+      absorbed.add(entry.id)
     }
   })
   return { byCall, absorbed }

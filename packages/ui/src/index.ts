@@ -296,6 +296,11 @@ export {
   type HemeraToolStatus,
 } from './activity/hemera-tool-call.tsx'
 export { CommandRun, type CommandRunProps, type CommandState } from './activity/command-run.tsx'
+export {
+  CallOutcome,
+  type CallOutcomeProps,
+  type CallPermission,
+} from './activity/call-outcome.tsx'
 /** A command the agent proposes for the catalogue, and the human's answer (D8-11). */
 export {
   CommandProposal,

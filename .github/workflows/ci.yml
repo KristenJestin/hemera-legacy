@@ -81,7 +81,7 @@ jobs:
       # (#253): with it on C:, C: was 85% busy, a write waited up to a third of a second, the
       # processors sat idle and one `git rev-parse` took 45 s, past a test's timeout. On D:, the
       # runner's local disk, the repository suites ran in 174 s instead of 285 s and no `git`
-      # took more than half a second.
+      # took more than 0.6 s.
       - name: Keep the temporary folder off the system disk
         if: runner.os == 'Windows'
         shell: pwsh
@@ -97,9 +97,27 @@ jobs:
       # fifty a Windows job once sat for, and the suites' own timeouts catch what really stalls
       # (#99).
       - name: Test
+        if: runner.os != 'Windows'
         working-directory: source
         timeout-minutes: 20
         run: pnpm test
+      # A Windows runner has two cores, four threads. There, the stories' two Chromiums beside
+      # the repository suites hold the processors at 100% for minutes: a `git` a suite starts
+      # then takes seconds, not tens of milliseconds, and a test that starts twenty of them runs
+      # past its thirty seconds. Measured (#253): side by side, one `git` in a hundred took over
+      # 2.8 s and one took 33 s; the repository suites alone kept the processors at 54% and
+      # every `git` under 0.6 s. So Windows runs the two one after the other, and the stories
+      # run even when the suites failed, so one run reports both.
+      - name: Test the repository suites
+        if: runner.os == 'Windows'
+        working-directory: source
+        timeout-minutes: 15
+        run: pnpm test --project repository
+      - name: Test the stories
+        if: runner.os == 'Windows' && !cancelled()
+        working-directory: source
+        timeout-minutes: 15
+        run: pnpm test --project storybook-light --project storybook-dark
 
   # The beta is the application the user runs every day, and it is built from every push to the
   # integration branch (design D3-10). It carries no tag: its version is what the repository

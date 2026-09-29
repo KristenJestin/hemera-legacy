@@ -11,8 +11,10 @@
  */
 
 import {
+  COMMAND_SCOPES,
   COMMAND_TYPES,
   PHASE_IDS,
+  RECIPE_KINDS,
   QUESTION_RULE,
   READ_PAGE_BYTES,
   SEARCH_MATCH_LIMIT,
@@ -60,6 +62,14 @@ export type ParsedCall =
   | {
       readonly tool: 'project_get'
       readonly arguments: z.infer<(typeof TOOL_ARGUMENTS)['project_get']>
+    }
+  | {
+      readonly tool: 'setup_read'
+      readonly arguments: z.infer<(typeof TOOL_ARGUMENTS)['setup_read']>
+    }
+  | {
+      readonly tool: 'setup_propose'
+      readonly arguments: z.infer<(typeof TOOL_ARGUMENTS)['setup_propose']>
     }
   | {
       readonly tool: 'session_get'
@@ -146,6 +156,60 @@ export const OPTION_SENT = z.object({
   label: z.string().min(1),
   recommended: z.boolean().optional(),
 })
+
+/** A text an agent may leave out, read as nothing when it is blank. */
+const OPTIONAL_TEXT = z
+  .string()
+  .optional()
+  .transform((text) => (text === undefined || text.trim() === '' ? null : text.trim()))
+
+/**
+ * One change of `setup_propose`, as its JSON text reads (#218): what the Project settings would
+ * be asked, field by field, with the settings' own defaults for what is left out.
+ */
+export const CHANGE_SENT = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('repository'), path: z.string().trim().min(1) }),
+  z.object({
+    kind: z.literal('command'),
+    name: z.string().trim().min(1),
+    line: z.string().trim().min(1),
+    type: z.enum(COMMAND_TYPES),
+    repository: OPTIONAL_TEXT,
+    folder: OPTIONAL_TEXT,
+    scope: z.enum(COMMAND_SCOPES).default('workspace'),
+    portless: z.boolean().default(false),
+    portlessName: OPTIONAL_TEXT,
+    runAtOpen: z.boolean().default(false),
+    lineWindows: OPTIONAL_TEXT,
+    lineLinux: OPTIONAL_TEXT,
+  }),
+  z.object({
+    kind: z.literal('step'),
+    step: z.enum(RECIPE_KINDS),
+    repository: OPTIONAL_TEXT,
+    path: OPTIONAL_TEXT,
+    command: OPTIONAL_TEXT,
+    line: OPTIONAL_TEXT,
+    lineWindows: OPTIONAL_TEXT,
+    lineLinux: OPTIONAL_TEXT,
+  }),
+  z.object({
+    kind: z.literal('variable'),
+    name: z.string().trim().min(1),
+    value: z.string(),
+    workspace: OPTIONAL_TEXT,
+  }),
+  z.object({ kind: z.literal('workspace_create'), name: z.string().trim().min(1) }),
+  z.object({
+    kind: z.enum(['workspace_prepare', 'workspace_resume', 'workspace_cleanup']),
+    workspace: z.string().trim().min(1),
+  }),
+])
+
+export type ChangeSent = z.infer<typeof CHANGE_SENT>
+
+/** The most changes one `setup_propose` call may carry: a Project set up, not a migration. */
+export const CHANGES_PER_CALL = 20
 
 /** How long a list of the Spec tools may be, as the JSON text it is sent as. */
 const LIST_CHARACTERS = SPEC_PAGE_CHARACTERS
@@ -252,6 +316,52 @@ export const TOOL_ARGUMENTS = {
     why: z.string().trim().min(1).describe('why it is worth keeping, for the human who decides'),
   }),
   project_get: z.object({}),
+  setup_read: z.object({}),
+  // What a setup proposal carries (#218): the changes, one card each, and why, which is what the
+  // human reads before deciding. A key, because a lost answer would otherwise propose twice.
+  setup_propose: z
+    .object({
+      changes: z
+        .string()
+        .max(LIST_CHARACTERS)
+        .describe(
+          'the changes, in the order they apply, as a JSON array; each one of: {"kind": "repository", "path"} to declare a repository relative to the Project root; {"kind": "command", "name", "line", "type", "repository"?, "folder"?, "scope"?: "workspace"|"project", "portless"?, "portlessName"?, "runAtOpen"?, "lineWindows"?, "lineLinux"?} to add a command, or change the one of that name; {"kind": "step", "step": "copy"|"link"|"run", "repository"?, "path"?, "command"?, "line"?, "lineWindows"?, "lineLinux"?} to add a preparation step; {"kind": "variable", "name", "value", "workspace"?} to set a variable on the Project or on one Workspace; {"kind": "workspace_create", "name"} to create a Workspace and prepare it; {"kind": "workspace_prepare"|"workspace_resume"|"workspace_cleanup", "workspace"} for an existing Workspace, by name',
+        ),
+      why: z
+        .string()
+        .trim()
+        .min(1)
+        .max(2000)
+        .describe('why these changes, for the human who decides'),
+      key: KEY.describe('an idempotency key, so a retry does not propose twice'),
+    })
+    .superRefine((sent, context) => {
+      const listed = jsonList(CHANGE_SENT).safeParse(sent.changes)
+      if (!listed.success) {
+        for (const issue of listed.error.issues) {
+          context.addIssue({
+            code: 'custom',
+            path: ['changes', ...issue.path],
+            message: issue.message,
+          })
+        }
+        return
+      }
+      if (listed.data.length === 0) {
+        context.addIssue({
+          code: 'custom',
+          path: ['changes'],
+          message: 'propose one change at least',
+        })
+      }
+      if (listed.data.length > CHANGES_PER_CALL) {
+        context.addIssue({
+          code: 'custom',
+          path: ['changes'],
+          message: `propose at most ${CHANGES_PER_CALL} changes in one call`,
+        })
+      }
+    }),
   session_get: z.object({}),
   spec_read: z.object({
     revision: z
@@ -456,6 +566,10 @@ export const TOOL_DESCRIPTIONS: Record<ToolName, string> = {
     "Proposes a command worth keeping in the Project's catalogue. A human accepts or declines it in the Session; nothing enters the catalogue by this call.",
   project_get:
     'The Project this Session belongs to: its name, where its Workspace root is, what it reads from, and its Specs, one per line with their key, type, status and title.',
+  setup_read:
+    "The Project's whole setup, as its settings show it: its repositories with the Git state of each in main, whether a Workspace includes it and its icon; the folder and the branch prefix of its Workspaces; its commands and services, with their type, where they run, their scope, Portless and whether they run when Hemera opens; its preparation recipe, step by step; its variables, by name only, never their values; and each Workspace with its state, the Spec it was made for, its preparation step by step, its variables by name and the services running in it.",
+  setup_propose:
+    "Propose changes to the Project's setup: declare a repository, add or change a command or a service, add a preparation step, set a variable, create and prepare a Workspace, resume a failed preparation, or clean a Workspace up. Nothing is changed by this call: each change is shown to the user as a card they accept or decline, and the changes of one call can be accepted together. Hemera checks each change as the settings would, and refuses the whole call with the reason when one would be refused. A variable's value is held until the user decides and is never shown back, in the thread or anywhere else: send one only when the user gave it or it is in the Project's files. Read setup_read first. Send a key so that a retry after a lost answer does not propose twice.",
   session_get:
     'This Session: its title, its Project, its agent, and the last entries of its thread.',
   spec_read: `Read the Spec this Session defines, rendered as Markdown: its key, type, status and revision, each section with its version as <!-- version: n -->, the stories with their criteria, the tasks, the phases and the open questions. The current revision, or an older one by number, which is read-only. One call returns at most ${SPEC_PAGE_CHARACTERS} characters and ends with the range read as JSON: offset, end, size, truncated and next.`,
@@ -482,6 +596,8 @@ export const TOOL_BOUNDS: Record<ToolName, string> = {
   commands_stop: 'a run of this Project, and all it started',
   commands_propose: 'a proposal a human decides; nothing written to the catalogue',
   project_get: 'this Project and the list of its Specs',
+  setup_read: "this Project's setup; variables by name, never their values",
+  setup_propose: `at most ${CHANGES_PER_CALL} changes a call, each a card the user decides; nothing applied by the call`,
   session_get: `this Session and its last ${THREAD_TAIL} entries`,
   spec_read: `this Session's Spec, ${SPEC_PAGE_CHARACTERS / 1024} K characters a page`,
   spec_write: "one write of this Session's draft, on its current version",
@@ -553,6 +669,10 @@ export function parseCall(tool: ToolName, raw: ToolArguments): ArgumentsDecision
       return decide(tool, read(TOOL_ARGUMENTS['commands_propose'], raw))
     case 'project_get':
       return decide(tool, read(TOOL_ARGUMENTS['project_get'], raw))
+    case 'setup_read':
+      return decide(tool, read(TOOL_ARGUMENTS['setup_read'], raw))
+    case 'setup_propose':
+      return decide(tool, read(TOOL_ARGUMENTS['setup_propose'], raw))
     case 'session_get':
       return decide(tool, read(TOOL_ARGUMENTS['session_get'], raw))
     case 'spec_read':

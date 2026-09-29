@@ -93,6 +93,9 @@ const CATALOGUE: Catalogued[] = [
   // Lot 20, recette of 24 September 2026: a box to tick, drawn in the theme, which every box of
   // the application is instead of the platform's own.
   { name: 'Checkbox', folder: 'checkbox', keyboard: true },
+  // Issue #140: what an agent is doing, said by Hemera's face. A thing to read and not a thing to
+  // operate, like the dot it will stand beside.
+  { name: 'Face', folder: 'face', keyboard: false },
 ]
 
 /** The pieces of the shell, which are components with a story each and no catalogue entry. */

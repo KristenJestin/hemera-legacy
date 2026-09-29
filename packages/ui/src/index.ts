@@ -29,6 +29,9 @@ export {
   type SelectProps,
 } from './components/select/select.tsx'
 export { Loading, type LoadingProps } from './components/loading/loading.tsx'
+/** What an agent is doing, said by Hemera's face: its expression, its motion, its colour. */
+export { Face, type FaceProps, type FaceSize } from './components/face/face.tsx'
+export type { FaceState } from './components/face/states.ts'
 /** Where a piece of work stands, said as a dot: a tool call, a turn, a row of a list. */
 export {
   StatusDot,

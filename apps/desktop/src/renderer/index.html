@@ -14,20 +14,41 @@
   </head>
   <body>
     <div id="root">
-      <!-- The start screen of @hemera/ui (shell/start-screen.tsx), written out so it is on the
-           first frame: the application draws the same one until its first page is ready. The
+      <!-- The start screen of @hemera/ui (shell/start-screen.tsx, StartFrame), written out so it
+           is on the first frame: a still of Hemera's face loading, its three dots where the face
+           draws them, turned by the stylesheet until the application draws the face itself. The
            rules it is drawn with before the theme arrives are written into the head by the
            renderer bundle (@hemera/ui/start-style). -->
       <div class="flex h-screen items-center justify-center bg-background text-muted-foreground">
-        <span role="status" aria-label="Starting Hemera" class="relative size-icon-lg">
-          <span class="absolute inset-0 flex items-center justify-center motion-safe:animate-turn">
-            <span class="absolute rounded-full bg-current size-1.5 orbit-0"></span>
-            <span class="absolute rounded-full bg-current size-1.5 orbit-1"></span>
-            <span class="absolute rounded-full bg-current size-1.5 orbit-2"></span>
+        <span
+          role="img"
+          aria-label="Starting Hemera"
+          title="Starting Hemera"
+          class="inline-block shrink-0 size-16"
+        >
+          <span class="block size-full motion-safe:animate-turn">
+            <svg
+              viewBox="0 0 32 32"
+              fill="none"
+              aria-hidden="true"
+              class="size-full overflow-visible"
+            >
+              <g stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M9.938 12.49L9.938 12.5L9.938 12.51" stroke-width="5.5"></path>
+                <path d="M22.062 12.49L22.062 12.5L22.062 12.51" stroke-width="5.5"></path>
+                <path d="M16 22.99L16 23L16 23.01" stroke-width="5.5"></path>
+              </g>
+            </svg>
           </span>
         </span>
       </div>
     </div>
+    <script>
+      // The still turns from the page's time origin rather than from whenever the stylesheet
+      // reached it: that origin is the clock the face's own orbit turns on, so the face that
+      // replaces the still picks its dots up where the turn had them.
+      for (const turning of document.getAnimations()) turning.startTime = 0
+    </script>
     <script type="module" src="./main.tsx"></script>
   </body>
 </html>

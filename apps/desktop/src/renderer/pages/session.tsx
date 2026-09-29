@@ -750,8 +750,13 @@ export function SessionPage({
         ) : undefined,
     },
   ]
-  /** Whether anything waits for the reader, which the row above the box says as long as it does. */
-  const waitsForYou = notices.some((group) => group.items.length > 0)
+  /**
+   * The first kind that waits for the reader, in the notices' order, or null: the row above the box
+   * says it waits as long as anything does, and its face says what for (issue #140).
+   */
+  const waitsFor = NOTICE_KINDS.find((kind) => itemsOf(kind).length > 0) ?? null
+  /** Whether anything waits for the reader. */
+  const waitsForYou = waitsFor !== null
 
   const scroller: ScrollerEntry[] = []
   /**
@@ -852,7 +857,7 @@ export function SessionPage({
    * message sets a turn running again, and the row goes back to saying what that one is doing
    * (`turnRowOf`).
    */
-  const activity = turnRowOf(thread, agent.running, agent.latest, waitsForYou)
+  const activity = turnRowOf(thread, agent.running, agent.latest, waitsFor)
 
   // What the agent is on is the agent's own answer, read back after every change: this page
   // draws what it was told and never a value it remembers (D5-13).

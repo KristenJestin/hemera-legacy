@@ -322,6 +322,9 @@ export function GoingOnLine({
 }: GoingOnLineProps): ReactNode {
   const [open, setOpen] = useState<string | null>(defaultOpen)
   const [detail, setDetail] = useState<string | null>(defaultDetail)
+  // What the reader took out of the line from its glance: the glance closes first, with its own
+  // motion, and the chip leaves once it is gone — never a glance left on a chip going away.
+  const [leaving, setLeaving] = useState<GoingOnItem | null>(null)
   const ranked = rankedGoingOn(items)
   const chips = ranked.slice(0, GOING_ON_SHOWN)
   const rest = ranked.length - chips.length
@@ -352,6 +355,11 @@ export function GoingOnLine({
                 setOpen(next ? item.id : null)
                 if (!next) seen(item)
               }}
+              onClosed={() => {
+                if (leaving?.id !== item.id) return
+                setLeaving(null)
+                onRemove?.(item)
+              }}
               trigger={
                 <button
                   type="button"
@@ -380,8 +388,8 @@ export function GoingOnLine({
                   onRemove === undefined
                     ? undefined
                     : (gone) => {
+                        setLeaving(gone)
                         setOpen(null)
-                        onRemove(gone)
                       }
                 }
               />

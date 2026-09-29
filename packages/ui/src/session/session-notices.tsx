@@ -49,14 +49,29 @@ export interface SessionNoticesProps {
   defaultOpen?: boolean | undefined
 }
 
+/**
+ * Where the pill rests: detached from the composer by a clear gap. The gap is inside what rises,
+ * so the whole of it goes behind the composer's edge on the way down and nothing shows under it.
+ */
+const REST = 'pointer-events-auto pb-2.5'
+
+/**
+ * The pill, in the warning's tone (review of #250: "trop collé, pas assez mis en avant"): it has
+ * to read as something waiting for the reader at a glance, not as one more neutral chip. The
+ * tinted fill is laid over the card's own, so the thread never shows through it in the dark
+ * theme, where the warning's fill is a tint and not a colour.
+ */
 const PILL =
-  'inline-flex h-control-sm items-center gap-2.5 rounded-full border border-border bg-card px-3 text-xs font-medium text-foreground shadow-sm outline-none hover:bg-accent focus-ring data-popup-open:bg-accent'
+  'relative isolate inline-flex h-control-md items-center gap-3 overflow-hidden rounded-full border border-warning bg-card px-4 text-sm font-semibold text-warning-muted-foreground shadow-md outline-none hover:border-warning-muted-foreground focus-ring data-popup-open:border-warning-muted-foreground'
 
-const KIND = 'flex items-center gap-1 text-muted-foreground'
+/** The warning's tint, laid over the card's fill. */
+const TINT = 'pointer-events-none absolute inset-0 -z-10 bg-warning-muted'
 
-const URGENT = 'flex items-center gap-1 text-warning-muted-foreground'
+const KIND = 'flex items-center gap-1.5'
 
-const COUNT = 'font-mono text-foreground'
+const URGENT = KIND
+
+const COUNT = 'font-mono'
 
 const PANEL = 'scroll-quiet flex max-h-pinned w-notices flex-col overflow-y-auto'
 
@@ -127,7 +142,7 @@ export function SessionNotices({ groups, defaultOpen = false }: SessionNoticesPr
       {count > 0 && (
         <motion.div
           key="notices"
-          className="pointer-events-auto"
+          className={REST}
           initial={RISE.hidden}
           animate={RISE.shown}
           exit={RISE.hidden}
@@ -150,6 +165,7 @@ export function SessionNotices({ groups, defaultOpen = false }: SessionNoticesPr
               onOpenChange={setOpen}
               trigger={
                 <button type="button" className={PILL} aria-label={nameOf(waiting)}>
+                  <span aria-hidden="true" className={TINT} />
                   {waiting.map((group) => (
                     <span key={group.kind} className={group.urgent === true ? URGENT : KIND}>
                       {group.icon}

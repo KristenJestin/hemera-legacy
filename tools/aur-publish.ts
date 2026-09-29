@@ -3,7 +3,8 @@
  * The AUR packages of Hemera, moved to a release once it is published (packaging/aur/).
  *
  * `hemera-bin` follows the tags semantic-release puts on `main`, `hemera-beta-bin` the beta
- * pre-release every push to `dev` publishes. Both are the PKGBUILD in this repository with its
+ * pre-release every push to `dev` publishes. Both install as `hemera` and conflict with each
+ * other, so installing one replaces the other. Both are the PKGBUILD in this repository with its
  * version, its pkgrel and its checksum changed, and the .SRCINFO changed the same way: nothing
  * here needs makepkg, so it runs the same on a runner and on any machine with Node and git.
  *
@@ -89,17 +90,26 @@ function assignmentsOf(pkgbuild: string): Map<string, string> {
   return variables
 }
 
-function scalarOf(pkgbuild: string, variable: string): string {
+/** The value of a single-word assignment, expanded. */
+export function scalarOf(pkgbuild: string, variable: string): string {
   const value = assignmentsOf(pkgbuild).get(variable)
   if (value === undefined) throw new Error(`the PKGBUILD assigns no ${variable}`)
   return value
 }
 
+/** The words of a one-line array assignment, `name=(…)`, each expanded as makepkg would. */
+export function arrayOf(pkgbuild: string, variable: string): string[] {
+  const words = new RegExp(`^${variable}=\\((.*)\\)$`, 'm').exec(pkgbuild)?.[1]
+  if (words === undefined) throw new Error(`the PKGBUILD has no one-line ${variable}`)
+  const variables = assignmentsOf(pkgbuild)
+  return (words.match(/'[^']*'|"[^"]*"|\S+/g) ?? []).map((word) => wordValue(word, variables))
+}
+
 /** The one source of the PKGBUILD, as makepkg expands it: `<file>::<url>`. */
 export function expandedSource(pkgbuild: string): string {
-  const source = /^source=\((.*)\)$/m.exec(pkgbuild)?.[1]
-  if (source === undefined) throw new Error('the PKGBUILD has no one-line source')
-  return wordValue(source.trim(), assignmentsOf(pkgbuild))
+  const [source, ...more] = arrayOf(pkgbuild, 'source')
+  if (source === undefined || more.length > 0) throw new Error('the PKGBUILD has no one source')
+  return source
 }
 
 function sha256sumOf(pkgbuild: string): string {

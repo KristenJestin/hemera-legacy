@@ -1,9 +1,12 @@
 # Maintainer: Kristen Jestin <kristen.jestin@pm.me>
 #
-# The latest beta of Hemera, the pre-release built from every push to `dev`. It installs beside
-# `hemera-bin` under its own name: /opt/hemera-beta, /usr/bin/hemera-beta and its own icon.
+# The latest beta of Hemera, the pre-release built from every push to `dev`. It installs where
+# `hemera-bin` does — /opt/hemera, /usr/bin/hemera, hemera.desktop and the hemera icon — and
+# conflicts with it, so installing one replaces the other: the two share one data folder.
 pkgname=hemera-beta-bin
-_app=hemera-beta
+_app=hemera
+# What the beta's deb names its folder, its executable, its entry and its icon.
+_deb=hemera-beta
 _product='Hemera Beta'
 _asset=Hemera.Beta
 _version=0.1.1-26-g8394bab
@@ -22,7 +25,7 @@ depends=('alsa-lib' 'at-spi2-core' 'cairo' 'dbus' 'expat' 'glib2' 'glibc' 'gtk3'
 provides=("$_app")
 conflicts=("$_app")
 options=('!strip' '!debug')
-source=("$_app-$_version.deb::$url/releases/download/beta-$_version/$_asset-$_version.deb")
+source=("$_deb-$_version.deb::$url/releases/download/beta-$_version/$_asset-$_version.deb")
 sha256sums=('b82a33d4d421deae0c6e6ce492947619796872ca20fc61e0d00ff833f32b84a7')
 
 package() {
@@ -34,14 +37,19 @@ package() {
   chmod 4755 "$pkgdir/opt/$_app/chrome-sandbox"
 
   install -d "$pkgdir/usr/bin"
-  ln -s "/opt/$_app/$_app" "$pkgdir/usr/bin/$_app"
+  ln -s "/opt/$_app/$_deb" "$pkgdir/usr/bin/$_app"
 
-  install -Dm644 "$srcdir/usr/share/applications/$_app.desktop" \
+  install -Dm644 "$srcdir/usr/share/applications/$_deb.desktop" \
     "$pkgdir/usr/share/applications/$_app.desktop"
-  sed -i "s|^Exec=.*|Exec=/usr/bin/$_app %U|" "$pkgdir/usr/share/applications/$_app.desktop"
+  sed -i -e "s|^Exec=.*|Exec=/usr/bin/$_app %U|" -e "s|^Icon=.*|Icon=$_app|" \
+    "$pkgdir/usr/share/applications/$_app.desktop"
 
-  install -d "$pkgdir/usr/share/icons"
-  cp -a "$srcdir/usr/share/icons/hicolor" "$pkgdir/usr/share/icons/hicolor"
+  local icon size
+  for icon in "$srcdir"/usr/share/icons/hicolor/*/apps/"$_deb".*; do
+    size=${icon#"$srcdir/usr/share/icons/hicolor/"}
+    size=${size%%/*}
+    install -Dm644 "$icon" "$pkgdir/usr/share/icons/hicolor/$size/apps/$_app.${icon##*.}"
+  done
 
   install -Dm644 "$pkgdir/opt/$_app/LICENSES.chromium.html" \
     "$pkgdir/usr/share/licenses/$pkgname/LICENSES.chromium.html"

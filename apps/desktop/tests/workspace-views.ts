@@ -91,6 +91,7 @@ export function step(position: number, change: Partial<WorkspaceStep> = {}): Wor
 export const STATUS: RepositoryState[] = [
   {
     relativePath: 'sources/api',
+    step: null,
     git: {
       ok: true,
       branch: 'atlas/HEM-7-login-form',
@@ -100,5 +101,9 @@ export const STATUS: RepositoryState[] = [
       untracked: 1,
     },
   },
-  { relativePath: 'sources/front', git: { ok: false, error: 'fatal: not a git repository' } },
+  {
+    relativePath: 'sources/front',
+    step: null,
+    git: { ok: false, error: 'fatal: not a git repository' },
+  },
 ]

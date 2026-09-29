@@ -42,6 +42,22 @@ const withoutDependencyMaps: Plugin = {
 }
 
 /**
+ * A dependency cache of the theme's own.
+ *
+ * The Storybook plugin names the cache after the Storybook folder, which both themes share, so
+ * the two dev servers prebundled the dependencies into one folder at the same moment, each
+ * replacing what the other was writing (#253). Twice on a Windows runner, one theme then stopped
+ * running stories, once before its first, and the run sat until its step was cut: that folder
+ * was the one thing the two themes wrote to together.
+ */
+function ownDependencyCache(theme: 'light' | 'dark'): Plugin {
+  return {
+    name: 'hemera:own-dependency-cache',
+    config: (config) => ({ cacheDir: `${config.cacheDir ?? 'node_modules/.vite'}-${theme}` }),
+  }
+}
+
+/**
  * The catalogue run as tests in a real Chromium, once per theme (design D1-06).
  *
  * A story is not written twice to be seen in both themes — the toolbar swaps the theme on any
@@ -57,6 +73,7 @@ export function catalogue(theme: 'light' | 'dark') {
         initialGlobals: { theme },
       }),
       withoutDependencyMaps,
+      ownDependencyCache(theme),
     ],
     // Declared rather than discovered: a dependency the optimizer meets for the first time
     // mid-run makes it reload the page under the tests, and a run that reloads is a run that

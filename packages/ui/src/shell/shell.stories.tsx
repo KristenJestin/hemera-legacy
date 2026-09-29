@@ -318,6 +318,17 @@ export const FoldsToARailAndBack: Story = {
       },
       { timeout: 3000 },
     )
+    // The words fade back in after the panel has opened, and the accessibility check that
+    // follows the story reads a word still fading at a fraction of its contrast: the story ends
+    // once every one of them is all the way in.
+    await waitFor(
+      () => {
+        for (const faded of sidebar.querySelectorAll<HTMLElement>('[style*="opacity"]')) {
+          expect(getComputedStyle(faded).opacity).toBe('1')
+        }
+      },
+      { timeout: 3000 },
+    )
   },
 }
 

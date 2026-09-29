@@ -15,9 +15,9 @@ import { collapse, expand, fold, POP, pop, RISE, rise, useTransition } from '../
  *
  * Closed, it is an icon a kind and how many wait of it, and nothing else — no sentence says it
  * waits, the pill is that sentence. Pressed, it opens above itself on every item, grouped by kind
- * under a head each — the kind's mark, its name, how many, and what answers them all — with the same
- * room and the same rule between every two groups; each item is a `NoticeCard`, one anatomy for
- * every kind (review of #250). Something new arriving while it is closed pops it
+ * under a head each — the kind's mark, what accepting its items does, how many, and what answers
+ * them all — with the same room and the same rule between every two groups; each item is a
+ * `NoticeCard`, one anatomy for every kind, which says the kind no second time (review of #250). Something new arriving while it is closed pops it
  * again, and never opens it: the reader opens it.
  *
  * The kinds are the caller's, handed over as groups: a kind this component has never heard of is
@@ -36,6 +36,11 @@ export interface NoticeGroup {
   kind: string
   /** What the kind is called, which is what a screen reader counts it by: `Permissions`. */
   label: string
+  /**
+   * What accepting its items does, said once for all of them in the group's head (review of
+   * #250): `Run once`, `Add to the catalogue`, `Start a Spec`; `Questions` for the questions.
+   */
+  title: string
   /** The kind's mark, on the pill beside its count. */
   icon: ReactNode
   /** Whether the kind holds the turn where it stands, drawn in the warning's tone. */
@@ -88,10 +93,11 @@ const GROUP = 'flex flex-col'
 const GROUP_APART = 'mt-3 flex flex-col border-t border-border pt-3'
 
 /** A group's head: its kind's mark, its name and how many wait, and what answers them all. */
-const GROUP_HEAD =
-  'flex h-control-sm items-center gap-2 pb-1 text-xs font-medium text-muted-foreground'
+const GROUP_HEAD = 'flex h-control-sm items-center gap-2 pb-1 text-sm font-medium text-foreground'
 
-const GROUP_COUNT = 'font-mono'
+const GROUP_MARK = 'flex text-muted-foreground'
+
+const GROUP_COUNT = 'font-mono text-muted-foreground'
 
 const GROUP_ACTIONS = 'ml-auto flex items-center'
 
@@ -170,6 +176,9 @@ export function SessionNotices({ groups, defaultOpen = false }: SessionNoticesPr
               side="top"
               align="center"
               label="Waiting for your answer"
+              // Opened by a press, it leaves the focus on the pill (review of #250): no answer is
+              // picked out before the reader has read them all, and Tab goes on into the panel.
+              keepFocus
               open={open}
               onOpenChange={setOpen}
               trigger={
@@ -193,11 +202,11 @@ export function SessionNotices({ groups, defaultOpen = false }: SessionNoticesPr
                         className={index === 0 ? GROUP : GROUP_APART}
                       >
                         <header className={GROUP_HEAD}>
-                          <span aria-hidden="true" className="flex">
+                          <span aria-hidden="true" className={GROUP_MARK}>
                             {group.icon}
                           </span>
-                          {group.label}
-                          <span className={GROUP_COUNT}>{String(group.items.length)}</span>
+                          {group.title}
+                          <span className={GROUP_COUNT}>{`· ${String(group.items.length)}`}</span>
                           {group.actions !== undefined && (
                             <span className={GROUP_ACTIONS}>{group.actions}</span>
                           )}

@@ -2,7 +2,6 @@ import { cn } from 'cn'
 import { type ReactNode, useState } from 'react'
 
 import { type NoticeAnswer, NoticeRecord } from '../activity/notice-record.tsx'
-import { IconFlag } from '../icons.ts'
 import { NoticeCard } from '../session/notice-card.tsx'
 import { InPlaceText } from './in-place-text.tsx'
 import type { SpecType } from './model.ts'
@@ -103,8 +102,6 @@ export function CreateSpecProposal({
     }
     return (
       <NoticeCard
-        icon={<IconFlag size="sm" />}
-        title="Continue a Spec"
         name="Continue a Spec"
         subject={
           <span className={EXISTING}>
@@ -141,8 +138,6 @@ export function CreateSpecProposal({
   }
   return (
     <NoticeCard
-      icon={<IconFlag size="sm" />}
-      title="Start a Spec"
       name="Create a Spec"
       refuse={{ label: 'Not now', onPress: onDecline }}
       accept={{

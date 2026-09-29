@@ -49,6 +49,7 @@ export function waitingAs(
 
 const requestSchema = z.object({
   toolCallId: z.string(),
+  tool: z.string().optional(),
   options: z.array(z.object({ optionId: z.string(), kind: z.string() })),
 })
 
@@ -114,4 +115,12 @@ export function permissionStandingOf(
     (option) => option.optionId === optionId,
   )?.kind
   return kind === 'allow_once' || kind === 'allow_always' ? 'allowed' : 'refused'
+}
+
+/**
+ * Whether a permission asks to run a line once — Hemera's `commands_run` for a one-off — which is
+ * what the permissions' group says it is about ("Run once"); any other question is allowed once.
+ */
+export function asksToRunALine(request: SessionEntry): boolean {
+  return read(requestSchema, request.payload)?.tool === 'commands_run'
 }

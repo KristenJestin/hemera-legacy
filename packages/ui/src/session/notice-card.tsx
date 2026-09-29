@@ -6,8 +6,9 @@ import { Button } from '../components/button/button.tsx'
  * One thing that waits for the reader, as the Session's notices draw every kind of it (review of
  * #250: "aucune cohérence"): one anatomy, one card style, whatever the kind.
  *
- * - a head: the kind's mark and a short title that says what accepting does — "Run once", "Add to
- *   the catalogue", "Start a Spec" — or, for a question, the question itself;
+ * - no head of its own: the group it stands in says the kind and what accepting does — "Run once",
+ *   "Add to the catalogue", "Start a Spec" — once for all its cards; a question alone keeps its
+ *   question as its first line;
  * - a body: what it is about, the line whole in the terminal's letters, and where;
  * - one row of answers, always in the same place and the same shape: a quiet text button that
  *   refuses, then the primary one that accepts, their verbs matching the title. A question has
@@ -22,10 +23,8 @@ export interface NoticeAnswerButton {
 }
 
 export interface NoticeCardProps {
-  /** The kind's mark. */
-  icon: ReactNode
-  /** What accepting does, or the question asked. */
-  title: ReactNode
+  /** The question asked, for a question: the one card whose first line is its own. */
+  title?: ReactNode
   /** What the card is called to a screen reader. */
   name: string
   /** What it is about, before its line: a command's name, a path as the agent named it. */
@@ -46,9 +45,7 @@ export interface NoticeCardProps {
 
 const CARD = 'flex flex-col gap-2 rounded-lg border border-border bg-surface-body p-3'
 
-const HEAD = 'flex min-w-0 items-start gap-2 text-sm font-medium text-foreground'
-
-const MARK = 'flex h-control-text shrink-0 items-center text-muted-foreground'
+const HEAD = 'min-w-0 text-sm font-medium text-foreground'
 
 const BODY = 'flex min-w-0 flex-col gap-1.5'
 
@@ -62,7 +59,6 @@ const PLACE = 'flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-xs text-
 const ANSWERS = 'flex flex-wrap items-center justify-end gap-2'
 
 export function NoticeCard({
-  icon,
   title,
   name,
   subject,
@@ -76,12 +72,7 @@ export function NoticeCard({
   const answers = refuse !== undefined || accept !== undefined || others.length > 0
   return (
     <div role="group" aria-label={name} className={CARD}>
-      <div className={HEAD}>
-        <span aria-hidden="true" className={MARK}>
-          {icon}
-        </span>
-        <span className="min-w-0 flex-1">{title}</span>
-      </div>
+      {title !== undefined && <div className={HEAD}>{title}</div>}
       {(subject !== undefined ||
         line !== undefined ||
         place !== undefined ||

@@ -1,9 +1,11 @@
 import type { ReactNode } from 'react'
 
+import { DecisionSummary } from '../approval/decision-summary.tsx'
 import { StatusDot, type StatusTone } from '../components/status-dot/status-dot.tsx'
 import { IconBookmarkPlus, IconShield } from '../icons.ts'
 import type { CommandProposalState } from './command-proposal.tsx'
 import type { CommandState } from './command-run.tsx'
+import { TerminalOutput } from './terminal-output.tsx'
 
 /**
  * What became of one of Hemera's calls, said on the call's own line (review of #250): the thread
@@ -70,5 +72,50 @@ export function CallOutcome({ permission, run, proposal }: CallOutcomeProps): Re
         </>
       )}
     </span>
+  )
+}
+
+export interface CallOutcomeDetailsProps {
+  /** The answer the permission was given, and when. */
+  decision?: { answer: string; at: string; refused: boolean } | undefined
+  /** What the run printed. */
+  output?: { id: string; text: string; released: boolean } | undefined
+  /** The command proposed: where it would run, its line, and why. */
+  proposal?: { line: string; folder: string; why: string } | undefined
+}
+
+const DETAILS = 'flex flex-col gap-1 pt-1'
+
+const PROPOSED_LINE = 'font-mono text-xs break-all text-foreground'
+
+const WHY = 'text-sm text-muted-foreground'
+
+/** What became of a call, read once it is opened: the answer given, what ran, what was proposed. */
+export function CallOutcomeDetails({
+  decision,
+  output,
+  proposal,
+}: CallOutcomeDetailsProps): ReactNode {
+  if (decision === undefined && output === undefined && proposal === undefined) return null
+  return (
+    <div className={DETAILS}>
+      {decision !== undefined && (
+        <DecisionSummary answer={decision.answer} at={decision.at} refused={decision.refused} />
+      )}
+      {proposal !== undefined && (
+        <>
+          <p className={PROPOSED_LINE}>{`${proposal.folder} $ ${proposal.line}`}</p>
+          <p className={WHY}>{proposal.why}</p>
+        </>
+      )}
+      {output !== undefined && (
+        <TerminalOutput
+          plain
+          terminalId={output.id}
+          output={output.text}
+          released={output.released}
+        />
+      )}
+    </div>
   )
 }

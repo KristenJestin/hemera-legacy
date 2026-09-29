@@ -32,6 +32,7 @@ import {
   type Spec,
   type SpecSnapshot,
   WORKSPACE_STATES,
+  type WorkspaceState,
   focusOf,
   renderSpecMarkdown,
 } from '@hemera/core'
@@ -64,7 +65,7 @@ import {
   workspaces,
 } from '../storage/schema.ts'
 import { type Mutation, type StaleVersionError, mutate } from '../transaction.ts'
-import { UnknownWorkspaceError } from './described.ts'
+import { UnknownWorkspaceError, WorkspaceTakenError, takenBy } from './described.ts'
 
 /** One launch as the interface reads it: the Spec, the revision, the Workspace, the build. */
 export interface LaunchView {
@@ -106,6 +107,7 @@ export type LaunchRefusal =
   | UnknownSpecError
   | UnknownRevisionError
   | UnknownWorkspaceError
+  | WorkspaceTakenError
   | WorkspaceNotReadyError
   | EmptyTitleError
   | InvalidCursorError
@@ -294,13 +296,21 @@ export interface LaunchWorkspaceView {
 }
 
 /**
+ * The Workspace a Spec is set on, and where it stands: a failed one is resumed and a cleaned one
+ * replaced, rather than started in (D8-12).
+ */
+export interface SpecWorkspaceView extends LaunchWorkspaceView {
+  readonly state: WorkspaceState
+}
+
+/**
  * What the panel of a Spec is drawn from (D8-12, D8-13), read whole: the launch of its build and
  * where that build stands, the Workspace the Spec is set on, the ones a build of it may be
  * started in, and the step the launch is waiting on while its Workspace is prepared.
  */
 export interface SpecLaunchesView {
   readonly launch: LaunchView | null
-  readonly workspace: LaunchWorkspaceView | null
+  readonly workspace: SpecWorkspaceView | null
   readonly workspaces: LaunchWorkspaceView[]
   /** The preparation step running while it waits, as the Workspace names it (D8-05). */
   readonly step: string | null
@@ -938,7 +948,15 @@ export const launchesLayer = Layer.effect(
                     )
             return {
               launch,
-              workspace: worked === undefined ? null : { id: worked.id, name: worked.name },
+              workspace:
+                worked === undefined
+                  ? null
+                  : {
+                      id: worked.id,
+                      name: worked.name,
+                      // The column is checked against `WORKSPACE_STATES`; this is the narrowing.
+                      state: WORKSPACE_STATES.find((known) => known === worked.state) ?? 'ready',
+                    },
               // `main` first: the Workspace every Project has, then the ones made by hand.
               workspaces: [
                 ...offered.filter((each) => each.name === MAIN_WORKSPACE),
@@ -1003,6 +1021,12 @@ export const launchesLayer = Layer.effect(
                 // wait for nothing, so it is refused as a Session's own check refuses it.
                 if (state === undefined || state === 'cleaned' || state === 'failed') {
                   return yield* Effect.fail(new WorkspaceNotReadyError(chosen.name, chosen.state))
+                }
+                // One Spec, one Workspace (D8-12): a Workspace made for another Spec is that
+                // Spec's build's, and the engine refuses it whatever the window offers.
+                const taken = yield* takenBy(transaction, workspaceId, specId)
+                if (taken !== null) {
+                  return yield* Effect.fail(new WorkspaceTakenError(chosen.name, taken))
                 }
                 const id = crypto.randomUUID()
                 const at = now()

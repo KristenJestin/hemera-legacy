@@ -12,19 +12,20 @@ import { ActivityRow, type ActivityRowProps } from './activity-row.tsx'
  * Four states, one row. A turn writes nothing for minutes at a time, and a thread that said
  * nothing while it ran was a thread the reader could not tell from a dead one. Each state is a
  * story, because each of them is a different promise: thinking and writing are work in flight,
- * running names the command it is on, and waiting is the turn stopped and asking. Four more
- * say how the turn ended, and stay until the next message: a question left for the reader, done,
+ * running names the command it is on, and waiting is the Session asking the reader for whatever
+ * its notices hold. Three more say how the turn ended, and stay until the next message: done,
  * stopped, failed.
  *
  * The mark at the start of the line is Hemera's face (issue #140), and it wears the work: a tool
- * that reads wears `reading`, one that writes `writing`, a command `running`. `Faces` shows
+ * that reads wears `reading`, one that writes `writing`, a command `running`, and a Session that
+ * waits wears `question` for a question and `permission` for anything else. `Faces` shows
  * every one of them, and `ATurnGoesOn` is the one to watch a turn change its face on.
  */
 const THOUGHT = `The join on invoice_lines is the cost, not the formatting. Streaming will not fix
 it on its own, so the query goes first and the loop after.`
 
 const meta = {
-  tags: ['autodocs', 'updated'],
+  tags: ['autodocs'],
   title: 'Blocks/Session/ActivityRow',
   component: ActivityRow,
   parameters: { layout: 'padded' },
@@ -32,16 +33,7 @@ const meta = {
   argTypes: {
     state: {
       control: 'inline-radio',
-      options: [
-        'thinking',
-        'running',
-        'waiting',
-        'streaming',
-        'question',
-        'done',
-        'stopped',
-        'failed',
-      ],
+      options: ['thinking', 'running', 'waiting', 'streaming', 'done', 'stopped', 'failed'],
       description: 'What the turn is doing, as the engine reports it.',
     },
     face: {
@@ -112,22 +104,25 @@ export const RunningHemeraTool: Story = {
   },
 }
 
-/** Waiting: the turn has stopped and is asking for a permission, and the face asks with it. */
+/**
+ * Waiting: the Session's notices hold a permission, or a proposal to take or leave, and the face
+ * asks for it.
+ */
 export const Waiting: Story = {
   args: { state: 'waiting' },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    await expect(canvas.getByText('Waiting for your permission')).toBeVisible()
-    await expect(canvas.getByRole('img', { name: 'Waiting for your permission' })).toHaveAttribute(
+    await expect(canvas.getByText('Waiting for your answer')).toBeVisible()
+    await expect(canvas.getByRole('img', { name: 'Waiting for your answer' })).toHaveAttribute(
       'data-state',
       'permission',
     )
   },
 }
 
-/** A question: the turn ended by asking the reader something, and waits on the answer. */
+/** A question of the Spec waits in the notices: the same words, and the face that asks. */
 export const Question: Story = {
-  args: { state: 'question' },
+  args: { state: 'waiting', face: 'question' },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     await expect(canvas.getByText('Waiting for your answer')).toBeVisible()
@@ -259,13 +254,13 @@ export const WaitingIsNotQuiet: Story = {
   args: { state: 'waiting', quietMs: 600_000, onStop: fn(), onOpenTrace: fn() },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    await expect(canvas.getByText('Waiting for your permission')).toBeVisible()
+    await expect(canvas.getByText('Waiting for your answer')).toBeVisible()
     await expect(canvas.queryByRole('button', { name: 'Stop' })).toBeNull()
     await expect(canvas.getByRole('img')).toHaveAttribute('data-state', 'permission')
   },
 }
 
-/** The eight states in one column, which is the only way to check that eight read as eight. */
+/** The seven states in one column, which is the only way to check that seven read as seven. */
 export const States: Story = {
   parameters: { controls: { disable: true } },
   render: () => (
@@ -274,7 +269,6 @@ export const States: Story = {
       <ActivityRow state="running" detail="cat recap.md" />
       <ActivityRow state="waiting" />
       <ActivityRow state="streaming" />
-      <ActivityRow state="question" />
       <ActivityRow state="done" elapsedMs={72_000} />
       <ActivityRow state="stopped" />
       <ActivityRow state="failed" />
@@ -285,9 +279,8 @@ export const States: Story = {
     const said = [
       'Thinking…',
       'Running cat recap.md',
-      'Waiting for your permission',
-      'Writing…',
       'Waiting for your answer',
+      'Writing…',
       'Done in 1 min 12 s',
       'Stopped',
       'Failed',
@@ -306,7 +299,7 @@ const FACES: readonly (ActivityRowProps & { wears: string })[] = [
   { state: 'streaming', wears: 'writing' },
   { state: 'running', detail: 'pnpm test', wears: 'running' },
   { state: 'waiting', wears: 'permission' },
-  { state: 'question', wears: 'question' },
+  { state: 'waiting', face: 'question', wears: 'question' },
   { state: 'done', elapsedMs: 72_000, wears: 'done' },
   { state: 'failed', wears: 'error' },
   { state: 'stopped', wears: 'asleep' },
@@ -344,7 +337,7 @@ const TURN: readonly ActivityRowProps[] = [
   { state: 'running', detail: 'pnpm test', face: 'running' },
   { state: 'waiting' },
   { state: 'streaming' },
-  { state: 'question' },
+  { state: 'waiting', face: 'question' },
   { state: 'done', elapsedMs: 48_000 },
 ]
 

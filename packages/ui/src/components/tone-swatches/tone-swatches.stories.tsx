@@ -22,7 +22,7 @@ function Harness({ tone: chosen = 'primary' }: { tone?: ProjectTone }) {
 }
 
 const meta = {
-  tags: ['autodocs', 'updated'],
+  tags: ['autodocs'],
   title: 'Components/ToneSwatches',
   component: Harness,
   parameters: { layout: 'padded' },

@@ -177,7 +177,7 @@ function Controlled({
 }
 
 const meta = {
-  tags: ['autodocs', 'updated'],
+  tags: ['autodocs'],
   title: 'Blocks/Workspace/CreateWorkspaceDialog',
   component: CreateWorkspaceDialog,
   render: (args) => <Controlled {...args} />,
@@ -651,6 +651,10 @@ export const NamedBeforeRead: Story = {
     const dialog = within(document.body).getByRole('dialog')
     const inside = within(dialog)
     rowOf(dialog, './sources/front').getByText('being read')
+    // While a row is read, Create says it waits for it.
+    await expect(
+      inside.getByRole('button', { name: 'Create, waiting for the repositories to be read' }),
+    ).toHaveAttribute('aria-disabled', 'true')
     await userEvent.type(inside.getByRole('textbox', { name: 'Name' }), 'spike')
 
     window.dispatchEvent(new Event(GIT_ANSWERS))
@@ -664,7 +668,8 @@ export const NamedBeforeRead: Story = {
       rowOf(dialog, './sources/front').getByRole('textbox', { name: 'Branch' }),
     ).toHaveValue('atlas/spike')
     // Create comes on by a fade once the last row is read: the accessibility pass measures its
-    // contrast once it has.
+    // contrast once it has. Its name is the label alone from then on: the loader leaving it is
+    // not read on its way out.
     const create = inside.getByRole('button', { name: 'Create' })
     await expect(create).toBeEnabled()
     await waitFor(() => {

@@ -190,7 +190,7 @@ export function LiveSpecPanel({
   function onRework(reason: string): void {
     actions.onRework(reason)
     if (launch?.state === 'waiting' || launch?.state === 'failed') {
-      setLaunch({ state: 'cancelled' })
+      setLaunch({ state: 'cancelled', reason: 'rework', again: false })
     }
   }
   return (

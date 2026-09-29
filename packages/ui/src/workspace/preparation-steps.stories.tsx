@@ -63,7 +63,7 @@ const WITH_A_MISSING_SOURCE = stepsAt(['done', 'done', 'done', 'done', 'done'], 
 })
 
 const meta = {
-  tags: ['autodocs', 'updated'],
+  tags: ['autodocs'],
   title: 'Blocks/Workspace/PreparationSteps',
   component: PreparationSteps,
   parameters: { layout: 'padded' },

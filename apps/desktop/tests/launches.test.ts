@@ -5,7 +5,7 @@
  * Every suite is named after the scenario of `Spec · build-launch` that it covers, and runs over
  * the whole engine on the fake agent `window.ts` composes.
  */
-import { mkdirSync, mkdtempSync, realpathSync, rmSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, realpathSync, renameSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -23,6 +23,7 @@ import { ReopenRefusedError } from '#engine/specs/revisions.ts'
 import { Specs, specsLayer } from '#engine/specs/specs.ts'
 import { Database, type EngineDatabase, SqliteClient } from '#engine/storage/database.ts'
 import { Launches, StartDeadline, launchesLayer } from '#engine/workspaces/launches.ts'
+import { WorkspaceTakenError } from '#engine/workspaces/described.ts'
 import { Preparation, recovered } from '#engine/workspaces/preparation.ts'
 import { Workspaces } from '#engine/workspaces/workspaces.ts'
 
@@ -99,8 +100,12 @@ const atlas = (ready = true) =>
     return { project, key: snapshot.spec.key, specId: snapshot.spec.id, session }
   })
 
-/** A Workspace of that Project: `preparing`, with the worktree of its repository as a step. */
-const making = (projectId: string, specId: string, key: string) =>
+/**
+ * A Workspace of that Project: `preparing`, with the worktree of its repository as a step. Made
+ * for the Spec named, or — `specId` null — from the Project's settings, for no Spec: one that
+ * two Specs may both be built in (D8-12).
+ */
+const making = (projectId: string, specId: string | null, key: string) =>
   Effect.gen(function* () {
     const workspaces = yield* Workspaces
     const plan = yield* workspaces.plan(projectId, key, 'export')
@@ -611,49 +616,55 @@ describe('A refusal says the Session the start had written', () => {
   })
 })
 
-describe('A launch waiting on a Workspace that will never be ready ends', () => {
-  test('A preparation that fails fails the launches that waited on it', async () => {
-    opened = await openWindow(dataFolder, fakeAgent())
-    const seen = await opened.running(
-      Effect.gen(function* () {
-        const { project, key, specId } = yield* atlas()
-        const launched = yield* Launches
-        const workspace = yield* making(project.id, specId, key)
-        const asked = yield* launched.request(specId, workspace.id)
-        // The repository the worktree was to be made from is gone: the step fails, and the
-        // Workspace with it — what waited on it has nothing left to wait for (D8-13).
-        rmSync(join(dataFolder, 'main', 'sources', 'api'), { recursive: true, force: true })
-        const prepared = yield* (yield* Preparation).prepare(workspace.id)
-        return { asked, prepared, launch: yield* launched.one(asked.id), builds: yield* builds }
-      }),
-    )
-    expect(seen.prepared.state).toBe('failed')
-    expect(seen.launch.state).toBe('failed')
-    expect(seen.launch.detail).toContain('The Workspace could not be prepared: ')
-    expect(seen.builds).toEqual([])
-  })
+// Both make a real worktree and then fail or remove it: on a Windows runner shared with the
+// stories, that git work alone measured 18 to 32 seconds, over the thirty a test is given.
+describe(
+  'A launch waiting on a Workspace that will never be ready ends',
+  { timeout: 60_000 },
+  () => {
+    test('A preparation that fails fails the launches that waited on it', async () => {
+      opened = await openWindow(dataFolder, fakeAgent())
+      const seen = await opened.running(
+        Effect.gen(function* () {
+          const { project, key, specId } = yield* atlas()
+          const launched = yield* Launches
+          const workspace = yield* making(project.id, specId, key)
+          const asked = yield* launched.request(specId, workspace.id)
+          // The repository the worktree was to be made from is gone: the step fails, and the
+          // Workspace with it — what waited on it has nothing left to wait for (D8-13).
+          rmSync(join(dataFolder, 'main', 'sources', 'api'), { recursive: true, force: true })
+          const prepared = yield* (yield* Preparation).prepare(workspace.id)
+          return { asked, prepared, launch: yield* launched.one(asked.id), builds: yield* builds }
+        }),
+      )
+      expect(seen.prepared.state).toBe('failed')
+      expect(seen.launch.state).toBe('failed')
+      expect(seen.launch.detail).toContain('The Workspace could not be prepared: ')
+      expect(seen.builds).toEqual([])
+    })
 
-  test('A cleanup cancels the launches that waited on the Workspace', async () => {
-    opened = await openWindow(dataFolder, fakeAgent())
-    const seen = await opened.running(
-      Effect.gen(function* () {
-        const { project, key, specId } = yield* atlas()
-        const launched = yield* Launches
-        const workspaces = yield* Workspaces
-        const workspace = yield* making(project.id, specId, key)
-        const asked = yield* launched.request(specId, workspace.id)
-        // The user removes the Workspace while the build still waits for it (D8-14): nothing will
-        // ever prepare that folder, and the launch says so on itself (D8-13).
-        const removed = yield* workspaces.cleanup(workspace.id)
-        return { asked, removed, launch: yield* launched.one(asked.id), builds: yield* builds }
-      }),
-    )
-    expect(seen.removed.state).toBe('cleaned')
-    expect(seen.launch.state).toBe('cancelled')
-    expect(seen.launch.detail).toBe('The Workspace was removed')
-    expect(seen.builds).toEqual([])
-  })
-})
+    test('A cleanup cancels the launches that waited on the Workspace', async () => {
+      opened = await openWindow(dataFolder, fakeAgent())
+      const seen = await opened.running(
+        Effect.gen(function* () {
+          const { project, key, specId } = yield* atlas()
+          const launched = yield* Launches
+          const workspaces = yield* Workspaces
+          const workspace = yield* making(project.id, specId, key)
+          const asked = yield* launched.request(specId, workspace.id)
+          // The user removes the Workspace while the build still waits for it (D8-14): nothing will
+          // ever prepare that folder, and the launch says so on itself (D8-13).
+          const removed = yield* workspaces.cleanup(workspace.id)
+          return { asked, removed, launch: yield* launched.one(asked.id), builds: yield* builds }
+        }),
+      )
+      expect(seen.removed.state).toBe('cleaned')
+      expect(seen.launch.state).toBe('cancelled')
+      expect(seen.launch.detail).toBe('The Workspace was removed')
+      expect(seen.builds).toEqual([])
+    })
+  },
+)
 
 describe('A failed start is retried on its own', () => {
   test('A failed agent launch is retried without redoing the preparation', async () => {
@@ -706,7 +717,8 @@ describe('One build left on nothing holds back nothing beside it', () => {
         const { project, key, specId } = yield* atlas()
         const launched = yield* Launches
         const preparation = yield* Preparation
-        const workspace = yield* making(project.id, specId, key)
+        // Made from the settings, for no Spec: the two Specs may both be built in it (D8-12).
+        const workspace = yield* making(project.id, null, key)
         const nothing = yield* unwrittenSpec(project.id)
         // Two launches wait on the one Workspace: the one that will be refused is asked for
         // first, so it is the one started first.
@@ -743,7 +755,8 @@ describe('A launch a Rework cancelled is not failed by a start racing it', () =>
       Effect.gen(function* () {
         const { project, key, specId } = yield* atlas()
         const launched = yield* Launches
-        const workspace = yield* making(project.id, specId, key)
+        // Made from the settings, for no Spec: the two Specs may both be built in it (D8-12).
+        const workspace = yield* making(project.id, null, key)
         const nothing = yield* unwrittenSpec(project.id)
         const asked = yield* launched.request(specId, workspace.id)
         const raced = yield* launched.request(nothing.id, workspace.id)
@@ -921,6 +934,109 @@ describe('The engine comes back to what a stopped engine left', () => {
         workspace_id: left.workspace.id,
       },
     ])
+  })
+})
+
+describe('A Spec whose launch was cancelled or never got an agent can be launched again', () => {
+  test('A launch cancelled by a Rework can be asked for again on the new revision', async () => {
+    opened = await openWindow(dataFolder, fakeAgent())
+    const seen = await opened.running(
+      Effect.gen(function* () {
+        const { project, key, specId, session } = yield* atlas()
+        const launched = yield* Launches
+        const preparation = yield* Preparation
+        const workspace = yield* making(project.id, specId, key)
+        const first = yield* launched.request(specId, workspace.id)
+        // Reworked while it waits, then made ready again: the new revision is launched by hand.
+        yield* yield* rework(specId, session.id)
+        yield* frozen(specId, session.id)
+        yield* preparation.prepare(workspace.id)
+        const cancelled = yield* launched.one(first.id)
+        const again = yield* launched.request(specId, workspace.id)
+        const started = yield* until(
+          launched.one(again.id),
+          (one) => one.state === 'started' || one.state === 'failed',
+        )
+        const panel = yield* launched.forSpec(specId)
+        return { again, builds: yield* builds, cancelled, first, panel, started }
+      }),
+    )
+    expect(seen.cancelled.state).toBe('cancelled')
+    expect(seen.cancelled.detail).toBe('reworked')
+    expect(seen.again.revisionId).not.toBe(seen.first.revisionId)
+    expect(seen.started.state).toBe('started')
+    expect(seen.panel.launch?.id).toBe(seen.again.id)
+    expect(seen.builds).toEqual([
+      {
+        id: seen.started.sessionId,
+        spec_id: seen.again.specId,
+        revision_id: seen.again.revisionId,
+        workspace_id: seen.again.workspaceId,
+      },
+    ])
+  })
+
+  test('A launch failed by its preparation is asked for again after a resume', async () => {
+    opened = await openWindow(dataFolder, fakeAgent())
+    const seen = await opened.running(
+      Effect.gen(function* () {
+        const { project, key, specId } = yield* atlas()
+        const launched = yield* Launches
+        const preparation = yield* Preparation
+        const workspace = yield* making(project.id, specId, key)
+        const first = yield* launched.request(specId, workspace.id)
+        // The repository is moved away while the Workspace is prepared: the step fails, and the
+        // launch with it, before any Session was made.
+        const source = join(dataFolder, 'main', 'sources', 'api')
+        const away = join(dataFolder, 'api-moved-away')
+        renameSync(source, away)
+        yield* preparation.prepare(workspace.id)
+        const failed = yield* launched.one(first.id)
+        const panel = yield* launched.forSpec(specId)
+        // Retry has no agent to start again: that launch is refused, and a new request is asked.
+        const retried = yield* Effect.flip(launched.retry(first.id))
+        renameSync(away, source)
+        const resumed = yield* preparation.resume(workspace.id)
+        const again = yield* launched.request(specId, workspace.id)
+        const started = yield* until(
+          launched.one(again.id),
+          (one) => one.state === 'started' || one.state === 'failed',
+        )
+        return { builds: yield* builds, failed, panel, resumed, retried, started }
+      }),
+    )
+    expect(seen.failed.state).toBe('failed')
+    expect(seen.failed.sessionId).toBeNull()
+    // The panel reads where the Workspace stands, and offers to resume it rather than to start.
+    expect(seen.panel.workspace?.state).toBe('failed')
+    expect(seen.failed.detail).toContain('The Workspace could not be prepared: ')
+    expect(seen.retried.message).toBe('only a build whose agent failed is started again.')
+    expect(seen.resumed.state).toBe('ready')
+    expect(seen.started.state).toBe('started')
+    expect(seen.builds.map((one) => one.id)).toEqual([seen.started.sessionId])
+  })
+})
+
+describe('A Spec cannot be given another Spec’s dedicated Workspace', () => {
+  test('A build of a Spec is refused in a Workspace made for another Spec', async () => {
+    opened = await openWindow(dataFolder, fakeAgent())
+    const seen = await opened.running(
+      Effect.gen(function* () {
+        const { project, key, specId } = yield* atlas()
+        const launched = yield* Launches
+        const other = yield* unwrittenSpec(project.id)
+        const workspace = yield* making(project.id, specId, key)
+        const refused = yield* Effect.flip(launched.request(other.id, workspace.id))
+        return { builtIn: yield* builtIn(other.id), key, refused, rows: yield* launches }
+      }),
+    )
+    expect(seen.refused).toBeInstanceOf(WorkspaceTakenError)
+    expect(seen.refused.message).toBe(
+      `the Workspace atl-1-export was made for ${seen.key}: a Spec is built in a Workspace of its own`,
+    )
+    // Nothing was written: no launch, and the other Spec is set on no Workspace.
+    expect(seen.rows).toEqual([])
+    expect(seen.builtIn).toBeNull()
   })
 })
 

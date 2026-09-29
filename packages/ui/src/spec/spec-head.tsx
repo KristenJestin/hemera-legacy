@@ -9,6 +9,7 @@ import {
   type IconProps,
   IconChevronRight,
   IconCircleCheck,
+  IconCircleDashed,
   IconCircleX,
   IconHammer,
   IconPencil,
@@ -39,7 +40,13 @@ const HEAD = 'flex min-h-control-md items-center gap-2.5'
 
 const KEY = 'shrink-0 font-mono text-xs text-muted-foreground'
 
+/** The key a provisional Spec does not have yet, said quietly in its place (issue #198). */
+const NO_KEY = 'shrink-0 text-xs text-muted-foreground italic'
+
 const TITLE = 'min-w-0 truncate text-base font-semibold'
+
+/** A provisional title: the request's words, not yet a Spec's, set apart from one (issue #198). */
+const PROVISIONAL_TITLE = 'min-w-0 truncate text-base font-semibold text-muted-foreground italic'
 
 /** The status's icon, which the keyboard reaches for its tooltip as the pointer does. */
 const STATUS = 'focus-ring flex shrink-0 rounded-sm not-italic'
@@ -49,16 +56,18 @@ const END = 'ml-auto flex shrink-0 items-center gap-1.5'
 /**
  * The icon of each status (D8-13, issue #159): a draft is being written, a frozen Spec is the
  * success one, a Spec a build has taken on is being built in the running colour, and one taken
- * back is the quiet one. The word is what the tooltip and the accessible name say.
+ * back is the quiet one. The word is what the tooltip and the accessible name say. A Spec not
+ * created yet wears the dashed circle of a thing that is not there (issue #198).
  */
 const STATUS_ICON: Record<
-  SpecStatus,
+  SpecStatus | 'provisional',
   { Icon: FunctionComponent<IconProps>; word: string; tone: string }
 > = {
   draft: { Icon: IconPencil, word: 'Draft', tone: 'text-muted-foreground' },
   ready: { Icon: IconCircleCheck, word: 'Ready', tone: 'text-success' },
   in_progress: { Icon: IconHammer, word: 'Building', tone: 'text-warning' },
   cancelled: { Icon: IconCircleX, word: 'Cancelled', tone: 'text-muted-foreground' },
+  provisional: { Icon: IconCircleDashed, word: 'Not created yet', tone: 'text-muted-foreground' },
 }
 
 export interface SpecHeadProps {
@@ -78,6 +87,11 @@ export interface SpecHeadProps {
   onRework: () => void
   /** Folds the panel to its band; the button is drawn only when this is given. */
   onFold?: (() => void) | undefined
+  /**
+   * Whether the Spec is only provisional (issue #198): no key yet, a title that is the request's
+   * until the agent proposes one, and no type until then.
+   */
+  provisional?: boolean | undefined
 }
 
 export function SpecHead({
@@ -91,14 +105,19 @@ export function SpecHead({
   onPickRevision,
   onRework,
   onFold,
+  provisional = false,
 }: SpecHeadProps): ReactNode {
   const ready = status === 'ready'
   const TypeIcon = SPEC_TYPE_ICONS[type]
-  const { Icon: StatusIcon, word, tone } = STATUS_ICON[status]
-  const reworkable = ready && !superseded
+  const { Icon: StatusIcon, word, tone } = STATUS_ICON[provisional ? 'provisional' : status]
+  const reworkable = ready && !superseded && !provisional
   return (
     <div className={HEAD}>
-      <span className={KEY}>{specKey}</span>
+      {provisional ? (
+        <span className={NO_KEY}>No key yet</span>
+      ) : (
+        <span className={KEY}>{specKey}</span>
+      )}
       <Tooltip label={word}>
         <i
           role="img"
@@ -110,8 +129,12 @@ export function SpecHead({
           <StatusIcon size="sm" aria-hidden="true" />
         </i>
       </Tooltip>
-      <h2 className={TITLE}>{title}</h2>
-      <Badge icon={<TypeIcon size="sm" aria-hidden="true" />}>{type}</Badge>
+      <h2 className={provisional ? PROVISIONAL_TITLE : TITLE}>{title}</h2>
+      {provisional ? (
+        <Badge>provisional</Badge>
+      ) : (
+        <Badge icon={<TypeIcon size="sm" aria-hidden="true" />}>{type}</Badge>
+      )}
       {(revisions.length > 1 || reworkable || onFold !== undefined) && (
         <span className={END}>
           {revisions.length > 1 && (

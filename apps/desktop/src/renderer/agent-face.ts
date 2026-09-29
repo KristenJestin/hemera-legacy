@@ -3,6 +3,8 @@ import type { SessionEntry } from '@hemera/ipc'
 import type { FaceState } from '@hemera/ui'
 import { z } from 'zod'
 
+import type { NoticeKind } from './notices.ts'
+
 /**
  * Which face an agent's work wears (issue #140): read off the entries of its thread, the way the
  * row above the box reads what the turn is doing.
@@ -30,6 +32,8 @@ const MARK_FACES: Readonly<Record<ToolMark, FaceState>> = {
   'read-spec': 'reading',
   'write-spec': 'writing',
   'propose-spec': 'writing',
+  'read-setup': 'reading',
+  'propose-setup': 'writing',
 }
 
 /**
@@ -66,6 +70,26 @@ export function callFaceOf(entry: SessionEntry): FaceState {
   if (named !== null) return MARK_FACES[TOOL_LABELS[named].mark]
   const kind = kindOf(entry)
   return (kind === null ? undefined : KIND_FACES.get(kind)) ?? 'running'
+}
+
+/**
+ * The face the row wears while the Session's notices hold something of a kind (issue #140).
+ *
+ * A permission and a question are the two things the face has an expression for. A proposal —
+ * a command for the catalogue, a change to the Project's setup, a Spec to start — is something the
+ * agent wants to do and asks leave for, taken or left like a permission: it wears `permission`.
+ */
+const NOTICE_FACES: Readonly<Record<NoticeKind, FaceState>> = {
+  permission: 'permission',
+  question: 'question',
+  spec: 'permission',
+  proposal: 'permission',
+  setup: 'permission',
+}
+
+/** The face of what waits for the reader in the Session's notices, by its kind. */
+export function noticeFaceOf(kind: NoticeKind): FaceState {
+  return NOTICE_FACES[kind]
 }
 
 /**

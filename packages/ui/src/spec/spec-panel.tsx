@@ -32,10 +32,9 @@ import { WorkspaceActions, type WorkspaceActionsProps } from './workspace-action
  * the window: on its rim the head — the key, the title, the status, the revisions, `Rework` on a
  * ready Spec and the fold chevron — then the body, which is the Spec as one column read from top
  * to bottom, each phase under a heading that sticks while it is read (`spec-column.tsx`), and on
- * the rim again one footer across the panel: `Mark ready` on a draft, quiet until the agent has
- * confirmed the Spec complete and primary from then on, and once the Spec is ready the build's
- * actions in its place, until it is reworked. No readiness is drawn (issue #135): what the draft
- * lacks is the agent's to say, and `Mark ready`'s to refuse with.
+ * the rim again one footer across the panel: on a draft, `Mark ready` as the primary action once
+ * the whole gate passes, and nothing until then (issue #209); once the Spec is ready, the build's
+ * actions in its place, until it is reworked.
  *
  * The two trade places by a swap (the `swap` kind of the preset). Opening, the small frame slides
  * out by the window's edge and fades, and a beat later, while it is still going, the panel slides
@@ -299,34 +298,36 @@ export function SpecPanel({
   // became of it is said beside `Mark ready`, never in its place, and offers nothing to start.
   const buildable = spec.replacedBy === undefined && spec.status !== 'draft'
   const launch = build?.launch ?? null
-  // `Mark ready` is offered on the current revision of a draft, whatever it holds: never disabled,
-  // what the Spec still lacks is what the engine refuses it with (issue #135). It turns primary
-  // once the whole gate passes — the agent's attestation on the content the Spec is at now among
-  // it (D7-10) — and stays quiet before (issue #150): an attestation given with a phase open or a
-  // blocking question raised is a press the engine refuses.
-  const markable = spec.status === 'draft' && spec.replacedBy === undefined
+  // `Mark ready` is offered on the current revision of a draft once the whole gate passes — the
+  // agent's attestation on the content the Spec is at now among it (D7-10) — as the primary
+  // action. Before, a press could only be refused, and the footer shows nothing (issue #209).
+  const markable =
+    spec.status === 'draft' && spec.replacedBy === undefined && spec.provisional !== true
   const confirmed = spec.readiness.checks.every((check) => check.passed)
+  const draftLaunch =
+    build === undefined || launch === null ? null : { ...build, onRetry: undefined }
   const foot: FootContent | null =
     buildable && build !== undefined
       ? { kind: 'build', build }
-      : markable
+      : markable && (confirmed || draftLaunch !== null || spec.readiness.refused !== undefined)
         ? {
             kind: 'ready',
             confirmed,
             refused: spec.readiness.refused,
             onMarkReady,
-            launch:
-              build === undefined || launch === null ? null : { ...build, onRetry: undefined },
+            launch: draftLaunch,
           }
         : null
 
   // The small frame leaves at once, and comes back a beat after the panel started leaving.
   const frameMoves = folded ? onTheBeat(fade) : fade
   const away = slide('stage').enter
+  // A provisional Spec has no key to be named by (issue #198).
+  const named = spec.provisional === true ? 'Provisional Spec' : `Spec ${spec.key}`
 
   return (
     <>
-      <section ref={dock} aria-label={`Spec ${spec.key}`} className={DOCK}>
+      <section ref={dock} aria-label={named} className={DOCK}>
         <div aria-hidden="true" className="spec-slot shrink-0" />
         <div className={CLIP}>
           {/* Mounted whether the Spec is folded or not, so that an unfold starts moving on the
@@ -352,6 +353,7 @@ export function SpecPanel({
                 onPickRevision={onPickRevision}
                 onRework={() => setReworking(true)}
                 onFold={() => fold(true, true)}
+                provisional={spec.provisional}
               />
               {spec.replacedBy !== undefined && (
                 // The one line under the head, and only for an older revision: where the phases
@@ -384,7 +386,7 @@ export function SpecPanel({
         >
           <div className="pointer-events-auto">
             <SpecFrame
-              specKey={spec.key}
+              specKey={spec.provisional === true ? 'the provisional Spec' : spec.key}
               groups={groups}
               writing={spec.focus}
               onUnfold={(phase) => fold(false, true, phase)}
@@ -411,7 +413,7 @@ type FootContent =
   | { kind: 'build'; build: WorkspaceActionsProps }
   | {
       kind: 'ready'
-      /** Whether the whole gate passes, the agent's attestation among it: `Mark ready` primary. */
+      /** Whether the whole gate passes, the agent's attestation among it: `Mark ready` offered. */
       confirmed: boolean
       /** What the last `Mark ready` was refused with. */
       refused: string | undefined
@@ -421,9 +423,9 @@ type FootContent =
     }
 
 /**
- * The footer of the panel (issues #135, #150): one across the panel, on the rim under the body,
- * what the Spec offers at its end — `Mark ready` on a draft, with what it was refused with beside
- * it; once ready, `Use an existing Workspace` and `Prepare and start the build`, then where the
+ * The footer of the panel (issues #135, #150, #205, #209): one across the panel, on the rim under
+ * the body, what the Spec offers at its end — on a draft, `Mark ready` once it can be pressed and
+ * nothing until then; once ready, `Use an existing Workspace` and `Prepare and start the build`, then where the
  * launch stands.
  *
  * What it holds arrives and leaves on the `expand` and `collapse` kinds: its height is what makes
@@ -459,14 +461,12 @@ function SpecFoot({ content }: { content: FootContent | null }): ReactNode {
                     {content.refused}
                   </p>
                 )}
-                <Button
-                  variant={content.confirmed ? 'primary' : 'secondary'}
-                  size="sm"
-                  onClick={content.onMarkReady}
-                >
-                  <IconCheck size="sm" aria-hidden="true" />
-                  Mark ready
-                </Button>
+                {content.confirmed && (
+                  <Button variant="primary" size="sm" onClick={content.onMarkReady}>
+                    <IconCheck size="sm" aria-hidden="true" />
+                    Mark ready
+                  </Button>
+                )}
               </>
             )}
           </Leaving>

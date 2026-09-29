@@ -33,10 +33,12 @@ import { fakeWorkspace } from './agent/install.ts'
 import { AGENT, ANSWERS, COMPLETE, COMPLETED, MODELS, PROPOSAL, PROPOSE } from './agent/script.ts'
 import {
   addProject,
+  awaitsRecord,
   awaits,
   choose,
   control,
   fill,
+  openNotices,
   press,
   pressIn,
   pressTab,
@@ -156,6 +158,18 @@ async function workspaceOf(key: string) {
 }
 
 /** The build Sessions of a Spec: the engine's list, narrowed to the mission and the Spec. */
+/**
+ * The briefs the build Session of a Spec was handed, as its thread keeps them: the thread draws
+ * none of them (issue #205), and the Session details' Context tab lists them.
+ */
+async function briefsOf(key: string): Promise<string[]> {
+  const [build] = await buildsOf(key)
+  return await browser.execute(async (sessionId: string) => {
+    const read = await window.hemera.invoke('sessions.read', { sessionId })
+    return read.entries.filter((entry) => entry.kind === 'mission_brief').map((one) => one.body)
+  }, build?.id ?? '')
+}
+
 async function buildsOf(key: string) {
   const project = await projectId()
   const specId = await specIdOf(key)
@@ -194,9 +208,10 @@ async function writeSpec(asked: string, key: string): Promise<void> {
   await write(asked)
   await press('Start chat')
   await awaits(ANSWERS[0])
-  await awaits('Create the Spec')
-  await pressIn(PROPOSAL_CARD, 'Create')
-  await awaits(`Created ${key}`)
+  // The proposal waits among the Session's notices, closed until pressed (issue #237).
+  await openNotices('Spec proposed')
+  await pressIn(PROPOSAL_CARD, 'Start')
+  await awaitsRecord(`Spec proposed, ${key} `)
 
   await unfoldSpec(key)
   // The `shape` phase cannot finish without these two, and this fake agent writes neither: they
@@ -237,15 +252,15 @@ async function writeSection(key: string, name: 'problem' | 'scope', body: string
 }
 
 /**
- * Presses the panel's `Mark ready` until the engine accepts it, and says what the panel and the
- * thread hold when it never does: `Mark ready` is offered on every draft (issue #135), the gate
- * is the engine's, and a write it refused is read in the thread.
+ * Presses the panel's `Mark ready` once it is offered, until the engine accepts it, and says what
+ * the panel and the thread hold when it never does: `Mark ready` is offered once the gate passes
+ * (issue #205), and a write the engine refused is read in the thread.
  */
 async function markedReady(key: string): Promise<void> {
   const until = Date.now() + 30_000
   while (Date.now() < until) {
-    // oxlint-disable-next-line no-await-in-loop -- pressed again until the engine accepts it
-    await pressIn(panelOf(key), 'Mark ready')
+    // oxlint-disable-next-line no-await-in-loop -- pressed once offered, until the engine accepts it
+    if ((await control('Mark ready')) !== null) await pressIn(panelOf(key), 'Mark ready')
     // oxlint-disable-next-line no-await-in-loop -- the pause the engine answers in
     await browser.pause(1000)
     // oxlint-disable-next-line no-await-in-loop -- read after each press
@@ -380,15 +395,16 @@ describe('A Spec’s build waits for the Workspace prepared for it', () => {
     await browser.pause(1500)
 
     // The panel belongs to the Session that defines the Spec, and this one is the build's: it has
-    // none, its thread holds the brief alone, and not the words its writer was asked with.
+    // none, and its thread holds not the words its writer was asked with. Nor does it draw the
+    // brief (issue #205): the Session details list it.
     expect(await region(panelOf(BUILT))).toBe('')
-    expect(await region(THREAD)).toContain('What the agent was told')
+    expect(await region(THREAD)).not.toContain('What the agent was told')
     expect(await region(THREAD)).not.toContain(ASKED_BUILT)
 
     // The brief is the Spec as it stood on the revision the launch names.
-    await pressIn(THREAD, 'What the agent was told')
-    await browser.pause(600)
-    expect(await region(THREAD)).toContain(PROPOSAL.title)
+    const briefs = await briefsOf(BUILT)
+    expect(briefs).toHaveLength(1)
+    expect(briefs[0]).toContain(PROPOSAL.title)
   })
 
   it('keeps Open once a Rework takes the Spec on', async () => {
@@ -414,7 +430,7 @@ describe('A Spec’s build waits for the Workspace prepared for it', () => {
     await pressIn(BUILD_GROUP, 'Open')
     await browser.pause(1500)
     expect(await region(panelOf(BUILT))).toBe('')
-    expect(await region(THREAD)).toContain('What the agent was told')
+    expect(await briefsOf(BUILT)).toHaveLength(1)
   })
 })
 
@@ -465,5 +481,35 @@ describe('A Rework takes a launch back where it waits', () => {
     expect(await buildsOf(TAKEN)).toEqual([])
     expect((await stateOf(TAKEN)).launch?.state).toBe('cancelled')
     expect(await region(panelOf(TAKEN))).toContain('Cancelled by the Rework')
+  })
+})
+
+describe('A Spec whose launch a Rework cancelled is launched again by hand', () => {
+  it('marks the new revision ready, starts the build, and opens its Session', async () => {
+    // The new revision is attested and frozen as the first one was; the launch the Rework took
+    // back is still said, and the Workspace the Spec is set on is offered to start in.
+    await write(COMPLETE)
+    await press('Send')
+    await browser.pause(1500)
+    await markedReady(TAKEN)
+    await awaits('Cancelled by the Rework')
+    await pressIn(BUILD_GROUP, 'Start the build')
+    await awaits('Build started', 60_000)
+
+    const built = await stateOf(TAKEN)
+    expect(built.revision).toBe(2)
+    expect(built.launch?.state).toBe('started')
+    expect(built.launch?.revisionId).toBe(built.revisionId)
+    const sessions = await buildsOf(TAKEN)
+    expect(sessions).toHaveLength(1)
+    expect(sessions[0]?.id).toBe(built.launch?.sessionId)
+
+    await pressIn(BUILD_GROUP, 'Open')
+    await browser.pause(1500)
+    expect(await region(panelOf(TAKEN))).toBe('')
+    // Its brief is the Spec as it stood on the revision the new launch names.
+    const briefs = await briefsOf(TAKEN)
+    expect(briefs).toHaveLength(1)
+    expect(briefs[0]).toContain(PROPOSAL.title)
   })
 })

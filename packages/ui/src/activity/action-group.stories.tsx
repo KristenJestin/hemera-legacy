@@ -4,7 +4,12 @@ import { expect, userEvent, waitFor, within } from 'storybook/test'
 
 import { AgentText } from '../message/agent-text.tsx'
 import { ActionGroup } from './action-group.tsx'
+import { DecisionSummary } from '../approval/decision-summary.tsx'
+import { SpecQuestionRecord } from '../spec/spec-question.tsx'
+import { CREDIT_NOTES } from '../spec/spec-fixtures.ts'
+import { CallOutcome } from './call-outcome.tsx'
 import { HemeraToolCall } from './hemera-tool-call.tsx'
+import { TerminalOutput } from './terminal-output.tsx'
 import { ThoughtBlock } from './thought-block.tsx'
 import { ToolCallCard } from './tool-call-card.tsx'
 
@@ -61,7 +66,7 @@ function rows(failed = false) {
 }
 
 const meta = {
-  tags: ['autodocs'],
+  tags: ['autodocs', 'updated'],
   title: 'Blocks/Activity/ActionGroup',
   component: ActionGroup,
   parameters: { layout: 'padded' },
@@ -247,5 +252,75 @@ export const InTheThread: Story = {
     const canvas = within(canvasElement)
     await expect(canvas.getAllByRole('button', { name: /actions/ })).toHaveLength(1)
     await expect(canvas.getByText(/each line needs its/)).toBeVisible()
+  },
+}
+
+/**
+ * A turn that asked (review of #250): a read, a one-off that waited on a permission and ran, a
+ * command proposed for the catalogue, and a question of the Spec — one group. Each call is one
+ * entry carrying what became of it: the run's dot and `exit 0` and the shield of the answer on the
+ * run's line, the bookmark of the decision on the proposal's. Opened, the run says the answer and
+ * what it printed; the question, what was chosen.
+ */
+export const ATurnThatAsked: Story = {
+  args: { count: 3, status: 'completed', latest: 'Propose command v2 format:check' },
+  render: (args) => (
+    <ActionGroup {...args}>
+      <ToolCallCard
+        title="Read package.json"
+        kind="read"
+        status="completed"
+        subject={{ text: 'package.json' }}
+      />
+      <HemeraToolCall
+        tool="commands_run"
+        label="Run command"
+        mark="run-command"
+        subject={{ text: 'bash -c "echo test de permission && date"' }}
+        status="completed"
+        summary="bash is exited"
+        outcome={<CallOutcome permission="allowed" run={{ state: 'finished', exitCode: 0 }} />}
+      >
+        <DecisionSummary answer="Allow once" at="10:42" />
+        <TerminalOutput
+          plain
+          terminalId="run-bash"
+          output={'test de permission\nMon Sep 29 10:42'}
+          released
+        />
+      </HemeraToolCall>
+      <HemeraToolCall
+        tool="commands_propose"
+        label="Propose command"
+        mark="propose-command"
+        subject={{ text: 'v2 format:check' }}
+        status="completed"
+        summary="proposed v2 format:check for the catalogue"
+        outcome={<CallOutcome proposal="accepted" />}
+      >
+        <p className="font-mono text-xs">./v2 $ bun run format:check</p>
+      </HemeraToolCall>
+      <SpecQuestionRecord question={{ ...CREDIT_NOTES, answer: { optionId: 'negative' } }} />
+    </ActionGroup>
+  ),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    // One group for the whole turn, the question and the outcomes inside it.
+    const group = canvas.getByRole('button', { name: /3 actions/ })
+    await userEvent.click(group)
+    const run = await canvas.findByRole('button', { name: /^Hemera Run command/ })
+    // The call carries what became of it, on its own line: one entry, not three.
+    await expect(within(run).getByRole('img', { name: 'allowed once' })).toBeInTheDocument()
+    await expect(within(run).getByText('exit 0')).toBeVisible()
+    await expect(
+      within(canvas.getByRole('button', { name: /^Hemera Propose command/ })).getByRole('img', {
+        name: 'added to the catalogue',
+      }),
+    ).toBeInTheDocument()
+    await userEvent.click(run)
+    await expect(await canvas.findByText('Allow once')).toBeVisible()
+    await expect(canvas.getByRole('log', { name: 'Output of run-bash' })).toBeVisible()
+    // An answered question keeps what was chosen, read once the group is open.
+    await expect(canvas.getByText('A, Negative rows in the same file')).toBeVisible()
   },
 }

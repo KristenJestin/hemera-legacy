@@ -872,6 +872,17 @@ export function Application() {
     [shell.activeProjectId],
   )
 
+  /**
+   * Renames a Session in its row of the sidebar, where its title lives (review of #250): the row
+   * turns into its field, the sidebar unfolding first when it is folded to its rail.
+   */
+  const startRenaming = (id: string): void => {
+    if (shell.collapsed) setCollapsed(false)
+    setNaming(id)
+  }
+  /** The Session whose row is its title field, while one is. */
+  const renaming = sessions.sessions.find((one) => one.id === naming)
+
   /** Puts a Session away, which takes the window off it when it was the one on screen. */
   const archive = useCallback(
     async (session: Session) => {
@@ -998,10 +1009,17 @@ export function Application() {
       settingsActive={place === 'settings'}
       sessions={shellSessions}
       onNewSession={() => void newSession()}
-      onRenameSession={(id) => {
-        setNaming(id)
-        goTo(id)
-      }}
+      onRenameSession={startRenaming}
+      // The row being renamed turns into its title field, where the title lives (review of #250).
+      renamingSession={
+        renaming === undefined
+          ? null
+          : {
+              id: renaming.id,
+              onCommit: (title) => void renameTo(renaming, title),
+              onCancel: () => setNaming(null),
+            }
+      }
       onArchiveSession={(id) => {
         const one = sessions.sessions.find((session) => session.id === id)
         if (one !== undefined) void archive(one)
@@ -1312,7 +1330,6 @@ export function Application() {
           // rather than saying it is empty, which is a thing it does not know yet.
           loaded={sessions.open === open.id && sessions.loaded}
           now={Date.now()}
-          editing={naming === open.id}
           // A prompt, a Stop or a decision the engine refused is said here too: the composer does
           // not wait for a turn, and a refusal nobody draws is a message that just goes unanswered.
           refusal={sessions.refusal ?? agents.refusal}
@@ -1326,9 +1343,7 @@ export function Application() {
           onStop={() => void stopTurn(open.id)}
           onDecide={(toolCallId, option) => void decide(open.id, toolCallId, option.optionId)}
           onChooseOption={(optionId, value) => void chooseOption(open.id, optionId, value)}
-          onRename={(title) => void renameTo(open, title)}
-          onStartEditing={() => setNaming(open.id)}
-          onCancelEditing={() => setNaming(null)}
+          onRename={() => startRenaming(open.id)}
           onArchive={() => void archive(open)}
           onSearchFiles={async (query: string) => await searchIn(open.workspaceId, query)}
           onPickFiles={async () => await pickIn(open.workspaceId)}

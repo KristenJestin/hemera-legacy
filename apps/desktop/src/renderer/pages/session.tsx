@@ -652,26 +652,26 @@ export function SessionPage({
     {
       kind: 'permission',
       label: 'Permissions',
-      icon: <IconShield size="sm" aria-hidden="true" />,
+      icon: <IconShield size="md" aria-hidden="true" />,
       urgent: true,
       items: itemsOf('permission'),
     },
     {
       kind: 'question',
       label: 'Questions',
-      icon: <IconMessageQuestion size="sm" aria-hidden="true" />,
+      icon: <IconMessageQuestion size="md" aria-hidden="true" />,
       items: itemsOf('question'),
     },
     {
       kind: 'spec',
       label: 'Spec proposed',
-      icon: <IconFlag size="sm" aria-hidden="true" />,
+      icon: <IconFlag size="md" aria-hidden="true" />,
       items: itemsOf('spec'),
     },
     {
       kind: 'proposal',
       label: 'Proposed commands',
-      icon: <IconBookmarkPlus size="sm" aria-hidden="true" />,
+      icon: <IconBookmarkPlus size="md" aria-hidden="true" />,
       items: itemsOf('proposal'),
       actions:
         proposalsWaiting.length > 1 ? (

@@ -152,7 +152,7 @@ const acceptAll = fn()
 export const InTheNotices: Story = {
   decorators: [
     (Story) => (
-      <div className="flex h-96 items-end justify-center">
+      <div className="flex h-screen items-end justify-center">
         <Story />
       </div>
     ),

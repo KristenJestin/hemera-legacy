@@ -152,7 +152,7 @@ export function setupTools(needs: SetupToolsNeeds) {
       for (const path of project.repositories) {
         const state = states.find((one) => one.relativePath === path)
         const git =
-          state === undefined
+          state === undefined || state.git === null
             ? 'Git state not read'
             : state.git.ok
               ? `on ${state.git.branch} at ${state.git.commit}, ${state.git.staged} staged, ${state.git.unstaged} changed, ${state.git.untracked} untracked`

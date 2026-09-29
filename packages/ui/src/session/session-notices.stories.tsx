@@ -4,11 +4,18 @@ import { expect, fn, screen, userEvent, waitFor, within } from 'storybook/test'
 
 import { Composer } from '../composer/composer.tsx'
 import { CommandProposal, CommandProposalRecord } from '../activity/command-proposal.tsx'
+import { SetupProposal, SetupProposalRecord } from '../activity/setup-proposal.tsx'
 import type { CommandType } from '../activity/command-type.ts'
 import { PermissionRecord, PermissionRequest } from '../approval/permission-request.tsx'
 import { Button } from '../components/button/button.tsx'
 import { TooltipProvider } from '../components/tooltip/tooltip.tsx'
-import { IconBookmarkPlus, IconFlag, IconMessageQuestion, IconShield } from '../icons.ts'
+import {
+  IconBookmarkPlus,
+  IconFlag,
+  IconListCheck,
+  IconMessageQuestion,
+  IconShield,
+} from '../icons.ts'
 import { AgentText } from '../message/agent-text.tsx'
 import { CreateSpecProposal, SpecProposalRecord } from '../spec/create-spec-proposal.tsx'
 import type { SpecQuestionView } from '../spec/model.ts'
@@ -32,6 +39,7 @@ type Waiting =
   | { id: string; kind: 'proposal'; name: string; line: string; type: CommandType }
   | { id: string; kind: 'spec'; title: string }
   | { id: string; kind: 'question'; question: SpecQuestionView }
+  | { id: string; kind: 'setup'; verb: string; subject: string; line?: string }
 
 const ASK: Waiting = {
   id: 'ask',
@@ -57,6 +65,25 @@ const SIX: Waiting[] = [
     type: 'configure',
   },
 ]
+
+/** The changes one call of the agent proposed to the Project's setup (#218). */
+const SETUP: Waiting[] = [
+  { id: 'front', kind: 'setup', verb: 'Add repository', subject: './sources/front' },
+  { id: 'web', kind: 'setup', verb: 'Add service', subject: 'web', line: 'pnpm --filter web dev' },
+  { id: 'key', kind: 'setup', verb: 'Add variable', subject: 'API_KEY' },
+]
+
+const SETUP_WHY = 'The README says how the Project is run, and you asked me to set it up.'
+
+/** The setup's details, as the page hands them: a variable says it is set, never its value. */
+function setupDetailsOf(waiting: { verb: string }) {
+  return waiting.verb === 'Add variable'
+    ? [
+        { label: 'Scope', value: 'the Project' },
+        { label: 'Value', value: 'set, not shown' },
+      ]
+    : []
+}
 
 const SPEC: Waiting = { id: 'spec', kind: 'spec', title: 'Export the invoices as CSV' }
 
@@ -113,6 +140,18 @@ function Answer({
           onDecline={answer}
         />
       )
+    case 'setup':
+      return (
+        <SetupProposal
+          verb={waiting.verb}
+          subject={waiting.subject}
+          line={waiting.line}
+          details={setupDetailsOf(waiting)}
+          why={SETUP_WHY}
+          onAccept={answer}
+          onDecline={answer}
+        />
+      )
     case 'question':
       return (
         <SpecQuestion
@@ -161,6 +200,17 @@ function Kept({ waiting, answered }: { waiting: Waiting; answered: boolean }): R
           specKey={answered ? 'ATL-7' : undefined}
         />
       )
+    case 'setup':
+      return (
+        <SetupProposalRecord
+          verb={waiting.verb}
+          subject={waiting.subject}
+          line={waiting.line}
+          details={setupDetailsOf(waiting)}
+          why={SETUP_WHY}
+          state={answered ? 'accepted' : 'pending'}
+        />
+      )
     case 'question':
       return (
         <SpecQuestionRecord
@@ -177,13 +227,14 @@ function Kept({ waiting, answered }: { waiting: Waiting; answered: boolean }): R
 function groupsOf(
   waiting: readonly Waiting[],
   onAnswer: (id: string) => void,
-  onAcceptAll: () => void,
+  onAcceptAll: (kind: Waiting['kind']) => void,
 ): NoticeGroup[] {
   const of = (kind: Waiting['kind']) =>
     waiting
       .filter((one) => one.kind === kind)
       .map((one) => ({ id: one.id, content: <Answer waiting={one} onAnswer={onAnswer} /> }))
   const proposals = of('proposal')
+  const setup = of('setup')
   return [
     {
       kind: 'permission',
@@ -219,8 +270,22 @@ function groupsOf(
       items: proposals,
       actions:
         proposals.length > 1 ? (
-          <Button variant="link" size="sm" onClick={onAcceptAll}>
+          <Button variant="link" size="sm" onClick={() => onAcceptAll('proposal')}>
             Add all
+          </Button>
+        ) : undefined,
+    },
+    {
+      kind: 'setup',
+      label: 'Setup changes',
+      title: 'Set up the Project',
+      tone: 'build',
+      icon: <IconListCheck size="md" aria-hidden="true" />,
+      items: setup,
+      actions:
+        setup.length > 1 ? (
+          <Button variant="link" size="sm" onClick={() => onAcceptAll('setup')}>
+            Accept all
           </Button>
         ) : undefined,
     },
@@ -269,8 +334,8 @@ function Bench({ waiting: first, script = [], defaultOpen, onAnswer }: BenchProp
     onAnswer(id)
     setWaiting((before) => before.filter((one) => one.id !== id))
   }
-  const acceptAll = (): void => {
-    setWaiting((before) => before.filter((one) => one.kind !== 'proposal'))
+  const acceptAll = (kind: Waiting['kind']): void => {
+    setWaiting((before) => before.filter((one) => one.kind !== kind))
   }
   return (
     <TooltipProvider>
@@ -598,5 +663,43 @@ export const AnsweredInOwnWords: Story = {
     })
     // The panel is still open, on what is left.
     await expect(screen.getByRole('dialog', { name: 'Waiting for your answer' })).toBeVisible()
+  },
+}
+
+/**
+ * The Project's setup, proposed by the agent in one call (#218): its own tile and count on the
+ * pill, a row a change inside, and Accept all as the group's last row. Accepted, the three leave
+ * the notices together, and their records in the thread turn their dots; what else waits stays.
+ */
+export const SetupChanges: Story = {
+  args: { waiting: [ASK, ...SETUP] },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const pill = await canvas.findByRole('button', {
+      name: 'Waiting for your answer: Permissions 1, Setup changes 3',
+    })
+    await userEvent.click(pill)
+    const panel = await screen.findByRole('dialog', { name: 'Waiting for your answer' })
+    await expect(
+      within(panel)
+        .getAllByRole('region')
+        .map((group) => group.getAttribute('aria-label')),
+    ).toEqual(['Permissions', 'Setup changes'])
+    const setup = within(panel).getByRole('region', { name: 'Setup changes' })
+    await expect(within(setup).getAllByRole('button', { name: 'Accept' })).toHaveLength(3)
+    // Unfolded, the change says what accepting it does, in the name's place.
+    const web = within(setup).getByRole('group', { name: 'Proposed change Add service web' })
+    await userEvent.click(within(web).getByRole('button', { name: 'Show the whole line' }))
+    await expect(await within(web).findByText('Add service')).toBeVisible()
+    await userEvent.click(within(setup).getByRole('button', { name: 'Accept all' }))
+    await waitFor(() => {
+      expect(within(panel).queryByRole('region', { name: 'Setup changes' })).toBeNull()
+    })
+    await expect(
+      canvas.getByRole('group', { name: 'Proposed change Add variable API_KEY, applied' }),
+    ).toBeVisible()
+    await expect(
+      canvas.getByRole('button', { name: 'Waiting for your answer: Permissions 1' }),
+    ).toBeVisible()
   },
 }

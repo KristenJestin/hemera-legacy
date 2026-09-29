@@ -194,6 +194,8 @@ function headingOf(item: GoingOnItem): Heading {
 
 export interface GoingOnDetailsProps {
   item: GoingOnItem
+  /** Whether the dialog is open; drawn closed, it plays its way in and out. */
+  open?: boolean | undefined
   onClose: () => void
   onStop: (run: GoingOnRun) => void
   onOpenUrl: (url: string) => void
@@ -202,6 +204,7 @@ export interface GoingOnDetailsProps {
 
 export function GoingOnDetails({
   item,
+  open = true,
   onClose,
   onStop,
   onOpenUrl,
@@ -211,7 +214,7 @@ export function GoingOnDetails({
     <Dialog
       size="wide"
       {...headingOf(item)}
-      open
+      open={open}
       onOpenChange={(next) => {
         if (!next) onClose()
       }}

@@ -44,7 +44,7 @@ import { DecisionSummary } from './decision-summary.tsx'
 const INTENT = 'text-sm text-muted-foreground'
 
 /** What the call is about, on the head: the face a path and a command are written in. */
-const SUBJECT = 'min-w-0 truncate font-mono text-xs'
+const SUBJECT = 'font-mono text-xs'
 
 /** The parameters that decide the answer: a label, and the value it holds. */
 const PARAMETERS = 'flex flex-wrap gap-x-3 gap-y-1 text-xs'
@@ -173,24 +173,28 @@ export function PermissionRequest({
     <NoticeRow
       name={`Permission for ${label ?? toolName}`}
       mono={what === undefined}
+      unfolds
       head={
         what === undefined ? (
           (command ?? toolName)
         ) : (
-          <span className="flex min-w-0 items-center gap-2">
-            <span className="shrink-0 font-medium">{what}</span>
-            {about !== undefined && (
-              <span className={SUBJECT} title={about}>
-                {about}
-              </span>
-            )}
-          </span>
+          <>
+            <span className="font-medium">{what}</span>{' '}
+            <span className={SUBJECT} title={about}>
+              {about ?? command}
+            </span>
+          </>
         )
       }
-      line={command}
       place={
-        parameters === undefined || parameters.length === 0 ? undefined : (
-          <PermissionParameters parameters={parameters} />
+        (parameters === undefined || parameters.length === 0) && about === undefined ? undefined : (
+          <>
+            <PermissionParameters parameters={parameters} />
+            {/* The path as it resolves, when the text says it as the agent named it. */}
+            {about !== undefined && command !== undefined && (
+              <span className="font-mono">{command}</span>
+            )}
+          </>
         )
       }
       refuse={refusal === undefined ? undefined : named(refusal)}

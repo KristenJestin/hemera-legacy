@@ -37,6 +37,7 @@ const SERVICE = {
 const VARIABLE = {
   verb: 'Add variable',
   subject: 'DATABASE_URL',
+  line: undefined,
   details: [
     { label: 'Scope', value: 'the Project' },
     { label: 'Value', value: 'set, not shown' },
@@ -48,6 +49,7 @@ const REPOSITORY = {
   verb: 'Add repository',
   subject: './sources/web',
   mono: true,
+  line: undefined,
   details: [],
   why: 'The front end lives in its own repository beside the API.',
 }

@@ -40,6 +40,11 @@ export default meta
 
 type Story = StoryObj<typeof meta>
 
+/** Unfolds the whole line and where it runs, as the reader does with the row's chevron. */
+async function unfold(canvasElement: HTMLElement): Promise<void> {
+  await userEvent.click(within(canvasElement).getByRole('button', { name: 'Show the whole line' }))
+}
+
 /** A change about to be made, with the parameters that decide the answer. */
 export const AskForAnEdit: Story = {
   args: {
@@ -188,6 +193,7 @@ export const HemeraToolOutsideTheRoot: Story = {
   },
   play: async ({ canvasElement, args }) => {
     const canvas = within(canvasElement)
+    await unfold(canvasElement)
     // What the call is and what it is about, on one line; what accepting does is its group's.
     const head = canvas.getByText('Write file').parentElement
     await expect(head?.textContent).toBe('Write file../notes/todo.md')
@@ -250,6 +256,7 @@ export const OneOffInside: Story = {
   },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
+    await unfold(canvasElement)
     await expect(canvas.queryByText(/asks to/)).toBeNull()
     await expect(canvas.getByText('In')).toBeVisible()
     await expect(canvas.getByText('main')).toBeVisible()
@@ -269,6 +276,7 @@ export const OneOffInARepository: Story = {
   },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
+    await unfold(canvasElement)
     const repository = canvas.getByText('v2').closest('dd')
     // The repository wears its icon, as it does in the Project's settings.
     await expect(repository?.querySelector('svg')).not.toBeNull()
@@ -289,6 +297,7 @@ export const OneOffOutside: Story = {
   },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
+    await unfold(canvasElement)
     await expect(canvas.getByText('Outside the Workspace')).toBeVisible()
     await expect(canvas.getByText('/home/ana/notes')).toBeVisible()
   },
@@ -321,17 +330,22 @@ export const TheWholeLine: Story = {
   ],
   play: async ({ canvasElement, args }) => {
     const canvas = within(canvasElement)
-    const line = canvas.getByText(args.command ?? '')
-    // Whole: wrapped over several rows, nothing scrolled or cut.
-    await expect(line.scrollWidth).toBeLessThanOrEqual(line.clientWidth)
-    await expect(line.getBoundingClientRect().height).toBeGreaterThan(20)
-    // Said once: the line is not on the head too.
-    await expect(canvas.getAllByText(args.command ?? '')).toHaveLength(1)
+    const command = args.command ?? ''
+    // Closed, the row says the line once, on one line.
+    await expect(canvas.getAllByText(command)).toHaveLength(1)
     await expect(canvas.queryByText(/Waiting/)).toBeNull()
     await expect(canvas.queryByText(/asks/)).toBeNull()
-    await expect(canvas.getByText('api')).toBeVisible()
-    const answers = canvas.getAllByRole('button').map((one) => one.textContent)
+    const answers = canvas
+      .getAllByRole('button')
+      .map((one) => one.textContent)
+      .filter((text) => text !== '')
     await expect(answers).toEqual(['Refuse', 'Allow once'])
+    // Unfolded, the whole line, wrapped over several rows, nothing scrolled or cut, and where.
+    await unfold(canvasElement)
+    const line = await canvas.findByText(command, { selector: 'pre' })
+    await expect(line.scrollWidth).toBeLessThanOrEqual(line.clientWidth)
+    await expect(line.getBoundingClientRect().height).toBeGreaterThan(20)
+    await expect(canvas.getByText('api')).toBeVisible()
   },
 }
 

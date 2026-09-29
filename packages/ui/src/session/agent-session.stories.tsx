@@ -459,6 +459,7 @@ function Page({
                         title: 'Run once',
                         icon: <IconShield size="md" aria-hidden="true" />,
                         urgent: true,
+                        tone: 'warning',
                         items: [{ id: 'permission', content: ASKED }],
                       },
                     ]}

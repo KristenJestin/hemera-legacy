@@ -30,12 +30,14 @@ import { acpTracesLayer } from '#engine/agents/trace.ts'
 import { discoveryLayer } from '#engine/agents/discovery.ts'
 import type { FakeAgent } from '#engine/agents/fake.ts'
 import { heldWordsLayer } from '#engine/agents/held.ts'
+import { sessionModesLayer } from '#engine/agents/modes.ts'
 import { AgentNotices } from '#engine/agents/notices.ts'
 import { clockLayer, poolLayer } from '#engine/agents/pool.ts'
 import { runtimeLayer } from '#engine/agents/runtime.ts'
 import { Agents } from '#engine/agents/service.ts'
 import { StderrSink, hostProcessesLayer } from '#engine/agents/supervisor.ts'
 import { proposalsLayer } from '#engine/commands/proposals.ts'
+import { setupProposalsLayer } from '#engine/setup/proposals.ts'
 import { commandsLayer } from '#engine/commands/service.ts'
 import { contextLayer } from '#engine/context/service.ts'
 import { domainEventsLayer } from '#engine/domain-events.ts'
@@ -57,11 +59,9 @@ import { toolServerLayer } from '#engine/tools/server.ts'
 import { gitLayer } from '#engine/git.ts'
 import { hostLinks, preparationLayer } from '#engine/workspaces/preparation.ts'
 import { launchesLayer } from '#engine/workspaces/launches.ts'
-import { recipeLayer } from '#engine/workspaces/recipe.ts'
 import { variablesLayer } from '#engine/workspaces/variables.ts'
-import { WorkspacesRoot, workspacesLayer } from '#engine/workspaces/workspaces.ts'
 
-import { SHIPPED, VERSION, besideTheAgent, machine } from './application.ts'
+import { SHIPPED, VERSION, besideTheAgent, machine, setupPlaces } from './application.ts'
 
 /** A window over one engine: the bridge the stores talk through, and the way to close it. */
 export interface OpenWindow {
@@ -134,6 +134,7 @@ async function openOver(
     ran: (sessionId, run) => push({ event: 'run', sessionId, run }),
     workspace: (projectId, workspaceId) => push({ event: 'workspace', projectId, workspaceId }),
     launched: (specId, projectId) => push({ event: 'launch.changed', specId, projectId }),
+    agents: () => push({ event: 'agents.changed' }),
   })
   // Nothing here asks a registry or updates an agent: the Agents section's own suites do.
   const listed = Layer.succeed(Agents, {
@@ -149,6 +150,8 @@ async function openOver(
     Layer.provideMerge(toolPermissionsLayer),
     Layer.provideMerge(commandsLayer),
     Layer.provideMerge(variablesLayer),
+    // The Workspaces and the recipe, one instance the tools read and the window changes (#218).
+    Layer.provideMerge(setupPlaces(dataFolder, notices)),
   )
   const runtime = runtimeLayer.pipe(
     Layer.provideMerge(proposalsLayer),
@@ -176,6 +179,7 @@ async function openOver(
     Layer.provideMerge(lines),
     Layer.provide(poolLayer.pipe(Layer.provide(clockLayer))),
     Layer.provideMerge(heldWordsLayer),
+    Layer.provideMerge(sessionModesLayer),
     Layer.provide(agentDirectoriesLayer(dataFolder)),
     Layer.provide(acpTracesLayer(dataFolder)),
   )
@@ -185,8 +189,6 @@ async function openOver(
 
   // The Workspaces of the Projects, made under the data folder, over the machine's `git`.
   const workspaces = preparationLayer.pipe(
-    Layer.provideMerge(Layer.mergeAll(workspacesLayer, recipeLayer)),
-    Layer.provide(Layer.succeed(WorkspacesRoot, join(dataFolder, 'workspaces'))),
     Layer.provide(hostLinks),
     Layer.provide(gitLayer()),
     Layer.provideMerge(launches),
@@ -194,7 +196,10 @@ async function openOver(
     Layer.provide(runtime),
   )
 
-  const services = Layer.mergeAll(runtime, workspaces)
+  // What a human decides of the setup changes the agent proposed (#218).
+  const setup = setupProposalsLayer.pipe(Layer.provide(workspaces), Layer.provide(runtime))
+
+  const services = Layer.mergeAll(runtime, workspaces, setup)
 
   mkdirSync(dataFolder, { recursive: true })
   const scope = Effect.runSync(Scope.make())

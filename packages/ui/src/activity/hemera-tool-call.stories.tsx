@@ -19,7 +19,7 @@ import { HemeraToolCall, type HemeraToolMark } from './hemera-tool-call.tsx'
  */
 
 const meta = {
-  tags: ['autodocs', 'updated'],
+  tags: ['autodocs'],
   title: 'Blocks/Activity/HemeraToolCall',
   component: HemeraToolCall,
   parameters: { layout: 'padded' },
@@ -530,6 +530,8 @@ const CATALOGUE: readonly (readonly [string, string, HemeraToolMark, string | nu
   ['commands_output', 'Command output', 'command-output', 'check', 'Reading the output of check'],
   ['commands_propose', 'Propose command', 'propose-command', 'test', 'Proposing test'],
   ['project_get', 'Project', 'project', null, 'Reading the Project'],
+  ['setup_read', 'Project setup', 'read-setup', null, 'Reading the Project setup'],
+  ['setup_propose', 'Propose setup', 'propose-setup', null, 'Proposing 3 changes'],
   ['session_get', 'Session', 'session', null, 'Reading this Session'],
   ['spec_read', 'Read Spec', 'read-spec', 'HEM-7', 'Reading HEM-7'],
   ['spec_write', 'Write Spec', 'write-spec', 'scope', 'Writing the scope'],
@@ -537,8 +539,8 @@ const CATALOGUE: readonly (readonly [string, string, HemeraToolMark, string | nu
 ]
 
 /**
- * The catalogue as the thread reads it (recette 3 of 23 September 2026): fifteen tools, fifteen
- * marks and fifteen labels, and what each call is about where it is about something. A mark per
+ * The catalogue as the thread reads it (recette 3 of 23 September 2026): seventeen tools,
+ * seventeen marks and seventeen labels, and what each call is about where it is about something. A mark per
  * kind of tool drew `fs_list` as `fs_read` and the four commands as one.
  */
 export const EveryTool: Story = {

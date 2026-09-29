@@ -23,6 +23,7 @@ import {
   processSupervisorLayer,
 } from '#engine/agents/supervisor.ts'
 import { heldWordsLayer } from '#engine/agents/held.ts'
+import { sessionModesLayer } from '#engine/agents/modes.ts'
 import { NoNotices } from '#engine/agents/notices.ts'
 import { commandsLayer, type Commands } from '#engine/commands/service.ts'
 import { openProfile } from '#engine/migrate.ts'
@@ -38,6 +39,7 @@ import { toolCatalogueLayer, type ToolCatalogue } from '#engine/tools/catalogue.
 import { ToolPermissions, type ToolPermissionsService } from '#engine/tools/permissions.ts'
 import { ToolServer, toolServerLayer } from '#engine/tools/server.ts'
 import { variablesLayer } from '#engine/workspaces/variables.ts'
+import { setupPlaces } from './application.ts'
 
 const SHIPPED = join(import.meta.dirname, '..', 'drizzle')
 const VERSION = '0.4.0'
@@ -146,6 +148,7 @@ function engine(
     Layer.provideMerge(Layer.succeed(ToolPermissions, permissions)),
     Layer.provideMerge(commandsLayer),
     Layer.provide(variablesLayer),
+    Layer.provide(setupPlaces(folder)),
     Layer.provideMerge(
       Layer.mergeAll(
         projectsLayer,
@@ -159,6 +162,7 @@ function engine(
     ),
     Layer.provide(Layer.mergeAll(processes, sink)),
     Layer.provide(heldWordsLayer),
+    Layer.provide(sessionModesLayer),
     // Nobody is watching: these suites read the thread and the runs, not what was pushed.
     Layer.provide(NoNotices),
   )

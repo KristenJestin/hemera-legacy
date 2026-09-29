@@ -9,6 +9,7 @@ import {
   EmptyProject,
   Greeting,
   SessionsFrame,
+  type AgentListing,
   type HomeSession,
   type JournalLine,
   type OfferedAgent,
@@ -59,6 +60,8 @@ export function HomePage({
   sessions,
   entries,
   agents,
+  agentsListing,
+  onRetryAgents,
   choice,
   offeringOf,
   onChooseAgent,
@@ -79,6 +82,10 @@ export function HomePage({
   entries: JournalLine[]
   /** The agents this machine has, as the registry named them. */
   agents: OfferedAgent[]
+  /** Where that list stands: looked for, listed, or not read (`AgentListing`). */
+  agentsListing: AgentListing
+  /** Asks for the list again, which the menu offers when it could not be read. */
+  onRetryAgents: () => void
   /**
    * What this Project's composer was left on, as the data folder remembers it (design D5-17).
    *
@@ -188,6 +195,8 @@ export function HomePage({
         agentMenu={
           <AgentModelMenu
             agents={agents}
+            listing={agentsListing}
+            onRetryAgents={onRetryAgents}
             agent={agent}
             onAgentChange={choose}
             models={model?.choices ?? []}

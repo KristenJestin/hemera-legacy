@@ -17,7 +17,7 @@ import { Button, IconButton } from '../components/button/button.tsx'
 import { Kbd } from '../components/kbd/kbd.tsx'
 import { OVER_MARK } from '../components/sliding-mark/sliding-mark.tsx'
 import { Tooltip } from '../components/tooltip/tooltip.tsx'
-import { SidebarSessionEntry } from '../session/session.tsx'
+import { SidebarSessionEntry, type SessionRenaming } from '../session/session.tsx'
 import {
   HOME_ENTRY,
   JOURNAL_ENTRY,
@@ -126,6 +126,8 @@ export interface SidebarProps {
   onNewSession?: (() => void) | undefined
   /** Renames a Session in place, from its own row in the list. */
   onRenameSession?: ((id: string) => void) | undefined
+  /** The Session whose row is its title field right now, and what the field keeps or drops. */
+  renaming?: SessionRenaming | null | undefined
   /** Takes a Session out of the list and keeps it, from its own row. */
   onArchiveSession?: ((id: string) => void) | undefined
   onOpenCommand: () => void
@@ -146,6 +148,7 @@ export function Sidebar({
   onSelectEntry,
   onNewSession,
   onRenameSession,
+  renaming,
   onArchiveSession,
   onOpenCommand,
   commandShortcut,
@@ -248,6 +251,7 @@ export function Sidebar({
             onArchive={
               onArchiveSession === undefined ? undefined : () => onArchiveSession(session.id)
             }
+            renaming={renaming?.id === session.id ? renaming : undefined}
           />
         ))}
         {/* No Session yet, said in words — the way to make one is the `+` above, which is where

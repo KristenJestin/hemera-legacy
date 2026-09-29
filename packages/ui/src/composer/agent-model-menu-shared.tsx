@@ -2,6 +2,7 @@ import { cn } from 'cn'
 import type { KeyboardEvent, ReactNode, Ref } from 'react'
 import { useId, useState } from 'react'
 
+import { Button } from '../components/button/button.tsx'
 import { Loading } from '../components/loading/loading.tsx'
 import { IconCheck, IconSearch } from '../icons.ts'
 import { AgentMark } from './agent-mark.tsx'
@@ -116,11 +117,22 @@ export interface ModeProps {
   disabled?: boolean | undefined
 }
 
+/**
+ * Where the list of agents stands: `listed` once the machine answered, `looking` while it has
+ * not yet, `failed` when it could not be read. An empty list is never drawn in place of either of
+ * the other two: an empty menu read as a machine with no agent at all.
+ */
+export type AgentListing = 'listed' | 'looking' | 'failed'
+
 export interface AgentModelMenuProps {
   /** The agents the engine offered, in the order it offered them. */
   agents: OfferedAgent[]
   agent: string | null
   onAgentChange: (id: string) => void
+  /** Where that list stands; `listed` unless the page says otherwise. */
+  listing?: AgentListing | undefined
+  /** Asks for the list again, which is what the panel offers when it could not be read. */
+  onRetryAgents?: (() => void) | undefined
   /** The models of the chosen agent; empty while none is known. */
   models: ModelChoice[]
   model: string | null
@@ -234,6 +246,12 @@ export const QUERY =
 
 /** What the room of the model list says while the models are being asked for. */
 const WAITING = 'Loading models…'
+
+/** What the room of the agent list says while the machine has not said which agents it has. */
+const LOOKING = 'Looking for agents…'
+
+/** What it says when the machine could not be asked, above the way to ask again. */
+const UNLISTED = 'Hemera could not list the agents on this machine.'
 
 /** What stands where a list would be when there is none: the room, kept, and a word in it. */
 export const INSTEAD =
@@ -361,13 +379,40 @@ export function AgentList({
   agent,
   onChoose,
   autoFocus = false,
+  listing = 'listed',
+  onRetry,
 }: {
   agents: readonly OfferedAgent[]
   agent: string | null
   onChoose: (one: OfferedAgent) => void
   autoFocus?: boolean | undefined
+  listing?: AgentListing | undefined
+  onRetry?: (() => void) | undefined
 }): ReactNode {
   const first = agents.findIndex(offered)
+  // The room the list will take, kept while there is none: the wait is said in the middle of it,
+  // as the models are, and a list that could not be read says so and offers to ask again.
+  if (listing === 'looking' && agents.length === 0) {
+    return (
+      <div className={INSTEAD}>
+        <Loading size="md" label={LOOKING} />
+        {/* Said once: the indicator already carries it to whatever reads the page. */}
+        <span aria-hidden="true">{LOOKING}</span>
+      </div>
+    )
+  }
+  if (listing === 'failed' && agents.length === 0) {
+    return (
+      <div className={INSTEAD} role="alert">
+        <span>{UNLISTED}</span>
+        {onRetry !== undefined && (
+          <Button size="sm" autoFocus={autoFocus} onClick={onRetry}>
+            Retry
+          </Button>
+        )}
+      </div>
+    )
+  }
   return (
     <div className={LIST} role="listbox" aria-label="Agents" onKeyDown={walkWithArrows}>
       {agents.map((one, index) => {

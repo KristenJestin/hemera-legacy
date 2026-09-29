@@ -20,6 +20,7 @@ import { registryLayer, updaterLayer } from './agents/installer.ts'
 import { QUALIFIED_VARIABLE, agentDirectoriesLayer, qualifiedBySuite } from './agents/bare.ts'
 import { acpTracesLayer } from './agents/trace.ts'
 import { heldWordsLayer } from './agents/held.ts'
+import { sessionModesLayer } from './agents/modes.ts'
 import { AgentNotices } from './agents/notices.ts'
 import type { Notice } from './agents/notices.ts'
 import { clockLayer, poolLayer } from './agents/pool.ts'
@@ -31,6 +32,8 @@ import type { Discovery } from './agents/discovery.ts'
 import { StderrSink, hostProcessesLayer, processSupervisorLayer } from './agents/supervisor.ts'
 import { type Proposals, proposalsLayer } from './commands/proposals.ts'
 import { type Commands, commandsLayer } from './commands/service.ts'
+import { type SetupProposals, setupDeskLayer, setupProposalsLayer } from './setup/proposals.ts'
+import { setupValuesLayer } from './setup/values.ts'
 import { type Context, contextLayer } from './context/service.ts'
 import { toolAccessLayer } from './tools/access.ts'
 import { toolCatalogueLayer } from './tools/catalogue.ts'
@@ -80,7 +83,10 @@ export interface EngineStart {
 /** The name each change of a Session travels under, on the one channel the page listens on. */
 export const PUSHED: Record<
   Notice,
-  Exclude<EngineEventName, 'entry' | 'run' | 'spec_changed' | 'launch_changed' | 'workspace'>
+  Exclude<
+    EngineEventName,
+    'entry' | 'run' | 'spec_changed' | 'launch_changed' | 'workspace' | 'agents_changed'
+  >
 > = {
   permission_requested: 'permission',
   turn_started: 'turn_start',
@@ -138,6 +144,13 @@ function noticesTo(port: MessagePortMain, log: (line: string) => void): Layer.La
         log(`pushing a launch failed: ${named(died)}`)
       }
     },
+    agents: () => {
+      try {
+        port.postMessage({ event: 'agents.changed' })
+      } catch (died) {
+        log(`pushing agents.changed failed: ${named(died)}`)
+      }
+    },
   })
 }
 
@@ -189,6 +202,7 @@ export type EngineServices =
   | Agents
   | Commands
   | Proposals
+  | SetupProposals
   | Context
   | Workspaces
   | Recipe
@@ -224,9 +238,9 @@ function servicesOf(
   // What the Agents section of the settings asks about: the three agents this machine has, and
   // the one thing that changes them, which is asked of a registry and of the tool that installed
   // the command (D5-18). Both of those need to know what the machine is, so they are built over
-  // it, and discovery is built a second time rather than shared: it is three `PATH` lookups with
-  // no state between them.
-  const discovery = discoveryLayer.pipe(Layer.provide(rows), Layer.provide(agents))
+  // it. Discovery is one instance, shared with the runtime below: it keeps the version each
+  // command printed, and a second instance would start every command again to learn it.
+  const discovery = discoveryLayer.pipe(Layer.provide(agents))
   const sources = Layer.mergeAll(registryLayer, updaterLayer).pipe(Layer.provide(agents))
   const listed = agentsLayer.pipe(Layer.provide(discovery), Layer.provide(sources))
   // The processes a command becomes and the processes an agent is are started by the same
@@ -235,6 +249,16 @@ function servicesOf(
   // The Specs, and the window that hears of them: one service, which the Spec tools write through
   // as the window's own requests do.
   const specs = specsLayer.pipe(Layer.provide(specNoticesTo(port, log)))
+  // The Workspaces of the Projects and their recipe, one instance for the whole engine: the setup
+  // tools read them and the settings change them (#218), and a preparation holds a Workspace in
+  // the very book a cleanup and a tool read. Made under the data folder unless a Project names a
+  // folder of its own (D8-02, D8-03), over the machine's `git`.
+  const git = gitLayer()
+  const places = Layer.mergeAll(workspacesLayer, recipeLayer).pipe(
+    Layer.provide(git),
+    Layer.provide(Layer.succeed(WorkspacesRoot, join(start.directory, 'workspaces'))),
+    Layer.provide(agents),
+  )
   // Hemera's own tools, and the one loopback address they are served on (D6-01 to D6-05). The
   // server and the runtime are handed the very same book of tokens — `provideMerge` hands it up
   // rather than minting a second one, and a token of one book means nothing to the other.
@@ -245,6 +269,8 @@ function servicesOf(
     Layer.provideMerge(commandsLayer),
     // The variables a run is given are the Project's overridden by the Workspace's (D8-06).
     Layer.provide(variablesLayer),
+    // What the setup tools read, and the values of the variables they propose (#218).
+    Layer.provide(setupDeskLayer.pipe(Layer.provide(places), Layer.provide(setupValuesLayer))),
     Layer.provide(rows),
     Layer.provide(specs),
     Layer.provide(processes),
@@ -252,10 +278,10 @@ function servicesOf(
     // What an agent holds in memory, written before a call or a run is: the runtime hands its
     // flush to this very instance, which is why the same layer is given to both.
     Layer.provide(heldWordsLayer),
+    Layer.provide(sessionModesLayer),
   )
   // What a Session is provided with, and the book of which agents are live (D6-07, D5-05).
   // The context names each repository's branch, read through the machine's `git` (D8-08).
-  const git = gitLayer()
   const provisions = Layer.mergeAll(
     contextLayer.pipe(Layer.provide(rows), Layer.provide(git)),
     poolLayer,
@@ -263,7 +289,7 @@ function servicesOf(
   const runtime = runtimeLayer.pipe(
     // Discovery is handed up rather than hidden: the settings page asks this process what the
     // machine has, and that question is answered without starting anything.
-    Layer.provideMerge(discoveryLayer),
+    Layer.provideMerge(discovery),
     Layer.provide(rows),
     // What each Project's composer was left on: the runtime seeds the Home's choices from it
     // at start and writes them back as they are made (D5-17).
@@ -279,6 +305,7 @@ function servicesOf(
     Layer.provide(processes),
     Layer.provide(agents),
     Layer.provide(heldWordsLayer),
+    Layer.provide(sessionModesLayer),
     // A directory of Hemera's per agent, inside the data folder, where its bare means is written.
     Layer.provide(agentDirectoriesLayer(start.directory)),
     // What an agent and Hemera said to each other, beside the diagnostic, when asked (#131).
@@ -300,10 +327,9 @@ function servicesOf(
   // Project names a folder of its own (D8-02, D8-03), and prepared through the very commands the
   // tools run: a `run` step is one of their runs, with no Session (D8-05, Decided 11).
   const workspaces = preparationLayer.pipe(
-    Layer.provideMerge(Layer.mergeAll(workspacesLayer, recipeLayer, variablesLayer)),
+    Layer.provideMerge(Layer.mergeAll(places, variablesLayer)),
     Layer.provide(git),
     Layer.provide(hostLinks),
-    Layer.provide(Layer.succeed(WorkspacesRoot, join(start.directory, 'workspaces'))),
     Layer.provide(tools),
     // Its diagnostic, and the window it tells when a Workspace or its steps change.
     Layer.provide(agents),
@@ -321,6 +347,15 @@ function servicesOf(
     // What a human decides of the commands the agent proposed: the catalogue is written from
     // there, on the very commands the tools run (D8-11).
     proposalsLayer.pipe(Layer.provide(tools), Layer.provide(rows), Layer.provide(agents)),
+    // What a human decides of the setup changes the agent proposed: applied through the use cases
+    // the settings call, on the very Workspaces and commands the window asks (#218).
+    setupProposalsLayer.pipe(
+      Layer.provide(workspaces),
+      Layer.provide(tools),
+      Layer.provide(rows),
+      Layer.provide(agents),
+      Layer.provide(setupValuesLayer),
+    ),
     workspaces,
     runtime,
   ).pipe(

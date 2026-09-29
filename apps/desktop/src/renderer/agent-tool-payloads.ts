@@ -1,19 +1,39 @@
-import { COMMAND_TYPES, TOOL_LABELS, type ToolMark, hemeraToolNamed } from '@hemera/core'
-import { type CommandRun, type SessionEntry, sectionNameSchema } from '@hemera/ipc'
+import {
+  COMMAND_TYPES,
+  TOOL_LABELS,
+  type ToolMark,
+  hemeraToolNamed,
+  setupChangeDetails,
+  setupChangeSubject,
+  setupChangeTitle,
+  setupChangeVerb,
+} from '@hemera/core'
+import {
+  type CommandRun,
+  type SessionEntry,
+  sectionNameSchema,
+  setupProposalSchema,
+} from '@hemera/ipc'
 import type {
   CommandProposalState,
   CommandState,
   CommandType,
   HemeraToolArgument,
   HemeraToolStatus,
+  PermissionParameter,
   PortClaim,
   PortConflict,
   Readiness,
+  SetupProposalDetail,
+  SetupProposalState,
+  RunRepository,
   SpecTarget,
   ToolKind,
   ToolSubject,
 } from '@hemera/ui'
 import { z } from 'zod'
+
+import { runPlaceOf } from './run-place.ts'
 
 /**
  * The kinds Hemera writes into a thread, read out of their payload (design D6-06, D6-12, D6-10,
@@ -334,6 +354,129 @@ function notYetOf(tool: string, state: string, body: string): string | null {
   return body.includes('a blocking question is open') ? 'not yet: a question is open' : 'not yet'
 }
 
+/** What a call the agent reported says of how it ended (engine, `agents/runtime.ts`). */
+const reportedCallPayloadSchema = z.object({
+  call: z.object({
+    status: z.string().nullable(),
+    content: z.array(
+      z.object({ type: z.string(), text: z.object({ text: z.string() }).optional() }),
+    ),
+    rawOutput: z.object({ text: z.string() }).nullable(),
+  }),
+})
+
+/**
+ * Why a call the agent reported did not end well, in words, and nothing for one that did or has
+ * not ended yet (issue #198).
+ *
+ * A call of Hemera's the agent could not make — the tool was not among those it listed — is never
+ * answered by Hemera, so the agent's report is all the thread holds of it: its name and a red dot
+ * said nothing of why. What the agent answered is the reason, and a call that came back with no
+ * word at all says so rather than leaving the body empty.
+ */
+export function reportedFailureOf(entry: SessionEntry): string | undefined {
+  const read = readPayload(reportedCallPayloadSchema, entry.payload)
+  if (read === null) return undefined
+  const { status, content, rawOutput } = read.call
+  if (status === 'cancelled') return 'The turn was stopped before this call answered.'
+  if (status !== 'failed') return undefined
+  const attached = content
+    .filter((block) => block.type === 'content')
+    .map((block) => block.text?.text.trim() ?? '')
+    .filter((text) => text !== '')
+  const said = rawOutput?.text.trim() || attached.join('\n\n')
+  return said === '' ? 'The agent reported this call failed and gave no reason.' : said
+}
+
+/**
+ * A command the agent ran in its own shell, through its own tool, as the line under the Session's
+ * title lists it (issue #219): Hemera holds no process for it, and knows only what the tool call
+ * reported — the line it was called with, how it stands, and what it answered.
+ */
+export interface AgentShellCall {
+  readonly id: string
+  readonly command: string
+  readonly state: 'running' | 'finished' | 'failed'
+  readonly output: string
+  /** When the call began, as the thread wrote it. */
+  readonly at: number
+}
+
+/** What a native call says of itself, as far as the line reads it (engine, `agents/runtime.ts`). */
+const shellCallPayloadSchema = z.object({
+  call: z.object({
+    title: z.string(),
+    kind: z.string().nullable(),
+    status: z.string().nullable(),
+    content: z.array(
+      z.object({ type: z.string(), text: z.object({ text: z.string() }).optional() }),
+    ),
+    rawInput: z.object({ text: z.string() }).nullable(),
+    rawOutput: z.object({ text: z.string() }).nullable(),
+  }),
+})
+
+/** The keys an agent's shell tool names its line under, and its output under. */
+const LINE_KEYS = ['command', 'cmd'] as const
+
+const OUTPUT_KEYS = ['output', 'stdout', 'stderr'] as const
+
+/**
+ * What a shell call answered, in its own words: the text it answered with when it is one, the
+ * streams it named when it answered an object, and what it attached when it answered nothing.
+ */
+function shellOutputOf(rawOutput: string | null, attached: readonly string[]): string {
+  if (rawOutput === null) return attached.join('\n\n')
+  const text = readPayload(z.string(), rawOutput)
+  if (text !== null) return text
+  const streams = OUTPUT_KEYS.map((key) => stringArgument(rawOutput, [key])).filter(
+    (stream) => stream !== undefined && stream !== '',
+  )
+  return streams.length > 0 ? streams.join('\n') : rawOutput
+}
+
+/** How a call the agent reported stands, in the line's three states. */
+function shellStateOf(status: string | null): AgentShellCall['state'] {
+  if (status === 'failed') return 'failed'
+  if (status === 'completed') return 'finished'
+  return 'running'
+}
+
+/**
+ * The commands the agent ran in its own shell: the thread's calls of kind `execute` that are not
+ * one of Hemera's tools — a command Hemera runs for the agent is a run of its own already. The line
+ * is what the call was called with, as one line or as its words, or its title when it said none.
+ */
+export function agentShellCallsOf(entries: readonly SessionEntry[]): AgentShellCall[] {
+  return entries.flatMap((entry) => {
+    if (entry.kind !== 'tool_call') return []
+    const read = readPayload(shellCallPayloadSchema, entry.payload)
+    if (read === null) return []
+    const { call } = read
+    if (call.kind !== 'execute' || hemeraToolNamed(call.title) !== null) return []
+    const input = call.rawInput?.text ?? ''
+    const command =
+      stringArgument(input, LINE_KEYS) ??
+      LINE_KEYS.map((key) =>
+        readPayload(z.object({ [key]: z.array(z.string()) }), input)?.[key]?.join(' '),
+      ).find((line) => line !== undefined) ??
+      call.title
+    const attached = call.content
+      .filter((block) => block.type === 'content')
+      .map((block) => block.text?.text ?? '')
+      .filter((text) => text !== '')
+    return [
+      {
+        id: entry.id,
+        command,
+        state: shellStateOf(call.status),
+        output: shellOutputOf(call.rawOutput?.text ?? null, attached),
+        at: entry.createdAt,
+      } satisfies AgentShellCall,
+    ]
+  })
+}
+
 /**
  * `null` when the payload does not parse: the entry is left out rather than drawn from a guess.
  *
@@ -448,6 +591,9 @@ export interface CommandRunDrawn extends RunFacts {
   readonly command: string
   readonly type: CommandType
   readonly state: CommandState
+  /** The Project's repository it runs in, or undefined for a folder that is none of them. */
+  readonly repository: RunRepository | undefined
+  /** Under the repository when it is in one, under the root otherwise, or as it ran. */
   readonly folder: string
   readonly url: string | undefined
   readonly exitCode: number | undefined
@@ -467,6 +613,8 @@ export interface CommandRunDrawn extends RunFacts {
 export function commandRunOf(
   entry: SessionEntry,
   live: readonly CommandRun[] = [],
+  root: string | null = null,
+  repositories: readonly RunRepository[] = [],
 ): CommandRunDrawn | null {
   const read = readPayload(commandRunPayloadSchema, entry.payload)
   if (read === null) return null
@@ -475,13 +623,16 @@ export function commandRunOf(
   const state = heard?.state ?? read.state
   const url = heard === undefined ? read.url : heard.url
   const exitCode = heard === undefined ? read.exitCode : heard.exitCode
+  // Said in the Project's words: its repository, or a folder under the root (issue #239).
+  const { repository, folder } = runPlaceOf(cwd, root, repositories)
   return {
     runId: runId ?? null,
     name,
     command: line,
     type,
     state: state === 'exited' ? 'finished' : state,
-    folder: cwd,
+    repository,
+    folder,
     url: url ?? undefined,
     exitCode: exitCode ?? undefined,
     oneOff,
@@ -510,6 +661,52 @@ export function commandProposalOf(entry: SessionEntry): CommandProposalDrawn | n
   return { ...read, folder: read.folder ?? '.' }
 }
 
+/** What a setup change is drawn from, read off a `setup_proposal` entry (#218). */
+export interface SetupProposalDrawn {
+  /** What Accept and Decline name the proposal by. */
+  readonly proposalId: string
+  /** What Accept all names the changes proposed together by. */
+  readonly batchId: string
+  /** The change in one line, as the Journal and the agent's answer say it. */
+  readonly title: string
+  /** What accepting it does, which the notices unfold: `Add service`. */
+  readonly verb: string
+  /** What it is about: a name, or a path. */
+  readonly subject: string
+  readonly mono: boolean
+  /** The line a command or a step would run, which opens in its block. */
+  readonly line: string | undefined
+  /** Every other field it would write; never a variable's value. */
+  readonly details: readonly SetupProposalDetail[]
+  readonly why: string
+  readonly state: SetupProposalState
+}
+
+/**
+ * `null` when the payload does not parse: the entry is left out rather than drawn from a guess.
+ * Everything said is said by the domain, as the Journal says it; the schema reads the change's
+ * fields and nothing else, so a value written into the entry by mistake never reaches the window.
+ */
+export function setupProposalOf(entry: SessionEntry): SetupProposalDrawn | null {
+  const read = readPayload(setupProposalSchema, entry.payload)
+  if (read === null) return null
+  const details = setupChangeDetails(read.change)
+  const subject = setupChangeSubject(read.change)
+  return {
+    proposalId: read.proposalId,
+    batchId: read.batchId,
+    title: setupChangeTitle(read.change),
+    verb: setupChangeVerb(read.change),
+    subject: subject.text,
+    mono: subject.path,
+    line: details.find((detail) => detail.label === 'Line')?.value,
+    // The line opens in its block, and what the change is about is its head: neither twice.
+    details: details.filter((detail) => detail.label !== 'Line' && detail.value !== subject.text),
+    why: read.why,
+    state: read.state,
+  }
+}
+
 /**
  * The Workspace a run's block names, or undefined when it is the Session's own (D8-08): a
  * Project-scoped service asked for from a Session elsewhere runs in `main` (D8-07). Undefined too
@@ -523,6 +720,31 @@ export function elsewhereOf(run: CommandRun, own: string | undefined): string | 
 export interface ContextDeliveryDrawn {
   readonly id: string
   readonly body: string
+  /** Whether it is still waiting to be handed over, which the thread says as a quiet row. */
+  readonly waiting: boolean
+}
+
+/**
+ * What waits to be handed over, by the kind of the delivery, said as the reader would say it
+ * (issue #211). What is not a kind of these is said in general terms.
+ */
+function waitingWords(kind: string | undefined): string {
+  switch (kind) {
+    case 'answer':
+      return 'The answer will be handed over when the agent is ready.'
+    case 'edit':
+      return 'Your edits will be handed over when the agent is ready.'
+    case 'internal':
+      return 'The result of a sub-agent will be handed over when the agent is ready.'
+    case 'instructions':
+      return 'The new instructions of the Workspace will be handed over when the agent is ready.'
+    case 'notice':
+      return 'What Hemera had to tell the agent will be handed over when it is ready.'
+    case 'run':
+      return 'The run will be handed over with your next message.'
+    default:
+      return 'What Hemera had for the agent will be handed over when it is ready.'
+  }
 }
 
 /**
@@ -531,14 +753,83 @@ export interface ContextDeliveryDrawn {
  * `null` too for the answers to the Spec's questions once handed over (issue #149): the answer is
  * drawn as the reader's own message where it was given, and a line of Hemera's saying it handed
  * it over, with a fingerprint, said the reader's words a second time in words nobody wrote. One
- * that could not be handed over yet is still said: that is news.
+ * that could not be handed over yet is still said: that is news. It is said in words, with no
+ * fingerprint, because what it is waiting for is the agent and not an id (issue #211).
  */
 export function contextDeliveryOf(entry: SessionEntry): ContextDeliveryDrawn | null {
   const read = readPayload(contextDeliveryPayloadSchema, entry.payload)
   if (read === null) return null
-  if (read.kind === 'answer' && entry.state !== 'failed') return null
+  // A run handed to the agent, or waiting to be, draws nothing (review of #250): the run is an
+  // entry of the thread already, and the Context tab keeps what was delivered.
+  if (read.kind === 'run') return null
+  if (entry.state === 'failed') {
+    return { id: entry.id, body: waitingWords(read.kind), waiting: true }
+  }
+  if (read.kind === 'answer') return null
   const short = read.fingerprint.slice(0, FINGERPRINT_CHARACTERS)
-  return { id: entry.id, body: `${entry.body} (${short})` }
+  return { id: entry.id, body: `${entry.body} (${short})`, waiting: false }
+}
+
+/** What a `turn` entry carries: why it ended. */
+const turnEndPayloadSchema = z.object({ stopReason: z.string() })
+
+/** What `StoppedTurn` draws of a turn that did not simply end. */
+export interface StoppedTurnDrawn {
+  /** Why it stopped, as the end of a sentence after "Stopped: ", or nothing for a Stop pressed. */
+  reason: string | undefined
+  byTheReader: boolean
+}
+
+/**
+ * The line of a turn that stopped, or null for one that simply ended: the agent's answer above it
+ * is the news (D5-13).
+ *
+ * A turn the reader stopped says so, "Stopped by you", and nothing more. One that stopped on its
+ * own says why, in the sentence the engine wrote for it: "Stopped: the agent could not answer."
+ * (issue #211), where it read "Stopped while The agent could not answer." — the sentence is a
+ * reason, not what the turn was doing.
+ */
+export function stoppedTurnOf(entry: SessionEntry): StoppedTurnDrawn | null {
+  const read = readPayload(turnEndPayloadSchema, entry.payload)
+  if (read === null || read.stopReason === 'end_turn') return null
+  if (read.stopReason === 'cancelled') return { reason: undefined, byTheReader: true }
+  const reason =
+    entry.body === '' ? undefined : entry.body.charAt(0).toLowerCase() + entry.body.slice(1)
+  return { reason, byTheReader: false }
+}
+
+/** A failure of Hemera's or of the agent's, drawn as an error row rather than as a message. */
+const failureNotePayloadSchema = z.object({ reason: z.enum(['delivery_failed', 'prompt_failed']) })
+
+/** What an error row draws: a sentence in words, the error as it came, and whether to retry. */
+export interface FailureNoteDrawn {
+  title: string
+  detail: string
+  /** Whether a Retry is offered: a delivery is Hemera's to hand over again. */
+  retry: boolean
+}
+
+/**
+ * The error row a note is, or null for a note that is not an error (issue #211).
+ *
+ * A turn that failed leaves the error it failed with in a note, and a raw error — "no session
+ * has been opened" — drawn as a line of Hemera's read as if Hemera were saying it. It is said in
+ * words, with what came under it as #131 draws what the agent reported. A delivery that failed
+ * offers Retry: what waits is still waiting, and Hemera can hand it over again. A prompt that
+ * failed does not: sending the message again is the reader's to do, from the composer.
+ */
+export function failureNoteOf(entry: SessionEntry): FailureNoteDrawn | null {
+  if (entry.kind !== 'note') return null
+  const read = readPayload(failureNotePayloadSchema, entry.payload)
+  if (read === null) return null
+  if (read.reason === 'delivery_failed') {
+    return {
+      title: 'Hemera could not hand this over to the agent',
+      detail: entry.body,
+      retry: true,
+    }
+  }
+  return { title: 'The agent answered with an error', detail: entry.body, retry: false }
 }
 
 /**
@@ -681,6 +972,8 @@ export function hemeraPermissionOf(
     readonly named?: string | undefined
     readonly resolved?: string | undefined
     readonly line?: string | null | undefined
+    /** Whether the engine found the place inside the Workspace; absent from an older question. */
+    readonly inside?: boolean | undefined
   },
 ): PermissionHead {
   const named = hemeraToolNamed(tool)
@@ -689,14 +982,56 @@ export function hemeraPermissionOf(
   const line = asked.line ?? null
   const subject = line ?? asked.named
   let intent = body.startsWith(`${tool} `) ? body.slice(tool.length + 1) : body
-  if (line !== null && intent.startsWith(`asks to run ${line} `)) {
-    intent = `asks to run ${intent.slice(`asks to run ${line} `.length)}`
+  if (line !== null) {
+    // Why a one-off is asked about wherever it runs (issue #239): the line is the agent's own, so
+    // the human decides before it runs. Where it runs is the card's parameters, not its head.
+    const outside =
+      asked.inside === false ||
+      (asked.inside === undefined && intent.includes('outside the Workspace'))
+    return {
+      label,
+      subject,
+      intent: `asks to run a line the agent wrote${outside ? ', outside the Workspace' : ''}`,
+    }
   }
   const resolved = asked.resolved
   if (resolved !== undefined && intent.endsWith(`: ${resolved}`)) {
     intent = intent.slice(0, -(resolved.length + 2))
   }
   return { label, subject, intent }
+}
+
+/**
+ * Where a question of Hemera's tools is about, as the card's parameters say it (issue #239).
+ *
+ * Inside, the Workspace or the Project's repository it runs in, and the path under it when it is
+ * not the base itself. Outside, and only when the engine says so, the Workspace it leaves and the
+ * resolved path — unless the card already shows that path as what it is about, which a file
+ * tool's does. A question written before the engine said where is read from its paths: a one-off
+ * under the root is inside, and a file tool is only ever asked about a place outside it.
+ */
+export function hemeraPlaceOf(
+  asked: {
+    readonly resolved: string
+    readonly root?: string | undefined
+    readonly inside?: boolean | undefined
+    readonly line?: string | null | undefined
+  },
+  workspace: string,
+  repositories: readonly RunRepository[],
+): PermissionParameter[] {
+  const line = asked.line ?? null
+  const place = runPlaceOf(asked.resolved, asked.root ?? null, repositories)
+  const inside = asked.inside ?? (line !== null && place.inside)
+  if (inside) {
+    const where: PermissionParameter =
+      place.repository === undefined
+        ? { label: 'In', value: workspace }
+        : { label: 'In', value: place.repository.path, repository: place.repository }
+    return place.folder === '.' ? [where] : [where, { label: 'Path', value: place.folder }]
+  }
+  const left: PermissionParameter = { label: 'Outside the Workspace', value: workspace }
+  return line === null ? [left] : [left, { label: 'Path', value: asked.resolved }]
 }
 
 /**

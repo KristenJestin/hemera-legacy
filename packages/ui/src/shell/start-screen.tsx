@@ -17,8 +17,9 @@ import { VIEW, drawnOf, pathOf, type DrawnStroke } from '../components/face/rig.
  * stylesheet had them rather than jumping back to where it starts.
  *
  * The classes of the still are these, and they only exist in the stylesheet because this file
- * uses them. The background is the one the frame is painted with, so nothing flashes between the
- * frame, this screen and the first page.
+ * uses them. Until that stylesheet has arrived, they are drawn with the rules of
+ * `start-style.ts`, which the page carries inline in its head. The background is the one the
+ * frame is painted with, so nothing flashes between the frame, this screen and the first page.
  */
 export const START_LABEL = 'Starting Hemera'
 

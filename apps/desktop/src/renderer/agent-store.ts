@@ -11,11 +11,14 @@ import type {
   StopReason,
 } from '@hemera/ipc'
 import { TOOL_LABELS, hemeraToolNamed } from '@hemera/core'
-import type { ActivityState, FaceState, SpecTarget } from '@hemera/ui'
+import type { ActivityState, AgentListing, FaceState, SpecTarget } from '@hemera/ui'
+import { z } from 'zod'
 
-import { asksAnswer, callFaceOf } from './agent-face.ts'
+import { asksAnswer, callFaceOf, noticeFaceOf } from './agent-face.ts'
 import { effortStage, effortToLand, modelStage } from './agent-options.ts'
 import { commandRunOf, specWriteOf } from './agent-tool-payloads.ts'
+import type { NoticeKind } from './notices.ts'
+import { patiently } from './patiently.ts'
 
 /**
  * What the agents of this window are doing (design D5-12, D5-13, D5-17).
@@ -130,6 +133,12 @@ export interface AgentState {
   offerings: ReadonlyMap<string, AgentOffering>
   /** What this machine has, as `agents.list` and `agents.check` answered. */
   agents: readonly AgentAvailability[]
+  /**
+   * Where that list stands: `looking` until the engine has answered it once, `failed` when it
+   * did not answer even asked again, `listed` from its first answer on. An empty `agents` is not an
+   * answer: it is what the window holds before there is one.
+   */
+  listing: AgentListing
   /** Whether that list is the one a registry answered, which is the settings' own question. */
   checked: boolean
   /** What the last act was refused with, in the engine's own words, or null. */
@@ -141,6 +150,7 @@ const EMPTY: AgentState = {
   options: new Map(),
   offerings: new Map(),
   agents: [],
+  listing: 'looking',
   checked: false,
   refusal: null,
 }
@@ -199,11 +209,8 @@ export interface Activity {
 /** How far a call got, in the two words that mean it has not finished (ipc, `ToolCallStatus`). */
 const UNFINISHED = ['pending', 'in_progress']
 
-/**
- * The four states a turn is in once it is over, which the row keeps until the next message: a turn
- * that ended on a question it asked the reader is over too, and waits on them.
- */
-const ENDED: readonly ActivityState[] = ['question', 'done', 'stopped', 'failed']
+/** The three states a turn is in once it is over, which the row keeps until the next message. */
+const ENDED: readonly ActivityState[] = ['done', 'stopped', 'failed']
 
 /** Whether an activity is the end of a turn rather than something a turn is doing. */
 export function hasEnded(activity: Activity): boolean {
@@ -258,19 +265,20 @@ function lastEnd(entries: readonly SessionEntry[]): number {
  * lasts.
  *
  * A `turn` entry after that message is the turn over: done, stopped or failed, and how long it
- * took from the message to that entry — or, when the turn asked a question of the Spec that has
- * no answer yet, a turn that ended by asking (issue #140), which is what the reader has to do next. Otherwise the states answer in this order: a permission
+ * took from the message to that entry. Otherwise the states answer in this order: a permission
  * first, because a turn waiting on the reader is not working whatever else the thread holds;
  * then the call it is running, because that is the one thing worth naming; then the answer being
  * written, when the entry the engine wrote last is one; and thinking for everything else, which
  * is what an agent between two blocks is doing.
  *
  * `latest` is the entry the engine pushed last. Absent — a Session opened on a thread read back
- * rather than watched — the last entry of the thread stands in for it.
+ * rather than watched — the last entry of the thread stands in for it. `asksItself` false leaves
+ * the permissions out: the Session's row reads whether it waits off the notices instead (#250).
  */
 export function activityOf(
   entries: readonly SessionEntry[],
   latest: string | null = null,
+  asksItself = true,
 ): Activity {
   const said = lastSaid(entries)
   const end = lastEnd(entries)
@@ -278,9 +286,6 @@ export function activityOf(
   if (end > said) {
     const closing = entries[end]
     const ending = endOf(closing?.state ?? null)
-    if (ending === 'done' && asksAnswer(entries.slice(said + 1, end), entries)) {
-      return { state: 'question' }
-    }
     const asked = entries[said]
     if (ending !== 'done' || closing === undefined || asked === undefined) return { state: ending }
     return { state: ending, elapsedMs: closing.createdAt - asked.createdAt }
@@ -291,7 +296,7 @@ export function activityOf(
     (latest === null ? undefined : running.find((entry) => entry.id === latest)) ?? running.at(-1)
   const thought = thoughtOf(running, newest?.turnId ?? null)
 
-  if (waiting(running)) return { state: 'waiting', thought }
+  if (asksItself && waiting(running)) return { state: 'waiting', thought }
 
   // A command Hemera is running for the turn — a test, a script — is what the turn waits on,
   // and its name says more than the tool call that asked for it (D6-12). A server is left running
@@ -322,6 +327,44 @@ export function activityOf(
   return { state: 'thinking', thought }
 }
 
+/** What a turn that has just been asked for is doing, before anything of it has arrived. */
+const THINKING: Activity = { state: 'thinking' }
+
+/**
+ * What the row beside the meter says (design D17-04): what the running turn is doing, or how the
+ * last one ended, or nothing in a thread no turn has ended in yet.
+ *
+ * A Session is never running on a thread that ends on a `turn` entry it just heard: that entry
+ * ends the turn in the same state (issue #223). So an end read while running is the turn before
+ * the message just said, which the engine has not echoed yet: the turn asked for is thinking.
+ *
+ * `waitsFor` is the first kind the Session's notices hold, in the order they list them, or null
+ * when they hold nothing (issue #237): the row then says the Session waits for the reader, and
+ * keeps saying it until nothing does. The face says what for (issue #140): a permission, a
+ * question, or a proposal to take or leave (`noticeFaceOf`).
+ */
+export function turnRowOf(
+  thread: readonly SessionEntry[],
+  running: boolean,
+  latest: string | null = null,
+  waitsFor: NoticeKind | null = null,
+): Activity | null {
+  // Whether the Session waits for the reader is the notices' answer and nobody else's (#250): the
+  // row and the pill read one list, so the row never says it waits while the pill holds nothing.
+  const read = activityOf(thread, latest, false)
+  // Whatever waits for the reader in the Session's notices — a permission, a proposal, a question
+  // — is what the row says for as long as anything does, a turn running or not (issue #237).
+  if (waitsFor !== null) {
+    return {
+      state: 'waiting',
+      face: noticeFaceOf(waitsFor),
+      thought: running && !hasEnded(read) ? read.thought : undefined,
+    }
+  }
+  if (running) return hasEnded(read) ? THINKING : read
+  return hasEnded(read) ? read : null
+}
+
 /**
  * The face a Session wears in the sidebar (issue #140), from what this window has heard of it.
  *
@@ -341,7 +384,9 @@ export function sessionFaceOf(agent: AgentSessionState): FaceState {
     if (read.face !== undefined) return read.face
     return RUNNING_FACES[read.state] ?? 'thinking'
   }
-  if (read.state === 'question') return 'question'
+  if (read.state === 'done' && asksAnswer(sinceSaid(agent.entries), agent.entries)) {
+    return 'question'
+  }
   if (read.state === 'failed') return 'error'
   return 'asleep'
 }
@@ -355,6 +400,11 @@ const RUNNING_FACES: Partial<Record<ActivityState, FaceState>> = {
   running: 'running',
   waiting: 'permission',
   streaming: 'writing',
+}
+
+/** What the thread holds since the last thing the user said: the turn that is, or last was. */
+function sinceSaid(entries: readonly SessionEntry[]): readonly SessionEntry[] {
+  return entries.slice(lastSaid(entries) + 1)
 }
 
 /**
@@ -390,12 +440,27 @@ function waitsOnHemera(entries: readonly SessionEntry[]): boolean {
   })
 }
 
+/**
+ * Whether a decision closes a question: every one does but the line a one-off leaves when the
+ * Session's mode let it run without asking (#242), which answers nothing another call asked.
+ */
+export function answersAQuestion(entry: SessionEntry): boolean {
+  if (entry.kind !== 'permission_decision') return false
+  try {
+    return !UNASKED_DECISION.safeParse(JSON.parse(entry.payload)).success
+  } catch {
+    return true
+  }
+}
+
+const UNASKED_DECISION = z.object({ unasked: z.literal(true) })
+
 /** Whether the agent is waiting on an answer: a request with no decision written after it. */
 function waiting(entries: readonly SessionEntry[]): boolean {
   for (let at = entries.length - 1; at >= 0; at -= 1) {
     const entry = entries[at]
     if (entry === undefined) continue
-    if (entry.kind === 'permission_decision') return false
+    if (answersAQuestion(entry)) return false
     if (entry.kind === 'permission_request') return true
   }
   return false
@@ -470,10 +535,15 @@ export function listenToAgents(): () => void {
   const stop = window.hemera.on((event: EngineEvent) => {
     if (event.event === 'entry' && event.entry !== null) {
       const held = state.sessions.get(event.sessionId) ?? QUIET
+      // A `turn` entry is the turn over, and the row says "Done" from it: the Stop goes in the
+      // same state, never one message later with the `turn` event that follows it (issue #223).
+      const ended = event.entry.kind === 'turn'
+      if (ended) announced.delete(event.sessionId)
       changed(event.sessionId, {
         entries: withEntry(held.entries, event.entry),
         latest: event.entry.id,
         heardAt: Date.now(),
+        running: held.running && !ended,
       })
       return
     }
@@ -494,6 +564,11 @@ export function listenToAgents(): () => void {
       announced.delete(event.sessionId)
       changed(event.sessionId, { running: false })
     }
+    // What the machine has changed since it was listed — a version that answered late, an agent
+    // updated — and the list is read again rather than patched. Checked again once the Agents
+    // section has asked the registries: a plain list answers no published version, and reading
+    // one would take away what that section shows.
+    if (event.event === 'agents.changed') void (state.checked ? checkAgents() : loadAgents())
   })
   return () => {
     listening = false
@@ -698,6 +773,19 @@ export async function decide(
 }
 
 /**
+ * Hands the agent of a Session what waits for it, after a delivery it did not take: the Retry of
+ * the row that said so (issue #211). The agent is started first if it is not running.
+ */
+export async function handOver(sessionId: string): Promise<void> {
+  try {
+    await window.hemera.invoke('agents.handOver', { sessionId })
+    replace({ ...state, refusal: null })
+  } catch (cause) {
+    replace({ ...state, refusal: message(cause) })
+  }
+}
+
+/**
  * Puts the agent of a Session on another of its own options, and reads back what it is on.
  *
  * A model changed while no effort was chosen in the Session is followed by the effort that model
@@ -736,13 +824,23 @@ export async function resume(sessionId: string): Promise<ResumeState | null> {
   }
 }
 
-/** What this machine has, read without leaving it: which command exists, and which version. */
+/**
+ * What this machine has, read without leaving it: which command exists, and which version.
+ *
+ * Asked again when it fails (`patiently`): the window asks it once at start, while a Session's
+ * agent may be starting beside it, and a list that failed then was a menu left empty for as long
+ * as the window stayed open. Until the first answer the list is `looking`, and a list that never
+ * answered is `failed` — for the menu to say so, and to offer this again. A list already on
+ * screen stays there when reading it again fails.
+ */
 export async function loadAgents(): Promise<void> {
+  if (state.listing === 'failed') replace({ ...state, listing: 'looking' })
   try {
-    const answered = await window.hemera.invoke('agents.list', {})
-    replace({ ...state, agents: answered.agents, refusal: null })
+    const answered = await patiently(async () => await window.hemera.invoke('agents.list', {}))
+    replace({ ...state, agents: answered.agents, listing: 'listed', refusal: null })
   } catch (cause) {
-    replace({ ...state, refusal: message(cause) })
+    const listing = state.listing === 'listed' ? 'listed' : 'failed'
+    replace({ ...state, listing, refusal: message(cause) })
   }
 }
 
@@ -753,7 +851,7 @@ export async function loadAgents(): Promise<void> {
 export async function checkAgents(): Promise<void> {
   try {
     const answered = await window.hemera.invoke('agents.check', {})
-    replace({ ...state, agents: answered.agents, checked: true, refusal: null })
+    replace({ ...state, agents: answered.agents, listing: 'listed', checked: true, refusal: null })
   } catch (cause) {
     replace({ ...state, refusal: message(cause) })
   }

@@ -93,6 +93,8 @@ export const SESSION_ENTRY_KINDS = [
   'spec_proposal',
   /** A command the agent proposed for the catalogue, waiting for a human's decision (D8-11). */
   'command_proposal',
+  /** A change to the Project's setup the agent proposed, waiting for a human's decision (#218). */
+  'setup_proposal',
 ] as const
 
 export type SessionEntryKind = (typeof SESSION_ENTRY_KINDS)[number]

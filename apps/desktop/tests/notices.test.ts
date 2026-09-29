@@ -158,3 +158,15 @@ describe("The permissions' group says what accepting does (#250)", () => {
     expect(asksToRunALine(asked('pending'))).toBe(false)
   })
 })
+
+describe('What waits is one list, closed with its turn (#250)', () => {
+  test('a request still marked pending in a turn that has ended waits no more', () => {
+    // Seen in a Session of the recette: the request of a turn the agent gave up on, never
+    // rewritten, and a turn that ended after it.
+    const ended = entry('turn', JSON.stringify({ stopReason: 'end_turn' }), 'end', 'end_turn')
+    const thread = [asked('pending'), ended]
+    expect(waitingAs(asked('pending'), thread, null, null)).toBe(null)
+    // While its turn runs, it waits.
+    expect(waitingAs(asked('pending'), [asked('pending')], null, null)).toBe('permission')
+  })
+})

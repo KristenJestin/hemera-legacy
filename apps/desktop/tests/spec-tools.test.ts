@@ -16,7 +16,14 @@ import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
 import { Effect, Layer } from 'effect'
 import { z } from 'zod'
 
-import { type SessionEntry, focusOf, offeredTools } from '@hemera/core'
+import {
+  DEFINE_MISSION_BRIEF,
+  DELIVERY_MARKER,
+  type SessionEntry,
+  contextUri,
+  focusOf,
+  offeredTools,
+} from '@hemera/core'
 
 import { type FakeStep, fakeAgent } from '#engine/agents/fake.ts'
 import { AgentRuntime } from '#engine/agents/runtime.ts'
@@ -24,6 +31,7 @@ import { Journal } from '#engine/journal.ts'
 import { Sessions } from '#engine/sessions.ts'
 import { SpecNotices } from '#engine/specs/notices.ts'
 import { Specs } from '#engine/specs/specs.ts'
+import { TOOL_DESCRIPTIONS } from '#engine/tools/arguments.ts'
 import { aSessionOn, gated, pause, threadOf, toolApplication } from './application.ts'
 import { agentOf, contracted, frozen, shaped, write } from './specs-harness.ts'
 import { type OpenWindow, openWindow } from './window.ts'
@@ -67,6 +75,26 @@ const defining = Effect.gen(function* () {
   })
   return { sessionId: session.id, projectId: session.projectId, specId: snapshot.spec.id }
 })
+
+/** Whether a thread holds a turn Hemera opened to hand something over, ended (D6-08). */
+const deliveredAlone = (entries: readonly SessionEntry[]) =>
+  entries.some((entry) => entry.kind === 'turn' && entry.payload.includes('"kind":"delivery"'))
+
+/** Waits until a Session's thread, read through the window, holds what the suite waits for. */
+async function untilThread(
+  bridge: OpenWindow['bridge'],
+  sessionId: string,
+  ready: (entries: readonly SessionEntry[]) => boolean,
+): Promise<readonly SessionEntry[]> {
+  for (let look = 0; look < 400; look += 1) {
+    // oxlint-disable-next-line no-await-in-loop -- a poll: each look waits for the one before it
+    const read = await bridge.invoke('sessions.read', { sessionId })
+    if (ready(read.entries)) return read.entries
+    // oxlint-disable-next-line no-await-in-loop -- the same poll, after its pause
+    await Effect.runPromise(pause(25))
+  }
+  throw new Error('the thread never held what the suite waited for')
+}
 
 /** One turn of a `define` Session: its agent does what the script says. */
 const turn = (sessionId: string) =>
@@ -399,6 +427,44 @@ describe('ready attests and does not freeze', () => {
   })
 })
 
+describe('The agent is told to ask the user through the question tool', () => {
+  test('the define brief and the description of spec_write both say every question goes through the tool, never in the reply', () => {
+    const through = 'Every question you put to the user goes through `spec_write` with `question`'
+    const never = 'never as text in your reply'
+    const labels = 'always adds an "Other" answer'
+    for (const told of [DEFINE_MISSION_BRIEF, TOOL_DESCRIPTIONS.spec_write]) {
+      expect(told).toContain(through)
+      expect(told).toContain(never)
+      expect(told).toContain(labels)
+    }
+    expect(TOOL_DESCRIPTIONS.spec_write).not.toContain('asked in the chat')
+  })
+})
+
+describe('ready is refused on a feature Spec without a story', () => {
+  test('the proposal is refused with what is missing, and nothing is attested', async () => {
+    const agent = fakeAgent({ steps: [uses('spec_propose', { kind: 'ready', key: 'propose-6' })] })
+    const seen = await toolApplication(dataFolder)(agent)(
+      Effect.gen(function* () {
+        const specs = yield* Specs
+        const { sessionId, specId } = yield* defining
+        yield* contracted(specId, sessionId)
+        yield* specs.writeStories(agentOf(sessionId), { specId, stories: [] })
+        const entries = yield* turn(sessionId)
+        return { after: yield* specs.read(specId), gate: yield* specs.gate(specId), entries }
+      }),
+    )
+    const missing =
+      'a feature Spec needs at least one user story with an acceptance criterion, and it has no story'
+    expect(agent.answers.used[0]).toMatchObject({ isError: true })
+    expect(agent.answers.used[0]?.text).toContain(`cannot be proposed ready: ${missing}`)
+    expect(callsIn(seen.entries)).toMatchObject([{ tool: 'spec_propose', state: 'refused' }])
+    expect(seen.after.revision.attestedContentVersion).toBeNull()
+    expect(seen.after.spec.status).toBe('draft')
+    expect(seen.gate.failures.map((failure) => failure.message)).toContain(missing)
+  })
+})
+
 describe('An older revision is read and never written', () => {
   test('spec_read names revision 1 read-only, and a write naming it is refused', async () => {
     const agent = fakeAgent({
@@ -514,6 +580,32 @@ describe('Stories, tasks and a question are written through the tool', () => {
   })
 })
 
+describe('The title and the type the user settled are written through the tool', () => {
+  test('a bug takes its reproduction section, the slug follows the title, and both at once are refused', async () => {
+    const agent = fakeAgent({
+      steps: [
+        uses('spec_write', { type: 'bug', key: 'type-1' }),
+        uses('spec_write', { title: 'Invoices lose their VAT', key: 'title-1' }),
+        uses('spec_write', { title: 'Two things', type: 'feature', key: 'both-1' }),
+      ],
+    })
+    const seen = await toolApplication(dataFolder)(agent)(
+      Effect.gen(function* () {
+        const { sessionId, specId, projectId } = yield* defining
+        yield* turn(sessionId)
+        const journal = yield* (yield* Journal).read({ projectId, specId })
+        return { after: yield* (yield* Specs).read(specId), journal: journal.entries }
+      }),
+    )
+    expect(agent.answers.used.map((answer) => answer.isError)).toEqual([false, false, true])
+    expect(agent.answers.used[2]?.text).toContain('send exactly one of')
+    expect(seen.after.revision).toMatchObject({ title: 'Invoices lose their VAT', type: 'bug' })
+    expect(seen.after.spec.slug).toBe('invoices-lose-their-vat')
+    expect(seen.after.sections.map((section) => section.name)).toContain('reproduction')
+    expect(seen.journal.filter((line) => line.type === 'spec.heading_written')).toHaveLength(2)
+  })
+})
+
 describe('The agent proposes a Spec through spec_propose in a free Session', () => {
   test('the proposal entry is written, and nothing else: no Spec, the Session stays free', async () => {
     const agent = fakeAgent({
@@ -617,7 +709,8 @@ describe('A Session whose proposal is accepted is offered the define set at its 
       type: 'feature',
       title: 'Export the Journal',
     })
-    await bridge.invoke('agents.prompt', { sessionId: session.id, text: 'Shape it.' })
+    // Its next turn is the one Hemera starts to hand it the brief.
+    await untilThread(bridge, session.id, deliveredAlone)
 
     expect(proposing.answers.tools).toEqual([[...offeredTools('free')]])
     expect(restarted.answers.resumes).toBe(1)
@@ -672,7 +765,7 @@ describe('A proposal accepted during a turn takes the write tools away at once a
     })
     gate.carryOn()
     await running
-    await bridge.invoke('agents.prompt', { sessionId: session.id, text: 'Shape it.' })
+    await untilThread(bridge, session.id, deliveredAlone)
 
     // Lent with the free set, the running agent is refused a write tool as not offered.
     expect(proposing.answers.used[1]).toMatchObject({ tool: 'fs_write', isError: true })
@@ -683,6 +776,134 @@ describe('A proposal accepted during a turn takes the write tools away at once a
     expect([...(restarted.answers.tools[0] ?? [])].toSorted()).toEqual(
       [...offeredTools('define')].toSorted(),
     )
+  })
+})
+
+describe("Accepting a proposal starts the agent's next turn with the define brief", () => {
+  test('Create hands the agent, started again, the mission brief in a turn of its own: the user types nothing', async () => {
+    const proposing = fakeAgent({
+      steps: [
+        { does: 'says', text: 'Shall I create the Spec?' },
+        uses('spec_propose', {
+          kind: 'spec',
+          title: 'Export the Journal',
+          type: 'feature',
+          key: 'propose-accept',
+        }),
+      ],
+    })
+    const restarted = fakeAgent({
+      answersDelivery: [{ does: 'says', text: 'Shaping the export.' }],
+    })
+    opened = await openWindow(dataFolder, proposing, restarted)
+    const { bridge } = opened
+    const project = await bridge.invoke('projects.create', {
+      name: 'Atlas',
+      tone: 'primary',
+      mainPath: workspace,
+    })
+    const session = await bridge.invoke('sessions.create', {
+      projectId: project.id,
+      provider: 'claude',
+    })
+    await bridge.invoke('agents.prompt', { sessionId: session.id, text: 'Export the Journal.' })
+    await bridge.invoke('specs.create', {
+      sessionId: session.id,
+      type: 'feature',
+      title: 'Export the Journal',
+    })
+    const entries = await untilThread(
+      bridge,
+      session.id,
+      (seen) => deliveredAlone(seen) && seen.some((entry) => entry.body === 'Shaping the export.'),
+    )
+
+    // One prompt, Hemera's: the marker and the brief, nothing the user said.
+    expect(restarted.answers.prompts).toEqual([DELIVERY_MARKER])
+    const brief = restarted.answers.blocks[0]?.find(
+      (block) => block.type === 'resource' && block.resource.uri === contextUri('brief'),
+    )
+    expect(
+      brief?.type === 'resource' && 'text' in brief.resource ? brief.resource.text : '',
+    ).toMatch(new RegExp(`^${DEFINE_MISSION_BRIEF.slice(0, 20)}`))
+    expect(entries.filter((entry) => entry.role === 'user').map((entry) => entry.body)).toEqual([
+      'Export the Journal.',
+    ])
+    // The brief is folded in the thread, and what the agent answered it follows it.
+    const folded = entries.find((entry) => entry.kind === 'mission_brief')
+    const answered = entries.find((entry) => entry.body === 'Shaping the export.')
+    expect(folded).toBeDefined()
+    expect(answered?.seq ?? 0).toBeGreaterThan(folded?.seq ?? 0)
+  })
+})
+
+describe('Declining a proposal tells the agent', () => {
+  test('Not now keeps the proposal declined, the Session free, and hands the agent the decline in a turn of its own', async () => {
+    const agent = fakeAgent({
+      turns: [
+        [
+          uses('spec_propose', {
+            kind: 'spec',
+            title: 'Export the Journal',
+            type: 'feature',
+            key: 'propose-decline',
+          }),
+        ],
+      ],
+      answersDelivery: [{ does: 'says', text: 'Understood, carrying on here.' }],
+    })
+    opened = await openWindow(dataFolder, agent)
+    const { bridge } = opened
+    const project = await bridge.invoke('projects.create', {
+      name: 'Atlas',
+      tone: 'primary',
+      mainPath: workspace,
+    })
+    const session = await bridge.invoke('sessions.create', {
+      projectId: project.id,
+      provider: 'claude',
+    })
+    await bridge.invoke('agents.prompt', { sessionId: session.id, text: 'Export the Journal.' })
+    const proposed = (await bridge.invoke('sessions.read', { sessionId: session.id })).entries.find(
+      (entry) => entry.kind === 'spec_proposal',
+    )
+    const proposalId = (proposed?.correlationId ?? '').slice('proposal:'.length)
+
+    await bridge.invoke('specs.declineProposal', { sessionId: session.id, proposalId })
+    const entries = await untilThread(
+      bridge,
+      session.id,
+      (seen) =>
+        deliveredAlone(seen) &&
+        seen.some((entry) => entry.body === 'Understood, carrying on here.'),
+    )
+
+    expect(agent.answers.prompts).toEqual(['Export the Journal.', DELIVERY_MARKER])
+    const notice = agent.answers.blocks[1]?.find(
+      (block) => block.type === 'resource' && block.resource.uri === contextUri('notice'),
+    )
+    expect(
+      notice?.type === 'resource' && 'text' in notice.resource ? notice.resource.text : '',
+    ).toContain('The user declined your proposal to create the feature Spec "Export the Journal"')
+    expect(entries.find((entry) => entry.kind === 'spec_proposal')?.state).toBe('declined')
+    expect(entries.filter((entry) => entry.role === 'user').map((entry) => entry.body)).toEqual([
+      'Export the Journal.',
+    ])
+    expect(entries.some((entry) => entry.kind === 'context_delivery')).toBe(true)
+    // And the Context tab lists it, as something Hemera handed the agent.
+    const context = await bridge.invoke('context.read', { sessionId: session.id })
+    expect(context.provided.filter((one) => one.kind === 'notice')).toEqual([
+      expect.objectContaining({ path: '', reached: 'delivery_prompt' }),
+    ])
+    const listed = await bridge.invoke('sessions.list', { projectId: project.id })
+    expect(listed.find((one) => one.id === session.id)).toMatchObject({
+      mission: 'free',
+      specId: null,
+    })
+    // Declined once: a second Not now is refused, and tells the agent nothing more.
+    await expect(
+      bridge.invoke('specs.declineProposal', { sessionId: session.id, proposalId }),
+    ).rejects.toThrow('This proposal was already answered.')
   })
 })
 

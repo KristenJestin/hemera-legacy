@@ -17,7 +17,7 @@
  */
 
 import { execFileSync } from 'node:child_process'
-import { readFileSync, readdirSync } from 'node:fs'
+import { existsSync, readFileSync, readdirSync } from 'node:fs'
 import { join, relative } from 'node:path'
 import { describe, expect, test } from 'vite-plus/test'
 
@@ -90,6 +90,12 @@ const CATALOGUE: Catalogued[] = [
   // HEM-17: where a piece of work stands, said as a dot. A thing to read and not a thing to
   // operate, so there is no keyboard story to ask of it.
   { name: 'StatusDot', folder: 'status-dot', keyboard: false },
+  // Lot 20, recette of 24 September 2026: a box to tick, drawn in the theme, which every box of
+  // the application is instead of the platform's own.
+  { name: 'Checkbox', folder: 'checkbox', keyboard: true },
+  // Issue #140: what an agent is doing, said by Hemera's face. A thing to read and not a thing to
+  // operate, like the dot it will stand beside.
+  { name: 'Face', folder: 'face', keyboard: false },
 ]
 
 /** The pieces of the shell, which are components with a story each and no catalogue entry. */
@@ -100,7 +106,14 @@ const SHELL = ['shell', 'chrome-bar', 'sidebar', 'gutter', 'command-palette']
  * shows as a screen or a composed piece, with the same discipline whatever root they sit under.
  */
 const SURFACES = {
-  project: ['project-dialog', 'project-settings'],
+  // Recette 1 of lot 20: the dialogs a repository and a command are added and edited in.
+  project: [
+    'project-dialog',
+    'project-settings',
+    'preparation-editor',
+    'repository-dialog',
+    'command-dialog',
+  ],
   journal: ['journal'],
   composer: ['composer', 'prompt-input'],
   // The thread of a Session (HEM-57): the messages, the viewport they are read in, and the
@@ -113,6 +126,17 @@ const SURFACES = {
   home: ['home'],
   settings: ['settings'],
   notifications: ['notifications'],
+  // Lot 20: what a Workspace is made of: its repositories, its creation, its preparation, the list
+  // of a Project's Workspaces and their cleanup, the variables and the services.
+  workspace: [
+    'workspace-repositories',
+    'create-workspace-dialog',
+    'preparation-steps',
+    'workspace-list',
+    'cleanup-dialog',
+    'variables-editor',
+    'service-list',
+  ],
 }
 
 /**
@@ -136,6 +160,99 @@ const ALWAYS = ['Playground', 'Variants', 'States']
  */
 const NAMED_STATES = new Map([
   ['composer/composer', ['Playground', 'Empty', 'Ready', 'Sending', 'Blocked']],
+  [
+    'workspace/variables-editor',
+    ['Project', 'Workspace', 'Empty', 'Adding', 'Editing', 'KeyExists', 'Keyboard'],
+  ],
+  [
+    'workspace/service-list',
+    [
+      'Starting',
+      'Ready',
+      'Unanswered',
+      'PortConflict',
+      'Failed',
+      'TwoInstances',
+      'ProjectScoped',
+      'Empty',
+      'Keyboard',
+    ],
+  ],
+  [
+    'workspace/workspace-repositories',
+    ['Ready', 'Empty', 'Cleaned', 'Loading', 'GitError', 'Preparing'],
+  ],
+  [
+    'workspace/create-workspace-dialog',
+    [
+      'Proposed',
+      'DetachedHead',
+      'RepositoryLeftOut',
+      'Refused',
+      'GitMissing',
+      'Invalid',
+      'FromSettings',
+      'Keyboard',
+    ],
+  ],
+  [
+    'workspace/preparation-steps',
+    [
+      'Pending',
+      'Running',
+      'Done',
+      'Skipped',
+      'Failed',
+      'Resumed',
+      'LinkRefused',
+      'RunFailed',
+      'Keyboard',
+    ],
+  ],
+  [
+    'workspace/workspace-list',
+    ['MainOnly', 'Filled', 'Expanded', 'NewWorkspace', 'MapFolder', 'Keyboard'],
+  ],
+  [
+    'workspace/cleanup-dialog',
+    ['Confirm', 'RefusedRunningService', 'RefusedGit', 'RefusedBuildSession', 'Keyboard'],
+  ],
+  // Lot 20: the recipe of a Project, with nothing in it, in order, being added to and edited, a
+  // source main does not hold, walked, and — recette 2 — a run carrying its own line and a copy's
+  // path picked outside its base.
+  [
+    'project/preparation-editor',
+    ['Empty', 'Filled', 'Adding', 'Editing', 'SourceMissing', 'OwnLine', 'Suggestions', 'Keyboard'],
+  ],
+  // Recette 1 of lot 20: the settings of a Project, one section at a time, each its story.
+  [
+    'project/project-settings',
+    [
+      'Complete',
+      'General',
+      'Repositories',
+      'Workspaces',
+      'Commands',
+      'Preparation',
+      'Variables',
+      'Refused',
+      'Keyboard',
+    ],
+  ],
+  ['project/repository-dialog', ['Add', 'Edit', 'Invalid', 'Refused', 'Keyboard']],
+  [
+    'project/command-dialog',
+    [
+      'Add',
+      'Edit',
+      'Portless',
+      'PortlessNameInvalid',
+      'PortlessMissing',
+      'PortlessInLine',
+      'Refused',
+      'Keyboard',
+    ],
+  ],
 ])
 
 function storiesIn(path: string): string[] {
@@ -277,11 +394,14 @@ describe('Catalogue, coquille et surfaces, et rien d’autre', () => {
       'Sidebar',
       'Gutter',
       'CommandPalette',
+      // What the window shows while it starts, before its first page is ready.
+      'StartScreen',
     ]
     const surfaces = [
       'ProjectDialog',
       'ProjectSettings',
       'RepositoryList',
+      'PreparationEditor',
       'DangerZone',
       'Journal',
       'JournalEntry',
@@ -336,7 +456,10 @@ describe('Catalogue, coquille et surfaces, et rien d’autre', () => {
       'ToolCallCard',
       'TerminalOutput',
       'DiffBlock',
+      // #149: the calls of a turn between two things the agent said, folded into one row.
+      'ActionGroup',
       'PermissionRequest',
+      'PermissionRecord',
       'DecisionSummary',
       // The agent, its model and its effort are one control since the trial of 22 September
       // 2026: three selectors in the foot of the composer, plus the agent's own at the far end
@@ -349,43 +472,79 @@ describe('Catalogue, coquille et surfaces, et rien d’autre', () => {
       // marker the thread already had.
       'ActivityRow',
       'UsageMeter',
+      // Issue #134: the two share the row above the box, and the meter stands at its foot.
+      'TurnLine',
+      'SessionNotices',
+      'SessionHistory',
+      'SessionCatalogue',
       'BlockedBanner',
       'AgentsSection',
       'PlanPanel',
       'SessionDetails',
       'StoppedTurn',
+      // #131: what an agent reported outside the conversation, or asked and nobody could see.
+      'AgentReport',
       'ResumeFallbackBanner',
       // HEM-18: Hemera lends the agent its own tools. A call to one of them is a block of the
       // thread with the mark that tells it from a native call, a command it runs is a block of
       // its own, and the Session says what it runs and what it works from in its details.
       'HemeraToolCall',
       'CommandRun',
-      'CommandsPanel',
+      'CommandProposal',
+      // #218: a change to the Project's setup the agent proposes, a row of the notices per
+      // change, and the quiet line the thread keeps of one whose call it cannot find.
+      'SetupProposal',
+      'SetupProposalRecord',
+      'CallOutcome',
+      'CallOutcomeDetails',
+      'CommandProposalRecord',
+      'NoticeRecord',
+      // Issue #219: what goes on in a Session, as a line under its title — the commands Hemera
+      // runs, those the agent runs in its own shell, its sub-agents — which the Commands tab of
+      // the Session's details, and its panel, gave way to.
+      'GoingOnLine',
+      // The Run at the end of that line: the catalogue matched as it is typed, and any other line
+      // run once.
+      'RunCommand',
       'ContextView',
       'BareModeState',
       'CommandList',
-      // Lot 19: the Spec panel of a `define` Session, its rail and its parts, and the three
-      // blocks of the thread: what the agent was handed, a question of the Spec asked in the
-      // chat, and the agent proposing a Spec in a `free` Session.
+      // Lot 20: the variables, the services and the details of a run of a Workspace.
+      'VariablesEditor',
+      'ServiceList',
+      'RunDetails',
+      // Lot 20: what Git says of a Workspace's repositories, the dialog that creates one, its
+      // preparation step by step, the Workspaces of a Project, and the cleanup that keeps the
+      // branches.
+      'WorkspaceRepositories',
+      'CreateWorkspaceDialog',
+      'PreparationSteps',
+      'WorkspaceList',
+      'CleanupDialog',
+      // Lot 19: the Spec panel of a `define` Session and its parts — folded to a small frame and
+      // open as one column since #164 — and the three blocks of the thread: what the agent was
+      // handed, a question of the Spec asked in the chat, and the agent proposing a Spec in a
+      // `free` Session.
       'SpecPanel',
       'SpecPart',
-      'SpecStage',
-      'SpecRail',
       'SpecHead',
       'SectionPart',
       'StoriesPart',
       'TasksPart',
       'QuestionsPart',
-      'ConflictBanner',
       'ReaderBar',
       'ReworkDialog',
       'MissionBrief',
       'SpecQuestion',
+      'SpecQuestionRecord',
       'CreateSpecProposal',
-      // The shell the Spec panel stands in, which any mission's panel opens in beside the chat,
-      // and the rail it is fed with.
-      'MissionPanel',
-      'MissionRail',
+      'SpecProposalRecord',
+      // The build of a frozen Spec: what it is launched in, and where that launch stands
+      // (D8-12, D8-13).
+      'WorkspaceActions',
+      // Recette 1 of lot 20: every addition and every edit of the settings is a dialog.
+      'CommandDialog',
+      'RepositoryDialog',
     ]
     // The form hook, its fields and the schemas they check against. Not components of the
     // catalogue: a field of a form is drawn by `Input` like everything else, and what these add
@@ -411,6 +570,11 @@ describe('Catalogue, coquille et surfaces, et rien d’autre', () => {
     // theme, not components: the application needs them to hand the shell a width and to say
     // which place it is on.
     const values = [
+      // Lot 20: the seven command types, their scopes, their icons and their labels (D8-07).
+      'COMMAND_SCOPES',
+      'COMMAND_TYPES',
+      'COMMAND_TYPE_ICONS',
+      'COMMAND_TYPE_LABELS',
       'EMPTY_DRAFT',
       'EVERYWHERE_PREFIX',
       'HOME_ENTRY',
@@ -418,6 +582,11 @@ describe('Catalogue, coquille et surfaces, et rien d’autre', () => {
       'NESTED_RADIUS',
       'PROJECT_SETTINGS_ENTRY',
       'PROJECT_TONES',
+      // #131: how long a running turn may hear nothing before its line says so, and offers more.
+      'QUIET_AFTER_MS',
+      'STUCK_AFTER_MS',
+      // Recette 1 of lot 20: the icons a repository may be drawn with.
+      'REPOSITORY_ICONS',
       'SIDEBAR_DEFAULT',
       'SIDEBAR_MAX',
       'SIDEBAR_MIN',
@@ -460,7 +629,9 @@ describe('Surfaces du lot 4 montrées en Storybook', () => {
  * entry that more than one file feeds are named after the state they show.
  */
 describe('Les cinq racines du catalogue', () => {
-  const ROOTS = ['Foundations', 'Components', 'Blocks', 'Surfaces', 'Shell']
+  // `Explorations` is the sixth, last: a design question drawn in several variants, deleted once
+  // one of them is built (`AGENTS.md`).
+  const ROOTS = ['Foundations', 'Components', 'Blocks', 'Surfaces', 'Shell', 'Explorations']
 
   /**
    * The order is not the alphabet's: a reader is given the five roots in the order above, and,
@@ -482,10 +653,15 @@ describe('Les cinq racines du catalogue', () => {
       'Session',
       'Complete',
       'Shell',
+      'Explorations',
     ])
     // The alphabet, asked for rather than hoped for: Storybook keeps the index's own order for
     // every name the list above does not mention, so the method is what makes the rule true.
     expect(settings).toContain("method: 'alphabetical'")
+  })
+
+  test('an exploration goes once the variant chosen is built: the questions, card B (#199)', () => {
+    expect(existsSync(join(designSystem, 'explorations', 'questions'))).toBe(false)
   })
 
   test('every story file is filed under one of the five roots', () => {

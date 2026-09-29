@@ -71,15 +71,18 @@ packages/ipc      @hemera/ipc      the shared channel declaration: one name per 
 packages/ui       @hemera/ui       the design system: the CSS theme, the motion preset, the
                                    icon catalogue and the components. React, Tailwind 4, Base
                                    UI and motion; nothing of Hemera, nothing of Electron.
+apps/face-lab     @hemera/face-lab a page to play with Hemera's face (#140): its states, its
+                                   changes and every number it plays by, through the face's
+                                   own door `@hemera/ui/face`. A tool; it ships nowhere.
 tools/            —                boundaries, commit-message, git-flow, environment-report,
                                    package-desktop, window-options, motion-presets.
                                    TypeScript run by Node, tested by Vitest.
 ```
 
-Dependency direction is `desktop → core`, `desktop → ipc` and `desktop → ui`. `core`, `ipc`
-and `ui` import nothing of Hemera: they are the leaves the application composes. Tabler comes
-through `packages/ui/src/icons.ts` and nowhere else. Import other packages only through their
-`exports`; never reach into another package's `src`.
+Dependency direction is `desktop → core`, `desktop → ipc`, `desktop → ui` and `face-lab → ui`.
+`core`, `ipc` and `ui` import nothing of Hemera: they are the leaves the application composes.
+Tabler comes through `packages/ui/src/icons.ts` and nowhere else. Import other packages only
+through their `exports`; never reach into another package's `src`.
 `node tools/boundaries.ts` enforces all of it and runs inside `pnpm lint`.
 
 "Workspace" means two things: a pnpm workspace (a package here) and a product Workspace
@@ -101,6 +104,7 @@ pnpm package --channel beta      # refused outside CI: prod and beta are the pip
 pnpm check                       # typecheck, lint, fmt:check and test, in that order
 
 pnpm --filter @hemera/desktop e2e  # the built application, driven by @wdio/electron-service
+pnpm face-lab                      # the face lab, served on http://localhost:6012
 ```
 
 Configuration lives in one place: `vite.config.ts` at the root holds the `lint`, `fmt` and
@@ -234,6 +238,12 @@ sections and phases, the ready gate and the write right. Every write checks that
 draft on its current revision and, for an agent, that its Session holds the write right, and
 records its Journal line in the same transaction.
 
+The product Workspaces live under `apps/desktop/src/engine/workspaces/`: the Workspaces of a
+Project (created, observed, cleaned up), their preparation step by step, the Project's recipe and
+the variables given to what runs in them. Git is `apps/desktop/src/engine/git.ts`: the machine's
+own `git`, spawned with its arguments and no shell, never inside a transaction, its refusal
+answered as Git wrote it.
+
 `data` and `engine` are the names the code uses; `Profile` is the word the interface keeps for
 the same folder, in the settings, in the Journal filter and on the `profile` events the engine
 writes at start-up.
@@ -266,11 +276,14 @@ writes at start-up.
 - Keyboard: declared tab order per page, visible focus ring, focus restored after overlays.
 - Storybook sidebar, five roots in this order and nothing else: **Foundations** (tokens,
   icons, motion); **Components**, the primitives, flat and alphabetical; **Blocks**, the
-  composed pieces that are not a screen, grouped by family and five families at most
-  (`Blocks/Message`, `Blocks/Activity`, `Blocks/Composer`, `Blocks/Session`, `Blocks/Spec`);
+  composed pieces that are not a screen, grouped by family and six families at most
+  (`Blocks/Message`, `Blocks/Activity`, `Blocks/Composer`, `Blocks/Session`, `Blocks/Spec`,
+  `Blocks/Workspace`);
   **Surfaces**, one entry per screen (`Surfaces/Session`, `Surfaces/Project/Dialog` when a
-  screen has several parts), never one entry per variant; **Shell**, the window frame. The
-  order of the roots and the alphabetical order inside are forced by `storySort` in
+  screen has several parts), never one entry per variant; **Shell**, the window frame; and,
+  last, **Explorations**, a design question under way drawn in several variants
+  (`Explorations/Questions`), under `src/explorations/`, exported by nothing, and deleted once
+  the variant chosen is built. The order of the roots and the alphabetical order inside are forced by `storySort` in
   `.storybook/preview`. A story file sits next to its component, `<name>.stories.tsx`; one
   story per state, named after the state (`Empty`, `Loading`, `Error`, `Filled`, `Dense`);
   a surface's first story is `Complete`, everything in place, because it is what the UI gate

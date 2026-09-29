@@ -24,6 +24,7 @@ import {
   type Agent as AcpAgent,
   type ContentBlock,
   type LoadSessionRequest,
+  type LoadSessionResponse,
   type McpServer,
   type NewSessionRequest,
   type NewSessionResponse,
@@ -158,6 +159,33 @@ export type FakeStep =
       readonly size: number
       readonly cost?: { readonly amount: number; readonly currency: string }
     }
+  | {
+      /**
+       * A line written on its standard error rather than said over the protocol (#131): what
+       * OpenCode does when its provider refuses it, and all it does about it.
+       */
+      readonly does: 'complains'
+      readonly line: string
+    }
+  | {
+      /**
+       * A request of a method Hemera does not implement, sent and awaited (#131): what the SDK
+       * answers it with is the agent's business, and the turn goes on either way.
+       */
+      readonly does: 'requests'
+      readonly method: string
+    }
+  | {
+      /**
+       * One of its options moved by the agent itself, as Claude Code leaves plan mode once the
+       * plan is approved: said as `current_mode_update` when `as` is `mode`, and as the whole set
+       * in a `config_option_update` otherwise.
+       */
+      readonly does: 'switches'
+      readonly option: string
+      readonly value: string
+      readonly as?: 'mode' | 'config'
+    }
 
 /**
  * What the agent is scripted to be: what it announces, and what it does when it is asked.
@@ -242,6 +270,17 @@ export interface FakeScript {
   readonly between?: () => Promise<void>
   /** Awaited before a delivery is answered: how a suite catches a turn inside its delivery. */
   readonly holdsDelivery?: () => Promise<void>
+  /**
+   * Awaited before `initialize` is answered: an agent whose cold start takes its time, or never
+   * ends, which is how a suite holds a build `starting` (#132).
+   */
+  readonly holdsStart?: () => Promise<void>
+  /**
+   * Awaited before `session/resume` or `session/load` is answered: an agent still taking its
+   * session back, which is how a suite catches a Session whose agent runs but holds no session
+   * yet (#211).
+   */
+  readonly holdsTakeBack?: () => Promise<void>
   /** Called with the text of each prompt as it arrives, for a test that watches the pipe. */
   readonly onPrompt?: (text: string) => void
   /**
@@ -380,6 +419,8 @@ export interface FakeAgent {
    * takes its bare mode from variables is handed (D6-02, D6-09).
    */
   readonly environments: Record<string, string>[]
+  /** Hands a reader every line the agent writes on its standard error from now on. */
+  readonly onStderr: (read: (line: string) => void) => void
   /** Ends the agent now, as a process that died on the spot does. */
   readonly die: () => void
   /** The death of the agent, which resolves once and only once. */
@@ -458,6 +499,9 @@ function updateOf(step: FakeStep): SessionUpdate | null {
     case 'asks':
     case 'uses':
     case 'usesTogether':
+    case 'complains':
+    case 'requests':
+    case 'switches':
       return null
     default:
       return null
@@ -704,9 +748,16 @@ export function fakeAgent(script: Partial<FakeScript> = {}): FakeAgent {
   // What it announces now, which a choice replaces: the protocol answers a choice with the whole
   // set of options as they stand, and this is that set.
   let announced: SessionConfigOption[] = [...(script.configOptions ?? [])]
+  // What a session taken back answers: the options as this process stands, as Claude Code's
+  // adapter answers `session/resume` and `session/load` — on its defaults, whatever the session
+  // was put on before the process that held it ended. Left out when the script named none.
+  const takenBack = (): ResumeSessionResponse =>
+    script.configOptions === undefined ? {} : { configOptions: [...announced] }
   let cancelled = false
   let dead = false
   let connection: AgentSideConnection | null = null
+  // Who reads its standard error: the supervisor's port hands it every reader it was given.
+  const complaints: ((line: string) => void)[] = []
 
   // The death is announced to whoever is waiting on it, and the promise is the one thing about
   // the agent that outlives the turn that was running: a test reads it whether the script died
@@ -836,10 +887,11 @@ export function fakeAgent(script: Partial<FakeScript> = {}): FakeAgent {
   }
 
   const agent: AcpAgent = {
-    initialize: (request) => {
+    initialize: async (request) => {
       // What the client said about itself, kept as it arrived: this is how a suite proves that
       // an extension Hemera advertises really reached the agent that reads it.
       answers.advertised.push(JSON.stringify(request.clientCapabilities))
+      await script.holdsStart?.()
       return {
         protocolVersion: PROTOCOL_VERSION,
         agentCapabilities: {
@@ -874,22 +926,25 @@ export function fakeAgent(script: Partial<FakeScript> = {}): FakeAgent {
       }
       return { configOptions: [...announced] }
     },
-    loadSession: async (request: LoadSessionRequest): Promise<void> => {
+    loadSession: async (request: LoadSessionRequest): Promise<LoadSessionResponse> => {
       answers.loads += 1
       if (script.refusesLoad === true) throw new Error('this agent refuses to load a session')
+      await script.holdsTakeBack?.()
       await handed(request)
       sessionId = request.sessionId
       for (const step of script.history ?? []) {
         // oxlint-disable-next-line no-await-in-loop -- a scripted agent replays its history in the order it was written, one message at a time
         await notify(step)
       }
+      return takenBack()
     },
     resumeSession: async (request: ResumeSessionRequest): Promise<ResumeSessionResponse> => {
       answers.resumes += 1
       if (script.refusesResume === true) throw new Error('this agent refuses to resume a session')
+      await script.holdsTakeBack?.()
       await handed(request)
       sessionId = request.sessionId
-      return {}
+      return takenBack()
     },
     authenticate: () => undefined,
     cancel: () => {
@@ -925,6 +980,29 @@ export function fakeAgent(script: Partial<FakeScript> = {}): FakeAgent {
         if (step.does === 'uses') {
           // oxlint-disable-next-line no-await-in-loop -- a tool is answered before the agent does anything with the answer
           await use(step)
+          continue
+        }
+        if (step.does === 'complains') {
+          for (const read of complaints) read(step.line)
+          continue
+        }
+        if (step.does === 'requests') {
+          // oxlint-disable-next-line no-await-in-loop -- a request is answered before the agent goes on, as it would wait on it
+          await connection?.extMethod(step.method, {}).catch(() => undefined)
+          continue
+        }
+        if (step.does === 'switches') {
+          announced = announced.map((option) =>
+            option.id === step.option && option.type !== 'boolean'
+              ? { ...option, currentValue: step.value }
+              : option,
+          )
+          const update: SessionUpdate =
+            step.as === 'mode'
+              ? { sessionUpdate: 'current_mode_update', currentModeId: step.value }
+              : { sessionUpdate: 'config_option_update', configOptions: [...announced] }
+          // oxlint-disable-next-line no-await-in-loop -- what it says is sent before what it says next
+          if (!dead) await connection?.sessionUpdate({ sessionId, update })
           continue
         }
         if (step.does === 'usesTogether') {
@@ -973,6 +1051,9 @@ export function fakeAgent(script: Partial<FakeScript> = {}): FakeAgent {
     output: toClient.readable,
     starts: [],
     environments: [],
+    onStderr: (read) => {
+      complaints.push(read)
+    },
     die,
     exited,
   }
@@ -1052,10 +1133,11 @@ function supervisedOf(agent: FakeAgent): SupervisedProcess {
       readers.push(read)
       pump()
     },
-    // The fake has no standard error: it is a peer in this process and not a program that can
-    // complain, so the reader is taken and never called. Refusing it would refuse a wiring the
-    // real port allows — a caller that reads both streams reads them here too.
-    onStderr: () => undefined,
+    // What a script writes there with a `complains` step, handed to every reader as the real
+    // port does.
+    onStderr: (read) => {
+      agent.onStderr(read)
+    },
   }
 }
 

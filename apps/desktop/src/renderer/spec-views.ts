@@ -1,26 +1,18 @@
-import {
-  type GateFailure,
-  contractOf,
-  focusOf,
-  readyGate,
-  sectionOwner,
-  takeOverRefusal,
-  unbriefedEdit,
-} from '@hemera/core'
+import { type GateFailure, readyGate, sectionOwner, takeOverRefusal } from '@hemera/core'
 import type {
-  ChannelArguments,
-  EditBuffer,
   JournalEntry,
   PhaseId,
   SectionName,
   Session,
   SpecAnswer as WireAnswer,
+  SpecLaunches,
   SpecQuestion,
   SpecRevision,
   SpecSnapshot,
 } from '@hemera/ipc'
 import type {
   GateCheck,
+  LaunchView,
   Mark,
   PhaseView,
   ReaderView,
@@ -40,31 +32,24 @@ import type {
  * A Spec snapshot as the Spec panel of `@hemera/ui` draws it (design D7-01, D7-08, D7-10, D7-12).
  *
  * The design system mirrors nothing of the domain: its view says what is shown, already decided —
- * one sentence of what is happening, a mark per part, the readiness as seven segments and the
- * things left before ready. This is where a snapshot, its revisions, its edit buffers
- * and its Journal become that. Pure, and free of what `@hemera/ui` runs when it loads, so it is
- * tested on Node.
+ * a mark per part, the readiness as seven segments and the things left before ready. This is where
+ * a snapshot, its revisions and its Journal become that. Pure, and free of what `@hemera/ui` runs
+ * when it loads, so it is tested on Node.
  */
 
 /** Everything a Spec view is read from: the store's answers, as they came. */
 export interface SpecReading {
   snapshot: SpecSnapshot
   revisions: readonly SpecRevision[]
-  buffers: readonly EditBuffer[]
   /** The Spec's lines of the Journal, newest first. */
   journal: readonly JournalEntry[]
   /** What the last "Mark ready" was refused with, which the readiness bar says. */
   readyRefused?: string | null | undefined
+  /** The part a `spec_write` of the running turn is writing now, or null (issue #185). */
+  writing?: SpecTarget | null | undefined
 }
 
 const PHASES: readonly PhaseId[] = ['shape', 'plan', 'decompose', 'prototype']
-
-const PHASE_WORDS: Record<PhaseId, string> = {
-  shape: 'Shape',
-  plan: 'Plan',
-  decompose: 'Decompose',
-  prototype: 'Prototype',
-}
 
 /** How a section is named inside a sentence. */
 const SECTION_WORDS: Record<SectionName, string> = {
@@ -141,51 +126,35 @@ function taskKeys(snapshot: SpecSnapshot): Map<string, string> {
 }
 
 /**
- * The margin mark of a section: in conflict with a kept text of yours, nothing written, out of
- * date because the phase that owns it is stale (D7-08), or who wrote it last.
+ * The mark of a section: nothing written, out of date because the phase that owns it is stale
+ * (D7-08), or who wrote it last.
  */
 function sectionMark(
   snapshot: SpecSnapshot,
   name: SectionName,
   author: 'agent' | 'human' | null,
-  conflicting: boolean,
 ): Mark {
-  if (conflicting) return 'conflict'
   if (author === null) return 'empty'
   if (phaseState(snapshot, sectionOwner(name)) === 'stale') return 'stale'
   return author
 }
 
 /**
- * The sections, each with its mark, whether your edit is still to reach the agent, and, when a
- * text of yours was kept on another version than the one it is at, the conflict the banner says
- * (D7-12). A frozen revision shows no conflict:
- * nothing is saved on it.
+ * The sections, each with its mark: read, never edited by hand (issue #135). The one a
+ * `spec_write` is writing now is marked so, whatever it held before: its text, when it has some,
+ * stays on screen until the new one replaces it (issue #185).
  */
-export function sectionsOf(snapshot: SpecSnapshot, buffers: readonly EditBuffer[]): SectionView[] {
-  const editable = isEditable(snapshot)
+export function sectionsOf(
+  snapshot: SpecSnapshot,
+  writing: SpecTarget | null = null,
+): SectionView[] {
   return snapshot.sections.map((section) => {
-    const kept = editable
-      ? buffers.find((one) => one.name === section.name && one.baseVersion !== section.version)
-      : undefined
     const author = section.body.trim() === '' ? null : section.author
     return {
       name: section.name,
       body: section.body,
-      version: section.version,
       author,
-      mark: sectionMark(snapshot, section.name, author, kept !== undefined),
-      // "Sent to the agent next turn": an edit of yours its writer has not been briefed on.
-      pendingForAgent: editable && unbriefedEdit(section, snapshot.briefedAt),
-      conflict:
-        kept === undefined
-          ? undefined
-          : {
-              base: kept.baseVersion,
-              current: section.version,
-              mine: kept.body,
-              theirs: section.body,
-            },
+      mark: section.name === writing ? 'writing' : sectionMark(snapshot, section.name, author),
     }
   })
 }
@@ -253,56 +222,6 @@ function listMark(snapshot: SpecSnapshot, count: number): Mark {
   return phaseState(snapshot, 'decompose') === 'stale' ? 'stale' : 'agent'
 }
 
-/** Whether the agent attested the content the Spec is at now (D7-10). */
-function attested(snapshot: SpecSnapshot): boolean {
-  return snapshot.revision.attestedContentVersion === snapshot.spec.contentVersion
-}
-
-/**
- * The one sentence under the head: the phase in focus and where it stands.
- *
- * In the reader's words, never the engine's: no revision, no attestation, no stale. Frozen, it
- * says so; with every phase finished, whether the agent confirmed the Spec complete; with a phase
- * stale, that it is to review and the agent goes over it again — every phase after a Rework, the
- * one a new shaping made stale otherwise; with a blocking question of that phase open, that the answer is yours; and
- * otherwise what the agent is writing: the first empty section of the shape, the plan, the tasks.
- */
-export function nowOf(snapshot: SpecSnapshot): string {
-  if (!isCurrent(snapshot)) return 'An earlier version · read only, as it was frozen'
-  if (snapshot.spec.status !== 'draft') {
-    return 'Ready · frozen, a build can start from it'
-  }
-  const focus = focusOf(snapshot.phases)
-  if (focus === null) {
-    return attested(snapshot)
-      ? 'Decompose · finished, the agent confirmed the Spec is complete'
-      : 'Decompose · finished, waiting for the agent to confirm the Spec is complete'
-  }
-  const phase = PHASE_WORDS[focus]
-  if (phaseState(snapshot, focus) === 'stale') {
-    // Right after a Rework every phase that can run is stale; one stale among others finished is
-    // a new shaping's doing, whatever the revision.
-    const reworked = snapshot.phases.every(
-      (one) => one.state === 'stale' || one.state === 'unavailable',
-    )
-    return reworked
-      ? 'Every phase to review · the agent goes over each again'
-      : `${phase} · to review, the agent goes over it again`
-  }
-  const waiting = snapshot.questions.some(
-    (question) => question.blocking && question.resolvedAt === null && question.phase === focus,
-  )
-  if (waiting) return `${phase} · waiting for your answer`
-  if (focus === 'decompose') return 'Decompose · the agent is splitting the tasks'
-  if (focus === 'plan') return 'Plan · the agent is writing the plan'
-  const empty = contractOf(snapshot.revision.type).find(
-    (name) => (snapshot.sections.find((one) => one.name === name)?.body.trim() ?? '') === '',
-  )
-  return empty === undefined
-    ? `${phase} · the agent is shaping the need`
-    : `${phase} · the agent is writing ${SECTION_WORDS[empty]}`
-}
-
 function isSection(target: string): target is SectionName {
   return target in SECTION_WORDS
 }
@@ -330,6 +249,9 @@ function todoOf(snapshot: SpecSnapshot, failures: readonly GateFailure[]): Readi
       add({ label: 'the task links', target: 'tasks' })
     } else if (check === 'coverage' && target === 'tasks') {
       add({ label: 'the tasks', target: 'tasks' })
+    } else if (check === 'coverage' && target === 'stories') {
+      // A feature with no story at all: the target names the list, not a story (#143).
+      add({ label: 'a user story', target: 'stories' })
     } else if (check === 'coverage') {
       const key = keys.get(target) ?? target
       if (!snapshot.criteria.some((criterion) => criterion.storyId === target)) {
@@ -354,11 +276,35 @@ function todoOf(snapshot: SpecSnapshot, failures: readonly GateFailure[]): Readi
 }
 
 /**
+ * Whether a check that passes stands on something written or decided (issue #130).
+ *
+ * The gate passes a check on nothing at all: no task has no broken link and no cycle, no question
+ * leaves none open. A bar that drew those filled was partly green on a Spec where nothing was
+ * written. A segment fills for what the Spec holds: tasks for the links and the cycles, stories or
+ * tasks for the coverage, a question answered for the questions. The contract, the phases and the
+ * attestation pass only on what was written or declared, and stand on it already.
+ */
+function grounded(check: GateCheck, snapshot: SpecSnapshot): boolean {
+  switch (check) {
+    case 'references':
+    case 'cycle':
+      return snapshot.tasks.length > 0
+    case 'coverage':
+      return snapshot.stories.length > 0 || snapshot.tasks.length > 0
+    case 'questions':
+      return snapshot.questions.some((question) => question.answer !== null)
+    default:
+      return true
+  }
+}
+
+/**
  * The readiness of the revision shown (D7-10): the ready gate of `@hemera/core`, run on the very
  * snapshot on screen — so what it says and the content version "Mark ready" is sent with are one
- * reading — check by check, each failing one naming what fails. A frozen revision passed its
- * gate when it was frozen, and is drawn so. `failed` is what the gate answers of the snapshot,
- * handed in by a test that looks at one check.
+ * reading — check by check, each failing one naming what fails. A check the gate passes on
+ * nothing is not drawn as met until the Spec holds what it is about; a gate that passes whole
+ * meets every check. A frozen revision passed its gate when it was frozen, and is drawn so.
+ * `failed` is what the gate answers of the snapshot, handed in by a test that looks at one check.
  */
 export function readinessOf(
   snapshot: SpecSnapshot,
@@ -369,7 +315,7 @@ export function readinessOf(
     checks: GATE_ORDER.map((check) => {
       const failing = failures.filter((failure) => CHECKS[failure.check] === check)
       return failing.length === 0
-        ? { check, passed: true }
+        ? { check, passed: failures.length === 0 || grounded(check, snapshot) }
         : {
             check,
             passed: false,
@@ -412,42 +358,50 @@ export function revisionsOf(
       number: revision.number,
       detail:
         revision.id === snapshot.spec.currentRevisionId
-          ? `Latest · ${snapshot.spec.status === 'draft' ? 'draft' : 'frozen'}`
-          : `Frozen ${dayOf(frozenAt(revision, snapshot, revisions, journal))} · read only`,
+          ? `Latest · ${snapshot.spec.status === 'draft' ? 'draft' : 'ready'}`
+          : `Marked ready ${dayOf(frozenAt(revision, snapshot, revisions, journal))} · read only`,
     }))
 }
 
 /**
- * A refused "Mark ready" in the reader's words. The engine's refusal of a Spec that does not pass
- * its gate lists the gate's failures in its own vocabulary — phases, attestation — which the bar
- * above already says plainly; a Spec that changed meanwhile is said as it is.
+ * A refused "Mark ready" in the reader's words, which is where the panel says what the draft still
+ * lacks: no readiness is drawn anywhere else (issue #135). The engine's refusal of a Spec that does
+ * not pass its gate lists the gate's failures in its own vocabulary — phases, attestation — so it
+ * is said with the things left, in plain words; a Spec that changed meanwhile is said as it is.
  */
-export function plainRefusal(key: string, refused: string | null | undefined): string | undefined {
+export function plainRefusal(
+  key: string,
+  refused: string | null | undefined,
+  todo: readonly ReadinessItem[],
+): string | undefined {
   if (refused === null || refused === undefined) return undefined
-  return refused.includes('does not pass its gate')
-    ? `${key} is not ready yet: see what is left above.`
-    : refused
+  if (!refused.includes('does not pass its gate')) return refused
+  if (todo.length === 0) return `${key} is not ready yet.`
+  return `${key} is not ready yet. Still to do: ${todo.map((item) => item.label).join(', ')}.`
 }
 
 /** The whole view of the panel. */
 export function specViewOf({
   snapshot,
   revisions,
-  buffers,
   journal,
   readyRefused,
+  writing = null,
 }: SpecReading): SpecView {
+  const readiness = readinessOf(snapshot)
   return {
     key: snapshot.spec.key,
     title: snapshot.revision.title,
     type: snapshot.revision.type,
-    // A revision other than the current one is frozen, whatever the Spec is now (D7-05).
-    status: isEditable(snapshot) ? 'draft' : 'ready',
+    // The revision shown speaks for itself: the current one carries the Spec's own status, which a
+    // build makes `in_progress` (D8-13), and an older one reads as frozen, whatever the Spec is
+    // now (D7-05).
+    status: isCurrent(snapshot) ? snapshot.spec.status : 'ready',
     revision: snapshot.revision.number,
     revisions: revisionsOf(snapshot, revisions, journal),
     phases: phasesOf(snapshot),
-    now: nowOf(snapshot),
-    sections: sectionsOf(snapshot, buffers),
+    // Only the current revision is written to: an older one shown is not the one being written.
+    sections: sectionsOf(snapshot, isCurrent(snapshot) ? writing : null),
     stories: storiesOf(snapshot),
     storiesMark: listMark(snapshot, snapshot.stories.length),
     tasks: tasksOf(snapshot),
@@ -456,17 +410,107 @@ export function specViewOf({
     questionsMark:
       snapshot.questions.length === 0 ? 'empty' : (snapshot.questions.at(-1)?.raisedBy ?? 'agent'),
     readiness: {
-      ...readinessOf(snapshot),
-      refused: plainRefusal(snapshot.spec.key, readyRefused),
+      ...readiness,
+      refused: plainRefusal(snapshot.spec.key, readyRefused, readiness.todo),
     },
-    frozenOn: isEditable(snapshot)
-      ? undefined
-      : dayOf(frozenAt(snapshot.revision, snapshot, revisions, journal)),
     // An older revision offers no Rework, which the engine would refuse: only the current one
     // can be reworked (D7-05).
     replacedBy: isCurrent(snapshot)
       ? undefined
       : revisions.find((one) => one.id === snapshot.spec.currentRevisionId)?.number,
+  }
+}
+
+/**
+ * New Spec's Spec before it exists (issue #198): the panel draws it with no key, the request as
+ * its title, nothing written and no phase begun. Nothing of it is saved: the Spec the agent
+ * proposes, or the one it points to, takes its place once the user answers the card.
+ */
+export function provisionalViewOf(title: string): SpecView {
+  return {
+    key: '',
+    title,
+    type: 'feature',
+    status: 'draft',
+    revision: 1,
+    revisions: [],
+    phases: PHASES.map((name) => ({
+      name,
+      state: name === 'prototype' ? 'unavailable' : 'pending',
+    })),
+    sections: [],
+    stories: [],
+    storiesMark: 'empty',
+    tasks: [],
+    tasksMark: 'empty',
+    questions: [],
+    questionsMark: 'empty',
+    readiness: {
+      checks: GATE_ORDER.map((check) => ({ check, passed: false })),
+      todo: [],
+    },
+    provisional: true,
+  }
+}
+
+/**
+ * The launch of the Spec's build as the panel's head reads it (D8-13): where it stands, the step
+ * its Workspace is preparing while it waits, and — refused — the engine's own words for it, which
+ * are the only thing that says what to do about it. `null` while no launch has been asked for.
+ *
+ * The step belongs to the Workspace (D8-05) and is read beside the launch, not inside it: what a
+ * preparation is doing is what the launch is waiting for, and it is named where it stands.
+ *
+ * A launch nothing can start again is said with what ended it, and offers a new build once the
+ * Spec it is read on allows one: one failed before any Session was made — Retry has no agent to
+ * start again — and one cancelled by the cleanup of its Workspace, or by a Rework whose revision
+ * is ready since, which is launched by hand (D8-13).
+ */
+export function launchOf(
+  launches: SpecLaunches | null,
+  spec: Pick<SpecSnapshot['spec'], 'status' | 'currentRevisionId'>,
+): LaunchView | null {
+  if (launches === null || launches.launch === null) return null
+  const { state, detail, sessionId, revisionId } = launches.launch
+  switch (state) {
+    case 'waiting':
+      return launches.step === null ? { state } : { state, step: launches.step }
+    case 'starting':
+    case 'started':
+      return { state }
+    case 'cancelled':
+      return detail === REMOVED
+        ? { state, reason: 'removed', again: spec.status !== 'draft' }
+        : {
+            state,
+            reason: 'rework',
+            again: spec.status === 'ready' && revisionId !== spec.currentRevisionId,
+          }
+    case 'failed':
+      if (sessionId !== null) {
+        return { state, stage: 'agent', cause: detail ?? 'the agent did not start' }
+      }
+      return detail?.startsWith(NOT_PREPARED) === true
+        ? { state, stage: 'preparation', cause: detail.slice(NOT_PREPARED.length) }
+        : { state, stage: 'start', cause: detail ?? 'the build did not start' }
+  }
+}
+
+/** What the engine says of a launch whose Workspace was cleaned up while it waited (D8-13). */
+const REMOVED = 'The Workspace was removed'
+
+/** What the engine puts before the cause of a launch whose Workspace failed its preparation. */
+const NOT_PREPARED = 'The Workspace could not be prepared: '
+
+/**
+ * The Workspaces a build may be started in, and the one the Spec is set on (D8-12): `main` first,
+ * as the engine orders them, then the ones made by hand, the first one with where it stands.
+ */
+export function specWorkspacesOf(launches: SpecLaunches | null) {
+  if (launches === null) return { workspace: undefined, workspaces: [] }
+  return {
+    workspace: launches.workspace ?? undefined,
+    workspaces: launches.workspaces,
   }
 }
 
@@ -488,33 +532,4 @@ export function readerOf(
     writer: title ?? 'none',
     takeOverRefused: takeOverRefusal(snapshot.spec, title, writer !== null && running(writer)),
   }
-}
-
-/**
- * The stories of the revision as a write replaces them, with one of them changed: every story
- * is written, in its order, the one edited carrying its new narrative and criteria.
- *
- * The story edited is the one of its id, wherever it stands now: a story added or moved while
- * its text was being edited changes its place, never which story the edit lands on. A story
- * gone since has nothing to land on, and nothing is answered.
- */
-export function storiesWith(
-  snapshot: SpecSnapshot,
-  changed: StoryView,
-): ChannelArguments<'specs.writeStories'>['stories'] | null {
-  if (!snapshot.stories.some((story) => story.id === changed.id)) return null
-  return snapshot.stories.map((story) => {
-    const mine = story.id === changed.id
-    return {
-      id: story.id,
-      title: mine ? changed.title : story.title,
-      narrative: mine ? changed.narrative : story.narrative,
-      priority: story.priority,
-      criteria: mine
-        ? changed.criteria
-        : snapshot.criteria
-            .filter((criterion) => criterion.storyId === story.id)
-            .map((criterion) => criterion.body),
-    }
-  })
 }

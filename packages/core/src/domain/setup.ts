@@ -140,6 +140,65 @@ export function setupChangeTitle(change: SetupChange): string {
   }
 }
 
+/**
+ * What accepting a change does, in the words the Session's notices unfold it with: a verb and what
+ * it acts on — `Add service`, `Change variable`, `Clean up Workspace`.
+ */
+export function setupChangeVerb(change: SetupChange): string {
+  switch (change.kind) {
+    case 'repository':
+      return 'Add repository'
+    case 'command': {
+      const what = change.type === 'serve' ? 'service' : 'command'
+      return `${change.replaces ? 'Change' : 'Add'} ${what}`
+    }
+    case 'step':
+      return 'Add step'
+    case 'variable':
+      return change.replaces ? 'Change variable' : 'Add variable'
+    case 'workspace_create':
+      return 'Create Workspace'
+    case 'workspace_prepare':
+      return 'Prepare Workspace'
+    case 'workspace_resume':
+      return 'Resume preparation'
+    case 'workspace_cleanup':
+      return 'Clean up Workspace'
+  }
+}
+
+/** What a change is about, and whether that is a path. */
+export interface SetupSubject {
+  readonly text: string
+  readonly path: boolean
+}
+
+/**
+ * What a change is about, in one short line: a command's or a variable's name, a repository's or
+ * a step's path, a Workspace's name; and whether it is a path, set in the terminal's letters.
+ */
+export function setupChangeSubject(change: SetupChange): SetupSubject {
+  switch (change.kind) {
+    case 'repository':
+      return { text: change.path, path: true }
+    case 'command':
+      return { text: change.name, path: false }
+    case 'step':
+      if (change.step !== 'run') return { text: change.path ?? '', path: true }
+      return change.command === null
+        ? { text: change.line ?? '', path: true }
+        : { text: change.command, path: false }
+    case 'variable':
+      return { text: change.name, path: false }
+    case 'workspace_create':
+      return { text: change.name, path: false }
+    case 'workspace_prepare':
+    case 'workspace_resume':
+    case 'workspace_cleanup':
+      return { text: change.workspace, path: false }
+  }
+}
+
 /** Everything the change would write, said field by field; never a variable's value. */
 export function setupChangeDetails(change: SetupChange): readonly SetupDetail[] {
   switch (change.kind) {

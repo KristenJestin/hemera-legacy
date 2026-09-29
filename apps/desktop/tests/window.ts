@@ -30,6 +30,7 @@ import { acpTracesLayer } from '#engine/agents/trace.ts'
 import { discoveryLayer } from '#engine/agents/discovery.ts'
 import type { FakeAgent } from '#engine/agents/fake.ts'
 import { heldWordsLayer } from '#engine/agents/held.ts'
+import { sessionModesLayer } from '#engine/agents/modes.ts'
 import { AgentNotices } from '#engine/agents/notices.ts'
 import { clockLayer, poolLayer } from '#engine/agents/pool.ts'
 import { runtimeLayer } from '#engine/agents/runtime.ts'
@@ -178,6 +179,7 @@ async function openOver(
     Layer.provideMerge(lines),
     Layer.provide(poolLayer.pipe(Layer.provide(clockLayer))),
     Layer.provideMerge(heldWordsLayer),
+    Layer.provideMerge(sessionModesLayer),
     Layer.provide(agentDirectoriesLayer(dataFolder)),
     Layer.provide(acpTracesLayer(dataFolder)),
   )

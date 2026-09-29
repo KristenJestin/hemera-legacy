@@ -74,7 +74,7 @@ function Harness({ orientation, crossing, initial }: HarnessProps) {
 }
 
 const meta = {
-  tags: ['autodocs', 'new'],
+  tags: ['autodocs'],
   title: 'Components/SlidingMark',
   component: Harness,
   parameters: { layout: 'padded' },

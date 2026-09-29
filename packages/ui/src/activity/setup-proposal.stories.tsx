@@ -190,9 +190,7 @@ export const InTheNotices: Story = {
     await expect(pill).toHaveTextContent('3')
     const panel = await screen.findByRole('dialog', { name: 'Waiting for your answer' })
     const group = within(panel).getByRole('region', { name: 'Setup changes' })
-    await expect(within(group).getAllByRole('group', { name: /^Proposed change / })).toHaveLength(
-      3,
-    )
+    await expect(within(group).getAllByRole('group', { name: /^Proposed change / })).toHaveLength(3)
     // The kind is its tile, in a tone of its own, said under the pointer and nowhere else.
     const tiles = group.querySelectorAll('[title="Set up the Project"]')
     await expect(tiles).toHaveLength(3)
@@ -246,7 +244,9 @@ export const KeptOnTheCall: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     const call = canvas.getByRole('button', { name: /^Hemera Propose setup/ })
-    await expect(within(call).getByRole('img', { name: '1 of 3 changes waiting' })).toBeInTheDocument()
+    await expect(
+      within(call).getByRole('img', { name: '1 of 3 changes waiting' }),
+    ).toBeInTheDocument()
     await userEvent.click(call)
     await waitFor(() => {
       expect(canvas.getByText('DATABASE_URL')).toBeVisible()

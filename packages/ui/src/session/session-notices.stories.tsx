@@ -111,7 +111,7 @@ function Answer({
         />
       )
     case 'question':
-      return <SpecQuestion question={waiting.question} onAnswer={answer} />
+      return <SpecQuestion question={waiting.question} onAnswer={answer} bare />
   }
 }
 
@@ -199,8 +199,8 @@ function groupsOf(
       items: proposals,
       actions:
         proposals.length > 1 ? (
-          <Button variant="primary" size="sm" onClick={onAcceptAll}>
-            Accept all
+          <Button variant="secondary" size="sm" onClick={onAcceptAll}>
+            Add all
           </Button>
         ) : undefined,
     },
@@ -440,7 +440,7 @@ export const Arrival: Story = {
 /**
  * Everything at once (issue #237): a permission, a question, the Spec the agent proposes and six
  * commands — one mark and one count a kind on the pill, one group a kind inside, the permission
- * first; Accept all answers the six, and the rest stays.
+ * first; Add all answers the six, and the rest stays.
  */
 export const EveryKind: Story = {
   args: { waiting: [ASK, QUESTION, SPEC, ...SIX] },
@@ -460,7 +460,7 @@ export const EveryKind: Story = {
     await expect(within(panel).getAllByRole('group', { name: /^Proposed command / })).toHaveLength(
       6,
     )
-    await userEvent.click(within(panel).getByRole('button', { name: 'Accept all' }))
+    await userEvent.click(within(panel).getByRole('button', { name: 'Add all' }))
     await waitFor(() => {
       expect(within(panel).queryByRole('region', { name: 'Proposed commands' })).toBeNull()
     })
@@ -486,7 +486,8 @@ export const AnsweredInPlace: Story = {
     const panel = await screen.findByRole('dialog', { name: 'Waiting for your answer' })
     const records = canvas.getByRole('log', { name: 'Records' })
     const before = records.getBoundingClientRect()
-    await userEvent.click(within(panel).getByRole('button', { name: 'Accept dev' }))
+    const dev = within(panel).getByRole('group', { name: 'Proposed command dev' })
+    await userEvent.click(within(dev).getByRole('button', { name: 'Add' }))
     expect(args.onAnswer).toHaveBeenCalledWith('dev')
     await waitFor(() => {
       expect(within(panel).queryByRole('group', { name: 'Proposed command dev' })).toBeNull()
@@ -500,5 +501,31 @@ export const AnsweredInPlace: Story = {
     // The records stand where they stood: the answer changed a dot, not the thread.
     expect(records.getBoundingClientRect().top).toBe(before.top)
     expect(records.getBoundingClientRect().height).toBe(before.height)
+  },
+}
+
+/**
+ * Open on several kinds at once (review of #250): one card anatomy for every kind — its mark and
+ * what accepting does, the line whole and where, Refuse and the primary answer in the same place —
+ * under one head a kind, with the same rule and room between every two groups.
+ */
+export const OpenOnSeveralKinds: Story = {
+  args: {
+    waiting: [ASK, ...SIX.slice(0, 3), QUESTION],
+    defaultOpen: true,
+  },
+  play: async () => {
+    const panel = await screen.findByRole('dialog', { name: 'Waiting for your answer' })
+    const heads = within(panel)
+      .getAllByRole('region')
+      .map((group) => group.querySelector('header')?.textContent)
+    // A head a kind — its name and how many — and Add all in the proposals' own head.
+    await expect(heads).toEqual(['Permissions1', 'Questions1', 'Proposed commands3Add all'])
+    // Every item is a card with a title; every card that answers yes or no has its two words.
+    await expect(within(panel).getByText('Run once')).toBeVisible()
+    await expect(within(panel).getAllByText('Add to the catalogue')).toHaveLength(3)
+    await expect(within(panel).getAllByRole('button', { name: 'Add' })).toHaveLength(3)
+    await expect(within(panel).getAllByRole('button', { name: 'Decline' })).toHaveLength(3)
+    await expect(within(panel).getByRole('button', { name: 'Add all' })).toBeVisible()
   },
 }

@@ -5,7 +5,7 @@ import { CreateSpecProposal, SpecProposalRecord } from './create-spec-proposal.t
 
 /**
  * The agent proposing a Spec in a `free` Session: the title it understood, editable in place,
- * the type as one of three chips, and `Create` or `Not now`.
+ * the type as one of three chips, and `Start` or `Not now`.
  */
 const meta = {
   title: 'Blocks/Spec/CreateSpecProposal',
@@ -60,7 +60,7 @@ export const Proposed: Story = {
       // oxlint-disable-next-line no-await-in-loop -- one chip after the other, as they are read
       await expect(chip.querySelector(`.tabler-icon-${glyph}`)).not.toBeNull()
     }
-    await userEvent.click(canvas.getByRole('button', { name: 'Create' }))
+    await userEvent.click(canvas.getByRole('button', { name: 'Start' }))
     await expect(args.onCreate).toHaveBeenCalledWith('CSV invoice export', 'feature')
   },
 }
@@ -75,7 +75,7 @@ export const TitleEdited: Story = {
     await userEvent.tab()
     await userEvent.click(canvas.getByRole('radio', { name: 'maintenance' }))
     await userEvent.click(canvas.getByRole('radio', { name: 'feature' }))
-    await userEvent.click(canvas.getByRole('button', { name: 'Create' }))
+    await userEvent.click(canvas.getByRole('button', { name: 'Start' }))
     await expect(args.onCreate).toHaveBeenCalledWith('Monthly CSV export for the ledger', 'feature')
   },
 }
@@ -121,11 +121,11 @@ export const ExistingSpec: Story = {
   play: async ({ canvasElement, args }) => {
     const canvas = within(canvasElement)
     const card = canvas.getByRole('group', { name: 'Continue a Spec' })
-    await expect(card).toHaveTextContent('This Spec already exists')
+    await expect(card).toHaveTextContent('Continue a Spec')
     await expect(card).toHaveTextContent('ATL-4')
     await expect(card).toHaveTextContent('CSV invoice export')
     await expect(canvas.queryByRole('textbox', { name: 'Title of the Spec' })).toBeNull()
-    await expect(canvas.queryByRole('button', { name: 'Create' })).toBeNull()
+    await expect(canvas.queryByRole('button', { name: 'Start' })).toBeNull()
     await userEvent.click(canvas.getByRole('button', { name: 'Continue it' }))
     await expect(args.onContinue).toHaveBeenCalled()
     await expect(args.onCreate).not.toHaveBeenCalled()
@@ -164,6 +164,6 @@ export const KeptCreated: Story = {
       name: 'Spec proposed, ATL-7 «Export the Journal», created',
     })
     await expect(within(record).getByText('ATL-7')).toBeVisible()
-    await expect(within(record).queryByRole('button', { name: 'Create' })).toBeNull()
+    await expect(within(record).queryByRole('button', { name: 'Start' })).toBeNull()
   },
 }

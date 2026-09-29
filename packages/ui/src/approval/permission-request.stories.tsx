@@ -94,18 +94,22 @@ export const NothingButACommand: Story = {
   },
 }
 
-/** The options are ordered by the risk they carry, whatever order the agent sent them in. */
+/**
+ * The answers stand where every notice has them (review of #250): the refusal first and quiet, the
+ * one-shot permission last and primary, and a standing rule between the two, with how long it is
+ * remembered said on it — whatever order the agent sent them in.
+ */
 export const OrderedByRisk: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     const buttons = canvas.getAllByRole('button')
     await expect(buttons[0]).toHaveTextContent('Reject once')
-    await expect(buttons[1]).toHaveTextContent('Allow once')
-    await expect(buttons[2]).toHaveTextContent('Always allow edits')
+    await expect(buttons[1]).toHaveTextContent('Always allow edits (this session)')
+    await expect(buttons[2]).toHaveTextContent('Allow once')
   },
 }
 
-/** The arrows walk the options and Enter presses the focused one — the whole decision, no mouse. */
+/** Tab walks the answers in the order they are read, and Enter presses the focused one. */
 export const AnsweredByKeyboard: Story = {
   play: async ({ canvasElement, args }) => {
     const canvas = within(canvasElement)
@@ -113,18 +117,18 @@ export const AnsweredByKeyboard: Story = {
     refusal.focus()
     await expect(refusal).toHaveFocus()
 
-    await userEvent.keyboard('{ArrowRight}')
-    await expect(canvas.getByRole('button', { name: 'Allow once' })).toHaveFocus()
-
-    await userEvent.keyboard('{ArrowRight}')
-    const standing = canvas.getByRole('button', { name: 'Always allow edits' })
+    await userEvent.tab()
+    const standing = canvas.getByRole('button', { name: 'Always allow edits (this session)' })
     await expect(standing).toHaveFocus()
+
+    await userEvent.tab()
+    await expect(canvas.getByRole('button', { name: 'Allow once' })).toHaveFocus()
 
     await userEvent.keyboard('{Enter}')
     await expect(args.onDecide).toHaveBeenCalledWith({
-      optionId: 'always',
-      kind: 'allow_always',
-      name: 'Always allow edits',
+      optionId: 'once',
+      kind: 'allow_once',
+      name: 'Allow once',
     })
   },
 }
@@ -185,9 +189,9 @@ export const HemeraToolOutsideTheRoot: Story = {
   },
   play: async ({ canvasElement, args }) => {
     const canvas = within(canvasElement)
-    // One line: the label and what it is about; no code name, no sentence, no badge (#237).
+    // The head is what accepting does; what it is about is under it (#237, review of #250).
     const head = canvas.getByText('Write file').parentElement
-    await expect(head?.textContent).toBe('Write file../notes/todo.md')
+    await expect(head?.textContent).toBe('Write file')
     await expect(canvas.queryByText('fs_write')).toBeNull()
     await expect(getComputedStyle(canvas.getByText('../notes/todo.md')).fontFamily).toMatch(
       /mono|Fira/i,

@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
-import type { ReactNode } from 'react'
+import { type ReactNode, useState } from 'react'
 import { expect, fn, screen, userEvent, waitFor, within } from 'storybook/test'
 
 import { TooltipProvider } from '../components/tooltip/tooltip.tsx'
@@ -211,8 +211,51 @@ export const RemovedByHand: Story = {
     await userEvent.click(
       within(glanced).getByRole('button', { name: 'Remove test from the line' }),
     )
-    await expect(args.onRemove).toHaveBeenCalledWith(expect.objectContaining({ id: 'run-test' }))
+    // The glance closes first; the chip is taken out once it is gone.
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog', { name: 'test, running' })).toBeNull()
+    })
+    await waitFor(() => {
+      expect(args.onRemove).toHaveBeenCalledWith(expect.objectContaining({ id: 'run-test' }))
+    })
     // Something running closed is not something seen: it is not over.
     await expect(args.onSeen).not.toHaveBeenCalled()
+  },
+}
+
+/** A line that takes out what its glance's ✕ asks it to, as the page does. */
+function Removing(props: GoingOnLineProps): ReactNode {
+  const [items, setItems] = useState(props.items)
+  return (
+    <Line
+      {...props}
+      items={items}
+      onRemove={(gone) => setItems((before) => before.filter((one) => one.id !== gone.id))}
+    />
+  )
+}
+
+/**
+ * Taken out from its glance (review of #250): the glance closes with its own motion first, and
+ * the chip leaves the line by its width once the glance is gone — never a glance left anchored to
+ * a chip that is going away.
+ */
+export const RemovedFromItsGlance: Story = {
+  render: (args) => <Removing {...args} />,
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await userEvent.click(canvas.getByRole('button', { name: 'test, running' }))
+    const glanced = await screen.findByRole('dialog', { name: 'test, running' })
+    await userEvent.click(
+      within(glanced).getByRole('button', { name: 'Remove test from the line' }),
+    )
+    // While the glance is still there, the chip it hangs from is too.
+    await expect(canvas.getByRole('button', { name: 'test, running' })).toBeInTheDocument()
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog', { name: 'test, running' })).toBeNull()
+    })
+    await waitFor(() => {
+      expect(canvas.queryByRole('button', { name: 'test, running' })).toBeNull()
+    })
   },
 }

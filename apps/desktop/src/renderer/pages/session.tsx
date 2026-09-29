@@ -70,6 +70,7 @@ import {
   usageOf,
 } from '../agent-blocks.tsx'
 import { agentShellCallsOf, commandProposalOf, foldedCallsOf } from '../agent-tool-payloads.ts'
+import { callLinksOf } from '../call-links.ts'
 import { whenOf } from '../journal-lines.ts'
 import { type CommandWrite, commandLineOf, commandWriteOf } from '../project-lines.ts'
 import { asksToRunALine, NOTICE_KINDS, type NoticeKind, waitingAs } from '../notices.ts'
@@ -562,6 +563,9 @@ export function SessionPage({
   // A call to one of Hemera's tools is drawn once, as Hemera's block, where the agent reported
   // it: the agent's own report of it stays in the thread and is not drawn a second time (D6-06).
   const folded = foldedCallsOf(thread)
+  // What became of each of Hemera's calls — its permission, its run, its proposal — drawn with the
+  // call, and not a second and a third time on rows of their own (review of #250).
+  const links = callLinksOf(thread, folded)
   // The agent's reports of its calls, by the identifier it gave each: a question it asks about one
   // is headed by that call's line.
   const reported = new Map<string, SessionEntry>()
@@ -601,6 +605,7 @@ export function SessionPage({
       onOpenUrl,
       onHandOver,
       onSeenRun: (runId) => markSeen(session.id, runId),
+      callLink: (drawnId) => links.byCall.get(drawnId),
       reportedCall: (toolCallId) => reported.get(toolCallId),
       onAcceptProposal: (proposalId) => deciding(onAcceptProposal(proposalId)),
       onDeclineProposal: (proposalId) => deciding(onDeclineProposal(proposalId)),
@@ -623,6 +628,8 @@ export function SessionPage({
       if (proposal !== null) proposalsWaiting.push(proposal.proposalId)
       if (kind === 'permission' && !asksToRunALine(entry)) linesOnly = false
     }
+    // Carried by its call: drawn with it, never on its own row.
+    if (links.absorbed.has(entry.id)) continue
     const block = drawEntry(drawn, drawing)
     // No mark: the rail is navigated by what the reader wrote, and a tick for every block of a
     // turn was forty ticks for one question (trial of 22 September 2026).

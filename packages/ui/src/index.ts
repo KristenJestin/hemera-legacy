@@ -298,6 +298,8 @@ export {
 export { CommandRun, type CommandRunProps, type CommandState } from './activity/command-run.tsx'
 export {
   CallOutcome,
+  CallOutcomeDetails,
+  type CallOutcomeDetailsProps,
   type CallOutcomeProps,
   type CallPermission,
 } from './activity/call-outcome.tsx'

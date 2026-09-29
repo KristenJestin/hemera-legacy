@@ -343,8 +343,6 @@ export interface AgentContext {
   onOpenUrl: (url: string) => void
   /** Hands the agent again what waits for it, after a delivery it did not take (issue #211). */
   onHandOver: () => void
-  /** The reader opened a run of the thread that is over: it has been seen, and may leave the line. */
-  onSeenRun: (runId: string) => void
   /** What became of a call of Hemera's, by the entry it is drawn from (review of #250). */
   callLink: (drawnId: string) => CallLink | undefined
   /**
@@ -607,9 +605,6 @@ export function drawEntry(entry: SessionEntry, context: AgentContext): ReactNode
         {...shown}
         onOpenUrl={context.onOpenUrl}
         workspace={heard === undefined ? undefined : elsewhereOf(heard, context.workspace)}
-        onOpenChange={(open) => {
-          if (open && runId !== null && shown.state !== 'running') context.onSeenRun(runId)
-        }}
       />
     )
   }

@@ -194,9 +194,8 @@ export const HemeraToolOutsideTheRoot: Story = {
   play: async ({ canvasElement, args }) => {
     const canvas = within(canvasElement)
     await unfold(canvasElement)
-    // What the call is and what it is about, on one line; what accepting does is its group's.
-    const head = canvas.getByText('Write file').parentElement
-    await expect(head?.textContent).toBe('Write file ../notes/todo.md')
+    // Unfolded, what the call is titles the row, and the whole path is under it.
+    await expect(await canvas.findByText('Write file', { selector: '.absolute' })).toBeVisible()
     await expect(canvas.queryByText('fs_write')).toBeNull()
     await expect(getComputedStyle(canvas.getByText('../notes/todo.md')).fontFamily).toMatch(
       /mono|Fira/i,
@@ -331,9 +330,9 @@ export const TheWholeLine: Story = {
   play: async ({ canvasElement, args }) => {
     const canvas = within(canvasElement)
     const command = args.command ?? ''
-    // Closed, the row says the line once, cut to one line.
-    const line = canvas.getByText(command)
-    const folded = line.getBoundingClientRect().height
+    // Closed, the row says the line once, cut to one line, and no title.
+    await expect(canvas.getAllByText(command)).toHaveLength(1)
+    await expect(canvas.queryByText('Run command')).toBeNull()
     await expect(canvas.queryByText(/Waiting/)).toBeNull()
     await expect(canvas.queryByText(/asks/)).toBeNull()
     const answers = canvas
@@ -341,15 +340,19 @@ export const TheWholeLine: Story = {
       .map((one) => one.textContent)
       .filter((text) => text !== '')
     await expect(answers).toEqual(['Refuse', 'Allow once'])
-    // Unfolded in place: the same text, now whole, wrapped over several lines where it stood, and
-    // where it runs as a small line under it — one text, never a second block.
+    // Unfolded: the title takes the cut line's place, and the whole line opens under it once, in
+    // its block, wrapped, with where it runs under it.
     await unfold(canvasElement)
+    await expect(await canvas.findByText('Run command')).toBeVisible()
+    const whole = await canvas.findByText(command, { selector: 'pre' })
     await waitFor(() => {
-      expect(line.getBoundingClientRect().height).toBeGreaterThan(folded)
+      expect(
+        canvas.getAllByText(command).filter((one) => one.closest('[aria-hidden]') === null),
+      ).toEqual([whole])
     })
-    await expect(canvas.getAllByText(command)).toHaveLength(1)
-    await expect(line.scrollWidth).toBeLessThanOrEqual(line.clientWidth)
-    await expect(await canvas.findByText('api')).toBeVisible()
+    await expect(whole.scrollWidth).toBeLessThanOrEqual(whole.clientWidth)
+    await expect(whole.getBoundingClientRect().height).toBeGreaterThan(20)
+    await expect(canvas.getByText('api')).toBeVisible()
   },
 }
 

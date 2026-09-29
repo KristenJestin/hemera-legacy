@@ -159,26 +159,36 @@ export const GitError: Story = {
 }
 
 // Scenario "A repository not prepared yet waits for its worktree" (#217).
+async function saysItsStep(canvas: ReturnType<typeof within>, path: string, step: string) {
+  const row = within(canvas.getByText(path).closest('li')!)
+  const dot = row.getByRole('img', { name: step })
+  await expect(dot).toHaveAttribute('title', step)
+  await expect(row.queryByText(step)).toBeNull()
+}
+
 async function aRepositoryNotPreparedYetWaitsForItsWorktree({ canvasElement }: Context) {
   const canvas = within(canvasElement)
-  const api = within(canvas.getByText('./sources/api').closest('li')!)
-  await expect(api.getByText('Waiting for its worktree')).toBeVisible()
-  const front = within(canvas.getByText('./sources/front').closest('li')!)
-  await expect(front.getByText('Making its worktree…')).toBeVisible()
+  // Each row says its step as a dot, named by the step's sentence, and not as words on the row.
+  await saysItsStep(canvas, './sources/api', 'Waiting for its worktree')
+  await saysItsStep(canvas, './sources/front', 'Making its worktree…')
+  await saysItsStep(canvas, './sources/docs', 'Its worktree was not made')
+  await saysItsStep(canvas, './sources/site', 'No worktree: no repository in main')
   // A folder not made yet is no Git error, and Git is not being read in it either.
   await expect(canvas.queryByText('Git error')).toBeNull()
   await expect(canvas.queryByText('Reading Git…')).toBeNull()
 }
 
 /**
- * Being prepared: one worktree waits for its step, the other is being made. Each row says its
- * step, quietly, and nothing of Git until the folder is there to read.
+ * Being prepared: one worktree waits for its step, one is being made, one was not made and one
+ * is skipped. Each row says its step as a dot, and nothing of Git until the folder is there.
  */
 export const Preparing: Story = {
   args: {
     repositories: [
       { path: './sources/api', git: null, step: 'pending' },
       { path: './sources/front', git: null, step: 'running' },
+      { path: './sources/docs', git: null, step: 'failed' },
+      { path: './sources/site', git: null, step: 'skipped' },
     ],
   },
   play: aRepositoryNotPreparedYetWaitsForItsWorktree,

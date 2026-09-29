@@ -97,7 +97,10 @@ export const Pending: Story = {
     await expect(within(row).getByText('web')).toHaveAttribute('title', args.why)
     await expect(within(row).queryByText('Add service')).toBeNull()
     await userEvent.click(within(row).getByRole('button', { name: 'Show the whole line' }))
-    await expect(await within(row).findByText('Add service')).toBeVisible()
+    // The verb fades in over the name: read once it has.
+    await waitFor(() => {
+      expect(within(row).getByText('Add service')).toBeVisible()
+    })
     await expect(await within(row).findByText(SERVICE.line)).toBeVisible()
     await expect(within(row).getByText('atlas-web')).toBeVisible()
     await userEvent.click(within(row).getByRole('button', { name: 'Accept' }))
@@ -114,7 +117,9 @@ export const Variable: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     await userEvent.click(canvas.getByRole('button', { name: 'Show the whole line' }))
-    await expect(await canvas.findByText('Add variable')).toBeVisible()
+    await waitFor(() => {
+      expect(canvas.getByText('Add variable')).toBeVisible()
+    })
     await expect(canvas.getByText('set, not shown')).toBeVisible()
     await expect(canvasElement.textContent).not.toContain(SECRET)
   },

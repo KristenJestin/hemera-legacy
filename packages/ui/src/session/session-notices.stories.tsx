@@ -690,7 +690,10 @@ export const SetupChanges: Story = {
     // Unfolded, the change says what accepting it does, in the name's place.
     const web = within(setup).getByRole('group', { name: 'Proposed change Add service web' })
     await userEvent.click(within(web).getByRole('button', { name: 'Show the whole line' }))
-    await expect(await within(web).findByText('Add service')).toBeVisible()
+    // The title fades in over the name: read once it has.
+    await waitFor(() => {
+      expect(within(web).getByText('Add service')).toBeVisible()
+    })
     await userEvent.click(within(setup).getByRole('button', { name: 'Accept all' }))
     await waitFor(() => {
       expect(within(panel).queryByRole('region', { name: 'Setup changes' })).toBeNull()

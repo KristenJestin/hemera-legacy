@@ -11,8 +11,8 @@ import { type NoticeAnswer, NoticeRecord } from './notice-record.tsx'
  *
  * The agent has no write on the catalogue: `commands_propose` leaves an entry in the thread and
  * nothing else, and the command enters the catalogue only when a human accepts it. It is drawn as
- * every notice is (`NoticeCard`): "Add to the catalogue", then the type with its fixed icon and the
- * name, the line whole, where it would run, and Decline / Add. Why the agent proposes it is under
+ * every notice is (`NoticeCard`), under its group's "Add to the catalogue": the type with its fixed
+ * icon and the name, the line whole, where it would run, and Decline / Add. Why the agent proposes it is under
  * the pointer on the name, and in the thread's record of it, which is also where the answer stays.
  */
 
@@ -48,8 +48,6 @@ export function CommandProposal({
   const TypeIcon = COMMAND_TYPE_ICONS[type]
   return (
     <NoticeCard
-      icon={<IconBookmarkPlus size="sm" />}
-      title="Add to the catalogue"
       name={`Proposed command ${name}`}
       subject={
         <>
@@ -62,7 +60,8 @@ export function CommandProposal({
         </>
       }
       line={line}
-      place={folder === '.' ? 'Workspace root' : folder}
+      // Where it would run, when it is not the Workspace root, where every line runs.
+      place={folder === '.' ? undefined : folder}
       refuse={{ label: 'Decline', onPress: onDecline }}
       accept={{ label: 'Add', onPress: onAccept }}
     />

@@ -422,6 +422,7 @@ describe('The agent starts the app and the user opens it', () => {
       'commands.proposeDecline',
       'commands.remove',
       'commands.run',
+      'commands.runAgain',
       'commands.runOf',
       'commands.runs',
       'commands.services',

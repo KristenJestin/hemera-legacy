@@ -88,6 +88,15 @@ const ONE_OFF: GoingOnRun = {
   at: '10:46',
 }
 
+/** The same one-off, over and well: what a glance offers to run again or keep (issue #237). */
+export const ONE_OFF_DONE: GoingOnRun = {
+  ...ONE_OFF,
+  id: 'run-one-off-done',
+  state: 'finished',
+  exitCode: 0,
+  output: '✓ csv.stream (3 tests)',
+}
+
 /** A run in `v2`, which the Project declares as one of its repositories, at its base (#239). */
 const IN_REPOSITORY: GoingOnRun = {
   kind: 'run',

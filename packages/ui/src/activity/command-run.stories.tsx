@@ -1,22 +1,16 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
 import { type ReactNode, useState } from 'react'
-import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
+import { expect, fn, userEvent, within } from 'storybook/test'
 
-import { movesLess } from '../../.storybook/reduced-motion.ts'
 import { CommandRun } from './command-run.tsx'
 import { COMMAND_TYPES } from './command-type.ts'
 
 /**
- * A command Hemera runs for a Session (design D6-12).
- *
- * The stories are the four ways a run is read: an application that is running and has just
- * published its address, a check that is over and exited clean, a one-off line run inside the
- * Workspace root, and a process the reader stopped. The address is the reason the block exists,
- * so it is on the line in every story that has one. A one-off offers `Add to catalogue` beside its
- * command line, and pressing it is a request to the human's catalogue, not a promotion (D8-11).
- * A run in another Workspace than the Session's names it (D8-08).
- * An address is a link only once it has answered, and a run shows what it ran — its variables, a
- * port conflict — inside its fold (D8-09).
+ * A command Hemera runs for a Session, as the thread reads it (design D6-12, issue #237): one
+ * closed, quiet line — the type's icon, the dot, the name, `exit N` once over — whatever the run
+ * is doing, and what it ran once opened. No badge, no Stop, no `Add to catalogue`: those are the
+ * line's, in the head. An address is a link only once it has answered, and a run shows what it
+ * ran — its place, its variables, a port conflict — inside its fold (D8-06, D8-08, D8-09).
  */
 const SERVER_OUTPUT = [
   'vite v7.1.4 building for development...',
@@ -48,8 +42,6 @@ const meta = {
     url: 'http://localhost:5173/',
     readiness: 'ready',
     onOpenUrl: fn(),
-    onStop: fn(),
-    onAddToCatalogue: fn(),
   },
   argTypes: {
     name: { control: 'text', description: 'The name the catalogue keeps it under.' },
@@ -62,7 +54,7 @@ const meta = {
     state: {
       control: 'inline-radio',
       options: ['running', 'finished', 'failed', 'stopped'],
-      description: 'Where the process stands. A running process stays open; an ended one folds.',
+      description: 'Where the process stands: its dot, and its exit code once over.',
     },
     folder: { control: 'text', description: 'The folder it runs in.' },
     output: { control: 'text', description: 'What it has written so far.' },
@@ -82,11 +74,6 @@ const meta = {
       description: "The Workspace it runs in, when it is not the Session's own (D8-08).",
     },
     onOpenUrl: { control: false, description: 'Opens the published address.' },
-    onStop: { control: false, description: 'Stops the process.' },
-    onAddToCatalogue: {
-      control: false,
-      description: 'Asks for a one-off line to be kept in the catalogue; a one-off only.',
-    },
   },
 } satisfies Meta<typeof CommandRun>
 
@@ -112,24 +99,35 @@ async function oneHeader(canvasElement: HTMLElement, word: string, name?: string
   await expect(canvas.getAllByRole('img', { name: word })).toHaveLength(1)
 }
 
-/** A server that is up: the address is on the line, and one press opens it. */
+/** Opens the run's line, as a reader does to read what it ran. */
+async function open(canvasElement: HTMLElement): Promise<void> {
+  const canvas = within(canvasElement)
+  const row = canvas.getByRole('button', { expanded: false })
+  await userEvent.click(row)
+  await expect(row).toHaveAttribute('aria-expanded', 'true')
+}
+
+/**
+ * A server that is up: closed like any other line, its address beside its name; opened, the
+ * address is the one press that opens it, over what it printed.
+ */
 export const AppRunning: Story = {
   play: async ({ canvasElement, args }) => {
     const canvas = within(canvasElement)
-    await expect(canvas.getByText('pnpm dev')).toBeVisible()
     await oneHeader(canvasElement, 'Running', 'dev')
-    // A running process is what the reader is waiting on: the run's line is open, and the output
-    // is on the page without a press, as the log of that one line.
+    // Closed by default, running or not: the thread says what happened (issue #237).
     await expect(canvas.getByRole('button', { name: /^Running dev/ })).toHaveAttribute(
       'aria-expanded',
-      'true',
+      'false',
     )
+    await expect(canvas.getByText('localhost:5173/')).toBeVisible()
+    // Nothing to press on the line but its fold: no Stop beside a thread entry.
+    await expect(canvas.queryByRole('button', { name: 'Stop' })).toBeNull()
+    await open(canvasElement)
+    await expect(canvas.getByText('pnpm dev')).toBeVisible()
     await expect(canvas.getByRole('log', { name: 'Output of dev' })).toBeVisible()
-    await expect(canvas.getByText(/press h \+ enter to show help/)).toBeVisible()
     await userEvent.click(canvas.getByRole('button', { name: 'http://localhost:5173/' }))
     await expect(args.onOpenUrl).toHaveBeenCalledWith('http://localhost:5173/')
-    await userEvent.click(canvas.getByRole('button', { name: 'Stop' }))
-    await expect(args.onStop).toHaveBeenCalled()
   },
 }
 
@@ -141,6 +139,7 @@ export const AppRunning: Story = {
  */
 async function aUrlIsReadyOnlyAfterItAnswers({ canvasElement }: StoryContext): Promise<void> {
   const canvas = within(canvasElement)
+  await open(canvasElement)
   await expect(canvas.getByText('http://localhost:5173/')).toBeVisible()
   await expect(canvas.getByText('starting')).toBeVisible()
   await expect(canvas.queryByRole('button', { name: 'http://localhost:5173/' })).toBeNull()
@@ -156,6 +155,7 @@ export const AddressUnanswered: Story = {
   args: { readiness: 'unanswered' },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
+    await open(canvasElement)
     await expect(canvas.getByText('no answer after a minute; still starting')).toBeVisible()
     await expect(canvas.queryByRole('button', { name: 'http://localhost:5173/' })).toBeNull()
   },
@@ -169,6 +169,7 @@ export const AddressUnanswered: Story = {
  */
 async function aPortConflictNamesItsHolder({ canvasElement }: StoryContext): Promise<void> {
   const canvas = within(canvasElement)
+  await open(canvasElement)
   await expect(canvas.getByText('Port 5173 is held by dev in main')).toBeVisible()
   await expect(canvas.getByText('Port 5173 is also published by storybook in spike')).toBeVisible()
 }
@@ -183,16 +184,16 @@ export const PortConflict: Story = {
 }
 
 /**
- * A check that ended, opened: the line it ran, its folder, the variables Hemera gave it, its
- * output and its exit code, all on the block (D8-06).
+ * A check that ended, opened: where it ran, the line it ran, the variables Hemera gave it and its
+ * output; its exit code on the line (D8-06).
  *
  * Scenario "A run shows what it ran".
  */
 async function aRunShowsWhatItRan({ canvasElement }: StoryContext): Promise<void> {
   const canvas = within(canvasElement)
   await expect(canvas.getByText('exit 0')).toBeVisible()
-  await expect(canvas.getByText('sources/api')).toBeVisible()
   await userEvent.click(canvas.getByRole('button', { name: /exit 0/ }))
+  await expect(canvas.getByText('sources/api')).toBeVisible()
   await expect(canvas.getByText('pnpm vitest run')).toBeVisible()
   const variables = canvas.getByRole('list', { name: 'Variables given' })
   await expect(within(variables).getByText('PORT')).toBeVisible()
@@ -243,7 +244,10 @@ export const CheckExitedClean: Story = {
   },
 }
 
-/** A check that failed: the exit code carries the colour, and the output is read in place. */
+/**
+ * A check that failed (issue #237): closed like the rest, its dot and `exit 1` saying it; the
+ * output is there once asked for. It used to open itself on its output, in the way of the thread.
+ */
 export const CheckFailed: Story = {
   args: {
     name: 'test',
@@ -258,13 +262,21 @@ export const CheckFailed: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     await expect(canvas.getByText('exit 1')).toBeVisible()
-    // The run's line is open on a failure, and what it holds is the log itself.
     await oneHeader(canvasElement, 'Exited', 'test')
+    await expect(canvas.getByRole('button', { name: /exit 1/ })).toHaveAttribute(
+      'aria-expanded',
+      'false',
+    )
+    await expect(canvas.queryByText(/3 failed/)).toBeNull()
+    await userEvent.click(canvas.getByRole('button', { name: /exit 1/ }))
     await expect(canvas.getByText(/3 failed/)).toBeVisible()
   },
 }
 
-/** A one-off line: it is marked as one, and nothing promotes it to the catalogue. */
+/**
+ * A one-off line: its name is its line, in the terminal's letters, with no badge; nothing on it
+ * keeps it in the catalogue — that is its chip's, in the head (issue #237).
+ */
 export const OneOff: Story = {
   args: {
     name: 'pnpm drizzle-kit generate',
@@ -279,66 +291,21 @@ export const OneOff: Story = {
   },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    await expect(canvas.getByText('One-off')).toBeVisible()
-    await expect(canvas.getByText('Script')).toBeVisible()
+    await expect(canvas.queryByText('One-off')).toBeNull()
+    await expect(canvas.queryByText('Script')).toBeNull()
+    await expect(
+      getComputedStyle(canvas.getByText(/^pnpm drizzle-kit generate$/)).fontFamily,
+    ).toMatch(/mono|Fira/i)
     await userEvent.click(canvas.getByRole('button', { name: /exit 0/ }))
     await expect(canvas.getByText(/project_commands 1ms/)).toBeVisible()
+    await expect(canvas.queryByRole('button', { name: /Add to catalogue/ })).toBeNull()
     await oneHeader(canvasElement, 'Exited')
   },
 }
 
 /**
- * A one-off line offers to be kept, and pressing it asks and changes nothing of the run.
- *
- * Scenario "A one-off execution stays out of the catalogue": the run is marked `One-off`, the
- * press is a request to the human's catalogue, and the run itself promotes nothing.
- */
-async function aOneOffExecutionStaysOutOfTheCatalogue({
-  canvasElement,
-  args,
-}: StoryContext): Promise<void> {
-  // "A one-off execution stays out of the catalogue"
-  const canvas = within(canvasElement)
-  await expect(canvas.getByText('One-off')).toBeVisible()
-  await expect(canvas.getByText('exit 0')).toBeVisible()
-  // The offer sits beside the command line it is about, the first line of the run's body.
-  await expect(canvas.queryByRole('button', { name: 'Add to catalogue' })).toBeNull()
-  await userEvent.click(canvas.getByRole('button', { name: /exit 0/ }))
-  const add = canvas.getByRole('button', { name: 'Add to catalogue' })
-  await expect(add.parentElement).toContainElement(
-    canvas.getByText('npx vitest run src/login.test.ts', { selector: 'p' }),
-  )
-  await userEvent.click(add)
-  await expect(args.onAddToCatalogue).toHaveBeenCalledTimes(1)
-  // Nothing else moved: still a one-off, still exited, still open, and nothing was stopped.
-  await expect(canvas.getByText('One-off')).toBeVisible()
-  await expect(canvas.getByText('exit 0')).toBeVisible()
-  await expect(canvas.getByRole('button', { name: /exit 0/ })).toHaveAttribute(
-    'aria-expanded',
-    'true',
-  )
-  await expect(args.onStop).not.toHaveBeenCalled()
-  await oneHeader(canvasElement, 'Exited')
-}
-
-export const OneOffAddToCatalogue: Story = {
-  args: {
-    name: 'npx vitest run src/login.test.ts',
-    command: 'npx vitest run src/login.test.ts',
-    type: 'script',
-    state: 'finished',
-    folder: 'sources/front',
-    output: 'Test Files  1 passed (1)',
-    url: undefined,
-    exitCode: 0,
-    oneOff: true,
-  },
-  play: aOneOffExecutionStaysOutOfTheCatalogue,
-}
-
-/**
  * A Project-scoped service asked for from a Session in `login-form`: it runs in `main`, and the
- * line says so beside its folder.
+ * run says so where it says where it ran.
  *
  * Scenario "A Project-scoped service is one instance for all": one run, in `main`'s folder.
  */
@@ -346,8 +313,9 @@ async function aProjectScopedServiceIsOneInstanceForAll({
   canvasElement,
 }: StoryContext): Promise<void> {
   const canvas = within(canvasElement)
-  await expect(canvas.getByText('in main')).toBeVisible()
   await oneHeader(canvasElement, 'Running', 'auth')
+  await open(canvasElement)
+  await expect(canvas.getByText('in main')).toBeVisible()
 }
 
 export const InAnotherWorkspace: Story = {
@@ -372,6 +340,7 @@ export const InARepository: Story = {
     output: '> v2@0.0.0 build',
   },
   play: async ({ canvasElement }) => {
+    await open(canvasElement)
     await expect(within(canvasElement).getByText('v2')).toBeVisible()
   },
 }
@@ -386,9 +355,6 @@ export const Stopped: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     await expect(canvas.getByRole('img', { name: 'Stopped' })).toBeVisible()
-    // The name is exact: the fold's own line carries the word "Stopped", and what is asked for
-    // is the press that would end a process that is already over.
-    await expect(canvas.queryByRole('button', { name: 'Stop' })).toBeNull()
     await userEvent.click(canvas.getByRole('button', { name: /^Stopped dev/ }))
     await expect(canvas.getByText(/\^C/)).toBeVisible()
     await oneHeader(canvasElement, 'Stopped', 'dev')
@@ -397,54 +363,16 @@ export const Stopped: Story = {
   },
 }
 
-/** A process that has written nothing yet: the run's line, and an empty log under it. */
+/** A process that has written nothing yet: the run's line, and an empty log once opened. */
 export const Empty: Story = {
   args: { output: '', url: undefined },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     await oneHeader(canvasElement, 'Running', 'dev')
+    await open(canvasElement)
     const log = canvas.getByRole('log', { name: 'Output of dev' })
     await expect(log).toBeInTheDocument()
     await expect(log.textContent).toBe('')
-  },
-}
-
-/**
- * A failed run folds (recette 4 of 23 September 2026): it opens on its output, and once it is
- * over the fold is the reader's. It used to be held open for good, in the way of the thread.
- */
-export const AFailedRunFolds: Story = {
-  args: {
-    name: 'bun',
-    command: 'bun run check',
-    type: 'script',
-    state: 'failed',
-    folder: '.',
-    output: 'error: script "check" exited with code 1',
-    url: undefined,
-    exitCode: 1,
-    oneOff: true,
-  },
-  play: async ({ canvasElement }) => {
-    const canvas = within(canvasElement)
-    const row = canvas.getByRole('button', { name: /^Exited bun exit 1/ })
-    await expect(row).toHaveAttribute('aria-expanded', 'true')
-    await userEvent.click(row)
-    await expect(row).toHaveAttribute('aria-expanded', 'false')
-    await waitFor(() => {
-      expect(canvas.queryByText(/exited with code 1/)).toBeNull()
-    })
-  },
-}
-
-/** A running run stays open: a press on its line does not fold the process the reader waits on. */
-export const ARunningRunStaysOpen: Story = {
-  play: async ({ canvasElement }) => {
-    const canvas = within(canvasElement)
-    const row = canvas.getByRole('button', { name: /^Running dev/ })
-    await userEvent.click(row)
-    await expect(row).toHaveAttribute('aria-expanded', 'true')
-    await expect(canvas.getByRole('log', { name: 'Output of dev' })).toBeVisible()
   },
 }
 
@@ -474,48 +402,20 @@ function EndingRun({ exitCode }: { exitCode: number }): ReactNode {
 }
 
 /**
- * A run that exits 0 folds itself at that moment (recette 5 of 24 September 2026): held open
- * while it ran, folded on `collapse` once it is over — the output folds away rather than
- * vanishing — with its exit code on the line, and the reader can open it again.
+ * A run that ends stays as the reader left it (issue #237): closed while it ran, closed once it
+ * failed, its dot and its exit code saying how it ended; opened while it ran, still open.
  */
-export const ARunThatEndsFolds: Story = {
-  render: () => <EndingRun exitCode={0} />,
-  play: async ({ canvasElement }) => {
-    const canvas = within(canvasElement)
-    const row = canvas.getByRole('button', { name: /^Running check/ })
-    await expect(row).toHaveAttribute('aria-expanded', 'true')
-    await userEvent.click(canvas.getByRole('button', { name: 'End the run' }))
-    await expect(canvas.getByText('exit 0')).toBeVisible()
-    await expect(row).toHaveAttribute('aria-expanded', 'false')
-    if (!movesLess()) {
-      // Mid-exit: the line already says it is folded, and the output is still in the page
-      // folding away. An output that snapped shut would be gone here.
-      await expect(canvas.getByText('pnpm check')).toBeInTheDocument()
-    }
-    await waitFor(() => {
-      expect(canvas.queryByRole('log', { name: 'Output of check' })).toBeNull()
-    })
-    await userEvent.click(row)
-    await expect(row).toHaveAttribute('aria-expanded', 'true')
-    await expect(canvas.getByText(/3 passed/)).toBeVisible()
-  },
-}
-
-/**
- * A run that exits non-zero stays open on its output, as decided in recette 4 of 23 September
- * 2026, and folds under the reader's next press.
- */
-export const AFailedRunStaysOpen: Story = {
+export const ARunThatEndsStaysAsLeft: Story = {
   render: () => <EndingRun exitCode={1} />,
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     const row = canvas.getByRole('button', { name: /^Running check/ })
-    await expect(row).toHaveAttribute('aria-expanded', 'true')
+    await expect(row).toHaveAttribute('aria-expanded', 'false')
     await userEvent.click(canvas.getByRole('button', { name: 'End the run' }))
     await expect(canvas.getByText('exit 1')).toBeVisible()
+    await expect(row).toHaveAttribute('aria-expanded', 'false')
+    await userEvent.click(row)
     await expect(row).toHaveAttribute('aria-expanded', 'true')
     await expect(canvas.getByText(/3 failed/)).toBeVisible()
-    await userEvent.click(row)
-    await expect(row).toHaveAttribute('aria-expanded', 'false')
   },
 }

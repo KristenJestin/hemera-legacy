@@ -323,37 +323,103 @@ export async function pressIn(area: string, name: string): Promise<void> {
   await browser.pause(300)
 }
 
+/** The Session's notices, open: what waits for the reader, above the composer (issue #237). */
+export const NOTICES = '[role="dialog"][aria-label="Waiting for your answer"]'
+
+/** The pill the notices open from, on the composer's edge; its name counts what waits. */
+const PILL = 'button[aria-label^="Waiting for your answer"]'
+
 /**
- * Answers the question asked in the thread with the option that says this, and waits for its card
- * to say it was answered.
+ * Waits for the notices to hold something of this kind — `Permissions`, `Questions`, `Spec
+ * proposed`, `Proposed commands` — and opens them, the way a hand does: they are closed until
+ * pressed (issue #237). Whatever waits is answered in there, never in the thread.
+ */
+export async function openNotices(kind: string, within = 20_000): Promise<void> {
+  await browser.waitUntil(
+    async () =>
+      await browser.execute(
+        (pill: string, named: string) =>
+          (document.querySelector(pill)?.getAttribute('aria-label') ?? '').includes(named),
+        PILL,
+        kind,
+      ),
+    { timeout: within, interval: 200, timeoutMsg: `the notices never held ${kind}` },
+  )
+  const open = await browser.execute(
+    (panel: string) => document.querySelector(panel) !== null,
+    NOTICES,
+  )
+  if (!open) {
+    await browser.execute((pill: string) => {
+      const button = document.querySelector(pill)
+      if (button instanceof HTMLButtonElement) button.click()
+    }, PILL)
+  }
+  await browser.waitUntil(
+    async () =>
+      await browser.execute((panel: string) => document.querySelector(panel) !== null, NOTICES),
+    { timeout: 5000, interval: 100, timeoutMsg: 'the notices never opened' },
+  )
+  await browser.pause(300)
+}
+
+/**
+ * Waits for a line of the thread named this way, a record of something that waited for the reader
+ * (issue #237): `Spec proposed, ATL-1 «…», created`, `Proposed command dev, added to the catalogue`.
+ * Read by its name, which says the answer the dot draws.
+ */
+export async function awaitsRecord(name: string, within = 20_000): Promise<void> {
+  await browser.waitUntil(
+    async () =>
+      await browser.execute(
+        (named: string) =>
+          [...document.querySelectorAll('[role="group"][aria-label]')].some((group) =>
+            (group.getAttribute('aria-label') ?? '').startsWith(named),
+          ),
+        name,
+      ),
+    { timeout: within, interval: 200, timeoutMsg: `the thread never kept "${name}"` },
+  )
+}
+
+/**
+ * Answers the question the agent asked with the option that says this, among the Session's
+ * notices (issue #237), and waits for its record in the thread to say it was answered.
  *
  * Not through `pressIn`: an option is lettered by Hemera (issue #134), so what the button says
  * starts with its letter — `AThe issue date` — and a hand reads the option, not the letter. A
- * press on a choice is the answer (issue #199); the card then stays where it was, the choice
- * marked in it, and names itself after the answer.
+ * press on a choice is the answer (issue #199); the record the thread keeps of the question then
+ * names itself after the answer.
  */
 export async function answerWith(option: string): Promise<void> {
-  const pressed = await browser.execute((label: string) => {
-    // An answered card's rows stay, and can no longer be pressed: only an open one is looked at.
-    const options = document.querySelectorAll(
-      '[id^="ask-"] [aria-label="Answers"] button:not(:disabled)',
-    )
-    const button = [...options].find((one) => (one.textContent ?? '').includes(label))
-    if (!(button instanceof HTMLButtonElement)) return false
-    button.click()
-    return true
-  }, option)
+  await openNotices('Questions')
+  const pressed = await browser.execute(
+    (panel: string, label: string) => {
+      const options = document.querySelectorAll(
+        `${panel} [aria-label="Answers"] button:not(:disabled)`,
+      )
+      const button = [...options].find((one) => (one.textContent ?? '').includes(label))
+      if (!(button instanceof HTMLButtonElement)) return false
+      button.click()
+      return true
+    },
+    NOTICES,
+    option,
+  )
   expect(pressed).toBe(true)
   await browser.waitUntil(
     async () =>
       await browser.execute(
         (label: string) =>
-          [...document.querySelectorAll('[id^="ask-"] [role="group"]')].some((card) =>
-            (card.getAttribute('aria-label') ?? '').endsWith(label),
+          [...document.querySelectorAll('[id^="ask-"] [role="group"]')].some((record) =>
+            (record.getAttribute('aria-label') ?? '').endsWith(label),
           ),
         option,
       ),
-    { timeout: 5000, timeoutMsg: `the question's card never says it was answered with ${option}` },
+    {
+      timeout: 5000,
+      timeoutMsg: `the question's record never says it was answered with ${option}`,
+    },
   )
 }
 

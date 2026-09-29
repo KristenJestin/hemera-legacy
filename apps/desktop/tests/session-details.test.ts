@@ -735,36 +735,50 @@ describe('The line keeps what matters now (#237)', () => {
     state: CommandRun['state'],
     commandId: string | null,
     name = 'dev',
+    line = 'pnpm dev',
   ): CommandRun => ({
     ...aRun(id, ATLAS, state, commandId),
     name,
+    line,
     exitCode: EXITS[state],
     endedAt: state === 'running' ? null : '2026-09-23T08:01:00.000Z',
   })
-  const nothing = { seen: new Set<string>(), removed: new Set<string>(), before: new Set<string>() }
+  const nothing = { removed: new Set<string>(), before: new Set<string>() }
   const ids = (runs: readonly CommandRun[], marks = nothing): string[] =>
     lineOf(goingOnOf(runs, [], ATLAS), marks).map((item) => item.id)
 
-  test('what runs is a chip, and a one-off that ended well leaves once it is seen', () => {
-    const runs = [ran('sleep', 'exited', null, 'sleep'), ran('dev', 'running', 'c1')]
+  test('what runs is a chip, and a one-off over stays until it is taken out (#250)', () => {
+    const runs = [ran('sleep', 'exited', null, 'sleep', 'sleep 120'), ran('dev', 'running', 'c1')]
+    // Its glance or its details read change nothing: reading is not taking out.
     expect(ids(runs)).toEqual(['sleep', 'dev'])
-    expect(ids(runs, { ...nothing, seen: new Set(['sleep']) })).toEqual(['dev'])
+    expect(ids(runs, { ...nothing, removed: new Set(['sleep']) })).toEqual(['dev'])
   })
 
   test('a one-off that ended before the Session was opened is not on the line', () => {
-    const runs = [ran('sleep', 'exited', null, 'sleep')]
+    const runs = [ran('sleep', 'exited', null, 'sleep', 'sleep 120')]
     expect(ids(runs, { ...nothing, before: new Set(['sleep']) })).toEqual([])
   })
 
-  test('a failed run stays until it is seen, whenever it failed', () => {
-    const runs = [ran('check', 'failed', null, 'check')]
+  test('a one-off leaves once the same line runs as a command of the catalogue (#250)', () => {
+    const runs = [
+      ran('once', 'exited', null, 'bun', 'bun run check'),
+      ran('named', 'exited', 'c9', 'check', 'bun run check'),
+    ]
+    expect(ids(runs)).toEqual(['named'])
+  })
+
+  test('a failed run stays until it is taken out, or run again, whenever it failed (#250)', () => {
+    const runs = [ran('check', 'failed', null, 'check', 'bun run check')]
     expect(ids(runs, { ...nothing, before: new Set(['check']) })).toEqual(['check'])
-    expect(ids(runs, { ...nothing, seen: new Set(['check']) })).toEqual([])
+    expect(ids(runs, { ...nothing, removed: new Set(['check']) })).toEqual([])
+    // Run again, the same line: the new run takes its place.
+    const again = [...runs, ran('check-2', 'running', null, 'check', 'bun run check')]
+    expect(ids(again)).toEqual(['check-2'])
   })
 
   test('a catalogue command that ran stays as its shortcut, one chip for its newest run', () => {
     const runs = [ran('lint-1', 'exited', 'c2', 'lint'), ran('lint-2', 'exited', 'c2', 'lint')]
-    expect(ids(runs, { ...nothing, seen: new Set(['lint-1', 'lint-2']) })).toEqual(['lint-2'])
+    expect(ids(runs)).toEqual(['lint-2'])
   })
 
   test('a chip taken out by hand leaves, and comes back when its command runs again', () => {

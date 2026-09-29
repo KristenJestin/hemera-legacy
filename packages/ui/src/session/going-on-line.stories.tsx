@@ -35,13 +35,11 @@ const meta = {
   },
   args: {
     items: GOING_ON.few,
-    emptyLabel: 'Nothing running in csv-export',
     onStop: fn(),
     onOpenUrl: fn(),
     onAddToCatalogue: fn(),
     onRunAgain: fn(),
     onRemove: fn(),
-    onSeen: fn(),
   },
 } satisfies Meta<typeof Line>
 
@@ -49,7 +47,14 @@ export default meta
 
 type Story = StoryObj<typeof meta>
 
-export const Empty: Story = { args: { items: [] } }
+/** Nothing goes on: the line is its Run alone, and says nothing (review of #250). */
+export const Empty: Story = {
+  args: { items: [] },
+  play: async ({ canvasElement }) => {
+    const line = within(canvasElement).getByRole('group', { name: 'What goes on in this Session' })
+    await expect(line).toHaveTextContent('')
+  },
+}
 
 export const Few: Story = {}
 
@@ -144,7 +149,10 @@ export const RoundTrip: Story = {
     await expect(args.onStop).toHaveBeenCalledWith(expect.objectContaining({ id: 'run-test' }))
     await userEvent.click(within(glanced).getByRole('button', { name: 'Details of test' }))
     const details = await screen.findByRole('dialog', { name: 'test' })
-    await expect(within(details).getByText(/by the agent through Hemera/)).toBeVisible()
+    // It opens by the dialog's own motion, as every dialog of the window does (review of #250).
+    await waitFor(() =>
+      expect(within(details).getByText(/by the agent through Hemera/)).toBeVisible(),
+    )
     await userEvent.keyboard('{Escape}')
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
   },
@@ -160,7 +168,7 @@ export const ManyRoundTrip: Story = {
       within(list).getByRole('button', { name: 'Sub-agent Review, done, details' }),
     )
     const details = await screen.findByRole('dialog', { name: 'Sub-agent · Review' })
-    await expect(within(details).getByText(/No row is written twice/)).toBeVisible()
+    await waitFor(() => expect(within(details).getByText(/No row is written twice/)).toBeVisible())
     await userEvent.keyboard('{Escape}')
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
   },
@@ -191,8 +199,11 @@ export const GlanceActs: Story = {
     await expect(args.onAddToCatalogue).toHaveBeenCalledTimes(1)
     await userEvent.keyboard('{Escape}')
     await waitFor(() => {
-      expect(args.onSeen).toHaveBeenCalledTimes(1)
+      expect(screen.queryByRole('dialog', { name: /done$/ })).toBeNull()
     })
+    // Read and put away, the chip stays: reading is not taking out (review of #250).
+    await expect(chip).toBeInTheDocument()
+    await expect(args.onRemove).not.toHaveBeenCalled()
     await userEvent.click(chip)
     const again = await screen.findByRole('dialog', { name: /done$/ })
     await userEvent.click(within(again).getByRole('button', { name: /again$/ }))
@@ -218,8 +229,6 @@ export const RemovedByHand: Story = {
     await waitFor(() => {
       expect(args.onRemove).toHaveBeenCalledWith(expect.objectContaining({ id: 'run-test' }))
     })
-    // Something running closed is not something seen: it is not over.
-    await expect(args.onSeen).not.toHaveBeenCalled()
   },
 }
 

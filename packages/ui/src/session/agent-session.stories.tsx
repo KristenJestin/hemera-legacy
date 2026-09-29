@@ -380,7 +380,6 @@ function Page({
               {/* What goes on in the Session, on the head's own row (issues #219, #241). */}
               <GoingOnLine
                 items={goingOn}
-                emptyLabel="Nothing running in main"
                 onStop={fn()}
                 onOpenUrl={fn()}
                 onAddToCatalogue={fn()}

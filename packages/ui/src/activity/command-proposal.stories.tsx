@@ -42,7 +42,6 @@ const meta = {
     why: { control: 'text', description: 'Why the agent thinks it is worth keeping.' },
     onAccept: { control: false, description: 'Writes the command to the catalogue.' },
     onDecline: { control: false, description: 'Answers no; nothing is written.' },
-    className: { control: false, description: 'Where the row sits; never how it looks.' },
   },
 } satisfies Meta<typeof CommandProposal>
 
@@ -60,22 +59,23 @@ export const Pending: Story = {
     await expect(canvas.getByText(args.name)).toBeVisible()
     await expect(canvas.getByText(args.line)).toBeVisible()
     await expect(canvas.getByText(args.folder)).toBeVisible()
-    // Why is under the pointer on the name, not a paragraph of the row.
+    // Its title says what accepting does (review of #250); why is under the pointer on the name.
+    await expect(canvas.getByText('Add to the catalogue')).toBeVisible()
     await expect(canvas.getByText(args.name)).toHaveAttribute('title', args.why)
     await expect(canvas.queryByText(args.why)).toBeNull()
-    await userEvent.click(canvas.getByRole('button', { name: `Accept ${args.name}` }))
+    await userEvent.click(canvas.getByRole('button', { name: 'Add' }))
     await expect(args.onAccept).toHaveBeenCalledTimes(1)
     await expect(args.onDecline).not.toHaveBeenCalled()
-    await userEvent.click(canvas.getByRole('button', { name: `Decline ${args.name}` }))
+    await userEvent.click(canvas.getByRole('button', { name: 'Decline' }))
     await expect(args.onDecline).toHaveBeenCalledTimes(1)
   },
 }
 
-/** At the Workspace root, the row says nothing of where: the root is where a line runs. */
+/** At the Workspace root, the card says so, where it says where. */
 export const AtTheRoot: Story = {
   args: { name: 'test', line: 'pnpm test', type: 'test', folder: '.' },
   play: async ({ canvasElement }) => {
-    await expect(within(canvasElement).queryByText('.')).toBeNull()
+    await expect(within(canvasElement).getByText('Workspace root')).toBeVisible()
   },
 }
 
@@ -85,13 +85,9 @@ export const Keyboard: Story = {
     args.onAccept.mockClear()
     const canvas = within(canvasElement)
     await userEvent.tab()
-    await expect(document.activeElement).toBe(
-      canvas.getByRole('button', { name: `Decline ${args.name}` }),
-    )
+    await expect(document.activeElement).toBe(canvas.getByRole('button', { name: 'Decline' }))
     await userEvent.tab()
-    await expect(document.activeElement).toBe(
-      canvas.getByRole('button', { name: `Accept ${args.name}` }),
-    )
+    await expect(document.activeElement).toBe(canvas.getByRole('button', { name: 'Add' }))
     await userEvent.keyboard('{Enter}')
     await expect(args.onAccept).toHaveBeenCalledTimes(1)
   },

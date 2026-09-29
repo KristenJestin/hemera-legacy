@@ -477,7 +477,7 @@ export const FromAFreeSession: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     await expect(canvas.queryByRole('region', { name: 'Spec ATL-7' })).toBeNull()
-    await userEvent.click(canvas.getByRole('button', { name: 'Create' }))
+    await userEvent.click(canvas.getByRole('button', { name: 'Start' }))
     await expect(await canvas.findByRole('region', { name: 'Spec ATL-7' })).toBeVisible()
     await expect(canvas.getByRole('button', { name: 'Unfold the Spec' })).toBeVisible()
     // The head names the Project and nothing more: the mission is the panel (issue #149).

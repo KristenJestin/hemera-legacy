@@ -2,7 +2,7 @@ import type { SessionEntry } from '@hemera/ipc'
 import type { PermissionStanding } from '@hemera/ui'
 import { z } from 'zod'
 
-import { commandProposalOf, questionOpen } from './agent-tool-payloads.ts'
+import { commandProposalOf, questionOpen, setupProposalOf } from './agent-tool-payloads.ts'
 import { waitsForAnswer } from './spec-entries.ts'
 
 /**
@@ -14,8 +14,11 @@ import { waitsForAnswer } from './spec-entries.ts'
  * it which entries wait and how a permission was answered, and `agent-blocks.tsx` draws them.
  */
 
-/** The kinds of what waits, in the order the notices list them: what holds the turn first. */
-export const NOTICE_KINDS = ['permission', 'question', 'spec', 'proposal'] as const
+/**
+ * The kinds of what waits, in the order the notices list them: what holds the turn first, and the
+ * changes to the Project's setup the agent proposes last (#218).
+ */
+export const NOTICE_KINDS = ['permission', 'question', 'spec', 'proposal', 'setup'] as const
 
 export type NoticeKind = (typeof NOTICE_KINDS)[number]
 
@@ -24,7 +27,8 @@ export type NoticeKind = (typeof NOTICE_KINDS)[number]
  *
  * A permission while the engine holds it open and its turn runs; a command the agent proposes while nobody answered
  * it; the Spec a `free` Session's agent proposes while it is proposed; a question of the Spec
- * neither answered nor left behind by a Rework.
+ * neither answered nor left behind by a Rework; a change to the Project's setup while nobody
+ * answered it.
  */
 export function waitingAs(
   entry: SessionEntry,
@@ -44,10 +48,27 @@ export function waitingAs(
   if (entry.kind === 'spec_proposal') {
     return waitsForAnswer(entry, thread, specId, asked) ? 'spec' : null
   }
+  if (entry.kind === 'setup_proposal') {
+    return setupProposalOf(entry)?.state === 'pending' ? 'setup' : null
+  }
   if (entry.kind === 'spec_question') {
     return waitsForAnswer(entry, thread, specId, asked) ? 'question' : null
   }
   return null
+}
+
+/**
+ * The batches of setup changes that still wait, in the order they were first proposed: what the
+ * setup's Accept all answers, one batch after the other (Decided 1 of #218).
+ */
+export function setupBatchesWaiting(thread: readonly SessionEntry[]): string[] {
+  const batches: string[] = []
+  for (const entry of thread) {
+    if (entry.kind !== 'setup_proposal') continue
+    const drawn = setupProposalOf(entry)
+    if (drawn?.state === 'pending' && !batches.includes(drawn.batchId)) batches.push(drawn.batchId)
+  }
+  return batches
 }
 
 /** Whether a turn ended after this entry was written: what it belonged to is over. */

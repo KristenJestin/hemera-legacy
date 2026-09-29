@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
-import { expect, fn, userEvent, within } from 'storybook/test'
+import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
 
 import { DiffBlock } from '../activity/diff-block.tsx'
 import { PermissionRecord, PermissionRequest } from './permission-request.tsx'
@@ -343,6 +343,12 @@ export const TheWholeLine: Story = {
     // Unfolded, the whole line, wrapped over several rows, nothing scrolled or cut, and where.
     await unfold(canvasElement)
     const line = await canvas.findByText(command, { selector: 'pre' })
+    // Said once: the row's cut line gives way to the whole one, and is hidden from the reader.
+    await waitFor(() => {
+      expect(
+        canvas.getAllByText(command).filter((one) => one.closest('[aria-hidden]') === null),
+      ).toHaveLength(1)
+    })
     await expect(line.scrollWidth).toBeLessThanOrEqual(line.clientWidth)
     await expect(line.getBoundingClientRect().height).toBeGreaterThan(20)
     await expect(canvas.getByText('api')).toBeVisible()

@@ -1,143 +1,148 @@
-import { cn } from 'cn'
 import type { ReactNode } from 'react'
 
-import { Badge } from '../components/badge/badge.tsx'
-import { Button } from '../components/button/button.tsx'
-import { IconCheck, IconListCheck, IconX } from '../icons.ts'
+import { IconListCheck } from '../icons.ts'
+import { NoticeRow } from '../session/notice-row.tsx'
+import { type NoticeAnswer, NoticeRecord } from './notice-record.tsx'
 
 /**
- * A change to the Project's setup the agent proposes, and what the human decided (#218).
+ * A change to the Project's setup the agent proposes, waiting for the human (#218), as the
+ * Session's notices list it.
  *
- * The agent reads the setup freely and changes nothing of it: `setup_propose` leaves one of these
- * in the thread per change, and the change is applied only when a human presses Accept — through
- * the very use case the Project settings call. The card says exactly what would change: a title,
- * and each field it would write under it. A variable's value is never one of them: the card says
- * it would be set, and nothing more.
+ * The agent reads the setup freely and changes nothing of it: `setup_propose` leaves one entry in
+ * the thread per change, and the change is applied only when a human accepts it — through the very
+ * use case the Project settings call. It is drawn as every notice is (`NoticeRow`): what it is
+ * about, and Decline / Accept, after the setup's tile; the chevron unfolds its verb in that place —
+ * "Add service", "Add variable" — the line it would run, and every other field it would write.
+ * The changes waiting together are accepted in one press by the group's Accept all.
  *
- * The changes the agent proposed in one call are one batch, each its own card. The last card of
- * a batch that still has more than one change waiting offers Accept all, which accepts them in
- * the order they were proposed: setting a Project up is not a click per card.
- *
- * Once decided it says the outcome in words and offers nothing more.
+ * A variable's value is never one of the fields: the row says it would be set, and nothing more
+ * (Decided 2 of #218).
  */
 
 /** Where a proposal stands: waiting for the human, or answered. */
 export type SetupProposalState = 'pending' | 'accepted' | 'declined'
 
-/** One field the change would write, as the card lists it. */
+/** One field the change would write. */
 export interface SetupProposalDetail {
   label: string
   value: string
 }
 
 export interface SetupProposalProps {
-  /** The change in one line: "Declare the repository ./sources/api". */
-  title: string
-  /** Every field it would write, in the order the settings show them. */
+  /** What accepting it does: `Add service`, `Add variable`, `Clean up Workspace`. */
+  verb: string
+  /** What it is about: a command's name, a repository's path, a variable's name. */
+  subject: string
+  /** Whether the subject is a path, set in the terminal's letters. */
+  mono?: boolean | undefined
+  /** The line a command or a step would run, whole. */
+  line?: string | undefined
+  /** Every other field it would write, in the order the settings show them. */
   details: readonly SetupProposalDetail[]
-  /** Why the agent proposes it, in its own words. */
+  /** Why the agent proposes it, in its own words: under the pointer on the subject. */
   why: string
-  state: SetupProposalState
   /** Applies the change, which is the human's to do. */
-  onAccept?: (() => void) | undefined
-  onDecline?: (() => void) | undefined
-  /**
-   * How many changes of this card's batch still wait, this one included: given to the last card
-   * of a batch, it offers Accept all when more than one does.
-   */
-  waiting?: number | undefined
-  /** Accepts every change of the batch still waiting, in the order proposed. */
-  onAcceptAll?: (() => void) | undefined
-  /** Where the block sits; never how it looks. */
-  className?: string | undefined
+  onAccept: () => void
+  onDecline: () => void
 }
 
-const BLOCK = 'flex w-full min-w-0 flex-col gap-1 rounded-lg border border-border bg-card px-3 py-2'
+const DETAIL_LABEL = 'text-muted-foreground'
 
-const LEAD = 'text-xs text-muted-foreground'
+const DETAIL_VALUE = 'font-mono text-foreground'
 
-/** The line that is read: what it is, the change itself, and the answer. */
-const HEAD = 'flex min-w-0 flex-wrap items-center gap-2'
-
-const MARK = 'flex shrink-0 text-muted-foreground'
-
-const TITLE = 'min-w-0 text-sm text-foreground'
-
-const ANSWER = 'ml-auto flex shrink-0 items-center gap-2'
-
-/** The fields, one per line, the value read whole where it wraps. */
-const DETAILS = 'flex flex-col gap-0.5'
-
-const DETAIL = 'flex min-w-0 items-baseline gap-2'
-
-const LABEL = 'w-24 shrink-0 text-xs text-muted-foreground'
-
-const VALUE = 'min-w-0 font-mono text-xs break-all text-foreground'
-
-const WHY = 'text-sm text-muted-foreground'
-
-/** The batch's own answer, under the card that closes it. */
-const BATCH = 'flex items-center justify-end gap-2 pt-1'
-
-const BATCH_LEAD = 'text-xs text-muted-foreground'
+/** The fields, as one small line under the line to run. */
+function Details({ details }: { details: readonly SetupProposalDetail[] }): ReactNode {
+  return details.map((detail) => (
+    <span key={detail.label}>
+      <span className={DETAIL_LABEL}>{`${detail.label} `}</span>
+      <span className={DETAIL_VALUE}>{detail.value}</span>
+    </span>
+  ))
+}
 
 export function SetupProposal({
-  title,
+  verb,
+  subject,
+  mono = false,
+  line,
+  details,
+  why,
+  onAccept,
+  onDecline,
+}: SetupProposalProps): ReactNode {
+  return (
+    <NoticeRow
+      name={`Proposed change ${verb} ${subject}`}
+      head={<span title={why}>{subject}</span>}
+      mono={mono}
+      title={verb}
+      line={line}
+      place={details.length === 0 ? undefined : <Details details={details} />}
+      refuse={{ label: 'Decline', onPress: onDecline }}
+      accept={{ label: 'Accept', onPress: onAccept }}
+    />
+  )
+}
+
+/** A proposal's answer, as the thread says it: its dot, and the dot's word. */
+export const SETUP_ANSWERS: Record<SetupProposalState, { answer: NoticeAnswer; word: string }> = {
+  pending: { answer: 'pending', word: 'waiting' },
+  accepted: { answer: 'accepted', word: 'applied' },
+  declined: { answer: 'refused', word: 'declined' },
+}
+
+const KEPT = 'flex flex-col gap-1'
+
+const KEPT_LINE = 'font-mono text-xs break-all text-foreground'
+
+const KEPT_DETAILS = 'flex flex-wrap gap-x-3 gap-y-1 text-xs'
+
+const KEPT_WHY = 'text-sm text-muted-foreground'
+
+export interface SetupProposalRecordProps {
+  verb: string
+  subject: string
+  mono?: boolean | undefined
+  line?: string | undefined
+  details: readonly SetupProposalDetail[]
+  why: string
+  state: SetupProposalState
+}
+
+/**
+ * A proposed change as the thread keeps it when the call that proposed it is not in the thread:
+ * one closed line — the setup's mark, a dot for the answer, the verb and what it is about — and,
+ * opened, what it would write and why. It is answered among the Session's notices, never here.
+ */
+export function SetupProposalRecord({
+  verb,
+  subject,
+  mono = false,
+  line,
   details,
   why,
   state,
-  onAccept,
-  onDecline,
-  waiting,
-  onAcceptAll,
-  className,
-}: SetupProposalProps): ReactNode {
-  const batch = state === 'pending' && waiting !== undefined && waiting > 1
+}: SetupProposalRecordProps): ReactNode {
+  const { answer, word } = SETUP_ANSWERS[state]
   return (
-    <section aria-label={`Proposed change: ${title}`} className={cn(BLOCK, className)}>
-      <p className={LEAD}>The agent proposes a change to the Project setup</p>
-      <div className={HEAD}>
-        <span className={MARK}>
-          <IconListCheck size="sm" aria-hidden="true" />
-        </span>
-        <span className={TITLE}>{title}</span>
-        <span className={ANSWER}>
-          {state === 'pending' && (
-            <>
-              <Button variant="ghost" size="sm" onClick={onDecline}>
-                <IconX size="sm" aria-hidden="true" />
-                Decline
-              </Button>
-              <Button variant="primary" size="sm" onClick={onAccept}>
-                <IconCheck size="sm" aria-hidden="true" />
-                Accept
-              </Button>
-            </>
-          )}
-          {state === 'accepted' && <Badge tone="success">Applied</Badge>}
-          {state === 'declined' && <Badge tone="neutral">Declined</Badge>}
-        </span>
+    <NoticeRecord
+      icon={<IconListCheck size="sm" aria-hidden="true" />}
+      answer={answer}
+      answerLabel={word}
+      label={verb}
+      subject={subject}
+      mono={mono}
+      name={`Proposed change ${verb} ${subject}, ${word}`}
+    >
+      <div className={KEPT}>
+        {line !== undefined && <p className={KEPT_LINE}>{line}</p>}
+        {details.length > 0 && (
+          <p className={KEPT_DETAILS}>
+            <Details details={details} />
+          </p>
+        )}
+        <p className={KEPT_WHY}>{why}</p>
       </div>
-      {details.length > 0 && (
-        <dl className={DETAILS}>
-          {details.map((detail) => (
-            <div key={detail.label} className={DETAIL}>
-              <dt className={LABEL}>{detail.label}</dt>
-              <dd className={VALUE}>{detail.value}</dd>
-            </div>
-          ))}
-        </dl>
-      )}
-      <p className={WHY}>{why}</p>
-      {batch && (
-        <div className={BATCH}>
-          <span className={BATCH_LEAD}>{waiting} changes proposed together still wait</span>
-          <Button variant="secondary" size="sm" onClick={onAcceptAll}>
-            <IconCheck size="sm" aria-hidden="true" />
-            Accept all {waiting}
-          </Button>
-        </div>
-      )}
-    </section>
+    </NoticeRecord>
   )
 }

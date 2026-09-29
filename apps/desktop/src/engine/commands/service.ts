@@ -55,7 +55,7 @@ import {
   portlessNameFor,
   runsPortless,
 } from '@hemera/core'
-import { and, desc, eq, sql } from 'drizzle-orm'
+import { and, desc, eq, ne, or, sql } from 'drizzle-orm'
 import { Context, Deferred, Duration, Effect, Exit, Layer, Scope } from 'effect'
 import { request as httpsRequest } from 'node:https'
 import { isAbsolute, join, relative, sep } from 'node:path'
@@ -450,6 +450,21 @@ export interface CommandsService {
     runId: string,
     milliseconds: number,
   ) => Effect.Effect<RunView, UnknownRunError | DatabaseError>
+  /**
+   * The runs of a Session its agent was not told of as they now stand (issue #238), oldest first:
+   * one it was told nothing of, and one it was told was running that has ended since. A running
+   * one is read from memory, where its output is up to the last line.
+   */
+  readonly owed: (sessionId: string) => Effect.Effect<RunView[], DatabaseError>
+  /**
+   * Records what a Session's agent was told of its runs, by the answer of a tool or by a
+   * delivery: that it ended, or that it was running — which never takes back an end it was told.
+   * A run of another Session is left alone: its own agent was told nothing.
+   */
+  readonly told: (
+    sessionId: string,
+    runs: readonly Pick<RunView, 'id' | 'state'>[],
+  ) => Effect.Effect<void, DatabaseError>
   /** Stops everything of a Session, or everything at all when no Session is named. */
   readonly stopped: (sessionId?: string | undefined) => Effect.Effect<void, DatabaseError>
   /**
@@ -832,9 +847,10 @@ export const commandsLayer = Layer.effect(
               .where(eq(commandRuns.id, id))
               .pipe(Effect.mapError(failed('reading the run')))
             if (existing.length === 0) {
+              // Its agent was told nothing of it yet (issue #238); a rewrite leaves that alone.
               yield* transaction
                 .insert(commandRuns)
-                .values(row)
+                .values({ ...row, told: 'none' })
                 .pipe(Effect.mapError(failed('writing the run')))
             } else {
               yield* transaction
@@ -1495,6 +1511,48 @@ export const commandsLayer = Layer.effect(
             Effect.mapError(failed('reading the runs')),
             Effect.map((rows) => rows.map(rowOf)),
           ),
+
+      owed: (sessionId) =>
+        runRows()
+          .where(
+            and(
+              eq(commandRuns.sessionId, sessionId),
+              or(
+                eq(commandRuns.told, 'none'),
+                and(eq(commandRuns.told, 'running'), ne(commandRuns.state, 'running')),
+              ),
+            ),
+          )
+          .orderBy(commandRuns.startedAt, sql`${commandRuns}.rowid`)
+          .pipe(
+            Effect.mapError(failed('reading the runs owed to the agent')),
+            Effect.map((rows) =>
+              rows.map((row) => {
+                const record = live.get(row.run.id)
+                return record === undefined ? rowOf(row) : viewOf(row.run.id, record)
+              }),
+            ),
+          ),
+
+      told: (sessionId, runs) =>
+        withDatabase(
+          Effect.forEach(
+            runs,
+            (run) =>
+              database
+                .update(commandRuns)
+                .set({ told: run.state === 'running' ? 'running' : 'ended' })
+                .where(
+                  and(
+                    eq(commandRuns.id, run.id),
+                    eq(commandRuns.sessionId, sessionId),
+                    // Told it ended, the agent is never told again that it runs.
+                    run.state === 'running' ? eq(commandRuns.told, 'none') : undefined,
+                  ),
+                ),
+            { discard: true },
+          ).pipe(Effect.mapError(failed('recording what the agent was told of a run'))),
+        ),
 
       stopped: (sessionId) =>
         Effect.gen(function* () {

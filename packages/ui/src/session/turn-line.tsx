@@ -21,18 +21,35 @@ const ROW = 'flex items-end justify-between gap-3'
 /** The meter's place: the height of the activity row's line, the meter centred in it. */
 const METER = 'flex h-6 shrink-0 items-center'
 
+/**
+ * The activity's side while the Session's notices stand in the middle of the row, on the box's
+ * edge (issue #237): at most half the row, less the pill's half, so a long line is cut before it
+ * and never runs under it.
+ */
+const NOTCHED = 'flex min-w-0 max-w-1/2 pr-16'
+
 export interface TurnLineProps {
   /** What the turn is doing, or `null` when no turn has run since the last message. */
   activity: ActivityRowProps | null
   /** What the Session has spent, or `null` when no agent has accounted for it yet (D5-20). */
   usage: UsageMeterProps | null
+  /** Whether the Session's notices stand in the middle of the row, which the activity keeps off. */
+  notched?: boolean | undefined
 }
 
-export function TurnLine({ activity, usage }: TurnLineProps): ReactNode {
+export function TurnLine({ activity, usage, notched = false }: TurnLineProps): ReactNode {
   if (activity === null && usage === null) return null
   return (
     <div className={ROW}>
-      {activity === null ? <span /> : <ActivityRow {...activity} />}
+      {activity === null ? (
+        <span />
+      ) : notched ? (
+        <span className={NOTCHED}>
+          <ActivityRow {...activity} />
+        </span>
+      ) : (
+        <ActivityRow {...activity} />
+      )}
       {usage !== null && (
         <span className={METER}>
           <UsageMeter {...usage} />

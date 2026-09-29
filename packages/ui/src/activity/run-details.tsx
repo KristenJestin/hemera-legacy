@@ -1,7 +1,8 @@
 import { cn } from 'cn'
 import type { ReactNode } from 'react'
 
-import { Badge, type BadgeProps } from '../components/badge/badge.tsx'
+import { Badge } from '../components/badge/badge.tsx'
+import { StatusDot, type StatusTone } from '../components/status-dot/status-dot.tsx'
 import { ServiceUrl } from '../workspace/service-list.tsx'
 import type { Readiness } from '../workspace/services-model.ts'
 import { COMMAND_TYPE_ICONS, COMMAND_TYPE_LABELS, type CommandType } from './command-type.ts'
@@ -56,12 +57,16 @@ const NOTE = 'text-sm text-muted-foreground'
 /** Where a run stands, as a word: the exit code, once there is one, is the proof beside it. */
 export type RunState = 'running' | 'exited' | 'failed' | 'stopped'
 
-const STATE: Record<RunState, { word: string; tone: NonNullable<BadgeProps['tone']> }> = {
-  running: { word: 'Running', tone: 'info' },
+/** How a run stands: the dot's tone, and its word, which names the dot. */
+const STATE: Record<RunState, { word: string; tone: StatusTone }> = {
+  running: { word: 'Running', tone: 'running' },
   exited: { word: 'Exited', tone: 'success' },
-  failed: { word: 'Failed', tone: 'destructive' },
-  stopped: { word: 'Stopped', tone: 'neutral' },
+  failed: { word: 'Failed', tone: 'failure' },
+  stopped: { word: 'Stopped', tone: 'cancelled' },
 }
+
+/** The code a run exited with, beside its dot, in the terminal's letters. */
+const EXIT = 'shrink-0 font-mono text-xs text-muted-foreground'
 
 const STARTED_BY: Record<RunDetailsProps['startedBy'], string> = {
   agent: 'The agent',
@@ -112,10 +117,7 @@ export function RunDetails({
   const shown = STATE[state]
   const running = state === 'running'
   // A process stopped under it exits too, but "Stopped" is what happened; the code says nothing.
-  const word =
-    exitCode === undefined || running || state === 'stopped'
-      ? shown.word
-      : `Exited ${String(exitCode)}`
+  const exited = exitCode === undefined || running || state === 'stopped' ? null : exitCode
   // By code point, as the environment itself is keyed: the same order on every machine and
   // locale, where `localeCompare` would follow the reader's language.
   const variables = Object.entries(environment).toSorted(([one], [other]) =>
@@ -127,9 +129,10 @@ export function RunDetails({
         <span className={ICON}>
           <Icon size="sm" aria-hidden="true" />
         </span>
+        <StatusDot status={shown.tone} size="sm" label={shown.word} title={shown.word} />
         <span className={NAME}>{name}</span>
         <Badge tone="neutral">{COMMAND_TYPE_LABELS[type]}</Badge>
-        <Badge tone={shown.tone}>{word}</Badge>
+        {exited !== null && <span className={EXIT}>{`exit ${String(exited)}`}</span>}
       </div>
 
       <dl className={FACTS}>

@@ -1,118 +1,213 @@
 import { MAIN_WORKSPACE, PHASE_IDS } from '@hemera/core'
-import type { CommandRun, ContextView, Provided, Workspace } from '@hemera/ipc'
+import type { CommandRun, ContextView, Provided } from '@hemera/ipc'
 import type {
-  CatalogueCommandLine,
-  CommandPanelRun,
   ContextCommand,
   ContextEntry,
   ContextTool,
   ContextWorkspace,
+  GoingOnItem,
+  GoingOnRun,
+  GoingOnShell,
+  RunRepository,
   SessionDetailsTab,
 } from '@hemera/ui'
 
-import { runFactsOf } from './agent-tool-payloads.ts'
+import { type AgentShellCall, runFactsOf } from './agent-tool-payloads.ts'
+import { runPlaceOf } from './run-place.ts'
 
 /**
- * What the details of a Session draw from the tools store (design D6-10, D6-12).
+ * What the line under a Session's title and the Session's details draw (design D6-10, D6-12,
+ * issue #219).
  *
- * The Commands tab is the runs of the Session, the same runs the thread's blocks read; the
- * Context tab is its instructions and its tools, as the engine answered them. Both are read as
- * they came: nothing here decides what a run is or what was provided, it only says it in the
- * words the blocks take.
+ * The line is what goes on in the Session: its runs, the same runs the thread's blocks read, and
+ * the commands the agent ran in its own shell, as its calls reported them. The details are what
+ * the agent has been doing and what it works from. All of it is read as it came: nothing here
+ * decides what a run is or what was provided, it only says it in the words the blocks take.
  *
  * Kept apart from the page, which imports the design system's components, so a test can read it
  * without a theme or a DOM.
  */
 
-/** Where a run ran, relative to the Workspace root when it is inside it and the root is known. */
-function folderOf(cwd: string, root: string | null): string {
-  if (root === null) return cwd
-  const inside = cwd.replaceAll('\\', '/')
-  const base = root.replaceAll('\\', '/').replace(/\/$/, '')
-  if (inside === base) return '.'
-  if (inside.startsWith(`${base}/`)) return inside.slice(base.length + 1)
-  return cwd
+/** When something began, `HH:MM`, in the one reading the whole window uses. */
+function clockOf(at: number): string {
+  return new Date(at).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })
 }
 
-/** The runs of a Session as the Commands panel lists them, oldest first. */
-export function panelRunsOf(runs: readonly CommandRun[], root: string | null): CommandPanelRun[] {
-  return runs.map((run) => ({
+function runOf(
+  run: CommandRun,
+  root: string | null,
+  repositories: readonly RunRepository[],
+): GoingOnRun {
+  const facts = runFactsOf(run)
+  // Where it ran, in the Project's words: its repository and the folder under it, or a folder of
+  // the Workspace, relative to the root when it is under it (issue #239).
+  const place = runPlaceOf(run.cwd, root, repositories)
+  return {
+    kind: 'run',
     id: run.id,
     name: run.name,
     command: run.line,
     type: run.type,
     state: run.state === 'exited' ? 'finished' : run.state,
-    folder: folderOf(run.cwd, root),
+    repository: place.repository,
+    folder: place.folder,
+    workspace: run.workspaceName,
     output: run.output,
     url: run.url ?? undefined,
+    readiness: facts.readiness,
     exitCode: run.exitCode ?? undefined,
     oneOff: run.commandId === null,
-    // Its address as it stands, its variables and its conflict, as the thread's block shows them.
-    ...runFactsOf(run),
-  }))
+    startedBy: run.startedBy,
+    environment: facts.environment,
+    at: clockOf(Date.parse(run.startedAt)),
+  }
 }
 
 /**
- * The Project's catalogue as the Commands tab lists it, each command a row with its Run (#217):
- * the one the Context view answered, which is the catalogue the agent may run as well. None until
- * that view was read, and the tab then lists no catalogue rather than an empty one.
+ * A command of the agent's own shell: it runs where the agent runs, at the Workspace's root, which
+ * its call does not say and which the Session's Workspace names.
  */
-export function catalogueLinesOf(view: ContextView | null): CatalogueCommandLine[] | undefined {
-  return view?.commands.map((one) => ({ name: one.name, line: one.line }))
+function shellOf(call: AgentShellCall, workspace: string): GoingOnShell {
+  return {
+    kind: 'shell',
+    id: call.id,
+    command: call.command,
+    folder: '.',
+    workspace,
+    state: call.state,
+    output: call.output,
+    exitCode: undefined,
+    at: clockOf(call.at),
+  }
 }
 
 /**
- * The Workspace whose services the Commands tab lists (#217): the Session's own. `main`'s are
- * asked for as `main`'s — null — whichever row its runs were written with, as its settings do.
+ * What goes on in a Session, as the line under its title lists it: its runs and the agent's own
+ * shell commands, in the order they began, which is the order the line ranks from.
  */
-export function servicesWorkspaceOf(
-  workspaceId: string | null,
-  workspaces: readonly Workspace[],
-): string | null {
-  if (workspaceId === null) return null
-  return workspaces.find((one) => one.id === workspaceId)?.main === true ? null : workspaceId
+export function goingOnOf(
+  runs: readonly CommandRun[],
+  shells: readonly AgentShellCall[],
+  root: string | null,
+  workspace: string = MAIN_WORKSPACE,
+  repositories: readonly RunRepository[] = [],
+): (GoingOnRun | GoingOnShell)[] {
+  const began = [
+    ...runs.map((run) => ({
+      at: Date.parse(run.startedAt),
+      item: runOf(run, root, repositories),
+    })),
+    ...shells.map((call) => ({ at: call.at, item: shellOf(call, workspace) })),
+  ]
+  return began.toSorted((one, other) => one.at - other.at).map(({ item }) => item)
 }
 
 /**
- * Which of the three tabs has something to show (D6-10, D6-12), which is what the details open on.
+ * What the reader did to the line of a Session (issue #237): the chips they took out by hand; and
+ * what was already over when the Session was opened. Reading a chip — its glance, its details —
+ * is not taking it out (review of #250).
+ */
+export interface LineMarks {
+  readonly removed: ReadonlySet<string>
+  readonly before: ReadonlySet<string>
+}
+
+/** How an item stands, as its dot says it: a run the reader stopped is over. */
+function standingOf(item: GoingOnItem): 'running' | 'finished' | 'failed' {
+  if (item.kind !== 'run') return item.state
+  if (item.state === 'running') return 'running'
+  return item.state === 'failed' ? 'failed' : 'finished'
+}
+
+/**
+ * Where an item sits on the line: a command of the catalogue by its name, a line run once — or
+ * in the agent's own shell — by its line, which a new run of the same line takes over; a
+ * sub-agent alone.
+ */
+function slotOf(item: GoingOnItem): string {
+  if (item.kind === 'run')
+    return item.oneOff === true ? `line:${item.command}` : `command:${item.name}`
+  if (item.kind === 'shell') return `line:${item.command}`
+  return item.id
+}
+
+/**
+ * The line's lifecycle (issue #237, review of #250): what runs is a chip; a command of the
+ * catalogue that ran stays as the shortcut to run it again, one chip for its newest run; what
+ * failed stays until the reader takes it out or runs it again; a one-off — and a command of the
+ * agent's own shell, a sub-agent — over and well stays until it is taken out, until the same line
+ * runs as a command of the catalogue, or until the Session is opened again. Whatever the reader
+ * took out by hand is gone, and stays in the history; a command of the catalogue taken out comes
+ * back when it runs again. Reading a chip never takes it out.
+ */
+export function lineOf(items: readonly GoingOnItem[], marks: LineMarks): GoingOnItem[] {
+  const newest = new Map<string, GoingOnItem>()
+  for (const item of items) {
+    const slot = slotOf(item)
+    newest.delete(slot)
+    newest.set(slot, item)
+  }
+  const inCatalogue = (command: string, after: GoingOnItem): boolean => {
+    const at = items.indexOf(after)
+    return items
+      .slice(at + 1)
+      .some((one) => one.kind === 'run' && one.oneOff !== true && one.command === command)
+  }
+  return [...newest.values()].filter((item) => {
+    if (marks.removed.has(item.id)) return false
+    const standing = standingOf(item)
+    if (standing === 'running') return true
+    if (item.kind === 'run' && item.oneOff !== true) return true
+    // Run again as a command of the catalogue: the one-off gives it its place, failed or not.
+    if (item.kind === 'run' && inCatalogue(item.command, item)) return false
+    if (standing === 'failed') return true
+    return !marks.before.has(item.id)
+  })
+}
+
+/** What was over when the Session was opened: its runs ended, and its shell commands done. */
+export function overBefore(
+  runs: readonly CommandRun[],
+  shells: readonly AgentShellCall[],
+  opened: number,
+): ReadonlySet<string> {
+  return new Set([
+    ...runs
+      .filter((run) => run.endedAt !== null && Date.parse(run.endedAt) < opened)
+      .map((run) => run.id),
+    ...shells.filter((call) => call.state !== 'running' && call.at < opened).map((call) => call.id),
+  ])
+}
+
+/**
+ * Which of the two tabs has something to show (D6-10), which is what the details open on.
  *
- * Activity has a plan or a file the turn touched; Commands has a run of this Session or a
- * catalogue to run from; Context has a delivery — a change of `AGENTS.md` handed to the agent
- * between two turns. The base, the file given at the start and the tools are there in every
- * Session its agent has been asked anything, so they make no tab one to open on by themselves.
+ * Activity has a plan or a file the turn touched; Context has a delivery — a change of `AGENTS.md`
+ * handed to the agent between two turns. The base, the file given at the start and the tools are
+ * there in every Session its agent has been asked anything, so they make no tab one to open on by
+ * themselves. What the Session runs is on the line under its title, and no tab of the details.
  *
  * Nothing here opens the details: they are a dialog only the reader opens, from the Session's head
  * (second review of #18). What arrives while they are open changes what a tab holds.
  */
 export interface DetailsTabs {
   activity: boolean
-  commands: boolean
   context: boolean
 }
 
-export function detailsTabsOf(
-  plan: number,
-  files: number,
-  runs: readonly CommandRun[],
-  view: ContextView | null,
-): DetailsTabs {
+export function detailsTabsOf(plan: number, files: number, view: ContextView | null): DetailsTabs {
   return {
     activity: plan > 0 || files > 0,
-    commands: runs.length > 0 || (view?.commands.length ?? 0) > 0,
     context: view?.provided.some((one) => one.kind === 'instructions') ?? false,
   }
 }
 
 /**
- * The tab the details open on, which follows what is happening in the Session (D6-12): a command
- * running opens on its commands, then what the agent has been doing, then whichever tab has
- * something. With nothing in any tab they open on the Context, which is what the agent works from.
+ * The tab the details open on: what the agent has been doing when it has done anything, and the
+ * Context otherwise, which is what the agent works from.
  */
-export function openingTabOf(runs: readonly CommandRun[], tabs: DetailsTabs): SessionDetailsTab {
-  if (runs.some((run) => run.state === 'running')) return 'commands'
-  if (tabs.activity) return 'activity'
-  if (tabs.commands) return 'commands'
-  return 'context'
+export function openingTabOf(tabs: DetailsTabs): SessionDetailsTab {
+  return tabs.activity ? 'activity' : 'context'
 }
 
 /** How a source reached the agent, in the words the Context view says it with. */

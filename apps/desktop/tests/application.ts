@@ -38,6 +38,7 @@ import {
 import { agentDirectoriesLayer } from '#engine/agents/bare.ts'
 import { acpTracesLayer } from '#engine/agents/trace.ts'
 import { type HeldWords, heldWordsLayer } from '#engine/agents/held.ts'
+import { sessionModesLayer } from '#engine/agents/modes.ts'
 import { type Commands, commandsLayer } from '#engine/commands/service.ts'
 import { type Context as AgentContext, contextLayer } from '#engine/context/service.ts'
 import { type Journal, journalLayer } from '#engine/journal.ts'
@@ -252,6 +253,7 @@ export function application(
       Layer.provide(poolLayer.pipe(Layer.provide(clockLayer))),
       Layer.provideMerge(TestClock.layer()),
       Layer.provideMerge(heldWordsLayer),
+      Layer.provideMerge(sessionModesLayer),
       Layer.provide(agentDirectoriesLayer(dataFolder)),
       Layer.provide(acpTracesLayer(dataFolder)),
     )
@@ -537,6 +539,7 @@ export function toolApplication(
       Layer.provide(lines),
       Layer.provide(poolLayer.pipe(Layer.provide(clockLayer))),
       Layer.provideMerge(heldWordsLayer),
+      Layer.provideMerge(sessionModesLayer),
       Layer.provide(agentDirectoriesLayer(dataFolder)),
       Layer.provide(acpTracesLayer(dataFolder)),
     )

@@ -23,6 +23,7 @@ import {
   processSupervisorLayer,
 } from '#engine/agents/supervisor.ts'
 import { heldWordsLayer } from '#engine/agents/held.ts'
+import { sessionModesLayer } from '#engine/agents/modes.ts'
 import { NoNotices } from '#engine/agents/notices.ts'
 import { commandsLayer, type Commands } from '#engine/commands/service.ts'
 import { openProfile } from '#engine/migrate.ts'
@@ -161,6 +162,7 @@ function engine(
     ),
     Layer.provide(Layer.mergeAll(processes, sink)),
     Layer.provide(heldWordsLayer),
+    Layer.provide(sessionModesLayer),
     // Nobody is watching: these suites read the thread and the runs, not what was pushed.
     Layer.provide(NoNotices),
   )

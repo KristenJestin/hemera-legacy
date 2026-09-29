@@ -27,6 +27,7 @@ export type ShortcutAction =
   | { kind: 'command' }
   | { kind: 'settings' }
   | { kind: 'session' }
+  | { kind: 'run' }
   | { kind: 'project'; rank: number }
 
 export interface Shortcut {
@@ -60,6 +61,14 @@ export const SHORTCUTS: Shortcut[] = [
     label: 'New Session',
     inFields: false,
   },
+  // Run's menu, at the end of the Session's line (review of #250): E for execute, with Shift so
+  // it answers in the composer too without taking a letter the box or the platform writes with.
+  {
+    action: { kind: 'run' },
+    combination: 'Mod+Shift+E',
+    label: 'Run a command',
+    inFields: true,
+  },
   ...RANKS.map((digit, index) => ({
     action: { kind: 'project' as const, rank: index + 1 },
     combination: `Mod+${digit}` as const,
@@ -85,7 +94,7 @@ export function shownKeys(combination: Hotkey): string {
 }
 
 /** The keystroke of one of the named actions, ready to be drawn as keys. */
-export function keysOf(kind: 'sidebar' | 'command' | 'settings' | 'session'): string {
+export function keysOf(kind: 'sidebar' | 'command' | 'settings' | 'session' | 'run'): string {
   const found = SHORTCUTS.find((shortcut) => shortcut.action.kind === kind)
   if (found === undefined) throw new Error(`no shortcut is declared for ${kind}`)
   return shownKeys(found.combination)

@@ -102,6 +102,9 @@ export const RUN_WAIT_MS = 30_000
 /** The longest it may be told to wait: 10 minutes. */
 export const RUN_WAIT_LONGEST_MS = 600_000
 
+/** How many lines of a run's output one `commands_output` call hands back. */
+export const OUTPUT_PAGE_LINES = 200
+
 /** How many entries of the thread `session_get` hands back. */
 export const THREAD_TAIL = 20
 
@@ -286,6 +289,14 @@ export const TOOL_ARGUMENTS = {
       .min(1)
       .optional()
       .describe('which run, as commands_list names it; the one running, or the last, without it'),
+    from: z
+      .number()
+      .int()
+      .min(1)
+      .optional()
+      .describe(
+        `the first line to read, counted from 1: ${OUTPUT_PAGE_LINES} lines from there; the last ${OUTPUT_PAGE_LINES} without it`,
+      ),
   }),
   commands_stop: z.object({
     run: z.string().min(1).optional().describe('which run; the only one running without it'),
@@ -549,8 +560,7 @@ export const TOOL_DESCRIPTIONS: Record<ToolName, string> = {
   commands_list:
     "The commands the Project's catalogue holds: name, line, kind, and the folder each runs in. Then the runs of this Session, whoever started them, you or the user from the Commands panel: run id, name, state, the exit code once it ended, catalogue or one-off, and the line.",
   commands_run: `Ask for a command of the Project's catalogue to run, by name, or a one-off line, which the user is asked to allow before it runs. A serve command that is already running is handed back rather than started twice. Any other type is waited for, up to timeout, and answers with its exit code and the end of its output; one still running then is left running in the background and its run id is given, so there is nothing to poll for. background: true answers at once. A serve command is left running as soon as it has started. The output, and the address it published, come back as they stand. Send a key so that a retry after a lost answer does not start it twice.`,
-  commands_output:
-    'What a run of this Session has printed, whoever started it, bounded, the address it published, and how it ended if it has.',
+  commands_output: `What a run of this Session has printed, whoever started it, the address it published, and how it ended if it has. One call returns at most ${OUTPUT_PAGE_LINES} lines: the last ones, or those from the line from names; the answer says which lines of how many it holds.`,
   commands_stop: 'Stop a run and everything it started.',
   commands_propose:
     "Proposes a command worth keeping in the Project's catalogue. A human accepts or declines it in the Session; nothing enters the catalogue by this call.",

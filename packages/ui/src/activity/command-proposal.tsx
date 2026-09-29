@@ -1,22 +1,20 @@
-import { cn } from 'cn'
 import type { ReactNode } from 'react'
 
-import { Badge } from '../components/badge/badge.tsx'
-import { Button } from '../components/button/button.tsx'
-import { IconCheck, IconX } from '../icons.ts'
-import { COMMAND_TYPE_ICONS, COMMAND_TYPE_LABELS, type CommandType } from './command-type.ts'
+import { IconBookmarkPlus } from '../icons.ts'
+import { NoticeRow } from '../session/notice-row.tsx'
+import { COMMAND_TYPE_ICONS, type CommandType } from './command-type.ts'
+import { type NoticeAnswer, NoticeRecord } from './notice-record.tsx'
 
 /**
- * A command the agent proposes for the catalogue, and what the human decided (D8-11).
+ * A command the agent proposes for the catalogue, waiting for the human (D8-11), as the Session's
+ * notices list it (issue #237).
  *
- * The agent has no write on the catalogue: `commands_propose` leaves this entry in the thread and
- * nothing else, and the command enters the catalogue only when a human presses Accept. The
- * block says what would be kept — the name, the type with its fixed icon, the line and the folder
- * — and why the agent thinks it is worth keeping, since that is what the human decides on.
- *
- * Once decided it says the outcome in words and offers nothing more: a proposal is answered
- * once, and the thread keeps the answer. A long line wraps where it is rather than folding, so
- * what is accepted is always read whole.
+ * The agent has no write on the catalogue: `commands_propose` leaves an entry in the thread and
+ * nothing else, and the command enters the catalogue only when a human accepts it. It is drawn as
+ * every notice is (`NoticeRow`): its name, and Decline / Add, after the tile that says it is to be
+ * added to the catalogue; the chevron unfolds its whole line and where it would run. Its type is
+ * left to the thread's record: a second mark on the row read as a second kind. Why the agent
+ * proposes it is under the pointer on the name, and in the thread's record of it.
  */
 
 /** Where a proposal stands: waiting for the human, or answered. */
@@ -28,79 +26,96 @@ export interface CommandProposalProps {
   /** The line it would run, exactly as proposed. */
   line: string
   type: CommandType
-  /** The folder it would run in, relative to the Workspace root. */
+  /** The folder it would run in, relative to the Workspace root; `.` for the root itself. */
   folder: string
   /** Why the agent thinks it is worth keeping, in its own words. */
   why: string
-  state: CommandProposalState
   /** Writes the command to the catalogue, which is the human's to do. */
-  onAccept?: (() => void) | undefined
-  onDecline?: (() => void) | undefined
-  /** Where the block sits; never how it looks. */
-  className?: string | undefined
+  onAccept: () => void
+  onDecline: () => void
 }
 
-const BLOCK = 'flex w-full min-w-0 flex-col gap-1 rounded-lg border border-border bg-card px-3 py-2'
-
-/** The line that is read: what it is, what it is called, where it runs, and the answer. */
-const HEAD = 'flex min-w-0 flex-wrap items-center gap-2'
-
-const MARK = 'flex shrink-0 text-muted-foreground'
-
-const NAME = 'min-w-0 truncate text-sm text-foreground'
-
-const FOLDER = 'min-w-0 truncate font-mono text-xs text-muted-foreground'
-
-const LEAD = 'text-xs text-muted-foreground'
-
-/** The line itself, whole: what is accepted is what was read. */
-const LINE = 'font-mono text-xs break-all text-foreground'
-
-const WHY = 'text-sm text-muted-foreground'
-
-const ANSWER = 'ml-auto flex shrink-0 items-center gap-2'
-
 export function CommandProposal({
+  name,
+  line,
+  folder,
+  why,
+  onAccept,
+  onDecline,
+}: CommandProposalProps): ReactNode {
+  return (
+    <NoticeRow
+      name={`Proposed command ${name}`}
+      head={<span title={why}>{name}</span>}
+      // Unfolded, what it is takes the name's place, and the whole line opens under it, with the
+      // name it would be kept under and where it would run, when that is not the Workspace root.
+      title="Add command"
+      line={line}
+      place={
+        <>
+          <span className="font-medium text-foreground">{name}</span>
+          {folder !== '.' && <span>{folder}</span>}
+        </>
+      }
+      refuse={{ label: 'Decline', onPress: onDecline }}
+      accept={{ label: 'Add', onPress: onAccept }}
+    />
+  )
+}
+
+const STATES: Record<CommandProposalState, { answer: NoticeAnswer; word: string }> = {
+  pending: { answer: 'pending', word: 'waiting' },
+  accepted: { answer: 'accepted', word: 'added to the catalogue' },
+  declined: { answer: 'refused', word: 'declined' },
+}
+
+const KEPT = 'flex flex-col gap-1'
+
+const KEPT_LINE = 'font-mono text-xs break-all text-foreground'
+
+const KEPT_WHY = 'text-sm text-muted-foreground'
+
+export interface CommandProposalRecordProps {
+  name: string
+  line: string
+  type: CommandType
+  folder: string
+  why: string
+  state: CommandProposalState
+}
+
+/**
+ * A proposal as the thread keeps it (issue #237): one closed line — the bookmark, a dot for the
+ * answer, the type and the name — and, opened, the line where it would run and why the agent
+ * proposed it. It is answered among the Session's notices, never here.
+ */
+export function CommandProposalRecord({
   name,
   line,
   type,
   folder,
   why,
   state,
-  onAccept,
-  onDecline,
-  className,
-}: CommandProposalProps): ReactNode {
+}: CommandProposalRecordProps): ReactNode {
+  const { answer, word } = STATES[state]
   const TypeIcon = COMMAND_TYPE_ICONS[type]
   return (
-    <section aria-label={`Proposed command ${name}`} className={cn(BLOCK, className)}>
-      <p className={LEAD}>The agent proposes a command for the catalogue</p>
-      <div className={HEAD}>
-        <span className={MARK}>
-          <TypeIcon size="sm" aria-hidden="true" />
-        </span>
-        <span className={NAME}>{name}</span>
-        <Badge tone="neutral">{COMMAND_TYPE_LABELS[type]}</Badge>
-        <span className={FOLDER}>{folder === '.' ? 'Workspace root' : folder}</span>
-        <span className={ANSWER}>
-          {state === 'pending' && (
-            <>
-              <Button variant="ghost" size="sm" onClick={onDecline}>
-                <IconX size="sm" aria-hidden="true" />
-                Decline
-              </Button>
-              <Button variant="primary" size="sm" onClick={onAccept}>
-                <IconCheck size="sm" aria-hidden="true" />
-                Accept
-              </Button>
-            </>
-          )}
-          {state === 'accepted' && <Badge tone="success">Added to the catalogue</Badge>}
-          {state === 'declined' && <Badge tone="neutral">Declined</Badge>}
-        </span>
+    <NoticeRecord
+      icon={<IconBookmarkPlus size="sm" aria-hidden="true" />}
+      answer={answer}
+      answerLabel={word}
+      subject={name}
+      name={`Proposed command ${name}, ${word}`}
+    >
+      <div className={KEPT}>
+        <p className={KEPT_LINE}>
+          <span className="inline-flex pr-2 align-middle text-muted-foreground">
+            <TypeIcon size="sm" aria-hidden="true" />
+          </span>
+          {`${folder} $ ${line}`}
+        </p>
+        <p className={KEPT_WHY}>{why}</p>
       </div>
-      <p className={LINE}>{line}</p>
-      <p className={WHY}>{why}</p>
-    </section>
+    </NoticeRecord>
   )
 }

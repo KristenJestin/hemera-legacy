@@ -26,7 +26,7 @@ const GROUPED = [
 const ROUNDING = 2
 
 const meta = {
-  tags: ['autodocs', 'updated'],
+  tags: ['autodocs'],
   title: 'Components/Select',
   component: Select,
   args: { label: 'Model', items: FLAT, onValueChange: fn() },

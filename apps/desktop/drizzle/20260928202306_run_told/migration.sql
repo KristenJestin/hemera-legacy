@@ -1,0 +1,1 @@
+ALTER TABLE `command_runs` ADD `told` text DEFAULT 'ended' NOT NULL;

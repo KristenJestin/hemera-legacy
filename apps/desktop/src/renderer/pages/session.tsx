@@ -2,6 +2,7 @@ import { Fragment, useEffect, useRef, useState, useSyncExternalStore } from 'rea
 import type { ReactNode } from 'react'
 
 import type {
+  Command,
   CommandRun,
   ConfigOption,
   ContextView as Provided,
@@ -15,8 +16,7 @@ import type {
 import {
   ActionGroup,
   AgentModelMenu,
-  BlockedBanner,
-  CommandsPanel,
+  Button,
   Composer,
   ContextView,
   MessageDaySeparator,
@@ -25,38 +25,67 @@ import {
   MessageText,
   SessionEmpty,
   CreateWorkspaceDialog,
+  GoingOnLine,
+  RunCommand,
   SessionDetails,
   SessionHeader,
+  SessionNotices,
   SpecPanel,
   TurnLine,
   STUCK_AFTER_MS,
   type MessageLine,
   type MessageState,
+  type NoticeGroup,
+  type NoticeItem,
+  type RepositoryLine,
+  SessionCatalogue,
+  type SessionCatalogueProps,
+  SessionHistory,
   type OfferedAgent,
   type PermissionOption,
+  type RunRepository,
   type ScrollerEntry,
   type UsageMeterProps,
 } from '@hemera/ui'
+import { IconBookmarkPlus, IconFlag, IconMessageQuestion, IconShield } from '@hemera/ui/icons'
 
 import {
-  activityOf,
   hasEnded,
   hasTrace,
   heardSince,
   openTrace,
   specWritingOf,
+  turnRowOf,
   type Activity,
   type AgentSessionState,
 } from '../agent-store.ts'
 import { type Grouping, groupActions, groupingOf } from '../action-groups.ts'
 import { effortDefaultOf, effortStage, modeStage, modelStage } from '../agent-options.ts'
-import { drawEntry, planOf, touchedOf, usageOf, waitingOf } from '../agent-blocks.tsx'
-import { elsewhereOf, foldedCallsOf } from '../agent-tool-payloads.ts'
+import {
+  type AgentContext,
+  drawEntry,
+  drawNotice,
+  planOf,
+  touchedOf,
+  usageOf,
+} from '../agent-blocks.tsx'
+import { agentShellCallsOf, commandProposalOf, foldedCallsOf } from '../agent-tool-payloads.ts'
+import { callLinksOf } from '../call-links.ts'
 import { whenOf } from '../journal-lines.ts'
-import { contextListsOf, detailsTabsOf, openingTabOf, panelRunsOf } from '../session-details.ts'
-import { openSessions, type OfferedWorkspace, workspaceFixedOf } from '../sessions-store.ts'
+import { type CommandWrite, commandLineOf, commandWriteOf } from '../project-lines.ts'
+import { asksToRunALine, NOTICE_KINDS, type NoticeKind, waitingAs } from '../notices.ts'
+import {
+  contextListsOf,
+  detailsTabsOf,
+  goingOnOf,
+  lineOf,
+  openingTabOf,
+  overBefore,
+} from '../session-details.ts'
+import { linesSnapshot, marksOf, removeFromLine, subscribeToLines } from '../line-store.ts'
+import { openSessions, type OfferedWorkspace } from '../sessions-store.ts'
 import { selectEntry } from '../shell-store.ts'
-import { type DefinedSpec, questionMarkOf, waitsForAnswer } from '../spec-entries.ts'
+import { type DefinedSpec, questionMarkOf } from '../spec-entries.ts'
 import {
   answerQuestion,
   askForBuild,
@@ -134,9 +163,6 @@ function together(read: readonly SessionEntry[], live: readonly SessionEntry[]):
   ]
 }
 
-/** What a turn that has just been asked for is doing, before anything of it has arrived. */
-const THINKING: Activity = { state: 'thinking' }
-
 /** How often a running turn's silence is measured again: the line counts it by fives. */
 const QUIET_TICK_MS = 5_000
 
@@ -185,12 +211,15 @@ function TurnRow({
   since,
   sessionId,
   onStop,
+  notched,
 }: {
   activity: Activity | null
   usage: UsageMeterProps | null
   since: number | null
   sessionId: string
   onStop: () => void
+  /** Whether the Session's notices stand in the middle of the row. */
+  notched: boolean
 }): ReactNode {
   const listening = activity !== null && since !== null && !hasEnded(activity)
   const now = useTicking(listening)
@@ -210,6 +239,7 @@ function TurnRow({
             }
       }
       usage={usage}
+      notched={notched}
     />
   )
 }
@@ -243,8 +273,6 @@ export interface SessionPageProps {
   loaded: boolean
   /** What "today" means for this render, so the separators are read once. */
   now: number
-  /** Whether the title is being typed into, which the page that called this one decides. */
-  editing: boolean
   /** What the last act was refused with, in the engine's own words, or null. */
   refusal: string | null
   /** What the engine has pushed for this Session since it was opened. */
@@ -279,9 +307,8 @@ export interface SessionPageProps {
   onDecide: (toolCallId: string, option: PermissionOption) => void
   /** Sets one of the agent's own options for the turn to come. */
   onChooseOption: (optionId: string, value: string) => void
-  onRename: (title: string) => void
-  onStartEditing: () => void
-  onCancelEditing: () => void
+  /** Renames the Session, in its row of the sidebar where its title lives (review of #250). */
+  onRename: () => void
   onArchive: () => void
   onSearchFiles: (query: string) => Promise<string[]>
   onPickFiles: () => Promise<string[]>
@@ -293,18 +320,25 @@ export interface SessionPageProps {
   onOpenUrl: (url: string) => void
   /** Stops a run and everything it started. */
   onStopRun: (runId: string) => void
+  /** Runs a run of the Session again, from its chip or the history (issue #237). */
+  onRunAgain: (runId: string) => void
   /** Hands the agent again what waits for it, after a delivery it did not take (issue #211). */
   onHandOver: () => void
   /** The Workspace root, which is what a run's folder is said relative to; null until known. */
   root: string | null
-  /** Runs a line from the Commands panel: a command of the catalogue by name, or a one-off. */
+  /** The Project's repositories, which a place is said as rather than as a folder (#239). */
+  repositories: readonly RunRepository[]
+  /** Runs a line from the Run of the line: a command of the catalogue by name, or a one-off. */
   onRunCommand: (line: string) => void
+  /** The Project's catalogue, which the Run of the line offers. */
+  catalogue: readonly Command[]
   /** What this Session was provided, may consult, and keeps to its agent; null until read. */
   context: Provided | null
-  /** The Workspaces the pill lists: `ready`, `main` first, and the Session's own (D8-08). */
+  /**
+   * The Workspaces of the Project, the Session's own among them (D8-08): what its Workspace is
+   * named by. The Session's composer offers no choice of it since issue #241.
+   */
   workspaces: readonly OfferedWorkspace[]
-  /** Moves the Session to another Workspace, null for `main`, before its agent has started. */
-  onChooseWorkspace: (workspaceId: string | null) => void
   /** Accepts a command the agent proposed; answers the engine's refusal, or null (D8-11). */
   onAcceptProposal: (proposalId: string) => Promise<string | null>
   /** Declines it; answers the engine's refusal, or null. */
@@ -317,6 +351,26 @@ export interface SessionPageProps {
   onAcceptSetupBatch: (batchId: string) => Promise<string | null>
   /** Declines a proposed change; answers the refusal, or null. */
   onDeclineSetup: (proposalId: string) => Promise<string | null>
+  /**
+   * The catalogue as the Session's details edit it (issue #237): the Project's repositories a
+   * command may run from, whether Portless is here, the Project's name, and the writes.
+   */
+  catalogueEditing: CatalogueEditing
+  /** Bumped each time Run's keystroke is pressed: Run opens (review of #250). */
+  runAsked: number
+  /** That keystroke, written for the platform, which Run's tooltip says. */
+  runShortcut: string
+}
+
+/** What the Catalogue tab of the details needs to edit the Project's catalogue (issue #237). */
+export interface CatalogueEditing {
+  repositories: readonly RepositoryLine[]
+  portlessInstalled: boolean
+  projectName: string
+  /** Writes a command, new or of the same name; answers the engine's refusal, or null. */
+  onSave: (command: CommandWrite, existing: boolean) => Promise<string | null>
+  onRemove: (name: string) => void
+  onListFolder: NonNullable<SessionCatalogueProps['onListFolder']>
 }
 
 export function SessionPage({
@@ -324,7 +378,6 @@ export function SessionPage({
   entries,
   loaded,
   now,
-  editing,
   refusal,
   agent,
   sessions,
@@ -337,27 +390,30 @@ export function SessionPage({
   onDecide,
   onChooseOption,
   onRename,
-  onStartEditing,
-  onCancelEditing,
   onArchive,
   onSearchFiles,
   onPickFiles,
   onOpenFile,
   commandRuns,
+  catalogue,
   onOpenUrl,
   onStopRun,
+  onRunAgain,
   onHandOver,
   root,
+  repositories,
   onRunCommand,
   context,
   workspaces,
-  onChooseWorkspace,
   onAcceptProposal,
   onDeclineProposal,
   onAddToCatalogue,
   onAcceptSetup,
   onAcceptSetupBatch,
   onDeclineSetup,
+  catalogueEditing,
+  runAsked,
+  runShortcut,
 }: SessionPageProps): ReactNode {
   const [value, setValue] = useState('')
   const [files, setFiles] = useState<string[]>([])
@@ -379,13 +435,14 @@ export function SessionPage({
     void decision.then(setRefused)
   }
   const stored = useSyncExternalStore(subscribeToSpec, specSnapshot, specSnapshot)
+  // What the reader did to the line of this Session, and when the Session was opened: a one-off
+  // over by then is not news (issue #237).
+  const lines = useSyncExternalStore(subscribeToLines, linesSnapshot, linesSnapshot)
+  const opened = useRef(Date.now())
   // Whether this Session was free when the page opened it: its Spec panel, once there, is one the
   // proposal just made, and it arrives rather than standing there (issue #130). The page is
   // keyed by the Session, so this is read once per Session opened.
   const openedFree = useRef(session.mission === 'free')
-  // The questions pinned above the composer since the page opened: one answered comes back to
-  // its place in the thread in front of the reader, and draws its check there (issue #199).
-  const waitedRef = useRef(new Set<string>())
   const defined = stored.snapshot?.spec.id === session.specId ? stored.snapshot : null
   // New Spec's provisional Spec, while this Session has no Spec of its own (issue #198).
   const provisional = stored.provisional.get(session.id) ?? null
@@ -467,8 +524,6 @@ export function SessionPage({
     return said
   }
 
-  const waiting = waitingOf(thread)
-
   // The Workspace the Session works in, on the pill: it can be changed until the agent has
   // started, and is fixed from then on, which the pill says in words (D8-08). A run in another
   // one — a Project-scoped service, in `main` — names it on its block.
@@ -511,6 +566,9 @@ export function SessionPage({
   // A call to one of Hemera's tools is drawn once, as Hemera's block, where the agent reported
   // it: the agent's own report of it stays in the thread and is not drawn a second time (D6-06).
   const folded = foldedCallsOf(thread)
+  // What became of each of Hemera's calls — its permission, its run, its proposal — drawn with the
+  // call, and not a second and a third time on rows of their own (review of #250).
+  const links = callLinksOf(thread, folded)
   // The agent's reports of its calls, by the identifier it gave each: a question it asks about one
   // is headed by that call's line.
   const reported = new Map<string, SessionEntry>()
@@ -525,30 +583,34 @@ export function SessionPage({
       ? new Set(stored.current.questions.map((one) => one.id))
       : null
   /**
-   * What waits for the reader's answer — the agent's proposal, a question of the Spec — drawn
-   * above the composer rather than where it was asked, for as long as it waits (issue #130): the
-   * agent goes on writing under it, and the reader had to scroll back up past all of it to answer.
+   * What waits for a human, by kind (issue #237): the Session's notices, on the composer's edge,
+   * whatever the thread's scroll. Each entry of it is drawn there with what answers it, and the
+   * thread keeps its quiet record where it was asked.
    */
-  const pinned: { id: string; content: ReactNode }[] = []
-  const waited = waitedRef.current
+  const waitingByKind = new Map<NoticeKind, NoticeItem[]>(NOTICE_KINDS.map((kind) => [kind, []]))
+  /** The proposals that wait, which `Add all` answers in one press. */
+  const proposalsWaiting: string[] = []
+  /** Whether every permission that waits is a line to run once, which its group's head says. */
+  let linesOnly = true
   for (let at = 0; at < thread.length; at += 1) {
     const entry = thread[at]
     if (entry === undefined || folded.hidden.has(entry.id)) continue
     const next = thread[at + 1]
     const drawn = folded.inPlaceOf.get(entry.id) ?? entry
-    const block = drawEntry(drawn, {
+    const drawing: AgentContext = {
       now,
       nextAt: next === undefined ? null : next.createdAt,
       onDecide,
       runs: commandRuns,
       workspace: workspace?.name,
+      root,
+      repositories,
       onOpenUrl,
-      onStopRun,
       onHandOver,
+      callLink: (drawnId) => links.byCall.get(drawnId),
       reportedCall: (toolCallId) => reported.get(toolCallId),
       onAcceptProposal: (proposalId) => deciding(onAcceptProposal(proposalId)),
       onDeclineProposal: (proposalId) => deciding(onDeclineProposal(proposalId)),
-      onAddToCatalogue: (run) => deciding(onAddToCatalogue(run)),
       onAcceptSetup: (proposalId) => deciding(onAcceptSetup(proposalId)),
       onAcceptSetupBatch: (batchId) => deciding(onAcceptSetupBatch(batchId)),
       onDeclineSetup: (proposalId) => deciding(onDeclineSetup(proposalId)),
@@ -557,28 +619,93 @@ export function SessionPage({
         specId: session.specId,
         defined: definedOf(defined, stored.revisions),
         asked,
-        waited,
         onAnswer: (questionId, answer) => void answerQuestion(questionId, answer),
         onCreate: (title, type) => void createSpec(session.id, type, title),
         onJoin: (proposalId) => void joinSpec(session.id, proposalId),
         onDecline: (proposalId) => deciding(declineSpecProposal(session.id, proposalId)),
       },
-    })
+    }
+    const kind = waitingAs(entry, thread, session.specId, asked)
+    if (kind !== null) {
+      const notice = drawNotice(drawn, drawing)
+      if (notice !== null) waitingByKind.get(kind)?.push({ id: entry.id, content: notice })
+      const proposal = kind === 'proposal' ? commandProposalOf(entry) : null
+      if (proposal !== null) proposalsWaiting.push(proposal.proposalId)
+      if (kind === 'permission' && !asksToRunALine(entry)) linesOnly = false
+    }
+    // Carried by its call: drawn with it, never on its own row.
+    if (links.absorbed.has(entry.id)) continue
+    const block = drawEntry(drawn, drawing)
     // No mark: the rail is navigated by what the reader wrote, and a tick for every block of a
     // turn was forty ticks for one question (trial of 22 September 2026).
     if (block === null) continue
-    if (waitsForAnswer(entry, thread, session.specId, asked)) {
-      pinned.push({ id: entry.id, content: block })
-      // Answered, it comes back to the thread in front of the reader, and draws its check there.
-      waited.add(entry.id)
-      continue
-    }
     // An answer to a question is the reader's, and marked on the rail as their messages are (issue
     // #149), by what they typed or the choice they made; the card that holds it carries the mark.
     const mark = entry.kind === 'spec_question' ? questionMarkOf(entry, thread, asked) : undefined
     byEntry.set(entry.id, { id: entry.id, mark, content: block })
     groupings.set(entry.id, groupingOf(drawn))
   }
+
+  /** Accepts every proposal that waits, one after the other, until the engine refuses one. */
+  const acceptAll = (): void => {
+    const ids = [...proposalsWaiting]
+    void (async () => {
+      for (const id of ids) {
+        // One at a time, in the order they were proposed: each is a write of the catalogue.
+        // oxlint-disable-next-line no-await-in-loop -- the catalogue is written one command at a time
+        const said = await onAcceptProposal(id)
+        if (said !== null) {
+          setRefused(said)
+          return
+        }
+      }
+      setRefused(null)
+    })()
+  }
+  const itemsOf = (kind: NoticeKind): NoticeItem[] => waitingByKind.get(kind) ?? []
+  const notices: NoticeGroup[] = [
+    {
+      kind: 'permission',
+      label: 'Permissions',
+      title: linesOnly ? 'Run once' : 'Allow once',
+      icon: <IconShield size="md" aria-hidden="true" />,
+      urgent: true,
+      tone: 'warning',
+      items: itemsOf('permission'),
+    },
+    {
+      kind: 'question',
+      label: 'Questions',
+      title: 'Questions',
+      tone: 'info',
+      icon: <IconMessageQuestion size="md" aria-hidden="true" />,
+      items: itemsOf('question'),
+    },
+    {
+      kind: 'spec',
+      label: 'Spec proposed',
+      title: 'Start a Spec',
+      tone: 'success',
+      icon: <IconFlag size="md" aria-hidden="true" />,
+      items: itemsOf('spec'),
+    },
+    {
+      kind: 'proposal',
+      label: 'Proposed commands',
+      title: 'Add to the catalogue',
+      tone: 'primary',
+      icon: <IconBookmarkPlus size="md" aria-hidden="true" />,
+      items: itemsOf('proposal'),
+      actions:
+        proposalsWaiting.length > 1 ? (
+          <Button variant="link" size="sm" onClick={acceptAll}>
+            Add all
+          </Button>
+        ) : undefined,
+    },
+  ]
+  /** Whether anything waits for the reader, which the row above the box says as long as it does. */
+  const waitsForYou = notices.some((group) => group.items.length > 0)
 
   const scroller: ScrollerEntry[] = []
   /**
@@ -597,7 +724,12 @@ export function SessionPage({
         // group the reader unfolded is the same group when the next call arrives in it.
         id: `actions-${piece.items[0]?.id ?? ''}`,
         content: (
-          <ActionGroup count={piece.count} status={piece.status} latest={piece.latest}>
+          <ActionGroup
+            count={piece.count}
+            status={piece.status}
+            latest={piece.latest}
+            unit={piece.unit}
+          >
             {piece.items.map((one) => (
               <Fragment key={one.id}>{one.content}</Fragment>
             ))}
@@ -671,21 +803,10 @@ export function SessionPage({
    *
    * Once the turn is over the row stays, quiet, and says how it ended — "Done in 12 s",
    * "Stopped", "Failed" — for as long as that end is the last thing that happened: the next
-   * message sets a turn running again, and the row goes back to saying what that one is doing.
-   * Until the engine has echoed that message the thread still ends on the previous turn's end,
-   * which is not what a turn just asked for is doing: it is thinking. The end is believed while
-   * running only when it is the very entry the engine pushed last, the few instants between the
-   * `turn` entry and the `turn` event that follows it.
+   * message sets a turn running again, and the row goes back to saying what that one is doing
+   * (`turnRowOf`).
    */
-  const read = activityOf(thread, agent.latest)
-  const endedNow = thread.find((entry) => entry.id === agent.latest)?.kind === 'turn'
-  const activity = agent.running
-    ? hasEnded(read) && !endedNow
-      ? THINKING
-      : read
-    : hasEnded(read)
-      ? read
-      : null
+  const activity = turnRowOf(thread, agent.running, agent.latest, waitsForYou)
 
   // What the agent is on is the agent's own answer, read back after every change: this page
   // draws what it was told and never a value it remembers (D5-13).
@@ -697,10 +818,14 @@ export function SessionPage({
   // touched. Both are states rather than events, and they are read here because the meter above
   // the box and the details are two readings of the same turn.
   const plan = planOf(thread)
+  // The commands the agent ran in its own shell, which the line and the history list (#219, #237).
+  const shells = agentShellCallsOf(thread)
+  // Everything the Session ran, in the order it began: the line's and the history's (issue #237).
+  const goingOn = goingOnOf(commandRuns, shells, root, workspace?.name, repositories)
   const touched = touchedOf(thread)
   const usage = usageOf(thread)
   // Which tabs have something to show, which is what the details open on.
-  const tabs = detailsTabsOf(plan.length, touched.length, commandRuns, context)
+  const tabs = detailsTabsOf(plan.length, touched.length, context)
 
   /**
    * The panel beside the chat, chosen by the Session's mission here and nowhere else. A `define`
@@ -767,13 +892,16 @@ export function SessionPage({
     */
     <div className="@container flex h-full min-h-0">
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-        <div className="mx-auto flex w-full max-w-3xl flex-col gap-4 px-6 pt-6 pb-4">
+        <div className="mx-auto w-full max-w-3xl px-6 pt-6 pb-4">
+          {/*
+            One row (issue #241): what goes on in the Session — the runs Hemera holds, the commands
+            the agent ran in its own shell, and the Run a command is started from (issue #219) — and
+            the head's ⓘ and `…` at its end. No title: the sidebar says it. A Session nothing
+            answers has no agent to lend a command to, and offers no Run.
+          */}
           <SessionHeader
             title={session.title}
             onRename={onRename}
-            editing={editing}
-            onStartEditing={onStartEditing}
-            onCancelEditing={onCancelEditing}
             onArchive={onArchive}
             // A Session nothing was ever written in is one the user made by mistake far more often
             // than one they are done with, and putting it away is a press they would come to
@@ -781,7 +909,41 @@ export function SessionPage({
             archiveDisabled={thread.length === 0}
             // The one way to the Session details: nothing the agent does opens them.
             onOpenDetails={() => setDetailsOpen(true)}
-          />
+          >
+            <GoingOnLine
+              items={lineOf(goingOn, {
+                ...marksOf(session.id, lines),
+                before: overBefore(commandRuns, shells, opened.current),
+              })}
+              onStop={(run) => onStopRun(run.id)}
+              onRunAgain={(run) => onRunAgain(run.id)}
+              onRemove={(item) => removeFromLine(session.id, item.id)}
+              onOpenUrl={onOpenUrl}
+              onAddToCatalogue={(shown) => {
+                const run = commandRuns.find((one) => one.id === shown.id)
+                if (run !== undefined) deciding(onAddToCatalogue(run))
+              }}
+              end={
+                session.provider === null ? undefined : (
+                  <RunCommand
+                    catalogue={catalogue.map((command) => ({
+                      name: command.name,
+                      command: command.line,
+                      type: command.type,
+                      running: commandRuns.some(
+                        (run) => run.commandId === command.id && run.state === 'running',
+                      ),
+                    }))}
+                    workspace={workspace?.name ?? 'main'}
+                    onRunCommand={(entry) => onRunCommand(entry.name)}
+                    onRunOnce={onRunCommand}
+                    shortcut={runShortcut}
+                    asked={runAsked}
+                  />
+                )
+              }
+            />
+          </SessionHeader>
         </div>
         {/*
           The thread is given the whole width under the head, and lays its own column on the one
@@ -801,8 +963,8 @@ export function SessionPage({
           />
         )}
         {/*
-          What the turn has spent stands above the box rather than in its foot: the foot is the
-          Workspace and the send alone, and a figure read at a glance is a figure that must not be
+          What the turn has spent stands above the box: the box has no foot (issue #241), its send
+          is an icon on its own row, and a figure read at a glance is a figure that must not be
           what makes a row wrap. A Session no agent has accounted for yet shows no meter at all —
           a meter drawn at zero is a figure that says nothing (D5-20).
 
@@ -818,6 +980,7 @@ export function SessionPage({
             since={agent.running ? heardSince(agent, thread) : null}
             sessionId={session.id}
             onStop={onStop}
+            notched={waitsForYou}
           />
           {/*
             What the page's last act was refused with — a rename, an archive, a thread that could
@@ -848,15 +1011,6 @@ export function SessionPage({
                 : `Say something to ${session.provider}…`
             }
             onSend={write}
-            workspaces={[...workspaces]}
-            workspace={workspace?.name}
-            workspaceFixed={workspaceFixedOf(session, agent.running)}
-            onWorkspaceChange={(name) => {
-              const chosen = workspaces.find((one) => one.name === name)
-              if (chosen !== undefined && chosen.id !== session.workspaceId) {
-                onChooseWorkspace(chosen.id)
-              }
-            }}
             // Nothing is handed over here: a refusal of this page is not a reason not to write,
             // and a write that is refused answers `write` itself — which is what the composer
             // shows under the box, on the sentence that was not written (D4b-02).
@@ -893,12 +1047,9 @@ export function SessionPage({
             }
             running={agent.running}
             onStop={onStop}
-            pinned={pinned}
-            blocked={
-              waiting === null ? undefined : (
-                <BlockedBanner waiting="The agent is asking to go on." onStop={onStop} />
-              )
-            }
+            // Everything that waits for the reader, on the box's edge (issue #237): it rises from
+            // behind the box when something starts waiting, and goes back there when nothing does.
+            notices={<SessionNotices groups={notices} />}
           />
         </div>
       </div>
@@ -914,25 +1065,35 @@ export function SessionPage({
         files={touched}
         onSelectFile={onOpenFile}
         onOpenTrace={traced ? () => void openTrace(session.id) : undefined}
-        // The commands of a Session with an agent, whoever started them (D6-12): the same runs
-        // the thread's blocks read, and the line a one-off is run from. A Session nothing
-        // answers has no agent to lend a command to, and says so on the tab.
-        commands={
+        // Everything the Session ran, whoever started it, in order (issue #237): the line keeps
+        // what matters now, and this keeps the whole trace.
+        history={
+          <SessionHistory
+            items={goingOn}
+            onRunAgain={(run) => onRunAgain(run.id)}
+            onStop={(run) => onStopRun(run.id)}
+          />
+        }
+        // The Project's catalogue, seen, run and edited without leaving the Session (issue #237).
+        catalogue={
           session.provider === null ? undefined : (
-            <CommandsPanel
-              // A one-off offers "Add to catalogue" here as it does in the thread (D8-11), and a
-              // run in another Workspace names it (D8-08).
-              runs={panelRunsOf(commandRuns, root).map((shown) => {
-                const run = commandRuns.find((one) => one.id === shown.id)
-                if (run !== undefined) {
-                  shown.onAddToCatalogue = () => deciding(onAddToCatalogue(run))
-                  shown.workspace = elsewhereOf(run, workspace?.name)
-                }
-                return shown
-              })}
-              onStop={onStopRun}
-              onOpenUrl={onOpenUrl}
-              onRun={onRunCommand}
+            <SessionCatalogue
+              commands={catalogue.map(commandLineOf)}
+              running={catalogue
+                .filter((command) =>
+                  commandRuns.some(
+                    (run) => run.commandId === command.id && run.state === 'running',
+                  ),
+                )
+                .map((command) => command.name)}
+              repositories={catalogueEditing.repositories}
+              portlessInstalled={catalogueEditing.portlessInstalled}
+              projectName={catalogueEditing.projectName}
+              onRun={(command) => onRunCommand(command.name)}
+              onAdd={async (line) => await catalogueEditing.onSave(commandWriteOf(line), false)}
+              onUpdate={async (line) => await catalogueEditing.onSave(commandWriteOf(line), true)}
+              onRemove={(command) => catalogueEditing.onRemove(command.name)}
+              onListFolder={catalogueEditing.onListFolder}
             />
           )
         }
@@ -943,10 +1104,10 @@ export function SessionPage({
             <ContextView {...contextListsOf(context, root, workspace?.name)} />
           )
         }
-        // The tab it opens on follows what is happening: a command running opens on Commands,
-        // then the tab that has something, and the Context when no tab has anything (D6-12). It
-        // is read when the dialog opens, so an open dialog never changes tab under the reader.
-        defaultTab={openingTabOf(commandRuns, tabs)}
+        // The tab it opens on is what the turn has done when it has done anything, and the Context
+        // otherwise. It is read when the dialog opens, so an open dialog never changes tab under
+        // the reader.
+        defaultTab={openingTabOf(tabs)}
       />
       {/*
         The panel of the Session's mission, beside the chat: the working surface the thread gave

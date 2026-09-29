@@ -75,8 +75,10 @@ apps/face-lab     @hemera/face-lab a page to play with Hemera's face (#140): its
                                    changes and every number it plays by, through the face's
                                    own door `@hemera/ui/face`. A tool; it ships nowhere.
 tools/            —                boundaries, commit-message, git-flow, environment-report,
-                                   package-desktop, window-options, motion-presets.
+                                   package-desktop, aur-publish, window-options, motion-presets.
                                    TypeScript run by Node, tested by Vitest.
+packaging/aur     —                the AUR packages hemera-bin and hemera-beta-bin, updated by
+                                   tools/aur-publish.ts on each release and beta.
 ```
 
 Dependency direction is `desktop → core`, `desktop → ipc`, `desktop → ui` and `face-lab → ui`.

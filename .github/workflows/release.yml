@@ -101,3 +101,24 @@ jobs:
         run: |
           shopt -s nullglob
           gh release upload "${{ needs.release.outputs.tag }}" dist/package/*.zip dist/package/*.AppImage dist/package/*.deb --clobber
+
+  # The AUR package of that version, once its deb is attached to the release it downloads
+  # (packaging/aur/). Without the `AUR_SSH_KEY` secret, the step says so and succeeds.
+  aur:
+    needs: [release, package]
+    if: needs.release.outputs.tag != ''
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.release.outputs.tag }}
+          persist-credentials: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.21.0
+
+      - name: Publish hemera-bin to the AUR
+        env:
+          AUR_SSH_KEY: ${{ secrets.AUR_SSH_KEY }}
+        run: node tools/aur-publish.ts hemera-bin '${{ needs.release.outputs.tag }}' --push

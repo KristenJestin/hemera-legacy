@@ -194,6 +194,11 @@ export interface HemeraToolCallProps {
   defaultOpen?: boolean | undefined
   /** What a press on a subject that is a path does: the reader goes there. */
   onOpenPath?: ((path: string) => void) | undefined
+  /**
+   * What became of the call, on its own line (review of #250): the permission it waited on, the
+   * run it asked for, the command it proposed — one entry for the call, not three.
+   */
+  outcome?: ReactNode
   /** What the call returned, handed over already drawn. */
   children?: ReactNode
   /** Where the block sits; never how it looks. */
@@ -227,6 +232,7 @@ export function HemeraToolCall({
   note,
   defaultOpen = false,
   onOpenPath,
+  outcome,
   children,
   className,
 }: HemeraToolCallProps): ReactNode {
@@ -258,29 +264,37 @@ export function HemeraToolCall({
           <span className={NAMED}>{label}</span>
           {subject !== undefined && <SubjectOnLine subject={subject} onOpen={onOpenPath} />}
           {note !== undefined && <span className={NOTE}>— {note}</span>}
-          <StatusDot
-            status={tone}
-            size="sm"
-            label={word}
-            title={ms === undefined ? undefined : `${ms} ms`}
-          />
+          {outcome}
+          {/* A call that carries what became of it says it by those marks, and by no second dot. */}
+          {outcome === undefined && (
+            <StatusDot
+              status={tone}
+              size="sm"
+              label={word}
+              title={ms === undefined ? undefined : `${ms} ms`}
+            />
+          )}
         </span>
       }
     >
       {error !== undefined && <p className={errorClass(status)}>{error}</p>}
       {/* Said once (recette 4 of 23 September 2026): a summary that is the error again, or opens
           with it, is the red line a second time in grey. */}
-      {!repeats(summary, error) && <p className={ANSWER}>{summary}</p>}
+      {/* Said once: a call carrying what became of it shows that alone once opened — the answer,
+          what ran — and not its own sentence and arguments a second time (review of #250). */}
+      {outcome === undefined && !repeats(summary, error) && <p className={ANSWER}>{summary}</p>}
       {/* The catalogue's name heads the arguments (recette 5 of 24 September 2026): it is for
           the eye that reads the thread against a log, and that eye opens the call first. */}
-      <dl className={ARGUMENTS}>
-        {[{ label: 'tool', value: tool }, ...(args ?? [])].map((argument) => (
-          <div key={argument.label} className={PAIR}>
-            <dt className={LABEL}>{argument.label}</dt>
-            <dd className={VALUE}>{argument.value}</dd>
-          </div>
-        ))}
-      </dl>
+      {outcome === undefined && (
+        <dl className={ARGUMENTS}>
+          {[{ label: 'tool', value: tool }, ...(args ?? [])].map((argument) => (
+            <div key={argument.label} className={PAIR}>
+              <dt className={LABEL}>{argument.label}</dt>
+              <dd className={VALUE}>{argument.value}</dd>
+            </div>
+          ))}
+        </dl>
+      )}
       {children}
     </Disclosure>
   )

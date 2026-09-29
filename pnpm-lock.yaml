@@ -331,6 +331,9 @@ importers:
       cn:
         specifier: 0.3.0
         version: 0.3.0
+      fuse.js:
+        specifier: 7.5.0
+        version: 7.5.0
       motion:
         specifier: 13.3.0
         version: 13.3.0(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
@@ -4810,6 +4813,10 @@ packages:
   function-timeout@1.0.2:
     resolution: {integrity: sha512-939eZS4gJ3htTHAldmyyuzlrD58P03fHG49v2JfFXbV6OhvZKRC9j2yAtdHw/zrp2zXHuv05zMIy40F0ge7spA==}
     engines: {node: '>=18'}
+
+  fuse.js@7.5.0:
+    resolution: {integrity: sha512-sQtrEfA+ez/3G0cCZecF70oqpCRttCexYUG4mUrtWL49ULUzUyxokt5kyqwtKzj1270RaKih+hcP3qLcumccow==}
+    engines: {node: '>=10'}
 
   galactus@2.0.2:
     resolution: {integrity: sha512-HmKyTFGomdAchz4umx8MwBnrnfFmdpwiTyGA4ZOF7rya2Lmgbc9qate4yweInL+0gUBVImhaz12SBGpW3SY4Yg==}
@@ -11707,6 +11714,8 @@ snapshots:
   function-bind@1.1.2: {}
 
   function-timeout@1.0.2: {}
+
+  fuse.js@7.5.0: {}
 
   galactus@2.0.2(supports-color@8.1.1):
     dependencies:

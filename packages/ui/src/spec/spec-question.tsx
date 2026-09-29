@@ -7,7 +7,9 @@ import { IconButton } from '../components/button/button.tsx'
 import { Tick } from '../components/checkbox/checkbox.tsx'
 import { Frame, FrameFooter, FrameHeader } from '../components/frame/frame.tsx'
 import { Tooltip } from '../components/tooltip/tooltip.tsx'
-import { IconArrowUp, IconLock, IconMessageQuestion, IconSparkles } from '../icons.ts'
+import { NoticeRecord } from '../activity/notice-record.tsx'
+import { NoticeRow } from '../session/notice-row.tsx'
+import { IconArrowUp, IconCheck, IconLock, IconMessageQuestion, IconSparkles } from '../icons.ts'
 import { AgentText } from '../message/agent-text.tsx'
 import { CROSSFADE, collapse, crossfade, expand, fold, useTransition } from '../motion.ts'
 import type { SpecAnswer, SpecQuestionView } from './model.ts'
@@ -53,7 +55,7 @@ const CHOICES = 'flex flex-col gap-0.5 p-1.5'
 
 /** A row the hand chooses: the body's nested radius, and the hover every control answers with. */
 const CHOICE =
-  'flex w-full items-center gap-3 rounded-md px-3 py-2 text-left text-sm text-foreground outline-none focus-ring hover:bg-muted disabled:text-muted-foreground disabled:hover:bg-transparent'
+  'flex min-h-control-md w-full items-center gap-3 rounded-md px-3 py-2 text-left text-sm text-foreground outline-none focus-ring hover:bg-muted disabled:text-muted-foreground disabled:hover:bg-transparent'
 
 /** The row chosen, once answered: the primary's muted fill, the one row left in colour. */
 const CHOSEN =
@@ -73,8 +75,11 @@ const MARK = 'ml-1.5 inline-flex align-middle text-primary-muted-foreground'
 /** Where the check of the row chosen draws itself: held on every row, so no label moves. */
 const CHECK = 'flex shrink-0 text-primary'
 
-/** `Other…` turned into its field: the row it was, the field in the label's place. */
-const WRITING = 'flex w-full items-center gap-3 px-3 py-1'
+/**
+ * `Other…` turned into its field: the row it was, at the height it was — a choice row's height —
+ * so nothing under it moves as it turns into a field and back.
+ */
+const WRITING = 'flex h-control-md w-full items-center gap-3 px-3'
 
 /** The reader's own answer: a field on the body's surface, the send icon inside its box. */
 const FIELD_BOX =
@@ -179,6 +184,8 @@ export interface SpecQuestionProps {
   arrives?: boolean | undefined
   /** The answer: an option pressed, or the reader's own words. */
   onAnswer: (answer: SpecAnswer) => void
+  /** Drawn as one of the Session's notices, the question as its title, with no frame of its own. */
+  bare?: boolean | undefined
 }
 
 export function SpecQuestion({
@@ -186,6 +193,7 @@ export function SpecQuestion({
   cancelled = false,
   arrives = false,
   onAnswer,
+  bare = false,
 }: SpecQuestionProps): ReactNode {
   const [writing, setWriting] = useState(false)
   const [own, setOwn] = useState('')
@@ -209,6 +217,143 @@ export function SpecQuestion({
     answer !== null &&
     answer.text !== undefined &&
     !question.options.some((option) => option.id === answer.optionId)
+  const choices = (
+    <ul aria-label="Answers" className={CHOICES}>
+      {question.options.map((option, index) => {
+        const chosen = answer?.optionId === option.id
+        const row = (
+          <button
+            type="button"
+            className={chosen ? CHOSEN : CHOICE}
+            disabled={closed}
+            aria-pressed={answer === null ? undefined : chosen}
+            onClick={() => onAnswer({ optionId: option.id })}
+          >
+            <span className={chosen ? LETTER_CHOSEN : LETTER}>{letterOf(index)}</span>
+            <span className="min-w-0 flex-1">
+              {option.label}
+              {option.recommended === true && (
+                <>
+                  <span className={MARK}>
+                    <IconSparkles size="sm" aria-hidden="true" />
+                  </span>
+                  <span className="sr-only">, recommended by the agent</span>
+                </>
+              )}
+            </span>
+            <span className={CHECK}>
+              <Tick checked={chosen} arrives={drawsItsCheck} />
+            </span>
+          </button>
+        )
+        return (
+          <li key={option.id}>
+            {option.recommended === true ? (
+              <Tooltip label="Recommended by the agent" disabled={closed}>
+                {row}
+              </Tooltip>
+            ) : (
+              row
+            )}
+          </li>
+        )
+      })}
+      {/* Always there, always last: the answer nobody offered is the reader's to give. */}
+      <li>
+        <AnimatePresence initial={false} mode="wait">
+          {chosenOwn ? (
+            <motion.button
+              key="given"
+              type="button"
+              className={CHOSEN}
+              disabled
+              aria-pressed
+              initial={CROSSFADE.from}
+              animate={CROSSFADE.to}
+              transition={fading}
+            >
+              <span className={LETTER_CHOSEN}>{ownLetter}</span>
+              <span className="min-w-0 flex-1 break-words">{answer?.text}</span>
+              <span className={CHECK}>
+                <Tick checked arrives={drawsItsCheck} />
+              </span>
+            </motion.button>
+          ) : writing && !closed ? (
+            <motion.div
+              key="writing"
+              className={WRITING}
+              initial={CROSSFADE.from}
+              animate={CROSSFADE.to}
+              exit={CROSSFADE.from}
+              transition={fading}
+            >
+              <span className={LETTER}>{ownLetter}</span>
+              <span className={FIELD_BOX}>
+                <input
+                  // The caret goes where the press sent it.
+                  autoFocus
+                  aria-label="Other"
+                  className={FIELD}
+                  placeholder="Your own answer…"
+                  value={own}
+                  onChange={(event) => setOwn(event.target.value)}
+                  onKeyDown={(event) => {
+                    // The field's keys are the field's: Escape gives `Other…` back and closes
+                    // nothing around it — the notices it may stand in, a dialog — and Enter sends.
+                    if (event.key === 'Escape' || event.key === 'Enter') event.stopPropagation()
+                    if (event.key === 'Escape') {
+                      event.preventDefault()
+                      setWriting(false)
+                      setLeft(true)
+                      return
+                    }
+                    if (event.key !== 'Enter') return
+                    event.preventDefault()
+                    give()
+                  }}
+                />
+                <IconButton
+                  variant="ghost"
+                  size="sm"
+                  aria-label="Send your answer"
+                  icon={<IconArrowUp size="sm" />}
+                  disabled={said === ''}
+                  onClick={give}
+                />
+              </span>
+            </motion.div>
+          ) : (
+            <motion.button
+              key="other"
+              type="button"
+              className={CHOICE}
+              disabled={closed}
+              aria-pressed={answer === null ? undefined : false}
+              autoFocus={left}
+              initial={CROSSFADE.from}
+              animate={CROSSFADE.to}
+              exit={CROSSFADE.from}
+              transition={fading}
+              onClick={() => setWriting(true)}
+            >
+              <span className={LETTER}>{ownLetter}</span>
+              {/* Once answered it is no longer a door to a field: the choice it was. */}
+              <span className="min-w-0 flex-1">{answer === null ? 'Other…' : 'Other'}</span>
+            </motion.button>
+          )}
+        </AnimatePresence>
+      </li>
+    </ul>
+  )
+  // Among the Session's notices, it is a notice as every other kind is (review of #250): the
+  // question is its title, the choices its answers, and no frame of its own.
+  if (bare) {
+    return (
+      <NoticeRow head={<AgentText text={question.body} />} wrap name={`Question: ${question.body}`}>
+        {choices}
+      </NoticeRow>
+    )
+  }
   return (
     <div
       role="group"
@@ -258,130 +403,84 @@ export function SpecQuestion({
         <div className={ASKED}>
           <AgentText text={question.body} />
         </div>
-        <ul aria-label="Answers" className={CHOICES}>
-          {question.options.map((option, index) => {
-            const chosen = answer?.optionId === option.id
-            const row = (
-              <button
-                type="button"
-                className={chosen ? CHOSEN : CHOICE}
-                disabled={closed}
-                aria-pressed={answer === null ? undefined : chosen}
-                onClick={() => onAnswer({ optionId: option.id })}
-              >
-                <span className={chosen ? LETTER_CHOSEN : LETTER}>{letterOf(index)}</span>
-                <span className="min-w-0 flex-1">
-                  {option.label}
-                  {option.recommended === true && (
-                    <>
-                      <span className={MARK}>
-                        <IconSparkles size="sm" aria-hidden="true" />
-                      </span>
-                      <span className="sr-only">, recommended by the agent</span>
-                    </>
-                  )}
-                </span>
-                <span className={CHECK}>
-                  <Tick checked={chosen} arrives={drawsItsCheck} />
-                </span>
-              </button>
-            )
-            return (
-              <li key={option.id}>
-                {option.recommended === true ? (
-                  <Tooltip label="Recommended by the agent" disabled={closed}>
-                    {row}
-                  </Tooltip>
-                ) : (
-                  row
-                )}
-              </li>
-            )
-          })}
-          {/* Always there, always last: the answer nobody offered is the reader's to give. */}
-          <li>
-            <AnimatePresence initial={false} mode="wait">
-              {chosenOwn ? (
-                <motion.button
-                  key="given"
-                  type="button"
-                  className={CHOSEN}
-                  disabled
-                  aria-pressed
-                  initial={CROSSFADE.from}
-                  animate={CROSSFADE.to}
-                  transition={fading}
-                >
-                  <span className={LETTER_CHOSEN}>{ownLetter}</span>
-                  <span className="min-w-0 flex-1 break-words">{answer?.text}</span>
-                  <span className={CHECK}>
-                    <Tick checked arrives={drawsItsCheck} />
-                  </span>
-                </motion.button>
-              ) : writing && !closed ? (
-                <motion.div
-                  key="writing"
-                  className={WRITING}
-                  initial={CROSSFADE.from}
-                  animate={CROSSFADE.to}
-                  exit={CROSSFADE.from}
-                  transition={fading}
-                >
-                  <span className={LETTER}>{ownLetter}</span>
-                  <span className={FIELD_BOX}>
-                    <input
-                      // The caret goes where the press sent it.
-                      autoFocus
-                      aria-label="Other"
-                      className={FIELD}
-                      placeholder="Your own answer…"
-                      value={own}
-                      onChange={(event) => setOwn(event.target.value)}
-                      onKeyDown={(event) => {
-                        if (event.key === 'Escape') {
-                          event.preventDefault()
-                          setWriting(false)
-                          setLeft(true)
-                          return
-                        }
-                        if (event.key !== 'Enter') return
-                        event.preventDefault()
-                        give()
-                      }}
-                    />
-                    <IconButton
-                      variant="ghost"
-                      size="sm"
-                      aria-label="Send your answer"
-                      icon={<IconArrowUp size="sm" />}
-                      disabled={said === ''}
-                      onClick={give}
-                    />
-                  </span>
-                </motion.div>
-              ) : (
-                <motion.button
-                  key="other"
-                  type="button"
-                  className={CHOICE}
-                  disabled={closed}
-                  aria-pressed={answer === null ? undefined : false}
-                  autoFocus={left}
-                  initial={CROSSFADE.from}
-                  animate={CROSSFADE.to}
-                  exit={CROSSFADE.from}
-                  transition={fading}
-                  onClick={() => setWriting(true)}
-                >
-                  <span className={LETTER}>{ownLetter}</span>
-                  {/* Once answered it is no longer a door to a field: the choice it was. */}
-                  <span className="min-w-0 flex-1">{answer === null ? 'Other…' : 'Other'}</span>
-                </motion.button>
-              )}
-            </AnimatePresence>
-          </li>
-        </ul>
+        {choices}
       </Frame>
     </div>
+  )
+}
+
+/** What an answer says after its question: `A, The issue date`, or `C, Other: …`. */
+function saidOf(question: SpecQuestionView, answer: SpecAnswer): string {
+  const index = question.options.findIndex((option) => option.id === answer.optionId)
+  const option = question.options[index]
+  if (option !== undefined) return `${letterOf(index)}, ${option.label}`
+  return `${letterOf(question.options.length)}, Other: ${answer.text ?? ''}`
+}
+
+const KEPT = 'flex flex-col gap-1 text-sm'
+
+const KEPT_CHOICE = 'flex items-center gap-2 text-muted-foreground'
+
+const KEPT_CHOSEN = 'flex items-center gap-2 text-foreground'
+
+const KEPT_CHECK = 'flex size-icon-sm shrink-0 text-primary'
+
+export interface SpecQuestionRecordProps {
+  question: SpecQuestionView
+  /** The turn was stopped before it was answered. */
+  cancelled?: boolean | undefined
+}
+
+/**
+ * A question of the Spec as the thread keeps it (issue #237): one closed line — the question's
+ * mark, a dot, the question and, once answered, what was chosen — and, opened, every choice it
+ * offered, the one taken checked. It is answered among the Session's notices, never here. It is
+ * named after its answer, as the card was (issue #199).
+ */
+export function SpecQuestionRecord({
+  question,
+  cancelled = false,
+}: SpecQuestionRecordProps): ReactNode {
+  const { answer } = question
+  const plain = plainQuestion(question.body)
+  const standing =
+    answer !== null
+      ? { answer: 'accepted' as const, word: 'answered' }
+      : cancelled
+        ? { answer: 'left' as const, word: 'not answered' }
+        : { answer: 'pending' as const, word: 'waiting' }
+  return (
+    <NoticeRecord
+      icon={<IconMessageQuestion size="sm" aria-hidden="true" />}
+      answer={standing.answer}
+      answerLabel={standing.word}
+      subject={plain}
+      said={answer === null ? undefined : saidOf(question, answer)}
+      name={
+        answer === null ? `Question: ${plain}, ${standing.word}` : answeredLabel(question, answer)
+      }
+    >
+      <ul aria-label="Answers" className={KEPT}>
+        {question.options.map((option, index) => {
+          const chosen = answer?.optionId === option.id
+          return (
+            <li key={option.id} className={chosen ? KEPT_CHOSEN : KEPT_CHOICE}>
+              <span className={KEPT_CHECK}>
+                {chosen && <IconCheck size="sm" aria-label="chosen" />}
+              </span>
+              {`${letterOf(index)}, ${option.label}`}
+            </li>
+          )
+        })}
+        {answer !== null && answer.optionId === undefined && (
+          <li className={KEPT_CHOSEN}>
+            <span className={KEPT_CHECK}>
+              <IconCheck size="sm" aria-label="chosen" />
+            </span>
+            {saidOf(question, answer)}
+          </li>
+        )}
+      </ul>
+    </NoticeRecord>
   )
 }

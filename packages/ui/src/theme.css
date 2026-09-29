@@ -83,7 +83,9 @@
 
   --success: #16a34a;
   --success-muted: #ecfdf3;
-  --success-muted-foreground: #15803d;
+  /* A shade under green-700: its own counts (a diff's +N) are read on the page itself, where
+     green-700 made 4.29:1 on the background and the catalogue asks 4.5:1 of small text. */
+  --success-muted-foreground: #157a3a;
   --warning: #d97706;
   --warning-muted: #fffbeb;
   --warning-muted-foreground: #b45309;
@@ -445,6 +447,11 @@
      questions at once would otherwise push the thread out of the window. A share of the window,
      for the reason a wide dialog is one: it is the thread above that has to keep its room. */
   --spacing-pinned: 40vh;
+
+  /* How wide the Session's notices open above the composer (issue #237): wide enough for a
+     one-off's whole line to wrap over a few rows rather than one row a word, narrower than the
+     thread's column so the panel still reads as the pill's and not as a page of its own. */
+  --spacing-notices: 36rem;
 
   /* The Spec open: a share of the Session's row, the container it is asked of. A length of the
      row rather than a fraction of the panel's own box, because the panel's box is what slides in
@@ -836,6 +843,25 @@
    A popup comes down from its trigger and folds back up into it rather than growing out of a
    corner: a scale from an origin reads as a direction nobody asked for, and the direction a
    list opens in is the first thing the eye uses to find where it came from. */
+/* Where a popup that grows is drawn: everything but what is still below its anchor's edge, so it
+   rises from behind the anchor. Its shadow is kept on the three other sides; the fourth is the
+   anchor's edge, the `sideOffset` under the popup. Written for a popup that opens upwards. */
+@utility popup-emerges {
+  clip-path: inset(-3rem -3rem -0.25rem -3rem);
+}
+
+/* What comes out of what opens it: the same beat as `popup-motion`, scaling from the point the
+   popup hangs from, which Base UI writes as `--transform-origin` (issue #237). */
+@utility popup-grows {
+  transform-origin: var(--transform-origin);
+  transition-property: opacity, scale, translate;
+  transition-duration: var(--duration-base);
+  transition-timing-function: var(--ease-calm);
+  @media (prefers-reduced-motion: reduce) {
+    transition-property: none;
+  }
+}
+
 @utility popup-motion {
   /* `translate` and `scale` and not `transform`: Tailwind 4 writes its transform utilities as
      the individual properties, and a transition naming `transform` never sees them — the popup

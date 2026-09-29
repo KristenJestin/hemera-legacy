@@ -8,6 +8,7 @@ import { DecisionSummary } from '../approval/decision-summary.tsx'
 import { SpecQuestionRecord } from '../spec/spec-question.tsx'
 import { CREDIT_NOTES } from '../spec/spec-fixtures.ts'
 import { CallOutcome } from './call-outcome.tsx'
+import { CommandRun } from './command-run.tsx'
 import { HemeraToolCall } from './hemera-tool-call.tsx'
 import { TerminalOutput } from './terminal-output.tsx'
 import { ThoughtBlock } from './thought-block.tsx'
@@ -329,5 +330,49 @@ export const ATurnThatAsked: Story = {
     await expect(canvas.getByRole('log', { name: 'Output of run-bash' })).toBeVisible()
     // An answered question keeps what was chosen, read once the group is open.
     await expect(canvas.getByText('A, Negative rows in the same file')).toBeVisible()
+  },
+}
+
+/**
+ * Runs the reader started one after the other between two messages (review of #250): one group,
+ * `6 runs`, its dot red when one failed; opened, the runs as they were, each its own line.
+ */
+export const RunsBetweenMessages: Story = {
+  args: { count: 6, status: 'failed', latest: 'echo', unit: 'runs' },
+  render: (args) => (
+    <ActionGroup {...args}>
+      {[1, 2, 3, 4, 5].map((at) => (
+        <CommandRun
+          key={at}
+          name="v2 check"
+          command="bun run check"
+          type="test"
+          state="failed"
+          folder="./v2"
+          output="error TS2322"
+          exitCode={1}
+        />
+      ))}
+      <CommandRun
+        name="echo"
+        command="echo hi"
+        type="script"
+        state="finished"
+        folder="."
+        output="hi"
+        exitCode={0}
+        oneOff
+      />
+    </ActionGroup>
+  ),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const group = canvas.getByRole('button', { name: /6 runs/ })
+    await expect(within(group).getByRole('img', { name: 'One failed' })).toBeInTheDocument()
+    await expect(canvas.queryByText('bun run check')).toBeNull()
+    await userEvent.click(group)
+    await waitFor(() => {
+      expect(canvas.getAllByText('exit 1')).toHaveLength(5)
+    })
   },
 }

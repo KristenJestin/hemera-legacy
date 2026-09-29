@@ -343,11 +343,7 @@ export function SpecQuestion({
   // question is its title, the choices its answers, and no frame of its own.
   if (bare) {
     return (
-      <NoticeCard
-        icon={<IconMessageQuestion size="sm" />}
-        title={<AgentText text={question.body} />}
-        name={`Question: ${question.body}`}
-      >
+      <NoticeCard title={<AgentText text={question.body} />} name={`Question: ${question.body}`}>
         {choices}
       </NoticeCard>
     )

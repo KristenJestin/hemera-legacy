@@ -2,7 +2,7 @@ import type { ReactNode } from 'react'
 
 import { type NoticeAnswer, NoticeRecord } from '../activity/notice-record.tsx'
 import { IconShield } from '../icons.ts'
-import { type NoticeAnswerButton, NoticeCard } from '../session/notice-card.tsx'
+import { type NoticeAnswerButton, NoticeRow } from '../session/notice-row.tsx'
 import { RepositoryGlyph, type RunRepository } from '../session/run-place.tsx'
 import { DecisionSummary } from './decision-summary.tsx'
 
@@ -24,10 +24,10 @@ import { DecisionSummary } from './decision-summary.tsx'
  * stealing the caret from a half-written sentence is how a prompt stops being finished. Tab walks
  * the answers and Enter is the focused button's own press. Escape answers nothing: among the
  * notices it closes them, and a reader putting the panel away has refused nothing. It is drawn
- * as every notice is (`NoticeCard`, review of #250): "Run once" for a one-off line, the label of
- * the call otherwise, then what it is about, the whole line and where, and the answers in the one
- * row every notice has — the refusal quiet, the one-shot permission primary, a standing rule
- * between the two with how long it is remembered.
+ * as every notice is (`NoticeRow`, review of #250): one row — the line a one-off would run, or the
+ * call's label and what it is about — with the answers every notice has, the refusal quiet, the
+ * one-shot permission primary, a standing rule between the two with how long it is remembered;
+ * the chevron unfolds the whole line and where it would run.
  *
  * The head reads the way the call's own line does (recette 3 of 23 September 2026): what a reader
  * calls the tool, what it is about, and what it asks — "Write file ../outside.txt asks to act
@@ -159,24 +159,32 @@ export function PermissionRequest({
   const standing = options
     .filter((option) => STANDING.includes(option.kind))
     .toSorted((left, right) => RISK[left.kind] - RISK[right.kind])
-  // What the call is, when it is not a line run once — which its group already says.
+  // What the call is, when it is not a line run once: the line a one-off runs is its own head.
   const what = toolName === 'commands_run' ? undefined : (label ?? toolName)
   const about = subject !== undefined && subject !== command ? subject : undefined
+  const children =
+    (label === undefined && intent !== undefined) || diff !== undefined ? (
+      <>
+        {label === undefined && intent !== undefined && <p className={INTENT}>{intent}</p>}
+        {diff}
+      </>
+    ) : undefined
   return (
-    <NoticeCard
+    <NoticeRow
       name={`Permission for ${label ?? toolName}`}
-      subject={
-        // What the call is, and what it is about when the line is not already that: the path
-        // as the agent named it.
-        what === undefined && about === undefined ? undefined : (
-          <>
-            {what !== undefined && <span className="shrink-0 font-medium">{what}</span>}
+      mono={what === undefined}
+      head={
+        what === undefined ? (
+          (command ?? toolName)
+        ) : (
+          <span className="flex min-w-0 items-center gap-2">
+            <span className="shrink-0 font-medium">{what}</span>
             {about !== undefined && (
               <span className={SUBJECT} title={about}>
                 {about}
               </span>
             )}
-          </>
+          </span>
         )
       }
       line={command}
@@ -189,9 +197,8 @@ export function PermissionRequest({
       others={standing.map(named)}
       accept={once === undefined ? undefined : named(once)}
     >
-      {label === undefined && intent !== undefined && <p className={INTENT}>{intent}</p>}
-      {diff}
-    </NoticeCard>
+      {children}
+    </NoticeRow>
   )
 }
 

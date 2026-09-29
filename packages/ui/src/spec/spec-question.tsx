@@ -8,7 +8,7 @@ import { Tick } from '../components/checkbox/checkbox.tsx'
 import { Frame, FrameFooter, FrameHeader } from '../components/frame/frame.tsx'
 import { Tooltip } from '../components/tooltip/tooltip.tsx'
 import { NoticeRecord } from '../activity/notice-record.tsx'
-import { NoticeCard } from '../session/notice-card.tsx'
+import { NoticeRow } from '../session/notice-row.tsx'
 import { IconArrowUp, IconCheck, IconLock, IconMessageQuestion, IconSparkles } from '../icons.ts'
 import { AgentText } from '../message/agent-text.tsx'
 import { CROSSFADE, collapse, crossfade, expand, fold, useTransition } from '../motion.ts'
@@ -55,7 +55,7 @@ const CHOICES = 'flex flex-col gap-0.5 p-1.5'
 
 /** A row the hand chooses: the body's nested radius, and the hover every control answers with. */
 const CHOICE =
-  'flex w-full items-center gap-3 rounded-md px-3 py-2 text-left text-sm text-foreground outline-none focus-ring hover:bg-muted disabled:text-muted-foreground disabled:hover:bg-transparent'
+  'flex min-h-control-md w-full items-center gap-3 rounded-md px-3 py-2 text-left text-sm text-foreground outline-none focus-ring hover:bg-muted disabled:text-muted-foreground disabled:hover:bg-transparent'
 
 /** The row chosen, once answered: the primary's muted fill, the one row left in colour. */
 const CHOSEN =
@@ -75,8 +75,11 @@ const MARK = 'ml-1.5 inline-flex align-middle text-primary-muted-foreground'
 /** Where the check of the row chosen draws itself: held on every row, so no label moves. */
 const CHECK = 'flex shrink-0 text-primary'
 
-/** `Other…` turned into its field: the row it was, the field in the label's place. */
-const WRITING = 'flex w-full items-center gap-3 px-3 py-1'
+/**
+ * `Other…` turned into its field: the row it was, at the height it was — a choice row's height —
+ * so nothing under it moves as it turns into a field and back.
+ */
+const WRITING = 'flex h-control-md w-full items-center gap-3 px-3'
 
 /** The reader's own answer: a field on the body's surface, the send icon inside its box. */
 const FIELD_BOX =
@@ -295,6 +298,9 @@ export function SpecQuestion({
                   value={own}
                   onChange={(event) => setOwn(event.target.value)}
                   onKeyDown={(event) => {
+                    // The field's keys are the field's: Escape gives `Other…` back and closes
+                    // nothing around it — the notices it may stand in, a dialog — and Enter sends.
+                    if (event.key === 'Escape' || event.key === 'Enter') event.stopPropagation()
                     if (event.key === 'Escape') {
                       event.preventDefault()
                       setWriting(false)
@@ -343,9 +349,9 @@ export function SpecQuestion({
   // question is its title, the choices its answers, and no frame of its own.
   if (bare) {
     return (
-      <NoticeCard title={<AgentText text={question.body} />} name={`Question: ${question.body}`}>
+      <NoticeRow head={<AgentText text={question.body} />} wrap name={`Question: ${question.body}`}>
         {choices}
-      </NoticeCard>
+      </NoticeRow>
     )
   }
   return (

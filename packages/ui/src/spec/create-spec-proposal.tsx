@@ -2,7 +2,7 @@ import { cn } from 'cn'
 import { type ReactNode, useState } from 'react'
 
 import { type NoticeAnswer, NoticeRecord } from '../activity/notice-record.tsx'
-import { NoticeCard } from '../session/notice-card.tsx'
+import { NoticeRow } from '../session/notice-row.tsx'
 import { InPlaceText } from './in-place-text.tsx'
 import type { SpecType } from './model.ts'
 import { SPEC_TYPE_ICONS } from './spec-icons.ts'
@@ -101,9 +101,9 @@ export function CreateSpecProposal({
       )
     }
     return (
-      <NoticeCard
+      <NoticeRow
         name="Continue a Spec"
-        subject={
+        head={
           <span className={EXISTING}>
             <span className={EXISTING_KEY}>{existingKey}</span>
             <span className={EXISTING_TITLE}>{proposed}</span>
@@ -137,15 +137,15 @@ export function CreateSpecProposal({
     return <p className={FOLDED}>{`Not now: « ${title} » was not created.`}</p>
   }
   return (
-    <NoticeCard
+    <NoticeRow
       name="Create a Spec"
+      head={<InPlaceText label="Title of the Spec" value={title} onCommit={setTitle} />}
       refuse={{ label: 'Not now', onPress: onDecline }}
       accept={{
         label: 'Start',
         onPress: () => onCreate(title.trim() === '' ? proposed : title.trim(), type),
       }}
     >
-      <InPlaceText label="Title of the Spec" value={title} onCommit={setTitle} />
       <div role="radiogroup" aria-label="Type" className={TYPES}>
         {ALL_TYPES.map((one) => (
           <button
@@ -161,7 +161,7 @@ export function CreateSpecProposal({
           </button>
         ))}
       </div>
-    </NoticeCard>
+    </NoticeRow>
   )
 }
 

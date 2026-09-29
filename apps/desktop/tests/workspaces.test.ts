@@ -802,6 +802,7 @@ describe('Each repository shows its branch, commit and changes', () => {
 
     expect(seen.status[0]).toEqual({
       relativePath: API,
+      step: null,
       git: {
         ok: true,
         branch: 'main',
@@ -832,8 +833,55 @@ describe('A Git error is surfaced as is', () => {
 
     expect(status[0]?.git).toMatchObject({ ok: true, branch: 'main' })
     expect(status[1]?.relativePath).toBe(FRONT)
-    expect(status[1]?.git.ok).toBe(false)
+    expect(status[1]?.git?.ok).toBe(false)
     expect(status[1]?.git).toMatchObject({ error: expect.stringMatching(/^fatal: /) })
+  })
+})
+
+describe('A repository not prepared yet waits for its worktree', () => {
+  it("answers each repository's worktree step and asks Git nothing of a folder not made yet", async () => {
+    const asked: string[] = []
+    const watched: GitSpawn = (program, cwd, args, limit) => {
+      asked.push(cwd)
+      return spawnGit(program, cwd, args, limit)
+    }
+    const seen = await workspaceEngine(
+      folder,
+      undefined,
+      undefined,
+      undefined,
+      gitLayer('git', watched),
+    )(
+      Effect.gen(function* () {
+        const workspaces = yield* Workspaces
+        const project = yield* atlas(main, [API, FRONT])
+        const workspace = yield* created(project.id)
+        asked.length = 0
+        return { workspace, status: yield* workspaces.status(workspace.id) }
+      }),
+    )
+
+    // Its folder is not made: no step has run, and neither repository is a Git error (#217).
+    expect(existsSync(seen.workspace.path)).toBe(false)
+    expect(seen.status).toEqual([
+      { relativePath: API, step: 'pending', git: null },
+      { relativePath: FRONT, step: 'pending', git: null },
+    ])
+    expect(asked.filter((cwd) => cwd.startsWith(seen.workspace.path))).toEqual([])
+  })
+
+  it('reads Git once the worktree step is done', async () => {
+    const status = await workspaceEngine(folder)(
+      Effect.gen(function* () {
+        const workspaces = yield* Workspaces
+        const project = yield* atlas(main, [API, FRONT])
+        const workspace = yield* prepared(project.id)
+        return yield* workspaces.status(workspace.id)
+      }),
+    )
+
+    expect(status.map((one) => one.step)).toEqual([null, null])
+    expect(status[0]?.git).toMatchObject({ ok: true, branch: 'atlas/HEM-7-login-form' })
   })
 })
 

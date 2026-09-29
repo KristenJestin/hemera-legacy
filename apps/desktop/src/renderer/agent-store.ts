@@ -11,11 +11,13 @@ import type {
   StopReason,
 } from '@hemera/ipc'
 import { TOOL_LABELS, hemeraToolNamed } from '@hemera/core'
-import type { ActivityState, AgentListing, SpecTarget } from '@hemera/ui'
+import type { ActivityState, AgentListing, FaceState, SpecTarget } from '@hemera/ui'
 import { z } from 'zod'
 
+import { asksAnswer, callFaceOf, noticeFaceOf } from './agent-face.ts'
 import { effortStage, effortToLand, modelStage } from './agent-options.ts'
 import { commandRunOf, specWriteOf } from './agent-tool-payloads.ts'
+import type { NoticeKind } from './notices.ts'
 import { patiently } from './patiently.ts'
 
 /**
@@ -193,6 +195,11 @@ export interface Activity {
   detail?: string | undefined
   /** What one of Hemera's own tools is doing, said whole: "Writing the Spec" (issue #170). */
   doing?: string | undefined
+  /**
+   * The face the row wears when the state says less than the call does (issue #140): reading or
+   * writing for a tool that reads or writes, where the state only says `running`.
+   */
+  face?: FaceState | undefined
   /** The thought arriving now, which is the last one of the turn that is running. */
   thought?: string | undefined
   /** How long the last turn took, from the user's message to its `turn` entry, once it is over. */
@@ -305,8 +312,9 @@ export function activityOf(
     // One of Hemera's own tools says what it is doing in words of its own, never by the agent's
     // word for it, `mcp__hemera__spec_write` (issue #159), nor as "Running Write Spec" (#170).
     const named = hemeraToolNamed(call.body)
-    if (named !== null) return { state: 'running', doing: TOOL_LABELS[named].doing, thought }
-    return { state: 'running', detail: call.body, thought }
+    const face = callFaceOf(call)
+    if (named !== null) return { state: 'running', doing: TOOL_LABELS[named].doing, face, thought }
+    return { state: 'running', detail: call.body, face, thought }
   }
 
   // A message has no state while it is being written — the engine writes the same entry again
@@ -330,25 +338,73 @@ const THINKING: Activity = { state: 'thinking' }
  * ends the turn in the same state (issue #223). So an end read while running is the turn before
  * the message just said, which the engine has not echoed yet: the turn asked for is thinking.
  *
- * `waitsForYou` is whether the Session's notices hold anything (issue #237): the row then says the
- * Session waits for the reader, and keeps saying it until nothing does.
+ * `waitsFor` is the first kind the Session's notices hold, in the order they list them, or null
+ * when they hold nothing (issue #237): the row then says the Session waits for the reader, and
+ * keeps saying it until nothing does. The face says what for (issue #140): a permission, a
+ * question, or a proposal to take or leave (`noticeFaceOf`).
  */
 export function turnRowOf(
   thread: readonly SessionEntry[],
   running: boolean,
   latest: string | null = null,
-  waitsForYou = false,
+  waitsFor: NoticeKind | null = null,
 ): Activity | null {
   // Whether the Session waits for the reader is the notices' answer and nobody else's (#250): the
   // row and the pill read one list, so the row never says it waits while the pill holds nothing.
   const read = activityOf(thread, latest, false)
   // Whatever waits for the reader in the Session's notices — a permission, a proposal, a question
   // — is what the row says for as long as anything does, a turn running or not (issue #237).
-  if (waitsForYou) {
-    return { state: 'waiting', thought: running && !hasEnded(read) ? read.thought : undefined }
+  if (waitsFor !== null) {
+    return {
+      state: 'waiting',
+      face: noticeFaceOf(waitsFor),
+      thought: running && !hasEnded(read) ? read.thought : undefined,
+    }
   }
   if (running) return hasEnded(read) ? THINKING : read
   return hasEnded(read) ? read : null
+}
+
+/**
+ * The face a Session wears in the sidebar (issue #140), from what this window has heard of it.
+ *
+ * At work while its turn runs — thinking, reading, writing, running a command — and asking while
+ * the turn waits on the reader for a permission. Once the turn is over the Session is at rest and
+ * asleep, unless it ended on something the reader has to see: a question left for them, or a
+ * failure. A Session nothing has been heard of since the window opened is asleep too: nothing of
+ * it runs.
+ *
+ * A turn just asked for whose thread still ends on the turn before is thinking, as the row above
+ * the box has it: the end is the last turn's, not this one's.
+ */
+export function sessionFaceOf(agent: AgentSessionState): FaceState {
+  const read = activityOf(agent.entries, agent.latest)
+  if (agent.running) {
+    if (hasEnded(read)) return 'thinking'
+    if (read.face !== undefined) return read.face
+    return RUNNING_FACES[read.state] ?? 'thinking'
+  }
+  if (read.state === 'done' && asksAnswer(sinceSaid(agent.entries), agent.entries)) {
+    return 'question'
+  }
+  if (read.state === 'failed') return 'error'
+  return 'asleep'
+}
+
+/**
+ * The faces of a turn in flight, as the row above the box wears them (`ACTIVITY_FACES` in the
+ * design system, which this module does not import: it reads no component).
+ */
+const RUNNING_FACES: Partial<Record<ActivityState, FaceState>> = {
+  thinking: 'thinking',
+  running: 'running',
+  waiting: 'permission',
+  streaming: 'writing',
+}
+
+/** What the thread holds since the last thing the user said: the turn that is, or last was. */
+function sinceSaid(entries: readonly SessionEntry[]): readonly SessionEntry[] {
+  return entries.slice(lastSaid(entries) + 1)
 }
 
 /**

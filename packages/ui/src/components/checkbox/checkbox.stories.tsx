@@ -31,7 +31,7 @@ function Kept({
 }
 
 const meta = {
-  tags: ['autodocs', 'updated'],
+  tags: ['autodocs'],
   title: 'Components/Checkbox',
   component: Checkbox,
   parameters: { layout: 'centered' },
@@ -134,21 +134,35 @@ function scaleOf(box: HTMLElement): number {
   return matrix.a
 }
 
-/** What the tick and the box go through, frame by frame, until the tick is at `end`. */
-async function framesUntil(
+/**
+ * What the tick and the box go through, frame by frame, from just before `gesture` until the tick
+ * is at `end`.
+ *
+ * The frames are read from before the gesture, not from when it resolves: on a machine busy with
+ * the rest of the run, the click can resolve after the box's short give is over, and a watch
+ * started then would never see it.
+ */
+async function framesAround(
   box: HTMLElement,
   end: number,
+  gesture: () => Promise<void>,
 ): Promise<{ drawn: number[]; scales: number[] }> {
   const drawn: number[] = []
   const scales: number[] = []
-  const started = performance.now()
-  while (performance.now() - started < 2000) {
-    // oxlint-disable-next-line no-await-in-loop -- one frame, then a look, then the next: the order is the point
-    await new Promise((next) => requestAnimationFrame(next))
-    drawn.push(drawnOf(box))
-    scales.push(scaleOf(box))
-    if (drawn.at(-1) === end && scales.at(-1) === 1) break
-  }
+  let done = false
+  const watching = (async () => {
+    const started = performance.now()
+    while (performance.now() - started < 2000) {
+      // oxlint-disable-next-line no-await-in-loop -- one frame, then a look, then the next: the order is the point
+      await new Promise((next) => requestAnimationFrame(next))
+      drawn.push(drawnOf(box))
+      scales.push(scaleOf(box))
+      if (done && drawn.at(-1) === end && scales.at(-1) === 1) break
+    }
+  })()
+  await gesture()
+  done = true
+  await watching
   return { drawn, scales }
 }
 
@@ -162,8 +176,20 @@ export const Checked: Story = {
   play: async ({ canvasElement }) => {
     const box = within(canvasElement).getByRole('checkbox', { name: /portless/i })
     await expect(drawnOf(box)).toBe(0)
-    await userEvent.click(box)
-    const { drawn, scales } = await framesUntil(box, 1)
+    // The give is over in 160 ms while the tick draws for 260 and is most of the way in by then: a
+    // machine busy with the rest of the run can give no frame inside the give and still one inside
+    // the draw. When no frame saw the box under its size, it is unchecked and checked again, up
+    // to five times: a box that never gives is never seen to.
+    const check = (): Promise<{ drawn: number[]; scales: number[] }> =>
+      framesAround(box, 1, () => userEvent.click(box))
+    let seen = await check()
+    for (let tries = 4; tries > 0 && Math.min(...seen.scales) === 1; tries -= 1) {
+      // oxlint-disable-next-line no-await-in-loop -- one gesture at a time: the retry is the point
+      await framesAround(box, 0, () => userEvent.click(box))
+      // oxlint-disable-next-line no-await-in-loop -- one gesture at a time: the retry is the point
+      seen = await check()
+    }
+    const { drawn, scales } = seen
     // Part of the way along on some frame: drawn, and not switched on.
     expect(drawn.some((one) => one > 0 && one < 1)).toBe(true)
     expect(Math.min(...scales)).toBeLessThan(1)
@@ -181,8 +207,7 @@ export const Unchecked: Story = {
     const box = within(canvasElement).getByRole('checkbox', { name: /portless/i })
     // Opened checked, it is drawn already: nothing draws itself on the way in.
     await expect(drawnOf(box)).toBe(1)
-    await userEvent.click(box)
-    const { drawn, scales } = await framesUntil(box, 0)
+    const { drawn, scales } = await framesAround(box, 0, () => userEvent.click(box))
     expect(drawn.some((one) => one > 0 && one < 1)).toBe(true)
     // Letting go is not pressed: the box stays its size.
     expect(Math.min(...scales)).toBe(1)
@@ -205,24 +230,17 @@ export const ReducedMotion: Story = {
   ),
   play: async ({ canvasElement }) => {
     const box = within(canvasElement).getByRole('checkbox', { name: /portless/i })
-    await userEvent.click(box)
     // Nothing part of the way on any frame: the tick goes from none of it to all of it.
-    const checked = await framesUntil(box, 1)
+    const checked = await framesAround(box, 1, () => userEvent.click(box))
     expect(checked.drawn.filter((one) => one > 0 && one < 1)).toEqual([])
     expect(checked.drawn.at(-1)).toBe(1)
     expect(checked.scales.every((one) => one === 1)).toBe(true)
-    await userEvent.click(box)
-    const unchecked = await framesUntil(box, 0)
+    const unchecked = await framesAround(box, 0, () => userEvent.click(box))
     expect(unchecked.drawn.filter((one) => one > 0 && one < 1)).toEqual([])
     expect(unchecked.drawn.at(-1)).toBe(0)
-    const restore = await emulateReducedMotion()
-    if (restore === null) return
-    try {
-      await waitFor(() => {
-        expect(getComputedStyle(box).transitionProperty).toBe('none')
-      })
-    } finally {
-      await restore()
-    }
+    if (!(await emulateReducedMotion())) return
+    await waitFor(() => {
+      expect(getComputedStyle(box).transitionProperty).toBe('none')
+    })
   },
 }

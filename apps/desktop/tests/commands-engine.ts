@@ -51,7 +51,11 @@ beforeEach(() => {
 })
 
 afterEach(() => {
-  rmSync(scratch.folder, { recursive: true, force: true })
+  // On Windows a run's tree is ended by `taskkill`, which answers once the kill is asked for and
+  // not once the system has let go of what the tree held: a child's working folder is one of
+  // them, and a folder still some process's working folder refuses to go with EPERM. Retried
+  // (up to five and a half seconds in all, inside the hook's ten) until it is free.
+  rmSync(scratch.folder, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 })
 })
 
 /** Everything a program of these suites may ask for: the engine, and nothing of the window. */

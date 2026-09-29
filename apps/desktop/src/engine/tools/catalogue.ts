@@ -38,6 +38,7 @@ import { mkdir, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/p
 import { basename, dirname, join, relative } from 'node:path'
 
 import { HeldWords } from '../agents/held.ts'
+import { SessionModes, modeAsks } from '../agents/modes.ts'
 import { AgentNotices } from '../agents/notices.ts'
 import { Commands } from '../commands/service.ts'
 import { Projects } from '../projects.ts'
@@ -50,6 +51,7 @@ import { Variables } from '../workspaces/variables.ts'
 import { mutate } from '../transaction.ts'
 import { ToolAccess } from './access.ts'
 import {
+  OUTPUT_PAGE_LINES,
   RUN_WAIT_MS,
   THREAD_TAIL,
   type ToolArguments,
@@ -268,6 +270,7 @@ export const toolCatalogueLayer: Layer.Layer<
   | ToolAccess
   | ToolPermissions
   | HeldWords
+  | SessionModes
   | AgentNotices
   | Specs
   | Database
@@ -282,6 +285,7 @@ export const toolCatalogueLayer: Layer.Layer<
     const database = yield* Database
     const access = yield* ToolAccess
     const held = yield* HeldWords
+    const modes = yield* SessionModes
     const notices = yield* AgentNotices
     const variables = yield* Variables
     const specs = yield* Specs
@@ -483,6 +487,7 @@ export const toolCatalogueLayer: Layer.Layer<
           root,
           named,
           place.path,
+          false,
           `${asked.tool} asks to act outside the Workspace: ${place.path}`,
           null,
         )
@@ -501,13 +506,16 @@ export const toolCatalogueLayer: Layer.Layer<
      * The permission block of D5-09, asked about one place, and the human's answer.
      *
      * `line` is the command line a one-off run would start, and null for every other question:
-     * the block shows it, because a line is what the human is deciding on.
+     * the block shows it, because a line is what the human is deciding on. `inside` is whether
+     * `where` is inside the root, which the block says rather than guesses (issue #239): a one-off
+     * is asked about wherever it runs.
      */
     const askHuman = (
       asked: ToolCall,
       root: string,
       named: string,
       where: string,
+      inside: boolean,
       body: string,
       line: string | null,
     ) =>
@@ -529,6 +537,7 @@ export const toolCatalogueLayer: Layer.Layer<
               named,
               resolved: where,
               root,
+              inside,
               line,
             }),
             correlationId: `perm:${id}`,
@@ -609,6 +618,38 @@ export const toolCatalogueLayer: Layer.Layer<
         // What was allowed is the place the human was shown, and that is where the tool acts.
         return { allowed: true as const, path: where }
       })
+
+    /**
+     * The line a one-off leaves when it ran without a question, the mode it followed said: one
+     * quiet decision, where an asked one leaves a block and its answer (#242).
+     */
+    const unasked = (asked: ToolCall, root: string, where: string, line: string, mode: string) => {
+      const id = crypto.randomUUID()
+      return inThread(asked.sessionId, {
+        role: 'hemera',
+        kind: 'permission_decision',
+        body: `ran without asking, ${mode} mode`,
+        payload: JSON.stringify({
+          toolCallId: id,
+          optionId: 'allowed',
+          tool: asked.tool,
+          named: where,
+          resolved: where,
+          root,
+          // Where it ran, as an asked question says it (#239): a mode only ever skips the
+          // question inside the root.
+          inside: true,
+          line,
+          mode,
+          // No question was asked, so this answers none: a window waiting on another call's
+          // question keeps waiting past it.
+          unasked: true,
+          answer: 'allowed',
+        }),
+        correlationId: `decision:${id}`,
+        state: 'completed',
+      }).pipe(Effect.catch(() => Effect.void))
+    }
 
     /** Which run a call means, when it named none: the only one this Session has going. */
     /**
@@ -898,8 +939,9 @@ export const toolCatalogueLayer: Layer.Layer<
               return failed("could not read the Project's main", 'the Workspace main did not read')
             }
             // A catalogue command is the user's own line, and inside the root it runs on its own.
-            // A one-off is a line the agent wrote: whatever folder it names, the human sees the
-            // line and decides before anything runs (D5-09) — one question, not one per rule.
+            // A one-off is a line the agent wrote: the human sees the line and decides before
+            // anything runs (D5-09) — one question, not one per rule — unless it stays inside the
+            // root and the Session's mode is one where the agent's own tools do not ask (#242).
             const inside =
               entry !== undefined
                 ? folder === '.'
@@ -911,11 +953,19 @@ export const toolCatalogueLayer: Layer.Layer<
                       return { allowed: false as const, reason: place.reason }
                     }
                     const oneOff = line ?? ''
+                    if (place.inside) {
+                      const standing = yield* modes.standing(asked.sessionId)
+                      if (standing !== null && !modeAsks(standing)) {
+                        yield* unasked(asked, root, place.path, oneOff, standing.name)
+                        return { allowed: true as const, path: place.path }
+                      }
+                    }
                     return yield* askHuman(
                       asked,
                       root,
                       folder,
                       place.path,
+                      place.inside,
                       place.inside
                         ? `commands_run asks to run ${oneOff} in ${place.path}`
                         : `commands_run asks to run ${oneOff} outside the Workspace, in ${place.path}`,
@@ -979,6 +1029,9 @@ export const toolCatalogueLayer: Layer.Layer<
                     ),
                 )) ?? started)
               : started
+            // What the agent reads here it is not handed again at the next prompt (issue #238):
+            // how it ended, or that it runs — and then its end, once it comes.
+            yield* answered(commands.told(asked.sessionId, [run]))
             const tail = run.output.split('\n').slice(-40).join('\n')
             return {
               ok: run.state !== 'failed',
@@ -1015,7 +1068,17 @@ export const toolCatalogueLayer: Layer.Layer<
               )
             }
             const run = read
-            const tail = run.output.split('\n').slice(-200).join('\n')
+            yield* answered(commands.told(asked.sessionId, [run]))
+            // A page of lines, the last by default or from the line asked for, and which of how
+            // many it is, so the lines before it can be asked for too (issue #238).
+            const lines = run.output.replace(/\n$/, '').split('\n')
+            const first =
+              call.arguments.from === undefined
+                ? Math.max(1, lines.length - OUTPUT_PAGE_LINES + 1)
+                : Math.min(call.arguments.from, lines.length)
+            const page = lines.slice(first - 1, first - 1 + OUTPUT_PAGE_LINES)
+            const shown = page.join('\n')
+            const whole = first === 1 && page.length === lines.length
             return {
               ok: true,
               summary: `${run.name} is ${run.state}${run.dropped === 0 ? '' : ` (${run.dropped} bytes dropped)`}`,
@@ -1023,7 +1086,10 @@ export const toolCatalogueLayer: Layer.Layer<
                 `run ${run.id}: ${run.name} — ${run.state}${run.pid === null ? '' : ` (pid ${run.pid})`}`,
                 run.url === null ? 'no address published' : `address: ${run.url}`,
                 run.exitCode === null ? 'still running' : `exit code ${run.exitCode}`,
-                tail === '' ? 'nothing printed' : `output:\n${tail}`,
+                ...(run.output === '' || whole
+                  ? []
+                  : [`lines ${first} to ${first + page.length - 1} of ${lines.length}`]),
+                run.output === '' ? 'nothing printed' : `output:\n${shown}`,
               ].join('\n'),
               paths: [],
             }

@@ -10,7 +10,7 @@ import { AgentReport } from './agent-report.tsx'
 const meta = {
   title: 'Blocks/Session/AgentReport',
   component: AgentReport,
-  tags: ['autodocs', 'updated'],
+  tags: ['autodocs'],
   parameters: { layout: 'padded' },
   args: {
     title: 'The agent reported an error',

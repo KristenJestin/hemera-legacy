@@ -210,7 +210,7 @@ async function writeSpec(asked: string, key: string): Promise<void> {
   await awaits(ANSWERS[0])
   // The proposal waits among the Session's notices, closed until pressed (issue #237).
   await openNotices('Spec proposed')
-  await pressIn(PROPOSAL_CARD, 'Create')
+  await pressIn(PROPOSAL_CARD, 'Start')
   await awaitsRecord(`Spec proposed, ${key} `)
 
   await unfoldSpec(key)

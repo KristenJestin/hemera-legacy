@@ -2,7 +2,8 @@ import { cn } from 'cn'
 import { type ReactNode, useState } from 'react'
 
 import { type NoticeAnswer, NoticeRecord } from '../activity/notice-record.tsx'
-import { Button } from '../components/button/button.tsx'
+import { IconFlag } from '../icons.ts'
+import { NoticeCard } from '../session/notice-card.tsx'
 import { InPlaceText } from './in-place-text.tsx'
 import type { SpecType } from './model.ts'
 import { SPEC_TYPE_ICONS } from './spec-icons.ts'
@@ -26,10 +27,6 @@ import { SPEC_TYPE_ICONS } from './spec-icons.ts'
  * In a Session New Spec started, the user asked for a Spec already: a new one the agent proposes
  * is created at once, and the card is only ever the quiet line that says so (issue #205).
  */
-
-const CARD = 'flex flex-col gap-2.5 rounded-lg border border-border bg-card p-3'
-
-const ASK = 'text-sm text-muted-foreground'
 
 const TYPES = 'flex gap-1.5'
 
@@ -105,25 +102,23 @@ export function CreateSpecProposal({
       )
     }
     return (
-      <div role="group" aria-label="Continue a Spec" className={CARD}>
-        <p className={ASK}>This Spec already exists</p>
-        <p className={EXISTING}>
-          <span className={EXISTING_KEY}>{existingKey}</span>
-          <span className={EXISTING_TITLE}>{proposed}</span>
-          <span className={EXISTING_TYPE}>
-            <TypeIcon type={understood} />
-            {understood}
+      <NoticeCard
+        icon={<IconFlag size="sm" />}
+        title="Continue a Spec"
+        name="Continue a Spec"
+        subject={
+          <span className={EXISTING}>
+            <span className={EXISTING_KEY}>{existingKey}</span>
+            <span className={EXISTING_TITLE}>{proposed}</span>
+            <span className={EXISTING_TYPE}>
+              <TypeIcon type={understood} />
+              {understood}
+            </span>
           </span>
-        </p>
-        <div className="flex justify-end gap-2">
-          <Button variant="ghost" size="sm" onClick={onDecline}>
-            Not now
-          </Button>
-          <Button variant="primary" size="sm" onClick={onContinue}>
-            Continue it
-          </Button>
-        </div>
-      </div>
+        }
+        refuse={{ label: 'Not now', onPress: onDecline }}
+        accept={{ label: 'Continue it', onPress: () => onContinue?.() }}
+      />
     )
   }
   if (state === 'created' && atOnce) {
@@ -145,8 +140,16 @@ export function CreateSpecProposal({
     return <p className={FOLDED}>{`Not now: « ${title} » was not created.`}</p>
   }
   return (
-    <div role="group" aria-label="Create a Spec" className={CARD}>
-      <p className={ASK}>Create the Spec</p>
+    <NoticeCard
+      icon={<IconFlag size="sm" />}
+      title="Start a Spec"
+      name="Create a Spec"
+      refuse={{ label: 'Not now', onPress: onDecline }}
+      accept={{
+        label: 'Start',
+        onPress: () => onCreate(title.trim() === '' ? proposed : title.trim(), type),
+      }}
+    >
       <InPlaceText label="Title of the Spec" value={title} onCommit={setTitle} />
       <div role="radiogroup" aria-label="Type" className={TYPES}>
         {ALL_TYPES.map((one) => (
@@ -163,19 +166,7 @@ export function CreateSpecProposal({
           </button>
         ))}
       </div>
-      <div className="flex justify-end gap-2">
-        <Button variant="ghost" size="sm" onClick={onDecline}>
-          Not now
-        </Button>
-        <Button
-          variant="primary"
-          size="sm"
-          onClick={() => onCreate(title.trim() === '' ? proposed : title.trim(), type)}
-        >
-          Create
-        </Button>
-      </div>
-    </div>
+    </NoticeCard>
   )
 }
 

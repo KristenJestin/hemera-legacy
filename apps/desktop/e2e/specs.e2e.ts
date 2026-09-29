@@ -183,7 +183,7 @@ describe('A free Session’s agent proposes a Spec, and Create makes the Session
 
   it('creates the Spec with its key, opens the panel and keeps the thread', async () => {
     await openNotices('Spec proposed')
-    await pressIn(PROPOSAL_CARD, 'Create')
+    await pressIn(PROPOSAL_CARD, 'Start')
     await awaitsRecord(`Spec proposed, ${KEY} `)
     await browser.waitUntil(async () => (await region(PANEL)) !== '', {
       timeout: 10_000,

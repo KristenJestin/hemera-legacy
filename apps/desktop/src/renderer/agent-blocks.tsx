@@ -744,6 +744,7 @@ export function drawNotice(entry: SessionEntry, context: AgentContext): ReactNod
       <SpecQuestion
         question={question}
         onAnswer={(answer) => context.spec.onAnswer(question.id, answer)}
+        bare
       />
     )
   }

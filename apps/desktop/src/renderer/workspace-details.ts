@@ -83,7 +83,7 @@ export function changesOf(counts: { staged: number; unstaged: number; untracked:
  */
 export function summaryOf(status: readonly RepositoryState[]): WorkspaceSummary | undefined {
   for (const one of status) {
-    if (one.git.ok) {
+    if (one.git?.ok === true) {
       return { branch: one.git.branch, commit: one.git.commit, changes: changesOf(one.git) }
     }
   }
@@ -109,7 +109,12 @@ export function workspaceCardOf(
         ? []
         : status === null
           ? workspace.repositories.map((one) => ({ path: one.relativePath, git: null }))
-          : status.map((one) => ({ path: one.relativePath, git: one.git })),
+          : status.map((one) => ({
+              path: one.relativePath,
+              git: one.git,
+              // A worktree not made yet says its step, and Git was not asked of it (#217).
+              step: one.step ?? undefined,
+            })),
     cleanedAt:
       workspace.cleanedAt === null
         ? undefined

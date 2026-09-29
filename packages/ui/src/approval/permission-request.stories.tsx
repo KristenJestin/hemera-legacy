@@ -1,8 +1,8 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
-import { expect, fn, userEvent, within } from 'storybook/test'
+import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
 
 import { DiffBlock } from '../activity/diff-block.tsx'
-import { PermissionRequest } from './permission-request.tsx'
+import { PermissionRecord, PermissionRequest } from './permission-request.tsx'
 
 /**
  * The gate at the size of a thread.
@@ -12,7 +12,7 @@ import { PermissionRequest } from './permission-request.tsx'
 const meta = {
   title: 'Blocks/Session/PermissionRequest',
   component: PermissionRequest,
-  tags: ['autodocs'],
+  tags: ['autodocs', 'updated'],
   parameters: { layout: 'padded' },
   args: {
     toolName: 'Edit',
@@ -39,6 +39,11 @@ const meta = {
 export default meta
 
 type Story = StoryObj<typeof meta>
+
+/** Unfolds the whole line and where it runs, as the reader does with the row's chevron. */
+async function unfold(canvasElement: HTMLElement): Promise<void> {
+  await userEvent.click(within(canvasElement).getByRole('button', { name: 'Show the whole line' }))
+}
 
 /** A change about to be made, with the parameters that decide the answer. */
 export const AskForAnEdit: Story = {
@@ -84,7 +89,7 @@ export const NothingButACommand: Story = {
     await expect(canvas.getByRole('button', { name: 'Allow once' })).toBeVisible()
     await expect(canvas.getByRole('button', { name: 'Reject once' })).toBeVisible()
     // No standing answer was offered, so nothing promises to remember one.
-    await expect(canvas.queryByText(/remembered for/)).toBeNull()
+    await expect(canvas.getByRole('button', { name: 'Allow once' })).not.toHaveAttribute('title')
     canvas.getByRole('button', { name: 'Allow once' }).click()
     await expect(args.onDecide).toHaveBeenCalledWith({
       optionId: '',
@@ -94,18 +99,22 @@ export const NothingButACommand: Story = {
   },
 }
 
-/** The options are ordered by the risk they carry, whatever order the agent sent them in. */
+/**
+ * The answers stand where every notice has them (review of #250): the refusal first and quiet, the
+ * one-shot permission last and primary, and a standing rule between the two, with how long it is
+ * remembered said on it — whatever order the agent sent them in.
+ */
 export const OrderedByRisk: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     const buttons = canvas.getAllByRole('button')
     await expect(buttons[0]).toHaveTextContent('Reject once')
-    await expect(buttons[1]).toHaveTextContent('Allow once')
-    await expect(buttons[2]).toHaveTextContent('Always allow edits')
+    await expect(buttons[1]).toHaveTextContent('Always allow edits (this session)')
+    await expect(buttons[2]).toHaveTextContent('Allow once')
   },
 }
 
-/** The arrows walk the options and Enter presses the focused one — the whole decision, no mouse. */
+/** Tab walks the answers in the order they are read, and Enter presses the focused one. */
 export const AnsweredByKeyboard: Story = {
   play: async ({ canvasElement, args }) => {
     const canvas = within(canvasElement)
@@ -113,34 +122,33 @@ export const AnsweredByKeyboard: Story = {
     refusal.focus()
     await expect(refusal).toHaveFocus()
 
-    await userEvent.keyboard('{ArrowRight}')
-    await expect(canvas.getByRole('button', { name: 'Allow once' })).toHaveFocus()
-
-    await userEvent.keyboard('{ArrowRight}')
-    const standing = canvas.getByRole('button', { name: 'Always allow edits' })
+    await userEvent.tab()
+    const standing = canvas.getByRole('button', { name: 'Always allow edits (this session)' })
     await expect(standing).toHaveFocus()
+
+    await userEvent.tab()
+    await expect(canvas.getByRole('button', { name: 'Allow once' })).toHaveFocus()
 
     await userEvent.keyboard('{Enter}')
     await expect(args.onDecide).toHaveBeenCalledWith({
-      optionId: 'always',
-      kind: 'allow_always',
-      name: 'Always allow edits',
+      optionId: 'once',
+      kind: 'allow_once',
+      name: 'Allow once',
     })
   },
 }
 
-/** Escape takes the refusal, and the refusal only: it never answers with a permission. */
-export const EscapeRefuses: Story = {
+/**
+ * Escape answers nothing (review of #250): among the notices it closes them, and a reader putting
+ * the panel away has not refused anything.
+ */
+export const EscapeAnswersNothing: Story = {
   play: async ({ canvasElement, args }) => {
     const canvas = within(canvasElement)
     canvas.getByRole('button', { name: 'Allow once' }).focus()
 
     await userEvent.keyboard('{Escape}')
-    await expect(args.onDecide).toHaveBeenCalledWith({
-      optionId: 'no',
-      kind: 'reject_once',
-      name: 'Reject once',
-    })
+    await expect(args.onDecide).not.toHaveBeenCalled()
   },
 }
 
@@ -173,10 +181,8 @@ export const HemeraToolOutsideTheRoot: Story = {
     label: 'Write file',
     subject: '../notes/todo.md',
     intent: 'asks to act outside the Workspace',
-    parameters: [
-      { label: 'Resolved path', value: '/home/ana/notes/todo.md' },
-      { label: 'Outside', value: '/home/ana/atlas' },
-    ],
+    // The path is what the card is about, so it is not said a second time as a parameter.
+    parameters: [{ label: 'Outside the Workspace', value: 'main' }],
     command: '/home/ana/notes/todo.md',
     options: [
       { optionId: 'allowed', kind: 'allow_once', name: 'Allow once' },
@@ -187,17 +193,15 @@ export const HemeraToolOutsideTheRoot: Story = {
   },
   play: async ({ canvasElement, args }) => {
     const canvas = within(canvasElement)
-    // One line: the label, what it is about, and what it asks; no code name, no second sentence.
-    const head = canvas.getByText('Write file').parentElement
-    await expect(head?.textContent).toBe(
-      'Write file../notes/todo.mdasks to act outside the WorkspaceWaiting for you',
-    )
+    await unfold(canvasElement)
+    // Unfolded, what the call is titles the row, and the whole path is under it.
+    await expect(await canvas.findByText('Write file', { selector: '.absolute' })).toBeVisible()
     await expect(canvas.queryByText('fs_write')).toBeNull()
     await expect(getComputedStyle(canvas.getByText('../notes/todo.md')).fontFamily).toMatch(
       /mono|Fira/i,
     )
     await expect(canvas.getByRole('group', { name: 'Permission for Write file' })).toBeVisible()
-    await expect(canvas.getAllByText('/home/ana/notes/todo.md').length).toBeGreaterThan(0)
+    await expect(canvas.getAllByText('/home/ana/notes/todo.md')).toHaveLength(1)
     // No "always": the two answers are about this call.
     await expect(canvas.queryByText(/always/i)).toBeNull()
     await userEvent.click(canvas.getByRole('button', { name: 'Allow once' }))
@@ -222,7 +226,180 @@ export const AgentCallWithItsSubject: Story = {
     const canvas = within(canvasElement)
     await expect(canvas.getByText('Edit file')).toBeVisible()
     await expect(canvas.getByText('src/session/session.tsx')).toBeVisible()
-    await expect(canvas.getByText('asks for your permission')).toBeVisible()
+    // What it asks is what the card is: no sentence says it again (#237).
+    await expect(canvas.queryByText('asks for your permission')).toBeNull()
     await expect(canvas.queryByText('Edit session.tsx')).toBeNull()
+  },
+}
+
+/** The two answers of a question of Hemera's own tools: this call only, nothing remembered. */
+const ONCE = [
+  { optionId: 'allowed', kind: 'allow_once' as const, name: 'Allow once' },
+  { optionId: 'refused', kind: 'reject_once' as const, name: 'Refuse' },
+]
+
+/**
+ * A one-off in the Workspace (issue #239): asked about because the agent wrote the line, which the
+ * head says, and said to run in the Workspace — nothing about it is outside anything.
+ */
+export const OneOffInside: Story = {
+  args: {
+    toolName: 'commands_run',
+    label: 'Run command',
+    subject: 'sleep 120',
+    intent: 'asks to run a line the agent wrote',
+    parameters: [{ label: 'In', value: 'main' }],
+    command: 'sleep 120',
+    options: ONCE,
+    scope: undefined,
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await unfold(canvasElement)
+    await expect(canvas.queryByText(/asks to/)).toBeNull()
+    await expect(canvas.getByText('In')).toBeVisible()
+    await expect(canvas.getByText('main')).toBeVisible()
+    await expect(canvas.queryByText(/outside/i)).toBeNull()
+    await expect(canvas.queryByText(/resolved/i)).toBeNull()
+  },
+}
+
+/** A one-off in one of the Project's repositories: the repository with its mark, then the path. */
+export const OneOffInARepository: Story = {
+  args: {
+    ...OneOffInside.args,
+    parameters: [
+      { label: 'In', value: 'v2', repository: { path: 'v2', icon: 'server' } },
+      { label: 'Path', value: 'scripts' },
+    ],
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await unfold(canvasElement)
+    const repository = canvas.getByText('v2').closest('dd')
+    // The repository wears its icon, as it does in the Project's settings.
+    await expect(repository?.querySelector('svg')).not.toBeNull()
+    await expect(canvas.getByText('scripts')).toBeVisible()
+    await expect(canvas.queryByText(/outside/i)).toBeNull()
+  },
+}
+
+/** A one-off the engine found outside the Workspace: said so, and where it would run. */
+export const OneOffOutside: Story = {
+  args: {
+    ...OneOffInside.args,
+    intent: 'asks to run a line the agent wrote, outside the Workspace',
+    parameters: [
+      { label: 'Outside the Workspace', value: 'main' },
+      { label: 'Path', value: '/home/ana/notes' },
+    ],
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await unfold(canvasElement)
+    await expect(canvas.getByText('Outside the Workspace')).toBeVisible()
+    await expect(canvas.getByText('/home/ana/notes')).toBeVisible()
+  },
+}
+
+/**
+ * A one-off whose line is longer than the card (issue #237): the whole line, wrapped in the
+ * terminal's letters rather than cut, where it would run, and the two answers — said once each,
+ * with no badge, no heading and no sentence around them.
+ */
+export const TheWholeLine: Story = {
+  args: {
+    toolName: 'commands_run',
+    label: 'Run command',
+    subject:
+      'pnpm --filter @atlas/api vitest run src/invoices/csv.stream.spec.ts --reporter=verbose --coverage.enabled=false',
+    intent: 'asks to run a line the agent wrote',
+    parameters: [{ label: 'In', value: 'api', repository: { path: 'api', icon: 'server' } }],
+    command:
+      'pnpm --filter @atlas/api vitest run src/invoices/csv.stream.spec.ts --reporter=verbose --coverage.enabled=false',
+    options: ONCE,
+    scope: undefined,
+  },
+  decorators: [
+    (Story) => (
+      <div className="w-notices">
+        <Story />
+      </div>
+    ),
+  ],
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement)
+    const command = args.command ?? ''
+    // Closed, the row says the line once, cut to one line, and no title.
+    await expect(canvas.getAllByText(command)).toHaveLength(1)
+    await expect(canvas.queryByText('Run command')).toBeNull()
+    await expect(canvas.queryByText(/Waiting/)).toBeNull()
+    await expect(canvas.queryByText(/asks/)).toBeNull()
+    const answers = canvas
+      .getAllByRole('button')
+      .map((one) => one.textContent)
+      .filter((text) => text !== '')
+    await expect(answers).toEqual(['Refuse', 'Allow once'])
+    // Unfolded: the title takes the cut line's place, and the whole line opens under it once, in
+    // its block, wrapped, with where it runs under it.
+    await unfold(canvasElement)
+    await expect(await canvas.findByText('Run command')).toBeVisible()
+    const whole = await canvas.findByText(command, { selector: 'pre' })
+    await waitFor(() => {
+      expect(
+        canvas.getAllByText(command).filter((one) => one.closest('[aria-hidden]') === null),
+      ).toEqual([whole])
+    })
+    await expect(whole.scrollWidth).toBeLessThanOrEqual(whole.clientWidth)
+    await expect(whole.getBoundingClientRect().height).toBeGreaterThan(20)
+    await expect(canvas.getByText('api')).toBeVisible()
+  },
+}
+
+/**
+ * What the thread keeps of a permission answered among the Session's notices (issue #237): one
+ * closed line — the shield, the dot of the answer, the call and its line — and, opened, where it
+ * ran, the whole line and the answer with its time. Nothing in it to press.
+ */
+export const KeptAllowed: Story = {
+  render: () => (
+    <PermissionRecord
+      toolName="commands_run"
+      label="Run command"
+      subject="sleep 120"
+      parameters={[{ label: 'In', value: 'main' }]}
+      command="sleep 120"
+      standing="allowed"
+      decision={{ answer: 'Allow once', at: '10:42' }}
+    />
+  ),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const record = canvas.getByRole('group', { name: 'Permission for Run command, allowed' })
+    await expect(within(record).getByText('sleep 120')).toBeVisible()
+    await expect(within(record).queryByRole('button', { name: 'Allow once' })).toBeNull()
+    await userEvent.click(within(record).getByRole('button'))
+    await expect(await within(record).findByText('10:42')).toBeVisible()
+    await expect(within(record).getByText('main')).toBeVisible()
+  },
+}
+
+/** Still waiting: the same line, its dot waiting; the answer is given in the notices. */
+export const KeptWaiting: Story = {
+  render: () => (
+    <PermissionRecord
+      toolName="commands_run"
+      label="Run command"
+      subject="sleep 120"
+      command="sleep 120"
+      standing="pending"
+    />
+  ),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await expect(
+      canvas.getByRole('group', { name: 'Permission for Run command, waiting' }),
+    ).toBeVisible()
+    await expect(canvas.queryByRole('button', { name: /Allow|Refuse/ })).toBeNull()
   },
 }

@@ -197,10 +197,11 @@ function Tabs({
       {/* One press, one Project. It sits after the last tab, where the next one will be. */}
       <Tooltip label="Add a Project" side="bottom">
         {/* Centred on its own: the strip stretches its children now, and this one is a control
-            rather than a tab — it has no sheet under it to reach down to. */}
+            rather than a tab — it has no sheet under it to reach down to. Whole, like a tab: a
+            strip too narrow for its Projects scrolls on to it rather than squeezing it away. */}
         <IconButton
           variant="ghost"
-          className="no-drag self-center"
+          className="no-drag shrink-0 self-center"
           icon={<IconPlus size="md" />}
           aria-label="Add a Project"
           onClick={onAddProject}

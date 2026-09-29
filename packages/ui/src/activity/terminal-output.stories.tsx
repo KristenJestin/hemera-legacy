@@ -18,7 +18,7 @@ const LINES = Array.from(
 ).join('\n')
 
 const meta = {
-  tags: ['autodocs'],
+  tags: ['autodocs', 'updated'],
   title: 'Blocks/Activity/TerminalOutput',
   component: TerminalOutput,
   parameters: { layout: 'padded' },
@@ -43,7 +43,7 @@ export const Live: Story = {
     const canvas = within(canvasElement)
     const row = canvas.getByRole('button', { name: /pnpm check/ })
     await expect(row).toHaveAttribute('aria-expanded', 'true')
-    await expect(canvas.getByText('Running')).toBeVisible()
+    await expect(canvas.getByRole('img', { name: 'Running' })).toBeVisible()
     const box = canvas.getByText(/\[39\] packages\/ui\/src\/session\/session\.tsx/)
     // The newest line is where the reader is looking: the box drives its own scroll, and it is
     // the only place in the application where what arrives moves the view.
@@ -60,7 +60,7 @@ export const Released: Story = {
     const canvas = within(canvasElement)
     const row = canvas.getByRole('button', { name: /pnpm check/ })
     await expect(row).toHaveAttribute('aria-expanded', 'false')
-    await expect(canvas.getByText('Released')).toBeVisible()
+    await expect(canvas.getByRole('img', { name: 'Released' })).toBeVisible()
     await userEvent.click(row)
     // Waited out rather than read the frame the press landed: the body unfolds from no height
     // at all, and nothing of it is visible until the room under the row has been made.

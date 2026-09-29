@@ -177,7 +177,7 @@ function Controlled({
 }
 
 const meta = {
-  tags: ['autodocs', 'updated'],
+  tags: ['autodocs'],
   title: 'Blocks/Workspace/CreateWorkspaceDialog',
   component: CreateWorkspaceDialog,
   render: (args) => <Controlled {...args} />,

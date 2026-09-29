@@ -31,11 +31,6 @@ export interface ToolsState {
   /** The catalogue of each Project the settings have read, oldest first. */
   catalogues: ReadonlyMap<string, readonly Command[]>
   /**
-   * The services of each open Session's Workspace, whoever started them (#217): what its Commands
-   * tab lists beside the catalogue, read when the Session opens and again whenever a run moves.
-   */
-  services: ReadonlyMap<string, readonly CommandRun[]>
-  /**
    * Whether `portless` is on this machine, asked once (D8-10 as amended by recette 1); false until
    * the engine answered, so a Portless box is never offered on a machine that may not have it.
    */
@@ -48,7 +43,6 @@ const EMPTY: ToolsState = {
   runs: new Map(),
   contexts: new Map(),
   catalogues: new Map(),
-  services: new Map(),
   portlessInstalled: false,
   refusal: null,
 }
@@ -59,9 +53,6 @@ let state: ToolsState = EMPTY
 
 /** Whether the engine is being listened to, so two pages never subscribe twice. */
 let listening = false
-
-/** What each Session's services were asked for with: its Project, and its Workspace (#217). */
-const servicesAsked = new Map<string, { projectId: string; workspaceId: string | null }>()
 
 export function subscribeToTools(listener: () => void): () => void {
   listeners.add(listener)
@@ -115,9 +106,6 @@ export function listenToTools(): () => void {
   listening = true
   const stop = window.hemera.on((event: EngineEvent) => {
     if (event.event === 'run') {
-      // A service of any Workspace may have started or stopped, whoever started it: the lists
-      // held are read again (#217).
-      for (const sessionId of servicesAsked.keys()) void readSessionServices(sessionId)
       // A run no Session asked for — a preparation's step — is in no Session's panel (Decided 11).
       if (event.sessionId !== null) {
         holding(event.sessionId, withRun(runsOf(event.sessionId), event.run))
@@ -182,6 +170,19 @@ export async function readContext(sessionId: string): Promise<void> {
     const contexts = new Map(state.contexts)
     contexts.set(sessionId, view)
     replace({ ...state, contexts })
+  } catch (cause) {
+    replace({ ...state, refusal: message(cause) })
+  }
+}
+
+/**
+ * Runs again a run of the Session, from its chip or its row in the history (issue #237): a
+ * command of the catalogue as the command, a one-off as the same line in the same folder.
+ */
+export async function runAgain(sessionId: string, runId: string): Promise<void> {
+  try {
+    const run = await window.hemera.invoke('commands.runAgain', { sessionId, runId })
+    holding(sessionId, withRun(runsOf(sessionId), run))
   } catch (cause) {
     replace({ ...state, refusal: message(cause) })
   }
@@ -347,44 +348,4 @@ export async function removeCommand(projectId: string, name: string): Promise<vo
 export function forgetToolsRefusal(): void {
   if (state.refusal === null) return
   replace({ ...state, refusal: null })
-}
-
-/** The services of a Session's Workspace, whoever started them; none until they were read. */
-export function sessionServicesOf(sessionId: string | null): readonly CommandRun[] {
-  if (sessionId === null) return []
-  return state.services.get(sessionId) ?? []
-}
-
-/**
- * Reads the services of a Session's Workspace (#217): every `serve` run of it that is running,
- * whoever started it, for its Commands tab. Asked with a Project and a Workspace, it keeps them,
- * and the next reading of that Session — the engine's `run` event — asks the same again.
- */
-export async function readSessionServices(
-  sessionId: string,
-  asked?: { projectId: string; workspaceId: string | null },
-): Promise<void> {
-  if (asked !== undefined) servicesAsked.set(sessionId, asked)
-  const question = servicesAsked.get(sessionId)
-  if (question === undefined) return
-  try {
-    const read = await window.hemera.invoke('commands.services', question)
-    const services = new Map(state.services)
-    services.set(sessionId, read)
-    replace({ ...state, services })
-  } catch (cause) {
-    replace({ ...state, refusal: message(cause) })
-  }
-}
-
-/** Stops one service of a Session's Workspace, that instance alone, whoever started it. */
-export async function stopSessionService(sessionId: string, runId: string): Promise<void> {
-  const question = servicesAsked.get(sessionId)
-  if (question === undefined) return
-  try {
-    await window.hemera.invoke('commands.stopService', { projectId: question.projectId, runId })
-    await readSessionServices(sessionId)
-  } catch (cause) {
-    replace({ ...state, refusal: message(cause) })
-  }
 }

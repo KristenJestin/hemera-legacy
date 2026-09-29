@@ -616,49 +616,55 @@ describe('A refusal says the Session the start had written', () => {
   })
 })
 
-describe('A launch waiting on a Workspace that will never be ready ends', () => {
-  test('A preparation that fails fails the launches that waited on it', async () => {
-    opened = await openWindow(dataFolder, fakeAgent())
-    const seen = await opened.running(
-      Effect.gen(function* () {
-        const { project, key, specId } = yield* atlas()
-        const launched = yield* Launches
-        const workspace = yield* making(project.id, specId, key)
-        const asked = yield* launched.request(specId, workspace.id)
-        // The repository the worktree was to be made from is gone: the step fails, and the
-        // Workspace with it — what waited on it has nothing left to wait for (D8-13).
-        rmSync(join(dataFolder, 'main', 'sources', 'api'), { recursive: true, force: true })
-        const prepared = yield* (yield* Preparation).prepare(workspace.id)
-        return { asked, prepared, launch: yield* launched.one(asked.id), builds: yield* builds }
-      }),
-    )
-    expect(seen.prepared.state).toBe('failed')
-    expect(seen.launch.state).toBe('failed')
-    expect(seen.launch.detail).toContain('The Workspace could not be prepared: ')
-    expect(seen.builds).toEqual([])
-  })
+// Both make a real worktree and then fail or remove it: on a Windows runner shared with the
+// stories, that git work alone measured 18 to 32 seconds, over the thirty a test is given.
+describe(
+  'A launch waiting on a Workspace that will never be ready ends',
+  { timeout: 60_000 },
+  () => {
+    test('A preparation that fails fails the launches that waited on it', async () => {
+      opened = await openWindow(dataFolder, fakeAgent())
+      const seen = await opened.running(
+        Effect.gen(function* () {
+          const { project, key, specId } = yield* atlas()
+          const launched = yield* Launches
+          const workspace = yield* making(project.id, specId, key)
+          const asked = yield* launched.request(specId, workspace.id)
+          // The repository the worktree was to be made from is gone: the step fails, and the
+          // Workspace with it — what waited on it has nothing left to wait for (D8-13).
+          rmSync(join(dataFolder, 'main', 'sources', 'api'), { recursive: true, force: true })
+          const prepared = yield* (yield* Preparation).prepare(workspace.id)
+          return { asked, prepared, launch: yield* launched.one(asked.id), builds: yield* builds }
+        }),
+      )
+      expect(seen.prepared.state).toBe('failed')
+      expect(seen.launch.state).toBe('failed')
+      expect(seen.launch.detail).toContain('The Workspace could not be prepared: ')
+      expect(seen.builds).toEqual([])
+    })
 
-  test('A cleanup cancels the launches that waited on the Workspace', async () => {
-    opened = await openWindow(dataFolder, fakeAgent())
-    const seen = await opened.running(
-      Effect.gen(function* () {
-        const { project, key, specId } = yield* atlas()
-        const launched = yield* Launches
-        const workspaces = yield* Workspaces
-        const workspace = yield* making(project.id, specId, key)
-        const asked = yield* launched.request(specId, workspace.id)
-        // The user removes the Workspace while the build still waits for it (D8-14): nothing will
-        // ever prepare that folder, and the launch says so on itself (D8-13).
-        const removed = yield* workspaces.cleanup(workspace.id)
-        return { asked, removed, launch: yield* launched.one(asked.id), builds: yield* builds }
-      }),
-    )
-    expect(seen.removed.state).toBe('cleaned')
-    expect(seen.launch.state).toBe('cancelled')
-    expect(seen.launch.detail).toBe('The Workspace was removed')
-    expect(seen.builds).toEqual([])
-  })
-})
+    test('A cleanup cancels the launches that waited on the Workspace', async () => {
+      opened = await openWindow(dataFolder, fakeAgent())
+      const seen = await opened.running(
+        Effect.gen(function* () {
+          const { project, key, specId } = yield* atlas()
+          const launched = yield* Launches
+          const workspaces = yield* Workspaces
+          const workspace = yield* making(project.id, specId, key)
+          const asked = yield* launched.request(specId, workspace.id)
+          // The user removes the Workspace while the build still waits for it (D8-14): nothing will
+          // ever prepare that folder, and the launch says so on itself (D8-13).
+          const removed = yield* workspaces.cleanup(workspace.id)
+          return { asked, removed, launch: yield* launched.one(asked.id), builds: yield* builds }
+        }),
+      )
+      expect(seen.removed.state).toBe('cleaned')
+      expect(seen.launch.state).toBe('cancelled')
+      expect(seen.launch.detail).toBe('The Workspace was removed')
+      expect(seen.builds).toEqual([])
+    })
+  },
+)
 
 describe('A failed start is retried on its own', () => {
   test('A failed agent launch is retried without redoing the preparation', async () => {

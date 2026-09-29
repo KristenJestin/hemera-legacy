@@ -12,8 +12,14 @@ export {
   type ButtonState,
   type IconButtonProps,
 } from './components/button/button.tsx'
-export { Dialog, DialogClose, type DialogProps } from './components/dialog/dialog.tsx'
+export {
+  Dialog,
+  DialogClose,
+  type DialogProps,
+  type DialogSize,
+} from './components/dialog/dialog.tsx'
 export { Badge, type BadgeProps } from './components/badge/badge.tsx'
+export { Checkbox, type CheckboxProps } from './components/checkbox/checkbox.tsx'
 export { Input, Textarea, type InputProps, type TextareaProps } from './components/field/field.tsx'
 export { Menu, type MenuItem, type MenuProps } from './components/menu/menu.tsx'
 export {
@@ -23,6 +29,15 @@ export {
   type SelectProps,
 } from './components/select/select.tsx'
 export { Loading, type LoadingProps } from './components/loading/loading.tsx'
+/** What an agent is doing, said by Hemera's face: its expression, its motion, its colour. */
+export { Face, type FaceProps, type FaceSize } from './components/face/face.tsx'
+export type { FaceState } from './components/face/states.ts'
+/** Where a piece of work stands, said as a dot: a tool call, a turn, a row of a list. */
+export {
+  StatusDot,
+  type StatusDotProps,
+  type StatusTone,
+} from './components/status-dot/status-dot.tsx'
 export {
   Tooltip,
   TooltipProvider,
@@ -69,13 +84,35 @@ export { Sidebar, type SidebarProps } from './shell/sidebar.tsx'
 /** The Project surfaces: where one is created, and where the one in front is configured. */
 export { EMPTY_DRAFT, ProjectDialog, type ProjectDialogProps } from './project/project-dialog.tsx'
 export {
+  CommandList,
   DangerZone,
   ProjectSettings,
   RepositoryList,
   type ProjectSettingsProps,
+  type ProjectSettingsSection,
 } from './project/project-settings.tsx'
+/** The dialogs a repository and a command of the Project are added and edited in. */
+export { CommandDialog, type CommandDialogProps } from './project/command-dialog.tsx'
+export { RepositoryDialog, type RepositoryDialogProps } from './project/repository-dialog.tsx'
 
-export type { ProjectDraft, RepositoryLine } from './project/model.ts'
+export {
+  REPOSITORY_ICONS,
+  type CommandLine,
+  type ProjectDraft,
+  type ProjectSettingsDraft,
+  type RepositoryDraft,
+  type RepositoryIcon,
+  type RepositoryLine,
+} from './project/model.ts'
+/** The preparation of a Project: the ordered recipe each dedicated Workspace replays (D8-05). */
+export {
+  PreparationEditor,
+  type PreparationEditorProps,
+  type RecipeCommand,
+  type RecipeKind,
+  type RecipeStepDraft,
+  type RecipeStepLine,
+} from './project/preparation-editor.tsx'
 
 /** The settings of the application, and the bell of the chrome bar. */
 export {
@@ -119,15 +156,22 @@ export {
  * The `Start chat` of the Home and the `Send` of a Session are one control: the word on it is
  * the page's, and the write is `onSend`, which answers with the reason it could not be written.
  */
-export { Composer, type ComposerProps } from './composer/composer.tsx'
-export { PromptInput, type PromptInputProps, type PromptShape } from './composer/prompt-input.tsx'
-export { ComposerActions, type ComposerActionsProps } from './composer/composer-actions.tsx'
 export {
+  Composer,
+  ComposerActions,
   ComposerAttachments,
+  MentionMenu,
+  PromptInput,
+  WorkspacePill,
+  type ComposerActionsProps,
   type ComposerAttachmentsProps,
-} from './composer/composer-attachments.tsx'
-export { MentionMenu, type MentionMenuProps } from './composer/mention-menu.tsx'
-export { WorkspacePill } from './composer/workspace-pill.tsx'
+  type ComposerProps,
+  type MentionMenuProps,
+  type PromptInputProps,
+  type PromptShape,
+  type WorkspaceChoice,
+  type WorkspacePillProps,
+} from './composer/index.ts'
 
 /** The Journal: what happened, in the order it happened. */
 export {
@@ -143,6 +187,7 @@ export {
   type JournalProps,
 } from './journal/journal.tsx'
 export { Gutter, type GutterProps } from './shell/gutter.tsx'
+export { StartScreen } from './shell/start-screen.tsx'
 export {
   HOME_ENTRY,
   JOURNAL_ENTRY,
@@ -189,6 +234,8 @@ export {
   type MessageHeaderProps,
   type MessageRowProps,
 } from './message/message.tsx'
+/** What an agent says, drawn from the Markdown that is still arriving. */
+export { AgentText } from './message/agent-text.tsx'
 export { MessageText } from './message/message-text.tsx'
 export {
   type MessageAuthor,
@@ -219,4 +266,290 @@ export {
   type ArchivedSession,
   type ArchivedSessionsProps,
   type SessionHeaderProps,
+  type SessionRenaming,
 } from './session/session.tsx'
+
+/** A turn with an agent, drawn as it happens: what it thought, what it called, what it ran, and
+ * what it changed. These are the blocks the thread of a Session with an agent is made of. */
+export { Disclosure, type DisclosureProps } from './activity/disclosure.tsx'
+export { ThoughtBlock, type ThoughtBlockProps } from './activity/thought-block.tsx'
+export {
+  ToolCallCard,
+  type ToolCallCardProps,
+  type ToolKind,
+  type ToolLocation,
+  type ToolStatus,
+  type ToolSubject,
+  toolKindLabel,
+} from './activity/tool-call-card.tsx'
+export { TerminalOutput, type TerminalOutputProps } from './activity/terminal-output.tsx'
+export { DiffBlock, type DiffBlockProps } from './activity/diff-block.tsx'
+/** The calls of a turn between two things the agent said, folded into one row (issue #149). */
+export {
+  ActionGroup,
+  type ActionGroupProps,
+  type ActionGroupStatus,
+} from './activity/action-group.tsx'
+/** The tools Hemera lends the agent (HEM-18): the call it made, and the command it ran. A call
+ * to one of Hemera's own tools is not the agent's business alone, so it says whose it is. */
+export {
+  HemeraToolCall,
+  type HemeraToolArgument,
+  type HemeraToolCallProps,
+  type HemeraToolMark,
+  type HemeraToolStatus,
+} from './activity/hemera-tool-call.tsx'
+export { CommandRun, type CommandRunProps, type CommandState } from './activity/command-run.tsx'
+export {
+  CallOutcome,
+  CallOutcomeDetails,
+  type CallOutcomeDetailsProps,
+  type CallOutcomeProps,
+  type CallPermission,
+} from './activity/call-outcome.tsx'
+/** A command the agent proposes for the catalogue, and the human's answer (D8-11). */
+export {
+  CommandProposal,
+  CommandProposalRecord,
+  type CommandProposalProps,
+  type CommandProposalRecordProps,
+  type CommandProposalState,
+} from './activity/command-proposal.tsx'
+/** A change to the Project's setup the agent proposes, and what the thread keeps of it (#218). */
+export {
+  SetupProposal,
+  SetupProposalRecord,
+  type SetupProposalDetail,
+  type SetupProposalProps,
+  type SetupProposalRecordProps,
+  type SetupProposalState,
+} from './activity/setup-proposal.tsx'
+/** What stays in the thread of something that waited for a human (issue #237). */
+export {
+  NoticeRecord,
+  type NoticeAnswer,
+  type NoticeRecordProps,
+} from './activity/notice-record.tsx'
+/** The seven types of a command and the icon the design system fixes for each (D8-07). */
+export {
+  COMMAND_SCOPES,
+  COMMAND_TYPES,
+  COMMAND_TYPE_ICONS,
+  COMMAND_TYPE_LABELS,
+  type CommandScope,
+  type CommandType,
+} from './activity/command-type.ts'
+
+/** The gate a turn stops at, and the one line the answer leaves behind. */
+export {
+  PermissionRecord,
+  PermissionRequest,
+  type PermissionRecordProps,
+  type PermissionStanding,
+  type PermissionOption,
+  type PermissionOptionKind,
+  type PermissionParameter,
+  type PermissionRequestProps,
+} from './approval/permission-request.tsx'
+export { DecisionSummary, type DecisionSummaryProps } from './approval/decision-summary.tsx'
+
+/**
+ * What an agent advertises, what the reader sets, and what the session has spent.
+ *
+ * The agent, its model and its effort are one control — `AgentModelMenu` — because they are one
+ * question asked in three steps, and three selectors in the foot of the composer was three
+ * controls wrapping onto a second line. What the agent may do without asking is a different
+ * question and stays a control of its own.
+ */
+export {
+  AgentModelMenu,
+  BlockedBanner,
+  ModeSelector,
+  UsageMeter,
+  type AgentChoice,
+  type AgentListing,
+  type AgentModelMenuProps,
+  type BlockedBannerProps,
+  type EffortChoice,
+  type ModeChoice,
+  type ModeSelectorProps,
+  type ModelChoice,
+  type OfferedAgent,
+  type UsageCost,
+  type UsageMeterProps,
+} from './composer/index.ts'
+
+/** The agents this machine has, with what it can say about each. */
+export {
+  AgentsSection,
+  type AgentOnTheMachine,
+  type AgentStanding,
+  type AgentsSectionProps,
+  type BareMode,
+} from './settings/agents-section.tsx'
+
+/** What a Session says about itself beside its thread: its plan, its files, a turn that was
+ * stopped, and a thread that was rebuilt rather than resumed. */
+export {
+  PlanPanel,
+  type PlanEntry,
+  type PlanPanelProps,
+  type PlanPriority,
+  type PlanStatus,
+} from './session/plan-panel.tsx'
+export {
+  SessionDetails,
+  type SessionDetailsProps,
+  type SessionDetailsTab,
+  type TouchedFile,
+} from './session/session-details.tsx'
+export {
+  type GoingOnAgent,
+  type GoingOnItem,
+  type GoingOnRun,
+  type GoingOnShell,
+  type GoingOnState,
+} from './session/going-on.ts'
+export { GoingOnLine, type GoingOnLineProps } from './session/going-on-line.tsx'
+export type { RunRepository } from './session/run-place.tsx'
+export { RunCommand, type RunCatalogueEntry, type RunCommandProps } from './session/run-command.tsx'
+export {
+  ContextView,
+  type ContextCommand,
+  type ContextEntry,
+  type ContextTool,
+  type ContextViewProps,
+  type ContextWorkspace,
+} from './session/context-view.tsx'
+export {
+  BareModeState,
+  type BareModeEntry,
+  type BareModeStateProps,
+} from './session/bare-mode-state.tsx'
+export { StoppedTurn, type StoppedTurnProps } from './session/stopped-turn.tsx'
+export { AgentReport, type AgentReportProps } from './session/agent-report.tsx'
+/** What the turn is doing right now, at the end of the thread while it runs. */
+export {
+  ActivityRow,
+  QUIET_AFTER_MS,
+  STUCK_AFTER_MS,
+  type ActivityRowProps,
+  type ActivityState,
+} from './session/activity-row.tsx'
+/** The row above the box: what the turn is doing, and what it has spent. */
+export { TurnLine, type TurnLineProps } from './session/turn-line.tsx'
+export {
+  SessionHistory,
+  type HistoryItem,
+  type SessionHistoryProps,
+} from './session/session-history.tsx'
+export { SessionCatalogue, type SessionCatalogueProps } from './session/session-catalogue.tsx'
+export {
+  SessionNotices,
+  type NoticeGroup,
+  type NoticeItem,
+  type NoticeTone,
+  type SessionNoticesProps,
+} from './session/session-notices.tsx'
+export {
+  ResumeFallbackBanner,
+  type ResumeFallbackBannerProps,
+} from './session/resume-fallback-banner.tsx'
+
+/** The variables, the services and the details of a run of a Workspace (lot 20). */
+export { VariablesEditor, type VariablesEditorProps } from './workspace/variables-editor.tsx'
+export { ServiceList, type ServiceListProps } from './workspace/service-list.tsx'
+export { RunDetails, type RunDetailsProps, type RunState } from './activity/run-details.tsx'
+export type {
+  PortClaim,
+  PortConflict,
+  Readiness,
+  ServiceLine,
+  VariableLine,
+} from './workspace/services-model.ts'
+/** The Workspace and its preparation (lot 20). */
+export { CleanupDialog, type CleanupDialogProps } from './workspace/cleanup-dialog.tsx'
+export {
+  CreateWorkspaceDialog,
+  type CreateWorkspaceDialogProps,
+} from './workspace/create-workspace-dialog.tsx'
+export {
+  type GitState,
+  type PlanRepositoryLine,
+  type PlanRepositoryRead,
+  type PreparationStepLine,
+  type StepKind,
+  type StepState,
+  type WorkspaceDraft,
+  type WorkspaceRepositoryLine,
+  type WorkspaceRow,
+  type WorkspaceState,
+  type WorkspaceSummary,
+} from './workspace/model.ts'
+export { PreparationSteps, type PreparationStepsProps } from './workspace/preparation-steps.tsx'
+export { WorkspaceList, type WorkspaceListProps } from './workspace/workspace-list.tsx'
+export {
+  WorkspaceRepositories,
+  type WorkspaceRepositoriesProps,
+} from './workspace/workspace-repositories.tsx'
+/**
+ * The Spec panel of a `define` Session (lot 19, issue #164): folded to a small frame of its three
+ * phases at the window's edge, and open one frame — the head, the Spec as one column under the
+ * headings of its phases, and one footer — the two trading places by a swap; the pieces a Session
+ * reading or reworking a Spec adds to it; and the three blocks of the thread — the thin Hemera line
+ * of what the agent was handed, a question of the Spec asked in the chat, and the agent proposing a
+ * Spec in a `free` Session. View types only: the domain arrives with phase 1.
+ */
+export { SpecPanel, type SpecPanelProps } from './spec/spec-panel.tsx'
+export { SpecPart, type SpecPartProps } from './spec/spec-part.tsx'
+export { SpecHead, type SpecHeadProps } from './spec/spec-head.tsx'
+export { SectionPart, type SectionPartProps } from './spec/section-part.tsx'
+export { StoriesPart, type StoriesPartProps } from './spec/stories-part.tsx'
+export { TasksPart, type TasksPartProps } from './spec/tasks-part.tsx'
+export { QuestionsPart, type QuestionsPartProps } from './spec/questions-part.tsx'
+export { ReaderBar, type ReaderBarProps } from './spec/reader-bar.tsx'
+export { ReworkDialog, type ReworkDialogProps } from './spec/rework-dialog.tsx'
+export { MissionBrief, type MissionBriefProps } from './spec/mission-brief.tsx'
+export {
+  SpecQuestion,
+  SpecQuestionRecord,
+  type SpecQuestionProps,
+  type SpecQuestionRecordProps,
+} from './spec/spec-question.tsx'
+export { WorkspaceActions, type WorkspaceActionsProps } from './spec/workspace-actions.tsx'
+export {
+  CreateSpecProposal,
+  SpecProposalRecord,
+  type CreateSpecProposalProps,
+  type ProposalState,
+  type SpecProposalRecordProps,
+} from './spec/create-spec-proposal.tsx'
+export type {
+  Author,
+  Executor,
+  GateCheck,
+  GateCheckView,
+  LaunchState,
+  LaunchView,
+  LaunchWorkspace,
+  Mark,
+  PhaseName,
+  PhaseState,
+  PhaseView,
+  ReaderView,
+  ReadinessItem,
+  ReadinessView,
+  RevisionView,
+  SectionName,
+  SectionView,
+  SpecAnswer,
+  SpecQuestionOption,
+  SpecQuestionView,
+  SpecStatus,
+  SpecTarget,
+  SpecType,
+  SpecView,
+  SpecWorkspace,
+  StoryView,
+  TaskView,
+} from './spec/model.ts'

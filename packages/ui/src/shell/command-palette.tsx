@@ -22,7 +22,7 @@ import type { ProjectTone } from './model.ts'
  * which of the two is being read, so the eye never has to infer it from the results.
  */
 const BACKDROP =
-  'fixed inset-0 bg-overlay backdrop-blur-xs backdrop-motion data-starting-style:opacity-0 data-starting-style:backdrop-blur-none data-ending-style:opacity-0 data-ending-style:backdrop-blur-none'
+  'fixed inset-0 bg-overlay backdrop-blur-xs backdrop-motion data-starting-style:opacity-0 data-ending-style:opacity-0'
 
 /**
  * Near the top rather than dead centre: a list that grows downwards from the middle of the

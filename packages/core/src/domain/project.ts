@@ -24,6 +24,24 @@ export const PROJECT_TONES = ['primary', 'info', 'success', 'warning', 'neutral'
 
 export type ProjectTone = (typeof PROJECT_TONES)[number]
 
+/**
+ * The icons a repository of a Project may wear (recette 1, item 11): a fixed set, drawn by the
+ * design system, so a repository reads as what it is — a server, a web front, a database — and
+ * never as a picture of the user's own. A repository wears none until one is chosen.
+ */
+export const REPOSITORY_ICONS = [
+  'folder',
+  'server',
+  'browser',
+  'database',
+  'package',
+  'book',
+  'mobile',
+  'terminal',
+] as const
+
+export type RepositoryIcon = (typeof REPOSITORY_ICONS)[number]
+
 export interface Project {
   id: string
   name: string
@@ -52,12 +70,14 @@ export class InvalidProjectNameError extends Error {
 }
 
 export class InvalidRepositoryPathError extends Error {
-  constructor(
-    readonly path: string,
-    reason: string,
-  ) {
+  // A field and not a parameter property: the fake agent of the end-to-end suite is run by Node
+  // with its types stripped, and stripping refuses a parameter property.
+  readonly path: string
+
+  constructor(path: string, reason: string) {
     super(`the repository location "${path}" is refused: ${reason}`)
     this.name = 'InvalidRepositoryPathError'
+    this.path = path
   }
 }
 

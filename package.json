@@ -5,7 +5,7 @@
   "scripts": {
     "dev": "vp run --filter !hemera --parallel dev",
     "typecheck": "vp run --filter !hemera typecheck",
-    "lint": "vp lint && node tools/boundaries.ts && node tools/window-options.ts && node tools/motion-properties.ts && node tools/scales.ts && node tools/text-measure.ts",
+    "lint": "vp lint && node tools/boundaries.ts && node tools/window-options.ts && node tools/motion-presets.ts && node tools/scales.ts && node tools/text-measure.ts",
     "fmt": "vp fmt",
     "fmt:check": "vp fmt --check",
     "test": "vp test",
@@ -13,6 +13,7 @@
     "package": "node tools/package-desktop.ts",
     "report": "node tools/environment-report.ts --write",
     "storybook": "pnpm --filter @hemera/ui storybook",
+    "face-lab": "pnpm --filter @hemera/face-lab lab",
     "check": "pnpm typecheck && pnpm lint && pnpm fmt:check && pnpm test"
   },
   "devDependencies": {

@@ -4,7 +4,14 @@
  * Each suite is named after the scenario of `specs/desktop-foundation/spec.md` it covers.
  */
 
+import { mkdtempSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+
 import { browser, expect } from '@wdio/globals'
+
+import { addProject } from './hand.ts'
+import { skipWithoutScreen } from './headless.ts'
 
 describe('Renderer sans Node', () => {
   it('has no require, no Node process and no Electron module in the page', async () => {
@@ -15,8 +22,13 @@ describe('Renderer sans Node', () => {
   })
 
   it('reaches the main process only through the bridge the preload exposes', async () => {
-    const bridge = await browser.execute(() => window.hemera.invoke instanceof Function)
-    expect(bridge).toBe(true)
+    // Two ways through and no other: a call the page makes, and a subscription to what the
+    // engine pushes without being asked (D5-12).
+    const bridge = await browser.execute(() => ({
+      invoke: window.hemera.invoke instanceof Function,
+      on: window.hemera.on instanceof Function,
+    }))
+    expect(bridge).toEqual({ invoke: true, on: true })
   })
 
   it('runs isolated and sandboxed, which is what the page is unable to do', async () => {
@@ -26,10 +38,12 @@ describe('Renderer sans Node', () => {
     const reached = await browser.execute(() => ({
       leaked: ['ipcRenderer', '__dirname', 'Buffer'].filter((name) => name in globalThis),
       // The preload puts one object on the page; a leaked preload scope would put its own.
-      bridgeKeys: Object.keys(window.hemera),
+      // The list is the claim here rather than a snapshot of it: what the page may reach is
+      // exactly the surface the bridge declares, and anything else on that object is a leak.
+      bridgeKeys: Object.keys(window.hemera).toSorted(),
     }))
     expect(reached.leaked).toEqual([])
-    expect(reached.bridgeKeys).toEqual(['invoke'])
+    expect(reached.bridgeKeys).toEqual(['invoke', 'on'])
   })
 })
 
@@ -81,6 +95,12 @@ describe("Ouverture sous Windows à l'échelle 150 %", () => {
   })
 
   it('marks a drag region the page does not lose to its controls', async () => {
+    // A Project first: before the first one the bar is the mark and nothing else — no tab, no
+    // bell and no fold — so a window without one has no control in its strip to keep out of the
+    // drag region. The claim is about a bar that carries something.
+    const sources = mkdtempSync(join(tmpdir(), 'hemera-e2e-window-'))
+    await addProject('Atlas', sources)
+
     const regions = await browser.execute(() => {
       const strip = document.querySelector('header')
       // The controls of lot 2 live in the bar itself; lot 0's witness panel is a story now.
@@ -92,11 +112,14 @@ describe("Ouverture sous Windows à l'échelle 150 %", () => {
     })
     expect(regions.strip).toBe('drag')
     expect(regions.control).toBe('no-drag')
+
+    rmSync(sources, { recursive: true, force: true })
   })
 })
 
 describe("Transition à la fréquence de l'écran", () => {
-  it('plays the witness transition without a frame above two display periods', async () => {
+  it('plays the witness transition without a frame above two display periods', async function () {
+    skipWithoutScreen(this, 'the frame time of the witness transition')
     // Played twice first, and not once: the first fold after the page has been sitting still
     // pays for its compositor layer, and that frame says what waking up costs, not what the
     // fold costs. A fold played back to back with another stays on 6 ms at 165 Hz.

@@ -1,13 +1,24 @@
 import { cn } from 'cn'
 import { motion } from 'motion/react'
 import type { Transition } from 'motion/react'
-import { type ReactNode, useEffect, useRef, useState } from 'react'
+import { type ReactNode, useRef, useState } from 'react'
 
 import { Button, IconButton } from '../components/button/button.tsx'
 import { Card } from '../components/card/card.tsx'
+import { Face } from '../components/face/face.tsx'
+import type { FaceState } from '../components/face/states.ts'
 import { List, ListItem } from '../components/list/list.tsx'
+import { OVER_MARK } from '../components/sliding-mark/sliding-mark.tsx'
+import { Menu, type MenuItem } from '../components/menu/menu.tsx'
 import { Tooltip } from '../components/tooltip/tooltip.tsx'
-import { IconArchive, IconMessages, IconPencil, IconRestore } from '../icons.ts'
+import {
+  IconArchive,
+  IconDots,
+  IconInfoCircle,
+  IconMessages,
+  IconPencil,
+  IconRestore,
+} from '../icons.ts'
 import { LABEL_DELAY, LABEL_TRAVEL, instant, morph, useTransition } from '../motion.ts'
 
 /**
@@ -25,22 +36,20 @@ import { LABEL_DELAY, LABEL_TRAVEL, instant, morph, useTransition } from '../mot
  * them, never inside them.
  */
 
-/** What the head of a Session says, and what it offers to do with it. */
-const HEAD = 'flex items-start gap-3'
+/** What the head of a Session holds, and what it offers to do with it: one row. */
+const HEAD = 'flex items-center gap-3'
 
-/** The title and what is said under it, which is one column and takes the room left. */
-const COLUMN = 'flex min-w-0 flex-col gap-1'
+/**
+ * What goes on in the Session, taking the room the commands leave (issue #241). The title is not
+ * drawn: the sidebar already says it, and the height is the thread's.
+ */
+const COLUMN = 'flex min-w-0 flex-1 items-center'
 
-const TITLE = 'text-2xl font-medium'
-
-/** The line under the title: the kind of work, the Project, and what the Session holds. */
-const SUB = 'flex flex-wrap items-center gap-1.5 text-sm text-muted-foreground'
-
-/** The actions of the head, at the end of the line rather than under it. */
+/** The commands of the head, at the end of the line rather than under it. */
 const ACTIONS = 'ml-auto flex shrink-0 items-center gap-2'
 
-/** The field and the words that say how it ends, on the line the title was on. */
-const EDIT = 'flex min-w-0 items-center gap-3'
+/** The field and the words that say how it ends, where the line was. */
+const EDIT = 'flex min-w-0 flex-1 items-center gap-3'
 
 /**
  * The title while it is being typed: the same line, its own underline saying so.
@@ -52,43 +61,23 @@ const EDIT = 'flex min-w-0 items-center gap-3'
 const FIELD = 'focus-ring flex min-w-0 flex-1'
 
 const INPUT =
-  'w-full min-w-0 border-b-2 border-primary bg-transparent text-2xl font-medium text-foreground outline-none'
-
-/** How the field ends, said where the keystrokes are read rather than in a tooltip. */
-const HINT = 'text-xs text-muted-foreground'
+  'w-full min-w-0 border-b-2 border-primary bg-transparent text-sm font-medium text-foreground outline-none'
 
 export interface SessionHeaderProps {
   /**
-   * What the Session is called.
+   * What the Session is called: what the `…` is named after, and what the field opens on.
    *
-   * The page names a new one — the prototype's `Untitled` — and this file never invents one:
-   * a title derived from the first message is a proposal the domain makes, not a word the
-   * design system decides on.
+   * It is not drawn (issue #241): the sidebar says it already. The page names a new one — the
+   * prototype's `Untitled` — and this file never invents one.
    */
   title: string
-  /** The Project it belongs to, which is where it will be found again. */
-  projectName: string
-  /** The rest of the line under the title, already written: `created 3 days ago · 5 messages`. */
-  meta: string
+  /** What goes on in the Session, on the head's own row (issue #241): the page's `GoingOnLine`. */
+  children?: ReactNode
   /**
-   * What the title becomes, once it is saved.
-   *
-   * Required, and never called on a keystroke: a page that wrote a version of the Session per
-   * character typed would be a page the engine refuses as stale, which is the same reason the
-   * Project's settings save on a press and not as they are typed.
+   * Renames the Session: the Session's row in the sidebar turns into its field, since the title
+   * lives there (review of #250). The head itself never changes.
    */
-  onRename: (title: string) => void
-  /**
-   * Whether the title is being typed right now.
-   *
-   * The page opens it: a Session that has just been created opens on it, because the title is
-   * the one thing a new Session has to say about itself. The Rename control opens it too.
-   */
-  editing?: boolean | undefined
-  /** Opens the field, which is what the Rename control does. */
-  onStartEditing?: (() => void) | undefined
-  /** Closes it without keeping what was typed. */
-  onCancelEditing?: (() => void) | undefined
+  onRename?: (() => void) | undefined
   /** Takes the Session out of the sidebar. Nothing is deleted, and nothing asks twice here. */
   onArchive?: (() => void) | undefined
   /**
@@ -99,67 +88,73 @@ export interface SessionHeaderProps {
    * head and the eye does not have to find the control again when the first line is written.
    */
   archiveDisabled?: boolean | undefined
+  /**
+   * Opens the Session's details: its plan and files, its commands, and what its agent works from.
+   *
+   * They are a dialog the reader opens and never a column beside the thread (second review of
+   * #18), and this is the one way to them, at the end of the head's line.
+   */
+  onOpenDetails?: (() => void) | undefined
 }
 
 /**
- * The head of a Session: what it is called, where it lives, and the two things that can be
- * done to it.
+ * The head of a Session: what goes on in it, and what can be done to it.
  *
- * The title is the page's first line and the only editable one, so it is edited where it
- * stands — a dialog over the page to change a line of it would hide the thread being named.
- * The two controls sit at the end of the same line rather than under it, because the head is
- * read once and the thread below is what the page is for.
+ * One row (issue #241): what goes on — the page's line of chips and its Run — and the ⓘ and the
+ * `…` at the end of the same row. The title is not drawn, since the sidebar says it; Rename edits
+ * it there, in the Session's own row of the sidebar, and the head never changes (review of #250).
+ *
+ * Rename and Archive sit behind one `…` menu instead of standing open at the end of the line: two
+ * words at the top of every thread are two words to read on the way to the content, and a command
+ * that opens on purpose is read once. Nothing is deleted by Archive, so it does not ask twice —
+ * it is a command in the menu, and the thread is still in the sidebar when it goes.
  *
  * Nothing here carries an outer margin: where the head sits in the page is the page's, and a
  * component that spaced itself would be a component that could not be moved.
  */
 export function SessionHeader({
   title,
-  projectName,
-  meta,
+  children,
   onRename,
-  editing = false,
-  onStartEditing,
-  onCancelEditing,
   onArchive,
   archiveDisabled = false,
+  onOpenDetails,
 }: SessionHeaderProps): ReactNode {
-  const rename = useRef<HTMLButtonElement>(null)
-  const wasEditing = useRef(false)
-  // Where the keyboard goes when the field closes. It goes back to the control that opened it
-  // and not to the top of the page: a field that takes the caret and then drops it on `<body>`
-  // is a page the keyboard has to walk again from its first control. On a new Session the page
-  // opened the field itself, and the answer is the same — the head is where the title is.
-  useEffect(() => {
-    if (wasEditing.current && !editing) rename.current?.focus()
-    wasEditing.current = editing
-  }, [editing])
+  const commands: MenuItem[] = []
+  if (onRename !== undefined) {
+    commands.push({ label: 'Rename', icon: <IconPencil size="sm" />, onSelect: onRename })
+  }
+  if (onArchive !== undefined) {
+    commands.push({
+      label: 'Archive',
+      icon: <IconArchive size="sm" />,
+      disabled: archiveDisabled,
+      onSelect: onArchive,
+    })
+  }
   return (
     <div className={HEAD}>
-      <div className={COLUMN}>
-        {editing ? (
-          <TitleField initial={title} onCommit={onRename} onCancel={onCancelEditing} />
-        ) : (
-          <h1 className={TITLE}>{title}</h1>
-        )}
-        <p className={SUB}>
-          <span>{`${projectName} · ${meta}`}</span>
-        </p>
-      </div>
+      <div className={COLUMN}>{children}</div>
       <div className={ACTIONS}>
-        {/* While the title is being typed, Rename is the field itself: a control that opened
-            the same field a second time would be a control that does nothing. */}
-        {!editing && onStartEditing !== undefined && (
-          <Button ref={rename} variant="ghost" size="sm" onClick={onStartEditing}>
-            <IconPencil size="sm" />
-            Rename
-          </Button>
+        {onOpenDetails !== undefined && (
+          <Tooltip label="Session details">
+            <IconButton
+              variant="ghost"
+              size="sm"
+              icon={<IconInfoCircle size="sm" />}
+              aria-label="Session details"
+              onClick={onOpenDetails}
+            />
+          </Tooltip>
         )}
-        {onArchive !== undefined && (
-          <Button variant="ghost" size="sm" disabled={archiveDisabled} onClick={onArchive}>
-            <IconArchive size="sm" />
-            Archive
-          </Button>
+        {commands.length > 0 && (
+          <span className="inline-flex">
+            <Menu
+              label={`Commands for ${title}`}
+              icon={<IconDots size="sm" />}
+              groups={[commands]}
+            />
+          </span>
         )}
       </div>
     </div>
@@ -172,8 +167,8 @@ export function SessionHeader({
  * It is a field and not a dialog, and it ends on Enter, on Escape, and on the click that goes
  * somewhere else on the page — a question left open in the head of a page asks itself again every
  * time the eye passes over it, and a field that stays open after the person is done with it is a
- * field that never got its answer. Both of the answers it takes are written under the field: a
- * keystroke explained in a tooltip arrives after the keystroke. What is typed is kept by the page,
+ * field that never got its answer. Nothing explains its keys beside it (review of #250): Enter
+ * keeps, Escape drops, as every field of the window does. What is typed is kept by the page,
  * not here: this holds a draft and hands it over once, which is what keeps the engine from being
  * asked to write a version per character.
  */
@@ -248,7 +243,6 @@ function TitleField({
           }}
         />
       </span>
-      <span className={HINT}>Enter to save · Esc to cancel</span>
     </div>
   )
 }
@@ -366,6 +360,13 @@ export function ArchivedSessions({ sessions, onRestore }: ArchivedSessionsProps)
   )
 }
 
+/** A Session being renamed in its row: which, and what its field keeps or drops. */
+export interface SessionRenaming {
+  id: string
+  onCommit: (title: string) => void
+  onCancel: () => void
+}
+
 /**
  * The sidebar's line for one Session.
  *
@@ -380,28 +381,50 @@ export function ArchivedSessions({ sessions, onRestore }: ArchivedSessionsProps)
  * for two commands that fit. It is also why nothing here is a menu: the row is a button, and a
  * button inside a button is not a row anybody can press.
  *
- * The mark's `layoutId` is the sidebar's own, so that the one filled surface of the panel is
- * handed from a Session to the Journal rather than each entry drawing its own.
+ * The mark is the sidebar's own and not the row's (issue #127): the row says which one it is
+ * with `data-mark`, is drawn over the mark while it is the one looked at, and is crossed by it
+ * otherwise — so the one filled surface of the panel is handed from a Session to the Journal
+ * rather than each entry drawing its own.
+ *
+ * Its mark is Hemera's face (issue #140), wearing what the Session's agent is doing: asleep while
+ * nothing runs, at work while a turn does, asking while it waits on the reader for an answer or a
+ * permission. A column of Sessions is read at a glance for the one that wants the reader, and the
+ * face is what says it, folded to the rail as well as open. Each row keeps a seed of its own,
+ * drawn from its id, so a Session wears the same life every time the panel is drawn and two rows
+ * side by side never blink together.
  */
 export function SidebarSessionEntry({
+  id,
   title,
+  agent = 'asleep',
   active,
   collapsed,
   onSelect,
   onRename,
   onArchive,
+  renaming,
 }: {
+  /** Which Session it is: what the sidebar's mark finds the row by. */
+  id: string
   /** What the Session is called, said in the row and read out as its name. */
   title: string
+  /** What its agent is doing, worn by the row's face; asleep when nothing is said. */
+  agent?: FaceState | undefined
   /** Whether the window is on it. */
   active: boolean
   /** Whether the panel is folded to its rail, where a row is its icon and nothing else. */
   collapsed: boolean
   onSelect: () => void
-  /** Renames it, in place, in the head of its page. */
+  /** Renames it: its row turns into its field, here, in place. */
   onRename?: (() => void) | undefined
   /** Takes it out of the sidebar. */
   onArchive?: (() => void) | undefined
+  /**
+   * The row's title field, open while the Session is renamed (review of #250): what is kept on
+   * Enter or a click elsewhere, and what closes it on Escape. The title lives here, and so does
+   * its renaming.
+   */
+  renaming?: SessionRenaming | undefined
 }): ReactNode {
   const transition = useTransition(morph)
   // `useTransition` hands back this very object when the system asks for less movement, and a
@@ -409,8 +432,18 @@ export function SidebarSessionEntry({
   const still = transition === instant
   const labels = collapsed || still ? transition : { ...transition, delay: LABEL_DELAY }
   const commands = !collapsed && (onRename !== undefined || onArchive !== undefined)
+  if (renaming !== undefined && !collapsed) {
+    return (
+      <div data-mark={id} className={cn(EDITING_ROW, active && OVER_MARK)}>
+        <span className={cn('relative z-1 flex shrink-0', active ? ICON_ACTIVE : ICON)}>
+          <IconMessages size="md" />
+        </span>
+        <TitleField initial={title} onCommit={renaming.onCommit} onCancel={renaming.onCancel} />
+      </div>
+    )
+  }
   return (
-    <div className="group relative flex w-full">
+    <div data-mark={id} className={cn('group relative flex w-full', active && OVER_MARK)}>
       <Tooltip label={title} side="right" disabled={!collapsed}>
         <Button
           variant="ghost"
@@ -419,9 +452,8 @@ export function SidebarSessionEntry({
           aria-current={active ? 'true' : undefined}
           onClick={onSelect}
         >
-          {active && <motion.span layoutId="active-nav" className={MARK} transition={transition} />}
           <span className={cn(ICON_PLACE, active ? ICON_ACTIVE : ICON)}>
-            <IconMessages size="md" />
+            <Face state={agent} size="icon" seed={seedOf(id)} />
           </span>
           <Label collapsed={collapsed} transition={labels}>
             {title}
@@ -454,6 +486,13 @@ export function SidebarSessionEntry({
   )
 }
 
+/** A seed drawn from a Session's id, the same for the same id: a string hashed to 31 bits. */
+function seedOf(id: string): number {
+  let hash = 0
+  for (const unit of id) hash = (Math.imul(hash, 31) + (unit.codePointAt(0) ?? 0)) >>> 0
+  return hash % 2 ** 31
+}
+
 /**
  * The row: the panel's own button, full width, with nothing of its own but the alignment.
  *
@@ -462,9 +501,6 @@ export function SidebarSessionEntry({
  * caller's, and the design system's lint refuses a padding class on a button.
  */
 const ENTRY = 'w-full shrink-0 justify-start'
-
-/** The one filled surface of the sidebar: the place being looked at, pressed into the panel. */
-const MARK = 'absolute inset-0 rounded-md bg-sidebar-accent'
 
 /**
  * Where the icon of a row sits, and what it weighs when the row is not the one looked at.
@@ -475,9 +511,12 @@ const MARK = 'absolute inset-0 rounded-md bg-sidebar-accent'
  * the transparent border the ghost variant draws, which lands it one pixel right of the middle
  * of the rail. The day the button's density changes, this is the number that follows it.
  */
-const ICON_PLACE = 'relative ml-1 flex shrink-0'
+const ICON_PLACE = 'relative z-1 ml-1 flex shrink-0'
 
 const ICON = 'text-muted-foreground'
+
+/** A row while its Session is renamed: its icon where it stands, and the field in its title's place. */
+const EDITING_ROW = 'relative flex h-control-md w-full items-center gap-3 px-3'
 
 const ICON_ACTIVE = 'text-sidebar-accent-foreground'
 
@@ -489,7 +528,7 @@ const ICON_ACTIVE = 'text-sidebar-accent-foreground'
  * The row is a button, so they are its siblings and never its children.
  */
 const COMMANDS =
-  'absolute inset-y-0 right-2 flex items-center gap-1 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100'
+  'absolute inset-y-0 right-2 z-1 flex items-center gap-1 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100'
 
 /** The part of a row that goes away with the width, and comes back after it. */
 function Label({
@@ -504,7 +543,7 @@ function Label({
   const travel = collapsed ? -LABEL_TRAVEL : 0
   return (
     <motion.span
-      className="relative ml-3 truncate"
+      className="relative z-1 ml-3 truncate"
       initial={false}
       animate={{ opacity: collapsed ? 0 : 1, x: travel }}
       transition={transition}

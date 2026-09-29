@@ -1,8 +1,9 @@
 import { cn } from 'cn'
-import { type ReactNode, type RefObject, useRef } from 'react'
+import type { ReactNode, RefObject } from 'react'
 
 import { Badge } from '../components/badge/badge.tsx'
 import { Button, IconButton } from '../components/button/button.tsx'
+import { OVER_MARK } from '../components/sliding-mark/sliding-mark.tsx'
 import { Tooltip } from '../components/tooltip/tooltip.tsx'
 import { IconLayoutSidebar, IconPlus } from '../icons.ts'
 import { NotificationBell } from '../notifications/notifications.tsx'
@@ -118,23 +119,25 @@ export function ChromeBar({
       </div>
 
       <div className="flex min-w-0 items-center gap-1 pr-2">
-        <span className="no-drag-children flex shrink-0 items-center">
-          <Tooltip label={fold} keys={collapseShortcut} side="bottom">
-            <IconButton
-              variant="ghost"
-              icon={<IconLayoutSidebar size="md" />}
-              aria-label={fold}
-              aria-expanded={!collapsed}
-              onClick={onToggleCollapsed}
-            />
-          </Tooltip>
-        </span>
-
-        {/* Before the first Project, the bar is the mark and the fold and nothing else: there
-            is no tab to draw, nothing to add a Project beside, and no event to have missed.
-            The one action there is belongs to the page underneath (design D4-06). */}
+        {/* Before the first Project, the bar is the mark and nothing else: there is no tab to
+            draw, nothing to add a Project beside, no event to have missed — and nothing to
+            fold, since the sidebar is not drawn either. The fold is left out rather than
+            disabled: a control drawn where it can do nothing is a control the hand is invited
+            to press for no answer, and the keystroke that reaches it has nothing to reach
+            either. The one action there is belongs to the page underneath (design D4-06). */}
         {activeProjectId === null ? null : (
           <>
+            <span className="no-drag-children flex shrink-0 items-center">
+              <Tooltip label={fold} keys={collapseShortcut} side="bottom">
+                <IconButton
+                  variant="ghost"
+                  icon={<IconLayoutSidebar size="md" />}
+                  aria-label={fold}
+                  aria-expanded={!collapsed}
+                  onClick={onToggleCollapsed}
+                />
+              </Tooltip>
+            </span>
             <span aria-hidden="true" className={RULE} />
             <Tabs
               projects={projects}
@@ -164,18 +167,18 @@ function Tabs({
   onSelectProject: (id: string) => void
   onAddProject: () => void
 }): ReactNode {
-  const tabs = useRef<(HTMLElement | null)[]>([])
-  const active = projects.findIndex((project) => project.id === activeProjectId)
   return (
     <Scrollable label="Projects" className="tab-bleed flex-1 self-stretch">
-      <TabMark tabs={tabs} active={active} count={projects.length} />
-      {projects.map((project, rank) => (
+      {projects.map((project) => (
+        // The active tab is drawn over the mark, which is its sheet; the others are drawn under
+        // it and say what they say over it, so the mark crosses them and never goes under one.
         <span
           key={project.id}
-          ref={(node) => {
-            tabs.current[rank] = node
-          }}
-          className="relative flex shrink-0 items-center"
+          data-mark={project.id}
+          className={cn(
+            'relative flex shrink-0 items-center',
+            project.id === activeProjectId && OVER_MARK,
+          )}
         >
           <Button
             variant="ghost"
@@ -183,24 +186,29 @@ function Tabs({
             aria-current={project.id === activeProjectId ? 'page' : undefined}
             onClick={() => onSelectProject(project.id)}
           >
-            <span className={cn('size-2 shrink-0 rounded-full', TONE[project.tone])} />
-            {project.name}
-            {project.pending > 0 && <Badge tone="neutral">{project.pending}</Badge>}
+            <span className={cn(OVER_MARK, 'flex items-center gap-2')}>
+              <span className={cn('size-2 shrink-0 rounded-full', TONE[project.tone])} />
+              {project.name}
+              {project.pending > 0 && <Badge tone="neutral">{project.pending}</Badge>}
+            </span>
           </Button>
         </span>
       ))}
       {/* One press, one Project. It sits after the last tab, where the next one will be. */}
       <Tooltip label="Add a Project" side="bottom">
         {/* Centred on its own: the strip stretches its children now, and this one is a control
-            rather than a tab — it has no sheet under it to reach down to. */}
+            rather than a tab — it has no sheet under it to reach down to. Whole, like a tab: a
+            strip too narrow for its Projects scrolls on to it rather than squeezing it away. */}
         <IconButton
           variant="ghost"
-          className="no-drag self-center"
+          className="no-drag shrink-0 self-center"
           icon={<IconPlus size="md" />}
           aria-label="Add a Project"
           onClick={onAddProject}
         />
       </Tooltip>
+      {/* Last, so that it is drawn after every tab it can cross. */}
+      <TabMark active={activeProjectId} />
     </Scrollable>
   )
 }

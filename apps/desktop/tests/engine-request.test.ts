@@ -6,20 +6,56 @@
  * follows an accepted one is a service standing on a database made for the test.
  */
 
-import { mkdirSync, mkdtempSync, rmSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
-import { Effect, Layer } from 'effect'
+import { Duration, Effect, Fiber, Layer, Option } from 'effect'
 
+import { DEFINE_MISSION_BRIEF, DELIVERY_MARKER, contextUri, readerLine } from '@hemera/core'
+import type { EngineArguments, EngineRequestName, EngineResponse } from '@hemera/ipc'
+
+import { AgentNotices, AgentRuntime, runtimeLayer } from '#engine/agents/runtime.ts'
+import { MachineEnvironment, discoveryLayer } from '#engine/agents/discovery.ts'
+import type { Discovery } from '#engine/agents/discovery.ts'
+import { Agents } from '#engine/agents/service.ts'
+import { type FakeAgent, fakeAgent, fakeSupervisor } from '#engine/agents/fake.ts'
+import { clockLayer, poolLayer } from '#engine/agents/pool.ts'
+import { StderrSink } from '#engine/agents/supervisor.ts'
+import { agentDirectoriesLayer } from '#engine/agents/bare.ts'
+import { acpTracesLayer } from '#engine/agents/trace.ts'
+import { heldWordsLayer } from '#engine/agents/held.ts'
+import { sessionModesLayer } from '#engine/agents/modes.ts'
+import { type Proposals, proposalsLayer } from '#engine/commands/proposals.ts'
+import { type SetupProposals, setupProposalsLayer } from '#engine/setup/proposals.ts'
+import { setupValuesLayer } from '#engine/setup/values.ts'
+import { type Commands, UnknownRunError, commandsLayer } from '#engine/commands/service.ts'
+import { type Context, contextLayer } from '#engine/context/service.ts'
 import { carriedMigrations, openProfile } from '#engine/migrate.ts'
 import { type Journal, journalLayer } from '#engine/journal.ts'
 import { type Preferences, preferencesLayer } from '#engine/preferences.ts'
-import { type Projects, projectsLayer } from '#engine/projects.ts'
+import { Projects, projectsLayer } from '#engine/projects.ts'
 import { answer, decideRequest } from '#engine/request.ts'
-import { type Sessions, sessionsLayer } from '#engine/sessions.ts'
+import { PATIENCE } from '#main/engine-conversation.ts'
+import { Sessions, sessionsLayer } from '#engine/sessions.ts'
+import { domainEventsLayer } from '#engine/domain-events.ts'
+import { NoSpecNotices } from '#engine/specs/notices.ts'
+import { Specs, specsLayer } from '#engine/specs/specs.ts'
 import { type EngineStatus, engineStatusLayer } from '#engine/status.ts'
 import { DatabaseError, SqliteClient, databaseLayer } from '#engine/storage/database.ts'
+import type { Database } from '#engine/storage/database.ts'
+import { toolAccessLayer } from '#engine/tools/access.ts'
+import { toolPermissionsLayer } from '#engine/tools/permissions.ts'
+import { ToolServer } from '#engine/tools/server.ts'
+import { gitLayer } from '#engine/git.ts'
+import { type Preparation, hostLinks, preparationLayer } from '#engine/workspaces/preparation.ts'
+import { type Launches, launchesLayer } from '#engine/workspaces/launches.ts'
+import { type Recipe, recipeLayer } from '#engine/workspaces/recipe.ts'
+import { type Variables, variablesLayer } from '#engine/workspaces/variables.ts'
+import { type Workspaces, WorkspacesRoot, workspacesLayer } from '#engine/workspaces/workspaces.ts'
+
+import { threadOf, until } from './application.ts'
+import { repository } from './repositories.ts'
 
 const SHIPPED = join(import.meta.dirname, '..', 'drizzle')
 /**
@@ -32,40 +68,203 @@ const LAST_MIGRATION = carriedMigrations(SHIPPED).at(-1)?.name
 
 let dataFolder: string
 
+/** Every Workspace the window was told had changed, in the order it was told (D8-05). */
+let told: { projectId: string; workspaceId: string }[]
+
 beforeEach(() => {
   dataFolder = mkdtempSync(join(tmpdir(), 'hemera-request-'))
   mkdirSync(dataFolder, { recursive: true })
+  told = []
 })
 
 afterEach(() => {
-  rmSync(dataFolder, { recursive: true, force: true })
-})
+  // The folder holds the repositories a test made and the workspaces prepared out of them:
+  // Windows hands it back a beat late, as agent-tools.test.ts says.
+  rmSync(dataFolder, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 })
+}, 60_000)
 
 /** Runs one accepted message against a data folder of this test's own. */
 function running<A, E>(
   program: Effect.Effect<
     A,
     E,
-    Preferences | EngineStatus | Projects | Journal | Sessions | SqliteClient
+    | Preferences
+    | EngineStatus
+    | Projects
+    | Journal
+    | Sessions
+    | Specs
+    | SqliteClient
+    | AgentRuntime
+    | Discovery
+    | Agents
+    | Commands
+    | Context
+    | Variables
+    | Workspaces
+    | Preparation
+    | Recipe
+    | Proposals
+    | SetupProposals
+    | Launches
   >,
+  agent: FakeAgent = fakeAgent(),
+  readVersion: (command: string) => Effect.Effect<string | undefined> = () =>
+    Effect.succeed('1.0.0'),
 ) {
-  const services = Layer.mergeAll(
+  // The list this test reads: an engine an earlier test left running past its timeout still
+  // tells its own, never this one's.
+  const tellTo = told
+  // The agents are the fake ones here: a suite that asks for a turn is asking whether the message
+  // reaches the runtime, and the runtime itself is proved by its own suite, on the fake provider.
+  const agents = Layer.mergeAll(
+    Layer.succeed(MachineEnvironment, {
+      home: '/home/ana',
+      env: {},
+      locate: (command) => Effect.succeed(`/usr/local/bin/${command}`),
+      bundled: () => Effect.succeed('/opt/hemera/node_modules/adapter/dist/index.js'),
+      readVersion,
+      holds: () => Effect.succeed(true),
+      read: () => Effect.succeed(undefined),
+    }),
+    fakeSupervisor(agent),
+    // Nobody watches a Session here; a Workspace that changed is kept, for the suite about it.
+    Layer.succeed(AgentNotices, {
+      wrote: () => undefined,
+      changed: () => undefined,
+      ran: () => undefined,
+      workspace: (projectId, workspaceId) => {
+        tellTo.push({ projectId, workspaceId })
+      },
+      launched: () => undefined,
+      agents: () => undefined,
+    }),
+    Layer.succeed(StderrSink, { write: () => Effect.void }),
+  )
+  // The tools an agent would be lent: the tokens are the engine's own, and the address is one
+  // nothing listens on — what this suite asks is whether a message reaches its use case.
+  const tools = Layer.mergeAll(
+    toolAccessLayer,
+    toolPermissionsLayer,
+    contextLayer.pipe(Layer.provide(gitLayer())),
+    commandsLayer,
+    variablesLayer,
+    Layer.succeed(ToolServer, {
+      origin: 'http://127.0.0.1:1',
+      forAgent: () => 'http://127.0.0.1:1/mcp',
+      gaveUp: () => Effect.void,
+    }),
+  )
+  // The rows of a Session and its thread stand on one file, and the runtime is built on the very
+  // same ones: `provideMerge` hands them up rather than hiding them.
+  const rows = Layer.mergeAll(projectsLayer, sessionsLayer).pipe(Layer.provide(agents))
+  // Nothing here asks the three agents of the machine: their own suite is where that is proved,
+  // and what this one is about is whether a message reaches the use case it names.
+  const listed = Layer.succeed(Agents, {
+    list: () => Effect.succeed([]),
+    check: () => Effect.succeed([]),
+    update: () => Effect.die('nothing in this file updates an agent'),
+  })
+  const lent = tools.pipe(
+    Layer.provide(rows),
+    Layer.provide(agents),
+    Layer.provide(heldWordsLayer),
+    Layer.provide(sessionModesLayer),
+  )
+  const runtime = runtimeLayer.pipe(
+    Layer.provideMerge(discoveryLayer),
+    Layer.provide(rows),
+    Layer.provide(preferencesLayer),
+    // Handed up, as the engine hands them up: the settings and the Commands panel ask for the
+    // very catalogue and runs the runtime lends.
+    Layer.provideMerge(lent),
+    Layer.provide(poolLayer.pipe(Layer.provide(clockLayer))),
+    Layer.provide(agents),
+    Layer.provide(heldWordsLayer),
+    Layer.provide(sessionModesLayer),
+    Layer.provide(agentDirectoriesLayer(dataFolder)),
+    Layer.provide(acpTracesLayer(dataFolder)),
+  )
+
+  // The launches, which start the builds a ready Workspace was waited for (D8-13).
+  const launches = launchesLayer.pipe(
+    Layer.provide(runtime),
+    Layer.provide(rows),
+    Layer.provide(preferencesLayer),
+    // A launch written tells the window (D8-13), through the same notices this harness holds.
+    Layer.provide(agents),
+  )
+
+  const places = preparationLayer.pipe(
+    Layer.provideMerge(Layer.mergeAll(workspacesLayer, recipeLayer)),
+    Layer.provide(variablesLayer),
+    Layer.provide(gitLayer()),
+    Layer.provide(hostLinks),
+    Layer.provide(Layer.succeed(WorkspacesRoot, join(dataFolder, 'workspaces'))),
+    // A `run` step is a run of the very commands the tools run (Decided 11).
+    Layer.provide(lent),
+    Layer.provide(agents),
+    Layer.provideMerge(launches),
+  )
+
+  const services: Layer.Layer<
+    | Preferences
+    | EngineStatus
+    | Projects
+    | Journal
+    | Sessions
+    | Specs
+    | AgentRuntime
+    | Discovery
+    | Agents
+    | Commands
+    | Context
+    | Variables
+    | Workspaces
+    | Preparation
+    | Recipe
+    | Proposals
+    | SetupProposals
+    | Launches
+    | Database
+    | SqliteClient
+  > = Layer.mergeAll(
     preferencesLayer,
     engineStatusLayer({ directory: dataFolder, channel: 'dev', version: '0.3.0' }),
-    projectsLayer,
     journalLayer,
-    sessionsLayer,
-  ).pipe(Layer.provideMerge(databaseLayer(join(dataFolder, 'hemera.sqlite'))))
+    rows,
+    specsLayer.pipe(Layer.provide(NoSpecNotices)),
+    listed,
+    runtime,
+    // What a human decides of the commands the agent proposed, on the very catalogue (D8-11).
+    proposalsLayer.pipe(Layer.provide(lent), Layer.provide(rows), Layer.provide(agents)),
+    // The Workspaces of the Projects, made under the data folder over the machine's `git`, and
+    // prepared in the scope of these services: what a background preparation runs in.
+    places,
+    // What a human decides of the setup changes the agent proposed, on the very Workspaces (#218).
+    setupProposalsLayer.pipe(
+      Layer.provide(places),
+      Layer.provide(lent),
+      Layer.provide(rows),
+      Layer.provide(agents),
+      Layer.provide(setupValuesLayer),
+    ),
+  ).pipe(
+    Layer.provideMerge(
+      Layer.mergeAll(databaseLayer(join(dataFolder, 'hemera.sqlite')), domainEventsLayer),
+    ),
+  )
 
   return Effect.runPromise(
-    Effect.scoped(
-      Effect.provide(
+    // The program's scope closes before the services': what it holds ends first.
+    Effect.provide(
+      Effect.scoped(
         Effect.gen(function* () {
           yield* openProfile(dataFolder, SHIPPED, '0.3.0')
           return yield* program
         }),
-        services,
       ),
+      services,
     ),
   )
 }
@@ -148,6 +347,8 @@ describe('Un message conforme est traité', () => {
       sidebar: { collapsed: false, width: null },
       activeProjectId: null,
       activeSessions: {},
+      composers: {},
+      acpTrace: false,
     })
   })
 })
@@ -203,5 +404,611 @@ describe('Une erreur typée traverse la frontière', () => {
 
     expect(failed).toBeInstanceOf(DatabaseError)
     if (failed instanceof DatabaseError) expect(failed.doing).toBe('reading the preferences')
+  })
+})
+
+/**
+ * Decides a message and answers it, inside a program that runs several: what a background
+ * preparation runs in is the scope of the services that program stands on.
+ */
+function asked<K extends EngineRequestName>(name: K, argument: EngineArguments<K>) {
+  const decision = decideRequest(name, argument)
+  if (!decision.accepted) return Effect.die(decision.reason)
+  return answer(decision).pipe(
+    // SAFETY: the answer of the use case `name`, which the router answers by that very name.
+    Effect.map((value) => value as EngineResponse<K>),
+  )
+}
+
+describe('agents.list answers while an agent start is in flight', () => {
+  test('the list comes back well within the window’s patience, without a version to wait for', async () => {
+    // The Session's agent is held in its cold start, and every version question hangs: the
+    // machine is loaded, which is when the menu came back empty (`agents.list` timed out).
+    let release: () => void = () => undefined
+    const held = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const agent = fakeAgent({ holdsStart: async () => await held })
+    const versions: string[] = []
+    const hanging = (command: string) => {
+      versions.push(command)
+      return Effect.never
+    }
+
+    const seen = await running(
+      Effect.gen(function* () {
+        const project = yield* asked('projects.create', {
+          name: 'Atlas',
+          tone: 'primary',
+          mainPath: dataFolder,
+        })
+        const sessions = yield* Sessions
+        const session = yield* sessions.create(project.id, 'claude')
+        // The reopened Session's agent, being started and not yet answering.
+        const starting = yield* Effect.forkChild(asked('agents.options', { sessionId: session.id }))
+        yield* until(
+          Effect.sync(() => agent.starts.length),
+          (count) => count > 0,
+        )
+
+        const started = performance.now()
+        const listed = yield* asked('agents.list', {}).pipe(Effect.timeoutOption(PATIENCE))
+        const took = performance.now() - started
+
+        release()
+        yield* Fiber.join(starting)
+        return { listed, took, starts: agent.starts.length }
+      }),
+      agent,
+      hanging,
+    )
+
+    expect(Option.isSome(seen.listed)).toBe(true)
+    const agents = Option.getOrThrow(seen.listed).agents
+    expect(agents.map((one) => one.id)).toEqual(['claude', 'codex', 'opencode'])
+    expect(agents.every((one) => one.found && one.version === null)).toBe(true)
+    expect(seen.took).toBeLessThan(Duration.toMillis(PATIENCE) / 2)
+    // The start itself asked no version: a Session has no use for one.
+    expect(versions.toSorted()).toEqual(['claude', 'codex', 'opencode'])
+    expect(seen.starts).toBe(1)
+  })
+})
+
+describe('Every Workspace channel reaches its use case', () => {
+  let main: string
+
+  beforeEach(() => {
+    main = join(dataFolder, 'main')
+    repository(join(main, 'sources', 'api'))
+    writeFileSync(join(main, '.env'), 'PORT=3000\n')
+    mkdirSync(join(main, 'docs'))
+    mkdirSync(join(dataFolder, 'spike'))
+    // Two `git` processes in a fixture, and a Windows runner that has just been created starts
+    // each one in seconds: the timeout is this suite's own, not the ten a hook is given (#99).
+  }, 60_000)
+
+  test('a dedicated Workspace is planned, created, prepared, observed and cleaned up', async () => {
+    const seen = await running(
+      Effect.gen(function* () {
+        const created = yield* asked('projects.create', {
+          name: 'Atlas',
+          tone: 'primary',
+          mainPath: main,
+        })
+        const project = yield* asked('repositories.add', {
+          id: created.id,
+          version: created.version,
+          relativePath: './sources/api',
+        })
+        const projectId = project.id
+
+        // The recipe: two steps added, the second moved above the first, then taken out.
+        yield* asked('recipe.add', {
+          projectId,
+          kind: 'copy',
+          base: null,
+          path: '.env',
+          commandId: null,
+          line: null,
+          lineWindows: null,
+          lineLinux: null,
+        })
+        const added = yield* asked('recipe.add', {
+          projectId,
+          kind: 'link',
+          base: null,
+          path: 'docs',
+          commandId: null,
+          line: null,
+          lineWindows: null,
+          lineLinux: null,
+        })
+        const moved = yield* asked('recipe.move', {
+          projectId,
+          id: added[1]?.id ?? '',
+          direction: 'up',
+        })
+        yield* asked('recipe.remove', { projectId, id: moved[0]?.id ?? '' })
+        const recipe = yield* asked('recipe.list', { projectId })
+
+        const plan = yield* asked('workspaces.plan', {
+          projectId,
+          key: 'HEM-7',
+          slug: 'login-form',
+        })
+        // Each location read on its own, as the dialog reads them (#110).
+        const reads = yield* Effect.forEach(plan.repositories, (relativePath) =>
+          asked('workspaces.planRepository', {
+            projectId,
+            key: 'HEM-7',
+            slug: 'login-form',
+            relativePath,
+          }),
+        )
+        const workspace = yield* asked('workspaces.create', {
+          projectId,
+          specId: null,
+          name: plan.name,
+          repositories: reads.map((one) => ({
+            relativePath: one.relativePath,
+            base: one.base ?? '',
+            branch: one.branch,
+          })),
+        })
+        const begun = yield* asked('preparation.prepare', { workspaceId: workspace.id })
+        // A second preparation while the first runs is still answered as a refusal.
+        const twice = yield* Effect.flip(
+          asked('preparation.prepare', { workspaceId: workspace.id }),
+        )
+        const listed = yield* until(asked('workspaces.list', { projectId }), (all) =>
+          all.some((one) => one.id === workspace.id && one.state === 'ready'),
+        )
+        const steps = yield* asked('preparation.steps', { workspaceId: workspace.id })
+        const status = yield* asked('workspaces.status', { id: workspace.id })
+
+        yield* asked('variables.set', { projectId, workspaceId: null, key: 'PORT', value: '3000' })
+        const set = yield* asked('variables.set', {
+          projectId,
+          workspaceId: workspace.id,
+          key: 'PORT',
+          value: '3001',
+        })
+        yield* asked('variables.remove', { projectId, workspaceId: null, key: 'PORT' })
+        const variables = {
+          project: yield* asked('variables.list', { projectId, workspaceId: null }),
+          workspace: yield* asked('variables.list', { projectId, workspaceId: workspace.id }),
+        }
+
+        const cleaned = yield* asked('workspaces.cleanup', { id: workspace.id })
+        const resumed = yield* asked('preparation.resume', { workspaceId: workspace.id })
+        const picked = yield* asked('workspaces.createOnFolder', {
+          projectId,
+          path: join(dataFolder, 'spike'),
+        })
+        return {
+          recipe,
+          moved,
+          plan,
+          reads,
+          workspace,
+          begun,
+          twice,
+          listed,
+          steps,
+          status,
+          set,
+          variables,
+          cleaned,
+          resumed,
+          picked,
+        }
+      }),
+    )
+
+    expect(seen.moved.map((step) => step.kind)).toEqual(['link', 'copy'])
+    expect(seen.recipe.map((step) => [step.kind, step.path])).toEqual([['copy', './.env']])
+
+    expect(seen.plan).toMatchObject({ name: 'hem-7-login-form', gitAvailable: true })
+    // The plan names its locations and reads none of them; each read answers on its own (#110).
+    expect(seen.plan.repositories).toEqual(['./sources/api'])
+    expect(seen.reads).toEqual([
+      expect.objectContaining({ relativePath: './sources/api', branch: 'atlas/HEM-7-login-form' }),
+    ])
+    expect(seen.workspace).toMatchObject({ state: 'preparing', dedicated: true, main: false })
+
+    // Answered at once, before any step ran; the Workspace became ready afterwards.
+    expect(seen.begun.map((step) => [step.kind, step.state])).toEqual([
+      ['worktree', 'pending'],
+      ['copy', 'pending'],
+    ])
+    expect(seen.twice.message).toBe('this Workspace is already being prepared')
+    expect(seen.listed.map((one) => [one.name, one.main])).toEqual([
+      ['main', true],
+      ['hem-7-login-form', false],
+    ])
+    expect(seen.steps.map((step) => step.state)).toEqual(['done', 'done'])
+    expect(seen.status).toEqual([
+      {
+        relativePath: './sources/api',
+        step: null,
+        git: expect.objectContaining({ ok: true, branch: 'atlas/HEM-7-login-form' }),
+      },
+    ])
+
+    expect(seen.set).toEqual({ key: 'PORT', value: '3001', workspaceId: seen.workspace.id })
+    expect(seen.variables.project).toEqual([])
+    expect(seen.variables.workspace).toEqual([seen.set])
+
+    expect(seen.cleaned).toMatchObject({ state: 'cleaned' })
+    expect(seen.resumed).toHaveLength(2)
+    expect(seen.picked).toMatchObject({ name: 'spike', state: 'ready', dedicated: false })
+  })
+
+  test('a Project, a Session and a proposal are decided through their channels', async () => {
+    const seen = await running(
+      Effect.gen(function* () {
+        const created = yield* asked('projects.create', {
+          name: 'Atlas',
+          tone: 'primary',
+          mainPath: main,
+        })
+        const added = yield* asked('repositories.add', {
+          id: created.id,
+          version: created.version,
+          relativePath: './sources/api',
+        })
+        const left = yield* asked('projects.setRepositoryIncluded', {
+          id: added.id,
+          version: added.version,
+          path: './sources/api',
+          included: false,
+        })
+        const rooted = yield* asked('projects.setWorkspacesRoot', {
+          id: left.id,
+          version: left.version,
+          path: join(dataFolder, 'elsewhere'),
+        })
+        const project = yield* asked('projects.setBranchPrefix', {
+          id: rooted.id,
+          version: rooted.version,
+          prefix: 'hemera',
+        })
+
+        const picked = yield* asked('workspaces.createOnFolder', {
+          projectId: project.id,
+          path: join(dataFolder, 'spike'),
+          name: 'spike',
+        })
+        const sessions = yield* Sessions
+        const session = yield* sessions.create(project.id, 'claude')
+        const chosen = yield* asked('sessions.chooseWorkspace', {
+          id: session.id,
+          version: session.version,
+          workspaceId: picked.id,
+        })
+        const services = yield* asked('commands.services', {
+          projectId: project.id,
+          workspaceId: picked.id,
+        })
+
+        // Two proposals as `commands_propose` writes them: one accepted, one declined (D8-11).
+        for (const [proposalId, name] of [
+          ['p-1', 'seed'],
+          ['p-2', 'reset'],
+        ] as const) {
+          yield* sessions.write(session.id, {
+            role: 'hemera',
+            kind: 'command_proposal',
+            body: name,
+            payload: JSON.stringify({
+              proposalId,
+              name,
+              line: `node ${name}.js`,
+              type: 'script',
+              folder: null,
+              why: 'run by hand twice',
+              state: 'pending',
+            }),
+            correlationId: `proposal:${proposalId}`,
+            state: 'pending',
+          })
+        }
+        const accepted = yield* asked('commands.proposeAccept', {
+          sessionId: session.id,
+          proposalId: 'p-1',
+        })
+        yield* asked('commands.proposeDecline', { sessionId: session.id, proposalId: 'p-2' })
+        const catalogue = yield* asked('commands.list', { projectId: project.id })
+        return { left, rooted, project, chosen, picked, services, accepted, catalogue }
+      }),
+    )
+
+    expect(seen.left.included).toEqual([])
+    expect(seen.rooted.workspacesRoot).toBe(join(dataFolder, 'elsewhere'))
+    expect(seen.project).toMatchObject({ branchPrefix: 'hemera', repositories: ['./sources/api'] })
+    expect(seen.chosen.workspaceId).toBe(seen.picked.id)
+    expect(seen.services).toEqual([])
+    expect(seen.accepted).toMatchObject({ name: 'seed', line: 'node seed.js' })
+    expect(seen.catalogue.map((command) => command.name)).toEqual(['seed'])
+  })
+
+  test('a step’s run is read by its Project, and by no other', async () => {
+    const seen = await running(
+      Effect.gen(function* () {
+        const project = yield* asked('projects.create', {
+          name: 'Atlas',
+          tone: 'primary',
+          mainPath: main,
+        })
+        const other = yield* asked('projects.create', {
+          name: 'Borealis',
+          tone: 'primary',
+          mainPath: join(dataFolder, 'spike'),
+        })
+        const workspace = yield* asked('workspaces.createOnFolder', {
+          projectId: project.id,
+          path: join(dataFolder, 'spike'),
+        })
+        // A run as a preparation step leaves it: no Session, its Workspace, its output and code.
+        const sql = yield* SqliteClient
+        yield* sql`INSERT INTO command_runs (id, session_id, workspace_id, name, line, type, cwd, state, exit_code, output, started_by, started_at, ended_at)
+          VALUES ('step-run', NULL, ${workspace.id}, 'install', 'pnpm install', 'script', ${workspace.path}, 'failed', 2, 'installed', 'user', '2026-09-24T08:00:00.000Z', '2026-09-24T08:00:01.000Z')`
+        const read = yield* asked('commands.runOf', { projectId: project.id, runId: 'step-run' })
+        const refused = yield* Effect.flip(
+          asked('commands.runOf', { projectId: other.id, runId: 'step-run' }),
+        )
+        return { read, refused }
+      }),
+    )
+
+    expect(seen.read).toMatchObject({
+      id: 'step-run',
+      sessionId: null,
+      workspaceName: 'spike',
+      state: 'failed',
+      exitCode: 2,
+      output: 'installed',
+    })
+    expect(seen.refused).toBeInstanceOf(UnknownRunError)
+  })
+
+  test('the window is told when a Workspace is created, prepared and cleaned up', async () => {
+    const seen = await running(
+      Effect.gen(function* () {
+        const created = yield* asked('projects.create', {
+          name: 'Atlas',
+          tone: 'primary',
+          mainPath: main,
+        })
+        const project = yield* asked('repositories.add', {
+          id: created.id,
+          version: created.version,
+          relativePath: './sources/api',
+        })
+        const plan = yield* asked('workspaces.plan', {
+          projectId: project.id,
+          key: 'HEM-7',
+          slug: 'login-form',
+        })
+        // Each location read on its own, as the dialog reads them (#110).
+        const reads = yield* Effect.forEach(plan.repositories, (relativePath) =>
+          asked('workspaces.planRepository', {
+            projectId: project.id,
+            key: 'HEM-7',
+            slug: 'login-form',
+            relativePath,
+          }),
+        )
+        const workspace = yield* asked('workspaces.create', {
+          projectId: project.id,
+          specId: null,
+          name: plan.name,
+          repositories: reads.map((one) => ({
+            relativePath: one.relativePath,
+            base: one.base ?? '',
+            branch: one.branch,
+          })),
+        })
+        const afterCreation = [...told]
+        yield* asked('preparation.prepare', { workspaceId: workspace.id })
+        yield* until(asked('preparation.steps', { workspaceId: workspace.id }), (steps) =>
+          steps.every((step) => step.state === 'done'),
+        )
+        // The end of the preparation is told after its last step is written.
+        const afterPreparation = yield* until(
+          Effect.sync(() => [...told]),
+          (all) => all.length >= afterCreation.length + 3,
+        )
+        yield* asked('workspaces.cleanup', { id: workspace.id })
+        const picked = yield* asked('workspaces.createOnFolder', {
+          projectId: project.id,
+          path: join(dataFolder, 'spike'),
+        })
+        return { project, workspace, picked, afterCreation, afterPreparation, all: [...told] }
+      }),
+    )
+
+    const about = (workspaceId: string) => ({ projectId: seen.project.id, workspaceId })
+    expect(seen.afterCreation).toEqual([about(seen.workspace.id)])
+    // The one step going to `running`, then to `done` with the Workspace `ready`, then the end.
+    expect(seen.afterPreparation).toEqual(Array(4).fill(about(seen.workspace.id)))
+    expect(seen.all.slice(4)).toEqual([about(seen.workspace.id), about(seen.picked.id)])
+  })
+
+  test.each([
+    ['workspaces.create', { projectId: 'atlas', specId: null, name: 'login-form' }, 'repositories'],
+    ['preparation.prepare', {}, 'workspaceId'],
+    [
+      'recipe.add',
+      { projectId: 'atlas', kind: 'delete', base: null, path: null, commandId: null },
+      'kind',
+    ],
+    ['variables.set', { projectId: 'atlas', workspaceId: null, key: 'PORT' }, 'value'],
+    ['projects.setBranchPrefix', { id: 'atlas', prefix: 'hemera' }, 'version'],
+    ['sessions.chooseWorkspace', { id: 'session-1', version: 1 }, 'workspaceId'],
+    ['commands.services', { workspaceId: null }, 'projectId'],
+    ['commands.proposeAccept', { sessionId: 'session-1' }, 'proposalId'],
+  ])('%s refuses %o, naming the field', (name, argument, field) => {
+    const decision = decideRequest(name, argument)
+
+    expect(decision.accepted).toBe(false)
+    if (!decision.accepted) {
+      expect(decision.reason).toContain(name)
+      expect(decision.reason).toContain(field)
+    }
+  })
+})
+
+/**
+ * A `define` Session whose agent took its first turn, the brief with it, on a Workspace of its
+ * own, and a question its agent asked: what a human change of its Spec is handed to.
+ */
+const defined = (workspace: string) =>
+  running(
+    Effect.gen(function* () {
+      const project = yield* (yield* Projects).create({
+        name: 'Atlas',
+        tone: 'primary',
+        mainPath: workspace,
+      })
+      const free = yield* (yield* Sessions).create(project.id, 'claude')
+      const specs = yield* Specs
+      const { snapshot } = yield* specs.create({
+        sessionId: free.id,
+        type: 'feature',
+        title: 'Export the journal',
+      })
+      const specId = snapshot.spec.id
+      yield* (yield* AgentRuntime).prompt(free.id, 'First turn.')
+      const raised = yield* specs.raiseQuestion(
+        { kind: 'agent', sessionId: free.id },
+        { specId, body: 'Which format?', blocking: true, phase: 'shape', options: [] },
+      )
+      const scope = raised.sections.find((section) => section.name === 'scope')
+      return {
+        sessionId: free.id,
+        specId,
+        questionId: raised.questions[0]?.id ?? '',
+        scopeVersion: scope?.version ?? 0,
+      }
+    }),
+  )
+
+/**
+ * Runs a message the window sends, as the entry point does, to a Session whose agent was started
+ * again and runs no turn: what reaches the agent then is what the message handed it, and not what
+ * the end of a turn would have.
+ */
+const sentWhileIdle = (
+  sessionId: string,
+  name: string,
+  // oxlint-disable-next-line anti-slop/no-unknown-parameters -- a message as it arrives, which is what `decideRequest` is for
+  argument: unknown,
+  agent: FakeAgent,
+) =>
+  running(
+    Effect.gen(function* () {
+      yield* (yield* AgentRuntime).start(sessionId)
+      const decision = decideRequest(name, argument)
+      if (!decision.accepted) return yield* Effect.die(decision.reason)
+      yield* answer(decision)
+      // The thread once a turn Hemera opened to hand something over has ended in it (D6-08).
+      return yield* until(threadOf(sessionId), (thread) =>
+        thread.some(
+          (entry) => entry.kind === 'turn' && entry.payload.includes('"kind":"delivery"'),
+        ),
+      )
+    }),
+    agent,
+  )
+
+/** The text of the resource a prompt carried at an address, if it carried one. */
+const handedAt = (agent: FakeAgent, prompt: number, uri: string) => {
+  const block = agent.answers.blocks[prompt]?.find(
+    (one) => one.type === 'resource' && one.resource.uri === uri,
+  )
+  return block?.type === 'resource' && 'text' in block.resource ? block.resource.text : null
+}
+
+describe('An answer resolves the question and reaches the agent at the next safe point', () => {
+  test('answered from the window while no turn runs, it is handed to the agent at once, in a turn of its own', async () => {
+    const workspace = mkdtempSync(join(tmpdir(), 'hemera-request-workspace-'))
+    const { sessionId, specId, questionId } = await defined(workspace)
+    const agent = fakeAgent()
+
+    const thread = await sentWhileIdle(
+      sessionId,
+      'specs.answerQuestion',
+      { specId, questionId, text: 'CSV' },
+      agent,
+    )
+    rmSync(workspace, { recursive: true, force: true })
+
+    expect(agent.answers.prompts).toEqual([DELIVERY_MARKER])
+    expect(handedAt(agent, 0, contextUri('answer'))).toBe(
+      '# Answers since your last turn\n\n- Which format?\n  The user answered: CSV',
+    )
+    const line = thread.find((entry) => entry.kind === 'context_delivery')
+    expect(line).toMatchObject({ role: 'hemera', turnId: expect.any(String) })
+  })
+})
+
+describe('A human edit is recorded and reaches the agent', () => {
+  test('saved from the panel while no turn runs, it is handed to the agent at once, never as a message', async () => {
+    const workspace = mkdtempSync(join(tmpdir(), 'hemera-request-workspace-'))
+    const { sessionId, specId, scopeVersion } = await defined(workspace)
+    const agent = fakeAgent()
+
+    const thread = await sentWhileIdle(
+      sessionId,
+      'specs.writeSection',
+      { specId, sessionId, name: 'scope', body: 'CSV only.', baseVersion: scopeVersion },
+      agent,
+    )
+    rmSync(workspace, { recursive: true, force: true })
+
+    expect(agent.answers.prompts).toEqual([DELIVERY_MARKER])
+    expect(handedAt(agent, 0, contextUri('edit'))).toContain('CSV only.')
+    expect(thread.filter((entry) => entry.role === 'user').map((entry) => entry.body)).toEqual([
+      'First turn.',
+    ])
+  })
+})
+
+describe('A Session that takes the write right is briefed as the writer at the next safe point', () => {
+  test('a reader briefed as one takes the right while no turn runs, and is handed the writer brief at once', async () => {
+    const workspace = mkdtempSync(join(tmpdir(), 'hemera-request-workspace-'))
+    const { sessionId, specId } = await defined(workspace)
+    // A second Session reads the draft, and its agent was briefed as a reader.
+    const readerAgent = fakeAgent()
+    const reader = await running(
+      Effect.gen(function* () {
+        const opened = yield* (yield* Specs).openSession({ specId, provider: 'claude' })
+        yield* (yield* AgentRuntime).prompt(opened.session.id, 'Reading along.')
+        const { spec } = yield* (yield* Specs).read(specId)
+        const writer = yield* (yield* Sessions).one(sessionId)
+        return { id: opened.session.id, key: spec.key, writerTitle: writer.session.title }
+      }),
+      readerAgent,
+    )
+    const agent = fakeAgent()
+
+    await sentWhileIdle(reader.id, 'specs.transferWrite', { specId, sessionId: reader.id }, agent)
+    rmSync(workspace, { recursive: true, force: true })
+
+    expect(
+      handedAt(readerAgent, 0, contextUri('brief'))?.startsWith(
+        readerLine(reader.key, reader.writerTitle),
+      ),
+    ).toBe(true)
+    // Taken over, it is briefed again at once, as the writer: no reader line any more.
+    expect(agent.answers.prompts).toEqual([DELIVERY_MARKER])
+    expect(handedAt(agent, 0, contextUri('brief'))?.startsWith(DEFINE_MISSION_BRIEF)).toBe(true)
+  })
+})
+
+describe('The main process asks for the commands to run at open', () => {
+  test('engine.atOpen asked with no argument answers what could not start: nothing, here', async () => {
+    expect(await send('engine.atOpen', {})).toEqual([])
   })
 })

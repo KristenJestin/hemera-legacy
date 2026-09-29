@@ -2,6 +2,7 @@ import type { Meta, StoryObj } from '@storybook/react-vite'
 import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
 import { useState } from 'react'
 
+import { expectNeverBuried, watchThereAndBack } from '../../.storybook/sliding-mark.ts'
 import type { ThemeChoice } from '../window.ts'
 import {
   Settings,
@@ -29,12 +30,26 @@ const ARCHIVED: ArchivedProject[] = [
   { id: 'shop', name: 'Legacy shop', archivedAt: 'in August' },
 ]
 
-function Controlled({ theme, archived, onThemeChange, onRestore, ...rest }: SettingsProps) {
+function Controlled({
+  theme,
+  archived,
+  onThemeChange,
+  onRestore,
+  acpTrace,
+  onAcpTraceChange,
+  ...rest
+}: SettingsProps) {
   const [chosen, setChosen] = useState<ThemeChoice>(theme)
   const [kept, setKept] = useState(archived)
+  const [tracing, setTracing] = useState(acpTrace ?? false)
   return (
     <Settings
       {...rest}
+      acpTrace={tracing}
+      onAcpTraceChange={(on) => {
+        setTracing(on)
+        onAcpTraceChange?.(on)
+      }}
       theme={chosen}
       onThemeChange={(next) => {
         setChosen(next)
@@ -49,6 +64,64 @@ function Controlled({ theme, archived, onThemeChange, onRestore, ...rest }: Sett
   )
 }
 
+/** What this machine has, as `agents.check` answered when the section was opened (D5-18). */
+const AGENTS: SettingsProps['agents'] = {
+  agents: [
+    {
+      id: 'claude',
+      name: 'Claude Code',
+      found: true,
+      version: '2.0.31',
+      authenticated: true,
+      installHint: 'npm i -g @anthropic-ai/claude-code',
+      loginHint: 'claude auth login',
+      installer: 'npm',
+      latest: '2.0.35',
+      bare: {
+        qualified: true,
+        private:
+          'its managed and policy settings and ~/.claude.json still load; Hemera does not read them.',
+      },
+    },
+    {
+      id: 'codex',
+      name: 'Codex',
+      found: true,
+      version: '0.9.4',
+      authenticated: false,
+      installHint: 'npm i -g @openai/codex',
+      loginHint: 'codex login',
+      installer: 'pnpm',
+      latest: '0.9.4',
+      bare: {
+        qualified: false,
+        reason:
+          'apply_patch has no configuration key, and the MCP resource tools appear as soon as an MCP server exists. Hemera would not see those calls, so this Session is not opened.',
+      },
+    },
+    {
+      id: 'opencode',
+      name: 'OpenCode',
+      found: false,
+      version: null,
+      authenticated: false,
+      installHint: 'npm i -g opencode-ai',
+      loginHint: 'opencode auth login',
+      installer: 'unknown',
+      latest: null,
+      bare: {
+        qualified: true,
+        private:
+          '$HOME/.opencode, its managed configuration and a remote .well-known/opencode still load; Hemera does not read them.',
+      },
+    },
+  ],
+  checked: true,
+  updating: null,
+  output: {},
+  onUpdate: fn(),
+}
+
 const meta = {
   tags: ['autodocs'],
   title: 'Surfaces/Settings',
@@ -59,14 +132,18 @@ const meta = {
     subtitle: 'Hemera Beta 0.4.0-beta.3 · channel beta',
     theme: 'dark',
     facts: FACTS,
+    agents: AGENTS,
     archived: ARCHIVED,
     onThemeChange: fn(),
     onOpenFolder: fn(),
     onOpenDiagnostic: fn(),
     onRestore: fn(),
+    acpTrace: false,
+    onAcpTraceChange: fn(),
   },
   argTypes: {
     subtitle: { control: 'text', description: 'The product, its version and its channel.' },
+    agents: { control: 'object', description: 'What this machine has, and its one press.' },
     theme: {
       control: 'inline-radio',
       options: ['system', 'light', 'dark'],
@@ -78,6 +155,11 @@ const meta = {
     onOpenFolder: { action: 'folder opened' },
     onOpenDiagnostic: { action: 'diagnostic opened' },
     onRestore: { action: 'restored' },
+    acpTrace: {
+      control: 'boolean',
+      description: 'Whether the ACP trace of each Session is written.',
+    },
+    onAcpTraceChange: { action: 'trace turned on or off' },
   },
 } satisfies Meta<typeof Settings>
 
@@ -154,13 +236,20 @@ export const RestoringAProject: Story = {
     args.onRestore.mockClear()
     const canvas = within(canvasElement)
 
-    const lines = canvas.getAllByRole('listitem')
+    // The page lists other things too — the agents of this machine, among them — so what is
+    // restored is read off the rows that carry the press.
+    const lines = canvas
+      .getAllByRole('listitem')
+      .filter((row) => within(row).queryByRole('button', { name: 'Restore' }) !== null)
     expect(lines).toHaveLength(2)
     await userEvent.click(within(lines[0]!).getByRole('button', { name: 'Restore' }))
     expect(args.onRestore).toHaveBeenCalledWith('ml')
     // It leaves the list it was restored from.
     await waitFor(() => {
-      expect(canvas.getAllByRole('listitem')).toHaveLength(1)
+      const left = canvas
+        .getAllByRole('listitem')
+        .filter((row) => within(row).queryByRole('button', { name: 'Restore' }) !== null)
+      expect(left).toHaveLength(1)
     })
   },
 }
@@ -176,5 +265,42 @@ export const Keyboard: Story = {
     await waitFor(() => {
       expect(canvas.getByRole('radio', { name: 'System' })).toBeChecked()
     })
+  },
+}
+
+/**
+ * The ACP trace of each Session, off until the reader turns it on (issue #131), with the sentence
+ * that says what it keeps and what it does not.
+ */
+export const TurningTheTraceOn: Story = {
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement)
+    const box = canvas.getByRole('checkbox', { name: /Write an ACP trace of each Session/ })
+    expect(box).not.toBeChecked()
+    expect(canvas.getByText(/written as their size only/)).toBeInTheDocument()
+
+    await userEvent.click(box)
+    await waitFor(() => {
+      expect(box).toBeChecked()
+    })
+    expect(args.onAcpTraceChange).toHaveBeenCalledWith(true)
+  },
+}
+
+/**
+ * The fill of the theme's segment crossing it, from one end to the other and back: on every frame
+ * of the way it is drawn over the middle choice and never under it (issue #127).
+ */
+export const MarkCrossing: Story = {
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const segment = canvas.getByRole('radiogroup', { name: 'Theme' })
+    const watched = await watchThereAndBack(
+      segment,
+      () => userEvent.click(canvas.getByRole('radio', { name: 'System' })),
+      () => userEvent.click(canvas.getByRole('radio', { name: 'Dark' })),
+    )
+    expect(canvas.getByRole('radio', { name: 'Dark' })).toBeChecked()
+    expectNeverBuried(watched)
   },
 }

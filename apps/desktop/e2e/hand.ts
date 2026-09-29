@@ -7,15 +7,18 @@
  * a suite about the shell has to make one before it can look at a tab, exactly as a hand would.
  */
 
-import { browser, expect } from '@wdio/globals'
+import { $, $$, browser, expect } from '@wdio/globals'
 
 /** Presses whatever the page shows under this name, and says so when there is nothing there. */
 export async function press(name: string): Promise<void> {
   // Matched on what the button contains rather than on what it is exactly: a tab carries the
-  // count of what nobody has seen, and the archive button carries the name of the Project.
+  // count of what nobody has seen, and the archive button carries the name of what it puts away
+  // — `Archive Invoice export` — so a label is read by what it starts with.
   const pressed = await browser.execute((label: string) => {
     const button = [...document.querySelectorAll('button')].find(
-      (one) => (one.textContent ?? '').includes(label) || one.getAttribute('aria-label') === label,
+      (one) =>
+        (one.textContent ?? '').includes(label) ||
+        (one.getAttribute('aria-label') ?? '').startsWith(label),
     )
     if (button === undefined) return false
     button.click()
@@ -57,6 +60,61 @@ export async function fill(label: string, value: string): Promise<void> {
   )
   expect(filled).toBe(true)
   await browser.pause(120)
+}
+
+/**
+ * Chooses an option of the select with this label, with the pointer, as a hand does.
+ *
+ * Not through `press`: a select of the design system opens on the pointer going down, which a
+ * `click()` dispatched from the page never is, and its options live in a popup the select puts
+ * at the end of the document. So the trigger is clicked by the driver, then the option that says
+ * exactly this.
+ */
+export async function choose(label: string, option: string): Promise<void> {
+  await $(`button[aria-label="${label}"]`).click()
+  await browser.pause(300)
+  const options = await $$('[role="option"]')
+  let chosen = false
+  for (const one of options) {
+    // oxlint-disable-next-line no-await-in-loop -- the options are read one after the other, in order
+    if ((await one.getText()).trim() === option) {
+      // oxlint-disable-next-line no-await-in-loop -- the one found is chosen, then the loop ends
+      await one.click()
+      chosen = true
+      break
+    }
+  }
+  expect(chosen).toBe(true)
+  await browser.pause(300)
+}
+
+/**
+ * Presses the tab that says this, with the pointer: a tab of the design system is chosen on the
+ * pointer, not on a click event.
+ */
+export async function pressTab(name: string): Promise<void> {
+  // A Dialog still leaving covers the page until it has gone, and a pointer pressed through it
+  // lands on the Dialog: the press waits for the page to be what it presses.
+  await browser.waitUntil(
+    async () =>
+      await browser.execute(
+        () => document.querySelector('[role="dialog"][data-ending-style]') === null,
+      ),
+    { timeout: 10_000, interval: 100, timeoutMsg: 'a Dialog never finished leaving' },
+  )
+  const found = await $$('[role="tab"]')
+  let pressed = false
+  for (const tab of found) {
+    // oxlint-disable-next-line no-await-in-loop -- the tabs are read one after the other, in order
+    if ((await tab.getText()).includes(name)) {
+      // oxlint-disable-next-line no-await-in-loop -- the one found is pressed, then the loop ends
+      await tab.click()
+      pressed = true
+      break
+    }
+  }
+  expect(pressed).toBe(true)
+  await browser.pause(400)
 }
 
 /**
@@ -144,6 +202,17 @@ export async function shows(text: string): Promise<boolean> {
 }
 
 /**
+ * What the sidebar says, which is where a Session is named and not the thread it draws.
+ *
+ * A name is in two places at once — the sidebar lists the Session under it and the page heads the
+ * thread with it — so a suite reading the whole page cannot tell which of the two it saw. The
+ * sidebar is the one that says how a Session is listed.
+ */
+export async function sidebar(): Promise<string> {
+  return await browser.execute(() => document.querySelector('aside')?.textContent ?? '')
+}
+
+/**
  * What the bar lists, in the order it lists them.
  *
  * Read as "does a tab say this", because a tab says more than a name: its tone is a dot and
@@ -183,4 +252,223 @@ export async function addProject(name: string, folder: string): Promise<void> {
   await fill('Folder of the main Workspace', folder)
   await press('Create Project')
   await browser.pause(600)
+}
+
+/**
+ * What the control of this name is: whether it can be pressed, and what it says about that.
+ *
+ * `press` is a hand on a button that works; this is the question asked of one that does not. A
+ * control that is off for a reason says the reason on itself — the send of a Home with no agent
+ * picked is exactly that — and reading it back is how a suite proves the reason was given rather
+ * than that nothing happened.
+ */
+export async function control(
+  name: string,
+): Promise<{ readonly off: boolean; readonly said: string } | null> {
+  return await browser.execute((label: string) => {
+    const button = [...document.querySelectorAll('button')].find(
+      (one) => (one.textContent ?? '').includes(label) || one.getAttribute('aria-label') === label,
+    )
+    if (button === undefined) return null
+    return {
+      // Either one is the control being off: a button that refuses the press, and one that tells
+      // whatever reads the page that it does.
+      off: button.disabled || button.getAttribute('aria-disabled') === 'true',
+      said: button.getAttribute('title') ?? '',
+    }
+  }, name)
+}
+
+/**
+ * Waits until the page holds this text, and says so when it never does.
+ *
+ * An agent answers when it answers: a turn is a process being started, a handshake and a stream,
+ * and a pause long enough for the slowest of them would be a pause every other suite pays for.
+ * What a suite waits on is the text itself.
+ */
+export async function awaits(text: string, within = 20_000): Promise<void> {
+  await browser.waitUntil(async () => await shows(text), {
+    timeout: within,
+    interval: 200,
+    timeoutMsg: `the page never showed "${text}"`,
+  })
+}
+
+/**
+ * Presses a button inside the first region this selector finds, and says so when there is none.
+ *
+ * `press` takes the first button of the page that says the name, and some names are said twice:
+ * `Create` is the proposal's in the thread and a Dialog's elsewhere, an option of a question is
+ * also a word of the register. A hand presses the one in front of it, so this is `press` held
+ * to one region, read by what the button starts with.
+ */
+export async function pressIn(area: string, name: string): Promise<void> {
+  const pressed = await browser.execute(
+    (scope: string, label: string) => {
+      const within = document.querySelector(scope)
+      if (within === null) return false
+      const button = [...within.querySelectorAll('button')].find(
+        (one) =>
+          (one.textContent ?? '').trim().startsWith(label) ||
+          (one.getAttribute('aria-label') ?? '').startsWith(label),
+      )
+      if (button === undefined) return false
+      button.click()
+      return true
+    },
+    area,
+    name,
+  )
+  expect(pressed).toBe(true)
+  await browser.pause(300)
+}
+
+/** The Session's notices, open: what waits for the reader, above the composer (issue #237). */
+export const NOTICES = '[role="dialog"][aria-label="Waiting for your answer"]'
+
+/** The pill the notices open from, on the composer's edge; its name counts what waits. */
+const PILL = 'button[aria-label^="Waiting for your answer"]'
+
+/**
+ * Waits for the notices to hold something of this kind — `Permissions`, `Questions`, `Spec
+ * proposed`, `Proposed commands` — and opens them, the way a hand does: they are closed until
+ * pressed (issue #237). Whatever waits is answered in there, never in the thread.
+ */
+export async function openNotices(kind: string, within = 20_000): Promise<void> {
+  await browser.waitUntil(
+    async () =>
+      await browser.execute(
+        (pill: string, named: string) =>
+          (document.querySelector(pill)?.getAttribute('aria-label') ?? '').includes(named),
+        PILL,
+        kind,
+      ),
+    { timeout: within, interval: 200, timeoutMsg: `the notices never held ${kind}` },
+  )
+  const open = await browser.execute(
+    (panel: string) => document.querySelector(panel) !== null,
+    NOTICES,
+  )
+  if (!open) {
+    await browser.execute((pill: string) => {
+      const button = document.querySelector(pill)
+      if (button instanceof HTMLButtonElement) button.click()
+    }, PILL)
+  }
+  await browser.waitUntil(
+    async () =>
+      await browser.execute((panel: string) => document.querySelector(panel) !== null, NOTICES),
+    { timeout: 5000, interval: 100, timeoutMsg: 'the notices never opened' },
+  )
+  await browser.pause(300)
+}
+
+/**
+ * Waits for a line of the thread named this way, a record of something that waited for the reader
+ * (issue #237): `Spec proposed, ATL-1 «…», created`, `Proposed command dev, added to the catalogue`.
+ * Read by its name, which says the answer the dot draws.
+ */
+export async function awaitsRecord(name: string, within = 20_000): Promise<void> {
+  await browser.waitUntil(
+    async () =>
+      await browser.execute(
+        (named: string) =>
+          [...document.querySelectorAll('[role="group"][aria-label]')].some((group) =>
+            (group.getAttribute('aria-label') ?? '').startsWith(named),
+          ),
+        name,
+      ),
+    { timeout: within, interval: 200, timeoutMsg: `the thread never kept "${name}"` },
+  )
+}
+
+/**
+ * Answers the question the agent asked with the option that says this, among the Session's
+ * notices (issue #237), and waits for its record in the thread to say it was answered.
+ *
+ * Not through `pressIn`: an option is lettered by Hemera (issue #134), so what the button says
+ * starts with its letter — `AThe issue date` — and a hand reads the option, not the letter. A
+ * press on a choice is the answer (issue #199); the record the thread keeps of the question then
+ * names itself after the answer.
+ */
+export async function answerWith(option: string): Promise<void> {
+  await openNotices('Questions')
+  const pressed = await browser.execute(
+    (panel: string, label: string) => {
+      const options = document.querySelectorAll(
+        `${panel} [aria-label="Answers"] button:not(:disabled)`,
+      )
+      const button = [...options].find((one) => (one.textContent ?? '').includes(label))
+      if (!(button instanceof HTMLButtonElement)) return false
+      button.click()
+      return true
+    },
+    NOTICES,
+    option,
+  )
+  expect(pressed).toBe(true)
+  await browser.waitUntil(
+    async () =>
+      await browser.execute(
+        (label: string) =>
+          [...document.querySelectorAll('[id^="ask-"] [role="group"]')].some((record) =>
+            (record.getAttribute('aria-label') ?? '').endsWith(label),
+          ),
+        option,
+      ),
+    {
+      timeout: 5000,
+      timeoutMsg: `the question's record never says it was answered with ${option}`,
+    },
+  )
+}
+
+/**
+ * Waits for a part of a Spec to be in its panel's column: every part is laid there one after the
+ * other under the heading of its phase (issue #164), so there is nothing to pick for it to be read.
+ */
+export async function showPart(key: string, part: string): Promise<void> {
+  await browser.waitUntil(
+    async () =>
+      await browser.execute(
+        (scope: string, name: string) =>
+          [...(document.querySelector(scope)?.querySelectorAll('[data-part] h3') ?? [])].some(
+            (heading) => (heading.textContent ?? '').startsWith(name),
+          ),
+        `[role="region"][aria-label="Contents of ${key}"]`,
+        part,
+      ),
+    { timeout: 5000, timeoutMsg: `the ${part} of ${key} is not in its column` },
+  )
+}
+
+/**
+ * Unfolds the panel of a Spec from the small frame it opens folded to, the way a hand does: a
+ * Session opens its Spec folded, and what is read in it — the head, the column, the reader bar —
+ * is drawn only once it is open. A panel already open is left as it is.
+ */
+export async function unfoldSpec(key: string): Promise<void> {
+  await browser.execute((scope: string) => {
+    const unfold = document
+      .querySelector(scope)
+      ?.querySelector('button[aria-label="Unfold the Spec"]')
+    if (unfold instanceof HTMLButtonElement) unfold.click()
+  }, `section[aria-label="Spec ${key}"]`)
+  await browser.waitUntil(
+    async () =>
+      await browser.execute(
+        (scope: string) => document.querySelector(scope) !== null,
+        `[role="region"][aria-label="Contents of ${key}"]`,
+      ),
+    { timeout: 5000, timeoutMsg: `the panel of ${key} never unfolded` },
+  )
+  await browser.pause(600)
+}
+
+/** What the region this selector finds says, or an empty string when there is none. */
+export async function region(selector: string): Promise<string> {
+  return await browser.execute(
+    (scope: string) => document.querySelector(scope)?.textContent ?? '',
+    selector,
+  )
 }

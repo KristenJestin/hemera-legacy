@@ -3,13 +3,17 @@
 Instructions for any coding agent working in this repository. `CLAUDE.md` is a symbolic link
 to this file: there is one contract, not two that drift apart.
 
-Hemera (code name of Nyx v3) is a desktop cockpit for ACP agents: Electron 44 with its
+Hemera is a desktop cockpit for ACP agents: Electron 44 with its
 Chromium, Node in the main process, React served by Vite in the renderer, SQLite through
 `node:sqlite` + Drizzle in a named `utilityProcess`. GPUiX and Bun were abandoned on
-15 September 2026. This repository is the product monorepo and holds code only: no
-`openspec/`, no specs, no reports. The OpenSpec change being implemented is given to you
-when you are launched; read its `proposal.md`, `specs/`, `design.md` and `tasks.md` before
-touching code, and name every test suite after the scenario it covers.
+15 September 2026. This repository holds the code and its documentation: the product rules
+in `docs/product/`, the dated decisions in `docs/decisions/`, the research in `docs/technical/`,
+and the way work is done in `docs/METHOD.md`. The issue you implement carries its Proposal,
+Design and Spec sections and its checklists; read them, and `docs/METHOD.md`, before touching
+code, and name every test suite after the scenario it covers.
+
+Everything in this repository is in English: documents, code, comments, commits, issues,
+pull requests and the interface.
 
 Behavioral guidelines below are adapted from the Karpathy-style CLAUDE.md. They bias toward
 caution over speed; for trivial tasks, use judgment.
@@ -22,7 +26,7 @@ caution over speed; for trivial tasks, use judgment.
 - If multiple interpretations exist, present them; don't pick silently.
 - If a simpler approach exists, say so. Push back when warranted.
 - If something is unclear, stop, name what is confusing, ask.
-- A product rule lives in `docs/product/core.md` and the lot's specs. If code and spec
+- A product rule lives in `docs/product/core.md` and the issue's Spec section. If code and spec
   disagree, the spec wins; if the spec is wrong, say so instead of quietly deviating.
 
 ## 2. Simplicity first
@@ -67,15 +71,18 @@ packages/ipc      @hemera/ipc      the shared channel declaration: one name per 
 packages/ui       @hemera/ui       the design system: the CSS theme, the motion preset, the
                                    icon catalogue and the components. React, Tailwind 4, Base
                                    UI and motion; nothing of Hemera, nothing of Electron.
+apps/face-lab     @hemera/face-lab a page to play with Hemera's face (#140): its states, its
+                                   changes and every number it plays by, through the face's
+                                   own door `@hemera/ui/face`. A tool; it ships nowhere.
 tools/            —                boundaries, commit-message, git-flow, environment-report,
-                                   package-desktop, window-options, motion-properties.
+                                   package-desktop, window-options, motion-presets.
                                    TypeScript run by Node, tested by Vitest.
 ```
 
-Dependency direction is `desktop → core`, `desktop → ipc` and `desktop → ui`. `core`, `ipc`
-and `ui` import nothing of Hemera: they are the leaves the application composes. Tabler comes
-through `packages/ui/src/icons.ts` and nowhere else. Import other packages only through their
-`exports`; never reach into another package's `src`.
+Dependency direction is `desktop → core`, `desktop → ipc`, `desktop → ui` and `face-lab → ui`.
+`core`, `ipc` and `ui` import nothing of Hemera: they are the leaves the application composes.
+Tabler comes through `packages/ui/src/icons.ts` and nowhere else. Import other packages only
+through their `exports`; never reach into another package's `src`.
 `node tools/boundaries.ts` enforces all of it and runs inside `pnpm lint`.
 
 "Workspace" means two things: a pnpm workspace (a package here) and a product Workspace
@@ -97,6 +104,7 @@ pnpm package --channel beta      # refused outside CI: prod and beta are the pip
 pnpm check                       # typecheck, lint, fmt:check and test, in that order
 
 pnpm --filter @hemera/desktop e2e  # the built application, driven by @wdio/electron-service
+pnpm face-lab                      # the face lab, served on http://localhost:6012
 ```
 
 Configuration lives in one place: `vite.config.ts` at the root holds the `lint`, `fmt` and
@@ -130,6 +138,10 @@ Never run a real LLM provider from a test.
   of these branches, create a feature branch first.
 - Never rewrite history that is not yours. No `--no-verify`.
 - One commit = one intent. No `wip` commits. Don't mix formatting and logic in one commit.
+- The subject is `<type>(<scope>): <subject>`: the **scope is required**, the subject is 72
+  characters at most, and the type is one of feat, fix, refactor, test, docs, chore, build, ci,
+  perf. `node tools/commit-message.ts --range origin/dev..HEAD` is the judge; run it before a
+  push, the `commit-messages` check runs the same tool.
 - **Pull requests are merged by squash, and by squash only.** The squash commit takes the pull
   request's title and description, so the title is a plain Angular subject —
   `feat(desktop): lot 3, the profile and its database` — with nothing in front of it: `main`
@@ -218,6 +230,20 @@ or the Effect SQLite client, and `tools/boundaries.ts` refuses it anywhere else.
 process asks the engine by name — `preferences.read`, `preferences.write`, `engine.status`,
 declared in `packages/ipc/src/engine.ts` — and never opens the file itself.
 
+The engine holds the agents as well, under `apps/desktop/src/engine/agents/`: the ACP client, the
+supervisor of the agent processes, what the machine has installed and the adapter of each agent.
+An agent is started, stopped and asked from there, and its thread is written from there.
+The Spec lives beside them, under `apps/desktop/src/engine/specs/`: the Spec, its revisions,
+sections and phases, the ready gate and the write right. Every write checks that the Spec is a
+draft on its current revision and, for an agent, that its Session holds the write right, and
+records its Journal line in the same transaction.
+
+The product Workspaces live under `apps/desktop/src/engine/workspaces/`: the Workspaces of a
+Project (created, observed, cleaned up), their preparation step by step, the Project's recipe and
+the variables given to what runs in them. Git is `apps/desktop/src/engine/git.ts`: the machine's
+own `git`, spawned with its arguments and no shell, never inside a transaction, its refusal
+answered as Git wrote it.
+
 `data` and `engine` are the names the code uses; `Profile` is the word the interface keeps for
 the same folder, in the settings, in the Journal filter and on the `profile` events the engine
 writes at start-up.
@@ -228,22 +254,41 @@ writes at start-up.
   closed set: `press` for what answers the hand (hover, press, a width following it — stiff and
   light), `arrival` for what puts itself in place (panels, popups — the prototype's "Calme"
   spring, `stiffness 170, damping 26`, no overshoot), `instant` for a system asking for less
-  movement. Components read `useTransition(preset)`, never a preset directly: it answers the
-  reduced-motion preference with the end state for every property, where motion's own
-  `reducedMotion` would keep animating opacity. The tree runs under
-  `MotionConfig reducedMotion="user"` all the same, as the net under any element that forgets
-  the hook — and the lint refuses a `motion.*` element that animates without a `transition`
-  from it. CSS transitions of the design system stop under `prefers-reduced-motion: reduce`.
-  No component writes its own spring numbers or durations; a lint check refuses them outside
-  that one file.
-  **Only `transform`, `opacity`, `filter` and `clip-path` are animated.** A lint check refuses
-  an animation that targets a layout property or a colour.
+  movement, `slide`, `expand`, `collapse` and `push` for what changes place or size,
+  `crossfade` for one content giving way to another in the same place, and `ping` for a ring
+  leaving what is running, over and over.
+  Components read `useTransition(kind)`, never a kind directly: it answers the reduced-motion
+  preference with the end state for every property, where motion's own `reducedMotion` would
+  keep animating opacity. The tree runs under `MotionConfig reducedMotion="user"` all the same,
+  as the net under any element that forgets the hook — and the lint refuses a `motion.*`
+  element that animates without a `transition` from it. CSS transitions of the design system
+  stop under `prefers-reduced-motion: reduce`. No component writes its own spring, duration,
+  curve or keyframe; a lint check refuses them outside that one file.
+  **Animate whatever the UX needs — a height, a width, a push on the neighbours included** (the
+  decision of 22 September 2026 replaces D0-06, which allowed four composited properties).
+  What is closed is the set of kinds, not the set of properties: a movement the preset has no
+  kind for is added to `motion.ts` as one, named and explained, and read from there.
 - Every visual value comes from the design system's CSS tokens. **No hex colors, no px sizes,
   no inline styles outside the token files.**
 - The HTML prototype in `docs/prototypes/` and `spikes/proto-motion/` are **token and motion
   references only**. Never copy their markup, classes or inline styles. Copying them is a
   rejected change.
 - Keyboard: declared tab order per page, visible focus ring, focus restored after overlays.
+- Storybook sidebar, five roots in this order and nothing else: **Foundations** (tokens,
+  icons, motion); **Components**, the primitives, flat and alphabetical; **Blocks**, the
+  composed pieces that are not a screen, grouped by family and six families at most
+  (`Blocks/Message`, `Blocks/Activity`, `Blocks/Composer`, `Blocks/Session`, `Blocks/Spec`,
+  `Blocks/Workspace`);
+  **Surfaces**, one entry per screen (`Surfaces/Session`, `Surfaces/Project/Dialog` when a
+  screen has several parts), never one entry per variant; **Shell**, the window frame; and,
+  last, **Explorations**, a design question under way drawn in several variants
+  (`Explorations/Questions`), under `src/explorations/`, exported by nothing, and deleted once
+  the variant chosen is built. The order of the roots and the alphabetical order inside are forced by `storySort` in
+  `.storybook/preview`. A story file sits next to its component, `<name>.stories.tsx`; one
+  story per state, named after the state (`Empty`, `Loading`, `Error`, `Filled`, `Dense`);
+  a surface's first story is `Complete`, everything in place, because it is what the UI gate
+  looks at. The skill in `.agents/skills/storybook` says how to write a story; this list says
+  where it shows and what it is called, and it wins when the two differ.
 - Storybook badges: a story file the lot **created** wears the `new` tag, one whose component the
   lot **changed** wears `updated`. The badge belongs to the lot that touches the design system
   and not to the component: the first thing such a lot does is take the previous lot's badges

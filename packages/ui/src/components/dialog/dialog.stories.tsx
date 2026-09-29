@@ -1,8 +1,15 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
+import { type ReactNode, useState } from 'react'
 import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
 
+import { movesLess } from '../../../.storybook/reduced-motion.ts'
+
+import { LIFT_EDGE } from '../../motion.ts'
 import { Button } from '../button/button.tsx'
-import { Dialog, DialogClose } from './dialog.tsx'
+import { Checkbox } from '../checkbox/checkbox.tsx'
+import { Input } from '../field/field.tsx'
+import { Select } from '../select/select.tsx'
+import { Dialog, DialogClose, type DialogProps } from './dialog.tsx'
 
 const ACTIONS = (
   <>
@@ -10,6 +17,12 @@ const ACTIONS = (
     <DialogClose render={<Button variant="destructive" />}>Delete</DialogClose>
   </>
 )
+
+/** A body of one line, for the stories that are not about how much a dialog holds. */
+const SHORT = 'This runs on your machine and nowhere else.'
+
+/** The lines of a body too long for any dialog, and where the dialog stops reading them. */
+const LINES = Array.from({ length: 60 }, (_, index) => `Line ${index + 1} of what the dialog holds`)
 
 const meta = {
   tags: ['autodocs'],
@@ -27,6 +40,7 @@ const meta = {
     title: { control: 'text' },
     description: { control: 'text' },
     trigger: { control: 'text' },
+    size: { control: 'inline-radio', options: ['md', 'wide'] },
     open: { control: 'boolean' },
     actions: { table: { disable: true } },
     children: { table: { disable: true } },
@@ -113,5 +127,276 @@ export const Keyboard: Story = {
       expect(within(document.body).queryByRole('dialog')).toBeNull()
     })
     expect(document.activeElement).toBe(trigger)
+  },
+}
+
+/** Opens one of the story's dialogs and reads the box, waiting for it to rise into place. */
+async function shown(canvas: ReturnType<typeof within>, trigger: string) {
+  await userEvent.click(canvas.getByRole('button', { name: trigger }))
+  const dialog = await waitFor(() => within(document.body).getByRole('dialog'))
+  // Read once it is in place: it arrives from transparent and from a smaller scale.
+  await waitFor(() => {
+    expect(getComputedStyle(dialog).opacity).toBe('1')
+  })
+  const body = within(dialog).getByText(SHORT).parentElement!.parentElement!
+  return {
+    box: dialog.getBoundingClientRect(),
+    body,
+    headTop: dialog.firstElementChild!.getBoundingClientRect().top,
+    footerBottom: dialog.lastElementChild!.getBoundingClientRect().bottom,
+    /** Closes it from its own button, and waits until it has gone. */
+    close: async () => {
+      await userEvent.click(within(dialog).getByRole('button', { name: 'Close' }))
+      await waitFor(() => {
+        expect(within(document.body).queryByRole('dialog')).toBeNull()
+      })
+    },
+  }
+}
+
+/**
+ * A short body, in both sizes: the dialog is as tall as what it holds, so the buttons sit right
+ * under it, one step from the body and inside the dialog's own frame. The same body in `md` and
+ * in `wide` is the same height — the size decides the width, not the height.
+ */
+export const ShortBody: Story = {
+  name: 'A short body keeps its footer right under it',
+  // The controls belong to the playground: this story decides these props itself, and a panel
+  // offering to change them would only be offering something that does not happen.
+  parameters: { controls: { disable: true } },
+  args: {
+    title: 'Rename the session',
+    description: 'The name is only for you; nothing else reads it.',
+    children: <p className="text-sm">{SHORT}</p>,
+  },
+  render: (args) => (
+    <div className="flex items-start gap-4">
+      <Dialog {...args} trigger="Rename" />
+      <Dialog {...args} size="wide" trigger="Rename, wider" />
+    </div>
+  ),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+
+    const narrow = await shown(canvas, 'Rename')
+    // The body holds one line: nothing to scroll, and nothing the dialog is stretched for.
+    expect(narrow.body.scrollHeight).toBe(narrow.body.clientHeight)
+    expect(narrow.headTop - narrow.box.top).toBeCloseTo(17, 0)
+    expect(narrow.box.bottom - narrow.footerBottom).toBeCloseTo(17, 0)
+    await narrow.close()
+
+    const wide = await shown(canvas, 'Rename, wider')
+    expect(wide.body.scrollHeight).toBe(wide.body.clientHeight)
+    expect(wide.headTop - wide.box.top).toBeCloseTo(17, 0)
+    expect(wide.box.bottom - wide.footerBottom).toBeCloseTo(17, 0)
+    await wide.close()
+
+    expect(wide.box.height).toBeCloseTo(narrow.box.height, 0)
+    expect(wide.box.width).toBeGreaterThan(narrow.box.width)
+  },
+}
+
+/**
+ * A long body: the dialog stops at the height it may take, its body is the only part that
+ * scrolls, and the buttons stay where they are while it does. A control under the hand lifts
+ * without widening what holds it either: the body has nothing to scroll sideways.
+ */
+export const LongBody: Story = {
+  name: 'A long body scrolls under a footer that stays',
+  // The controls belong to the playground: this story decides these props itself, and a panel
+  // offering to change them would only be offering something that does not happen.
+  parameters: { controls: { disable: true } },
+  args: {
+    size: 'wide',
+    title: 'Session details',
+    description: undefined,
+    trigger: 'Details',
+    children: (
+      <>
+        <ol className="flex flex-col gap-2 text-sm">
+          {LINES.map((line) => (
+            <li key={line}>{line}</li>
+          ))}
+        </ol>
+        {/* A control at the far edge of the body, where its lift has the least room left. */}
+        <div className="mt-4 flex flex-col gap-1">
+          <span className="text-sm font-medium">Runs from</span>
+          <Select
+            className="w-full"
+            label="Runs from"
+            defaultValue="root"
+            items={[
+              { value: 'root', label: 'Workspace root' },
+              { value: 'atlas', label: 'atlas' },
+            ]}
+          />
+        </div>
+      </>
+    ),
+  },
+  play: async ({ canvasElement }) => {
+    await userEvent.click(within(canvasElement).getByRole('button', { name: 'Details' }))
+    const dialog = await waitFor(() => within(document.body).getByRole('dialog'))
+    // Read once it is in place: it arrives from transparent and from a smaller scale.
+    await waitFor(() => {
+      expect(getComputedStyle(dialog).opacity).toBe('1')
+    })
+
+    // The most it may take, and wider than a question.
+    await waitFor(() => {
+      expect(dialog.getBoundingClientRect().height).toBeCloseTo(window.innerHeight * 0.7, 0)
+    })
+    expect(dialog.getBoundingClientRect().width).toBeGreaterThan(448)
+
+    // The body is the only part that scrolls…
+    const body = within(dialog).getByRole('list').parentElement!.parentElement!
+    expect(body.scrollHeight).toBeGreaterThan(body.clientHeight)
+
+    // …and the buttons do not move while it does.
+    const where = dialog.lastElementChild!.getBoundingClientRect().top
+    body.scrollTop = body.scrollHeight
+    expect(body.scrollTop).toBeGreaterThan(0)
+    expect(dialog.lastElementChild!.getBoundingClientRect().top).toBeCloseTo(where, 0)
+    expect(dialog.getBoundingClientRect().height).toBeCloseTo(window.innerHeight * 0.7, 0)
+
+    // A control under the hand lifts, and the body it sits in has room for it: nothing to
+    // scroll sideways, whatever the lift does. The lift is waited on to its end, since it grows
+    // over the frames of a spring.
+    const trigger = within(dialog).getByRole('combobox', { name: 'Runs from' })
+    const before = trigger.getBoundingClientRect().width
+    await userEvent.hover(trigger)
+    await waitFor(() => {
+      expect(trigger.getBoundingClientRect().width).toBeCloseTo(before + 2 * LIFT_EDGE, 0)
+    })
+    expect(body.scrollWidth).toBe(body.clientWidth)
+
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Close' }))
+    await waitFor(() => {
+      expect(within(document.body).queryByRole('dialog')).toBeNull()
+    })
+  },
+}
+
+/**
+ * The page behind a dialog does not move while it opens or while it closes (issue #183).
+ *
+ * The veil fades and does nothing else: its blur is the same on the first frame of the opening
+ * and on the last frame of the closing as it is once the dialog is open, so the page under it is
+ * never blurred again frame after frame. Whatever stands behind it — a button carrying `layout`,
+ * a line of text — is where it was, before, during and after.
+ */
+export const ThePageBehindStaysStill: Story = {
+  name: 'The page behind stays still',
+  parameters: { controls: { disable: true } },
+  render: (args) => (
+    <div className="flex flex-col items-start gap-4">
+      <p className="text-sm">A line of the page behind.</p>
+      <Button variant="primary">Mark ready</Button>
+      <Dialog {...args} trigger="Details" />
+    </div>
+  ),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const behind = [
+      canvas.getByText('A line of the page behind.'),
+      canvas.getByRole('button', { name: 'Mark ready' }),
+    ]
+    const where = () => behind.map((element) => element.getBoundingClientRect().toJSON())
+    const before = where()
+
+    await userEvent.click(canvas.getByRole('button', { name: 'Details' }))
+    const dialog = await waitFor(() => within(document.body).getByRole('dialog'))
+    await waitFor(() => {
+      expect(getComputedStyle(dialog).opacity).toBe('1')
+    })
+    expect(where()).toEqual(before)
+
+    // The veil's blur is the same whichever end of its fade it is at: only its opacity moves. The
+    // two ends are read with the veil's transition held, so what is read is where each end is
+    // and not a frame of the way there.
+    const veil = [...document.body.querySelectorAll<HTMLElement>('*')].find(
+      (element) => getComputedStyle(element).backdropFilter !== 'none',
+    )!
+    const open = getComputedStyle(veil).backdropFilter
+    veil.style.transitionProperty = 'none'
+    for (const edge of ['data-starting-style', 'data-ending-style']) {
+      veil.setAttribute(edge, '')
+      expect(getComputedStyle(veil).backdropFilter).toBe(open)
+      expect(getComputedStyle(veil).opacity).toBe('0')
+      veil.removeAttribute(edge)
+    }
+    veil.style.removeProperty('transition-property')
+
+    await userEvent.keyboard('{Escape}')
+    await waitFor(() => {
+      expect(within(document.body).queryByRole('dialog')).toBeNull()
+    })
+    expect(where()).toEqual(before)
+  },
+}
+
+/** A dialog whose body a choice makes taller: the field the box brings in. */
+function Growing(args: DialogProps): ReactNode {
+  const [more, setMore] = useState(false)
+  return (
+    <Dialog {...args} trigger="Add">
+      <div className="flex flex-col gap-3">
+        <Checkbox label="Serve it" checked={more} onCheckedChange={setMore} />
+        {more && <Input label="Address" value="atlas" onValueChange={() => undefined} />}
+      </div>
+    </Dialog>
+  )
+}
+
+/**
+ * What a choice brings in, the dialog grows to hold (issue #183): its body goes from the height
+ * it had to the height of what it now holds on `morph`, and the footer under it moves with it on
+ * the same beat, rather than the dialog landing at its new size at once.
+ */
+export const GrowsWithWhatItHolds: Story = {
+  name: 'Grows with what it holds',
+  parameters: { controls: { disable: true } },
+  args: { title: 'Add command', description: 'Named once and run by name.' },
+  render: (args) => <Growing {...args} />,
+  play: async ({ canvasElement }) => {
+    await userEvent.click(within(canvasElement).getByRole('button', { name: 'Add' }))
+    const dialog = await waitFor(() => within(document.body).getByRole('dialog'))
+    await waitFor(() => {
+      expect(getComputedStyle(dialog).opacity).toBe('1')
+    })
+    // The body is the part of the dialog between its head and its footer.
+    const box = within(dialog).getByRole('checkbox', { name: 'Serve it' })
+    const body = [...dialog.children].find((part) => part.contains(box))!
+    const from = body.getBoundingClientRect().height
+
+    const heights: number[] = []
+    let watching = true
+    const watch = (): void => {
+      heights.push(body.getBoundingClientRect().height)
+      if (watching) requestAnimationFrame(watch)
+    }
+    watch()
+    await userEvent.click(within(dialog).getByRole('checkbox', { name: 'Serve it' }))
+    await expect(within(dialog).getByRole('textbox', { name: 'Address' })).toBeInTheDocument()
+
+    // It lands as tall as what it holds, with nothing to scroll…
+    const content = body.firstElementChild!
+    await waitFor(() => {
+      expect(body.getBoundingClientRect().height).toBeCloseTo(
+        content.getBoundingClientRect().height,
+        0,
+      )
+    })
+    watching = false
+    const to = body.getBoundingClientRect().height
+    expect(to).toBeGreaterThan(from)
+    expect(body.scrollHeight).toBe(body.clientHeight)
+    if (!movesLess()) {
+      // …and it got there over frames: a height between the two was drawn.
+      expect(
+        heights.some((height) => height > from + 1 && height < to - 1),
+        'the dialog jumped to its new height',
+      ).toBe(true)
+    }
   },
 }

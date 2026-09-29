@@ -1,7 +1,9 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
 import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
 
+import { expectNeverBuried, watchThereAndBack } from '../../../.storybook/sliding-mark.ts'
 import { IconMessages, IconSettings, IconTimelineEvent } from '../../icons.ts'
+import { TooltipProvider } from '../tooltip/tooltip.tsx'
 import { Tabs } from './tabs.tsx'
 
 const PLACES = [
@@ -37,6 +39,10 @@ const meta = {
   argTypes: {
     label: { control: 'text' },
     items: { table: { disable: true } },
+    iconsOnly: {
+      control: 'boolean',
+      description: 'Each tab as its icon alone, named by its label.',
+    },
     className: { table: { disable: true } },
   },
   decorators: [
@@ -61,8 +67,38 @@ export const Variants: Story = {
     <div className="flex flex-col gap-6">
       <Tabs {...args} items={PLACES.map(({ icon: _icon, ...rest }) => rest)} />
       <Tabs {...args} />
+      {/* A strip narrower than its words: the icons alone, each named by its label. */}
+      <TooltipProvider>
+        <Tabs {...args} iconsOnly />
+      </TooltipProvider>
     </div>
   ),
+}
+
+/**
+ * A strip of icons, for a box narrower than the labels: each tab is still named by its label,
+ * which is what a screen reader announces and what the tooltip says under the hand.
+ */
+export const IconsOnly: Story = {
+  parameters: { controls: { disable: true } },
+  args: { iconsOnly: true },
+  decorators: [
+    (Story) => (
+      <TooltipProvider>
+        <Story />
+      </TooltipProvider>
+    ),
+  ],
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const journal = canvas.getByRole('tab', { name: 'Journal' })
+    expect(canvas.queryByText('Journal')).toBeNull()
+    await userEvent.click(journal)
+    await waitFor(() => {
+      expect(journal).toHaveAttribute('aria-selected', 'true')
+    })
+    expect(canvas.getByText('What happened, in order.')).toBeInTheDocument()
+  },
 }
 
 export const States: Story = {
@@ -72,9 +108,26 @@ export const States: Story = {
   args: { defaultValue: 'journal' },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    expect(canvas.getByRole('tab', { name: /journal/i })).toHaveAttribute('aria-selected', 'true')
+    const chosen = canvas.getByRole('tab', { name: /journal/i })
+    expect(chosen).toHaveAttribute('aria-selected', 'true')
     expect(canvas.getByText('What happened, in order.')).toBeInTheDocument()
+    // The chosen tab says its name in the foreground colour, the others stay muted.
+    const foreground = colourOf(canvasElement, 'text-foreground')
+    expect(getComputedStyle(chosen).color).toBe(foreground)
+    expect(getComputedStyle(canvas.getByRole('tab', { name: /sessions/i })).color).not.toBe(
+      foreground,
+    )
   },
+}
+
+/** The colour a theme class resolves to on this page, read off a probe rather than written. */
+function colourOf(room: HTMLElement, className: string): string {
+  const probe = document.createElement('span')
+  probe.className = className
+  room.append(probe)
+  const colour = getComputedStyle(probe).color
+  probe.remove()
+  return colour
 }
 
 /** Scenario « Tabs aux flèches » of `specs/window-shell/spec.md`. */
@@ -100,5 +153,26 @@ export const Keyboard: Story = {
     await waitFor(() => {
       expect(canvas.queryByText('The Sessions of the Project.')).toBeNull()
     })
+  },
+}
+
+/**
+ * The mark crossing the strip, out to the last tab and back to the first: on every frame of the
+ * way it is drawn over the tab it crosses and never under it (issue #127).
+ */
+export const MarkCrossing: Story = {
+  parameters: { controls: { disable: true } },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const strip = canvas.getByRole('tablist')
+    const first = canvas.getByRole('tab', { name: /sessions/i })
+    const last = canvas.getByRole('tab', { name: /settings/i })
+    const watched = await watchThereAndBack(
+      strip,
+      () => userEvent.click(last),
+      () => userEvent.click(first),
+    )
+    expect(first).toHaveAttribute('aria-selected', 'true')
+    expectNeverBuried(watched)
   },
 }

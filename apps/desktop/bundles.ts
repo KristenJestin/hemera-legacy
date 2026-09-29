@@ -1,18 +1,23 @@
 /**
- * The four bundles of the application, declared once and used by the build and by the
+ * The five bundles of the application, declared once and used by the build and by the
  * development run.
  *
- * They are four because Electron runs four programs: an ESM main process on Node, a preload
+ * Four of them are the four programs Electron runs: an ESM main process on Node, a preload
  * that a sandboxed renderer can only load as CommonJS, a renderer that is a web page, and the
- * named utility process that holds the database and nothing else (design D3-01).
+ * named utility process that holds the database and nothing else (design D3-01). The fifth is
+ * not a program of the application but the one a bundled ACP adapter is run inside, forked once
+ * per agent and outliving none of them (D5-21).
  */
 
+import { readFileSync } from 'node:fs'
+import { createRequire } from 'node:module'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
+import { startStyleIn } from '@hemera/ui/start-style'
 import tailwindcss from '@tailwindcss/vite'
 import react from '@vitejs/plugin-react'
-import type { InlineConfig } from 'vite-plus'
+import type { InlineConfig, Plugin } from 'vite-plus'
 
 const application = dirname(fileURLToPath(import.meta.url))
 
@@ -63,6 +68,30 @@ export const engineBundle: InlineConfig = {
   },
 }
 
+/**
+ * The program a bundled ACP adapter is run inside (D5-21).
+ *
+ * Bundled like the other three Node programs and for the same reason: `utilityProcess.fork` runs
+ * a file. What it must not carry is the adapters themselves — they are loaded from a path decided
+ * at run time, which no bundler can follow, and they travel beside a package rather than in it.
+ */
+export const adapterBundle: InlineConfig = {
+  root: application,
+  configFile: false,
+  build: {
+    outDir: resolve(OUTPUT, 'adapter'),
+    emptyOutDir: true,
+    target: 'node24',
+    minify: false,
+    lib: {
+      entry: resolve(application, 'src/adapter/index.ts'),
+      formats: ['es'],
+      fileName: () => 'index.js',
+    },
+    rollupOptions: { external: PROVIDED_BY_ELECTRON },
+  },
+}
+
 export const preloadBundle: InlineConfig = {
   root: application,
   configFile: false,
@@ -80,6 +109,27 @@ export const preloadBundle: InlineConfig = {
   },
 }
 
+/**
+ * The start screen's rules, written into the page's head (issue #185).
+ *
+ * `index.html` draws the start screen, but in development the theme only arrives through a
+ * script once every module has been fetched, and the loader stays invisible until then. The rules
+ * it needs go inline, read from the theme's file as it stands on disk, so the loader is on the
+ * first frame from the development server and from the built page alike.
+ */
+export const startScreenStyle: Plugin = {
+  name: 'hemera:start-screen-style',
+  transformIndexHtml: () => [
+    {
+      tag: 'style',
+      children: startStyleIn(
+        readFileSync(createRequire(import.meta.url).resolve('@hemera/ui/theme.css'), 'utf8'),
+      ),
+      injectTo: 'head',
+    },
+  ],
+}
+
 export const rendererBundle: InlineConfig = {
   root: resolve(application, 'src/renderer'),
   configFile: false,
@@ -88,7 +138,7 @@ export const rendererBundle: InlineConfig = {
   // `@vitejs/plugin-react` is typed against the `vite` package. Vite+ ships that same Vite
   // under its own name, so the plugin runs as it always did and only the nominal type differs.
   // SAFETY: same Vite, two package names; the plugins' nominal type is the only difference.
-  plugins: [react(), tailwindcss()] as NonNullable<InlineConfig['plugins']>,
+  plugins: [react(), tailwindcss(), startScreenStyle] as NonNullable<InlineConfig['plugins']>,
   build: {
     outDir: resolve(OUTPUT, 'renderer'),
     emptyOutDir: true,

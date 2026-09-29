@@ -1,7 +1,8 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
-import { expect, fn, within } from 'storybook/test'
+import { expect, fn, userEvent, within } from 'storybook/test'
 import { useState } from 'react'
 
+import { expectNeverBuried, watchThereAndBack } from '../../.storybook/sliding-mark.ts'
 import { TooltipProvider } from '../components/tooltip/tooltip.tsx'
 import { JOURNAL_ENTRY, SIDEBAR_DEFAULT, type ShellSession } from './model.ts'
 import { Sidebar } from './sidebar.tsx'
@@ -10,6 +11,18 @@ const SESSIONS: ShellSession[] = [
   { id: 'csv', title: 'CSV invoice export' },
   { id: 'search', title: 'Full-text search' },
   { id: 'drizzle', title: 'Migrate to Drizzle 1.0' },
+]
+
+/** Sessions whose agents are each doing something else, as the application hands them over. */
+const AT_WORK: ShellSession[] = [
+  { id: 'csv', title: 'CSV invoice export', agent: 'writing' },
+  { id: 'search', title: 'Full-text search', agent: 'question' },
+  { id: 'drizzle', title: 'Migrate to Drizzle 1.0', agent: 'permission' },
+  { id: 'tests', title: 'Flaky export tests', agent: 'running' },
+  { id: 'docs', title: 'Read the API docs', agent: 'reading' },
+  { id: 'lint', title: 'Lint the renderer', agent: 'thinking' },
+  { id: 'bump', title: 'Bump Electron', agent: 'error' },
+  { id: 'notes', title: 'Release notes' },
 ]
 
 interface HarnessProps {
@@ -46,7 +59,7 @@ function Harness({ collapsed = false, sessions = SESSIONS, settingsActive = fals
 }
 
 const meta = {
-  tags: ['autodocs', 'updated'],
+  tags: ['autodocs'],
   title: 'Shell/Sidebar',
   component: Harness,
   parameters: { layout: 'fullscreen' },
@@ -133,5 +146,58 @@ export const OnTheSettings: Story = {
 
     expect(marked).toHaveLength(1)
     expect(marked[0]).toHaveAccessibleName('Settings')
+  },
+}
+
+/**
+ * The panel's mark crossing it, down from the first Session to the Project settings and back up
+ * again: on every frame of the way it is drawn over the rows it crosses — the Sessions, the
+ * Journal — and never under one (issue #127). The way up is where a mark drawn inside its row
+ * went under the rows drawn after it.
+ */
+export const MarkCrossing: Story = {
+  parameters: { controls: { disable: true } },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const panel = canvas.getByRole('complementary', { name: /Sessions and places/ })
+    const watched = await watchThereAndBack(
+      panel,
+      () => userEvent.click(canvas.getByRole('button', { name: 'Project settings' })),
+      () => userEvent.click(canvas.getByRole('button', { name: 'CSV invoice export' })),
+    )
+    expect(canvas.getByRole('button', { name: 'CSV invoice export' })).toHaveAttribute(
+      'aria-current',
+      'true',
+    )
+    expectNeverBuried(watched)
+  },
+}
+
+/**
+ * Each Session wears what its agent is doing (issue #140): at work, asking for an answer or a
+ * permission, failed, or asleep while nothing runs — the one that wants the reader is found at a
+ * glance, by its face rather than by its words.
+ */
+export const AgentsAtWork: Story = {
+  parameters: { controls: { disable: true } },
+  args: { sessions: AT_WORK },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const worn = AT_WORK.map((session) =>
+      canvas.getByRole('button', { name: session.title }).querySelector('[data-state]'),
+    ).map((face) => face?.getAttribute('data-state'))
+    await expect(worn).toEqual(AT_WORK.map((session) => session.agent ?? 'asleep'))
+  },
+}
+
+/** Folded to the rail, the faces are what is left of the rows, and still say who wants the reader. */
+export const AgentsOnTheRail: Story = {
+  parameters: { controls: { disable: true } },
+  args: { sessions: AT_WORK, collapsed: true },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const asking = canvas.getByRole('button', { name: 'Full-text search' })
+    await expect(asking.querySelector('[data-state]')).toHaveAttribute('data-state', 'question')
+    await expect(asking.querySelector('[data-state]')).toBeVisible()
   },
 }

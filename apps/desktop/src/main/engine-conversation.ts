@@ -10,13 +10,49 @@
  * a port that never answers can be handed to it and the waiting watched from outside.
  */
 
-import type { EngineArguments, EngineRequestName, EngineResponse } from '@hemera/ipc'
+import type { EngineArguments, EngineEvent, EngineRequestName, EngineResponse } from '@hemera/ipc'
 import { Data, Duration, Effect } from 'effect'
 
 import type { EngineAnswer, EngineRequest } from '../engine/request.ts'
 
 /** How long a use case may take before the silence is reported as one. */
 export const PATIENCE = Duration.seconds(5)
+
+/**
+ * The use cases that answer when the work is over, not when it is taken.
+ *
+ * A prompt lasts as long as the agent's turn: minutes, sometimes more. Reporting its silence at
+ * five seconds is what made every turn look abandoned once it outlived the patience — the window
+ * heard a timeout, the engine went on working. These wait as long as it takes; the turn's own
+ * end is what the engine pushes as an event, and a dead process is still `EngineGone`.
+ */
+export const UNHURRIED: ReadonlySet<EngineRequestName> = new Set([
+  'agents.prompt',
+  // These start an agent when none is running — a spawn, a handshake and a `session/new`, or a
+  // load that streams a whole history back — and a cold start of an agent is seconds, not a few.
+  'agents.options',
+  'agents.offer',
+  'agents.offerSet',
+  'agents.setOption',
+  'agents.resume',
+  // An update runs the installer's own tool, and a check asks three registries over the network.
+  'agents.update',
+  'agents.check',
+  // A stop gives a run the grace it is owed before its tree is taken down (D5-04, D6-12).
+  'commands.stop',
+  'commands.stopService',
+  // The machine's `git`, once per repository (D8-03): a plan reads each of its locations, and a
+  // slow, refused or absent one is read on its own so that it holds back its own row and never the
+  // dialog (#110); a creation checks every base and branch, a status reads each worktree of a
+  // large tree, and a cleanup removes each worktree and then deletes a folder that may hold
+  // thousands of installed files (D8-04, D8-14, D8-15). `preparation.*` is not here: it answers
+  // with the steps at once and runs in the engine, followed through the `workspace` event (D8-05).
+  'workspaces.plan',
+  'workspaces.planRepository',
+  'workspaces.create',
+  'workspaces.status',
+  'workspaces.cleanup',
+])
 
 /**
  * The use case a failure happened on, carried under a name of its own.
@@ -42,16 +78,29 @@ export class EngineRefused extends Data.TaggedError('EngineRefused')<
   OnUseCase & { readonly message: string }
 > {}
 
-/** It did not answer in time, which is an answer and not something to keep waiting for. */
-export class EngineTimeout extends Data.TaggedError('EngineTimeout')<OnUseCase> {}
+/**
+ * It did not answer in time, which is an answer and not something to keep waiting for.
+ *
+ * Said in words, as a refusal is: this is what the page shows where the action was pressed, and
+ * the fields of the error as JSON said nothing to whoever pressed it (#132). The log keeps them.
+ */
+export class EngineTimeout extends Data.TaggedError('EngineTimeout')<OnUseCase> {
+  override get message(): string {
+    return 'the application did not answer in time'
+  }
+}
 
-/** It is not there any more, so there is nobody for the message to reach. */
-export class EngineGone extends Data.TaggedError('EngineGone')<OnUseCase> {}
+/** It is not there any more, so there is nobody for the message to reach. Said in words too. */
+export class EngineGone extends Data.TaggedError('EngineGone')<OnUseCase> {
+  override get message(): string {
+    return 'the application’s engine has stopped'
+  }
+}
 
 /** What a conversation needs of a port, which is all a test has to stand in for. */
 export interface EnginePort {
   postMessage: (message: EngineRequest) => void
-  on: (event: 'message', listener: (event: { data: EngineAnswer }) => void) => void
+  on: (event: 'message', listener: (event: { data: EngineAnswer | EngineEvent }) => void) => void
   start: () => void
 }
 
@@ -61,6 +110,15 @@ export interface EngineConversation {
     name: K,
     argument: EngineArguments<K>,
   ) => Effect.Effect<EngineResponse<K>, EngineRefused | EngineTimeout | EngineGone>
+  /**
+   * Everything the engine says without being asked (design D5-12).
+   *
+   * A turn happens over minutes, and what the page is drawn from is what arrives while it does:
+   * an entry was written, a turn ended, a permission is being asked for, the agent itself
+   * changed. Nothing waits for these and nothing is answered, so they travel beside the answers
+   * rather than as one — the identifier is what tells the two apart.
+   */
+  hear: (listener: (event: EngineEvent) => void) => void
 }
 
 /**
@@ -76,17 +134,28 @@ export function engineConversation(
   patience: Duration.Duration = PATIENCE,
 ): EngineConversation {
   const waiting = new Map<number, (answer: EngineAnswer) => void>()
+  const heard: ((event: EngineEvent) => void)[] = []
   let next = 0
 
   port.on('message', (event) => {
-    const settle = waiting.get(event.data.id)
+    const said = event.data
+    // What has no identifier is not an answer to anything: it is the engine saying something
+    // happened, and it goes to whoever is listening for it.
+    if (!('id' in said)) {
+      for (const listener of heard) listener(said)
+      return
+    }
+    const settle = waiting.get(said.id)
     if (settle === undefined) return
-    waiting.delete(event.data.id)
-    settle(event.data)
+    waiting.delete(said.id)
+    settle(said)
   })
   port.start()
 
   return {
+    hear: (listener) => {
+      heard.push(listener)
+    },
     ask: <K extends EngineRequestName>(name: K, argument: EngineArguments<K>) => {
       const asked = Effect.callback<EngineAnswer, EngineGone>((resume) => {
         if (!alive()) {
@@ -100,11 +169,16 @@ export function engineConversation(
         return Effect.sync(() => waiting.delete(id))
       })
 
-      return asked.pipe(
-        Effect.timeoutOrElse({
-          duration: patience,
-          orElse: () => Effect.fail(new EngineTimeout({ useCase: name })),
-        }),
+      const bounded = UNHURRIED.has(name)
+        ? asked
+        : asked.pipe(
+            Effect.timeoutOrElse({
+              duration: patience,
+              orElse: () => Effect.fail(new EngineTimeout({ useCase: name })),
+            }),
+          )
+
+      return bounded.pipe(
         Effect.flatMap((answer) =>
           answer.ok
             ? // SAFETY: the answer of the use case `name`, whose response type is

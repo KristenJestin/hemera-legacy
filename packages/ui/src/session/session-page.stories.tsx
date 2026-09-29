@@ -7,6 +7,7 @@ import { TooltipProvider } from '../components/tooltip/tooltip.tsx'
 import { MessageDaySeparator, MessageGroup } from '../message/message.tsx'
 import type { MessageLine, MessageState } from '../message/model.ts'
 import { MessageScroller, type ScrollerEntry } from '../message/scroller/scroller.tsx'
+import { ActivityRow, type ActivityRowProps } from './activity-row.tsx'
 import { SessionEmpty, SessionHeader } from './session.tsx'
 
 /**
@@ -25,22 +26,30 @@ import { SessionEmpty, SessionHeader } from './session.tsx'
 /** What the harness decides: a thread, how it stands with the profile, and where the page is. */
 interface PageProps {
   title: string
-  /** The line under the title, already written for the platform. */
-  meta: string
   /** The thread, in the order it was written. */
   thread: { day?: string; lines: MessageLine[] }[]
   /** Where the last message stands with the profile. */
   state: MessageState
   /** Why it is not kept, when it is not. */
   error?: string
-  /** Whether the title is being typed into. */
-  editing?: boolean
   /** Whether the page is a Session with nothing in it yet. */
   empty?: boolean
+  /** What the last turn is doing, or how it ended: the row above the box. */
+  activity?: ActivityRowProps
+  /** Whether a turn is running, which makes the send a Stop. */
+  running?: boolean
 }
 
-function Page({ title, meta, thread, state, error, editing = false, empty = false }: PageProps) {
-  const [name, setName] = useState(title)
+function Page({
+  title,
+  thread,
+  state,
+  error,
+  empty = false,
+  activity,
+  running = false,
+}: PageProps) {
+  const [name] = useState(title)
   const [value, setValue] = useState('')
   const [files, setFiles] = useState<string[]>([])
   const [writes, setWrites] = useState<MessageState>(state)
@@ -95,25 +104,28 @@ function Page({ title, meta, thread, state, error, editing = false, empty = fals
         <div className="mx-auto flex w-full max-w-3xl flex-col gap-4 px-6 pt-6 pb-4">
           <SessionHeader
             title={name}
-            projectName="Atlas"
-            meta={meta}
-            onRename={setName}
-            editing={editing}
-            onStartEditing={fn()}
-            onCancelEditing={fn()}
+
+            onRename={fn()}
             onArchive={fn()}
             archiveDisabled={empty}
           />
         </div>
-        <div className="mx-auto flex min-h-0 w-full max-w-3xl flex-1 flex-col px-6">
-          {empty ? (
+        {empty ? (
+          <div className="mx-auto flex min-h-0 w-full max-w-3xl flex-1 flex-col px-6">
             <SessionEmpty />
-          ) : (
-            <MessageScroller label="The thread of this Session" entries={entries} />
-          )}
-        </div>
-        <div className="mx-auto w-full max-w-3xl px-6 pb-4">
+          </div>
+        ) : (
+          <MessageScroller
+            className="flex-1"
+            label="The thread of this Session"
+            entries={entries}
+          />
+        )}
+        <div className="mx-auto flex w-full max-w-3xl flex-col gap-2 px-6 pb-4">
+          {activity !== undefined && <ActivityRow {...activity} />}
           <Composer
+            running={running}
+            onStop={fn()}
             value={value}
             onValueChange={setValue}
             files={files}
@@ -151,19 +163,17 @@ const THREAD = [
 ]
 
 const meta = {
-  tags: ['autodocs', 'new'],
-  title: 'Surfaces/Session page',
+  tags: ['autodocs', 'updated'],
+  title: 'Surfaces/Session',
   component: Page,
   parameters: { layout: 'fullscreen' },
   args: {
     title: 'CSV invoice export',
-    meta: 'created 3 days ago · 4 messages',
     thread: THREAD,
     state: 'saved',
   },
   argTypes: {
     title: { control: 'text', description: 'What the Session is called.' },
-    meta: { control: 'text', description: 'The line under the title, already written.' },
     thread: { table: { disable: true } },
     state: {
       control: 'inline-radio',
@@ -171,7 +181,6 @@ const meta = {
       description: 'Where the last message stands with the profile.',
     },
     error: { control: 'text', description: 'Why the last message is not kept.' },
-    editing: { control: 'boolean', description: 'Whether the title is being typed into.' },
     empty: { control: 'boolean', description: 'Whether the Session has nothing in it yet.' },
   },
 } satisfies Meta<typeof Page>
@@ -183,7 +192,9 @@ type Story = StoryObj<typeof meta>
 export const Playground: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    expect(canvas.getByRole('heading', { name: 'CSV invoice export' })).toBeInTheDocument()
+    // No title on the page (issue #241): the sidebar says it, and the room is the thread's.
+    expect(canvas.queryByRole('heading')).toBeNull()
+    expect(canvas.getByRole('button', { name: 'Commands for CSV invoice export' })).toBeVisible()
     expect(canvas.getByRole('log', { name: 'The thread of this Session' })).toBeInTheDocument()
     // Every line is in the thread, in the order it was written, and the days break it.
     const thread = canvas.getByRole('log', { name: 'The thread of this Session' })
@@ -196,30 +207,24 @@ export const Playground: Story = {
 /**
  * The two pages a Session is: one with a thread, and one that has nothing in it yet.
  *
- * A new Session is a real page and not an empty column: the head says what it is called and
- * what can be done to it, the middle says the thread is empty rather than showing an invented
- * first message, and the foot is ready.
+ * A new Session is a real page and not an empty column: the head says what can be done to it —
+ * its name is typed in its row of the sidebar (review of #250) — the middle says the thread is
+ * empty rather than showing an invented first message, and the foot is ready.
  */
 export const Variants: Story = {
   parameters: { controls: { disable: true } },
   render: () => (
     <div className="grid grid-cols-2">
-      <Page
-        title="CSV invoice export"
-        meta="created 3 days ago · 4 messages"
-        thread={THREAD}
-        state="saved"
-      />
-      <Page title="New session" meta="just now" thread={[]} state="saved" empty editing />
+      <Page title="CSV invoice export" thread={THREAD} state="saved" />
+      <Page title="New session" thread={[]} state="saved" empty />
     </div>
   ),
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     expect(canvas.getAllByRole('log')).toHaveLength(1)
     expect(canvas.getByText('Nothing written yet')).toBeInTheDocument()
-    // The title of a Session that has just been made is the one thing it has to say, so the
-    // field is open on it and the page is not waiting to be asked.
-    expect(canvas.getByRole('textbox', { name: /Session title|Title/ })).toBeInTheDocument()
+    // The head never turns into a field: the title is the sidebar's to type (review of #250).
+    expect(canvas.queryByRole('textbox', { name: /Session title|Title/ })).toBeNull()
   },
 }
 
@@ -228,15 +233,9 @@ export const States: Story = {
   parameters: { controls: { disable: true } },
   render: () => (
     <div className="grid grid-cols-3">
-      <Page title="In flight" meta="just now · 5 messages" thread={THREAD} state="saving" />
-      <Page title="Kept" meta="just now · 5 messages" thread={THREAD} state="saved" />
-      <Page
-        title="Refused"
-        meta="just now · 5 messages"
-        thread={THREAD}
-        state="failed"
-        error="the profile is read-only"
-      />
+      <Page title="In flight" thread={THREAD} state="saving" />
+      <Page title="Kept" thread={THREAD} state="saved" />
+      <Page title="Refused" thread={THREAD} state="failed" error="the profile is read-only" />
     </div>
   ),
   play: async ({ canvasElement }) => {
@@ -251,17 +250,52 @@ export const States: Story = {
 }
 
 /**
+ * A turn under way: the row above the box says what it is doing, for the whole of the turn, and
+ * the send is the Stop — destructive, in the same place — while the box stays open for the next
+ * message (trial of 22 September 2026).
+ */
+export const TurnRunning: Story = {
+  parameters: { controls: { disable: true } },
+  args: { running: true, activity: { state: 'running', detail: 'cat recap.md' } },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    expect(canvas.getByText('Running cat recap.md')).toBeVisible()
+    const stop = canvas.getByRole('button', { name: 'Stop' })
+    expect(stop).toBeEnabled()
+    expect(stop).toHaveClass('bg-destructive')
+    expect(canvas.queryByRole('button', { name: /Send/ })).toBeNull()
+  },
+}
+
+/**
+ * The turn is over: the row stays, quiet, and says how long it took, until the next message is
+ * sent; the Stop is the send again.
+ */
+export const TurnDone: Story = {
+  parameters: { controls: { disable: true } },
+  args: { activity: { state: 'done', elapsedMs: 12_000 } },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    expect(canvas.getByText('Done in 12 s')).toBeVisible()
+    expect(canvas.queryByRole('button', { name: 'Stop' })).toBeNull()
+    expect(canvas.getByRole('button', { name: /Send/ })).toBeInTheDocument()
+  },
+}
+
+/**
  * A Session nothing has been written into: no invented entry, and a way to start.
  *
  * The composer is the way in, which is why the empty state does not carry a button of its own.
  */
-export const Empty: Story = {
+export const NoMessageYet: Story = {
   parameters: { controls: { disable: true } },
-  args: { title: 'New session', meta: 'just now', thread: [], empty: true, editing: true },
+  args: { title: 'New session', thread: [], empty: true },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     expect(canvas.getByText('Nothing written yet')).toBeInTheDocument()
     expect(canvas.queryByRole('log')).toBeNull()
+    // Nor a column beside the thread: the Session details are a dialog the reader opens (#18).
+    expect(canvas.queryByRole('complementary')).toBeNull()
     // The way in is the composer: the box is there, named by what it asks for, and empty.
     const box = canvas.getByRole('textbox', { name: 'Write to this Session…' })
     expect(box).toHaveTextContent('')
@@ -280,7 +314,7 @@ export const AThreadThatDoesNotFit: Story = {
     thread: [
       {
         day: 'last week',
-        lines: Array.from({ length: 12 }, (_, index) => ({
+        lines: Array.from({ length: 24 }, (_, index) => ({
           id: `long-${index}`,
           body: `Line ${index + 1} of a thread that is taller than the window it is read in.`,
         })),

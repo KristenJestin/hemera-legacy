@@ -119,8 +119,8 @@ jobs:
         shell: bash
         env:
           HEMERA_SPAWN_TRACE: ${{ runner.temp }}/trace-d
-          TEMP: ${{ runner.temp }}\tmp
-          TMP: ${{ runner.temp }}\tmp
+          TEMP: ${{ runner.temp }}
+          TMP: ${{ runner.temp }}
         run: bash .github/diagnostics/traced.sh --project repository
       - uses: actions/upload-artifact@v4
         if: always()

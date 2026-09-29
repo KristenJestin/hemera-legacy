@@ -1,5 +1,5 @@
 import { AnimatePresence, motion } from 'motion/react'
-import { type ReactNode, useState } from 'react'
+import { type ReactNode, useRef, useState } from 'react'
 
 import { COMMAND_TYPE_ICONS } from '../activity/command-type.ts'
 import { IconButton } from '../components/button/button.tsx'
@@ -52,14 +52,12 @@ import { RunPlace } from './run-place.tsx'
  * What the line holds is the page's to decide (issue #237: what runs, what failed and is not seen
  * yet, the catalogue's shortcuts); the glance is where the reader acts on it — Run again, or Stop
  * while it runs, the one-off's `Add to catalogue`, the ⓘ, and the ✕ that takes the chip out of the
- * line — and closing a glance on something over is having seen it. A chip arrives and leaves by its
- * width, pushing the chips after it.
+ * line; reading a chip never takes it out (review of #250). A chip arrives and leaves by its width,
+ * pushing the chips after it. With nothing going on, the line is its Run alone.
  */
 
 export interface GoingOnLineProps {
   items: readonly GoingOnItem[]
-  /** Said when nothing goes on: where things would run. */
-  emptyLabel: string
   /** What closes the line: the way to start a command, when the page has one. */
   end?: ReactNode
   onStop: (run: GoingOnRun) => void
@@ -69,8 +67,6 @@ export interface GoingOnLineProps {
   onRunAgain?: ((run: GoingOnRun) => void) | undefined
   /** Takes the chip out of the line; what it was stays in the history. */
   onRemove?: ((item: GoingOnItem) => void) | undefined
-  /** Says the reader has read how it ended: its glance closed, or its details. */
-  onSeen?: ((item: GoingOnItem) => void) | undefined
   /** The glance open as the line is drawn: an item's id, `more` for the list, or none. */
   defaultOpen?: string | null | undefined
   /** The item whose Details are open as the line is drawn. */
@@ -96,8 +92,6 @@ const LABEL = 'min-w-0 truncate font-medium'
 const MONO_LABEL = 'min-w-0 truncate font-mono'
 
 const HINT = 'shrink-0 font-mono text-muted-foreground'
-
-const QUIET = 'text-xs text-muted-foreground'
 
 const GLANCE = 'flex w-menu-panel flex-col gap-2'
 
@@ -309,14 +303,12 @@ function Glance({
 
 export function GoingOnLine({
   items,
-  emptyLabel,
   end,
   onStop,
   onOpenUrl,
   onAddToCatalogue,
   onRunAgain,
   onRemove,
-  onSeen,
   defaultOpen = null,
   defaultDetail = null,
 }: GoingOnLineProps): ReactNode {
@@ -328,21 +320,22 @@ export function GoingOnLine({
   const ranked = rankedGoingOn(items)
   const chips = ranked.slice(0, GOING_ON_SHOWN)
   const rest = ranked.length - chips.length
-  const detailed = items.find((item) => item.id === detail)
+  // The Details open and close as every dialog of the window does, by its own motion: drawn closed
+  // first and opened on the next frame, and kept drawn while they close, on the item they were
+  // about even if it has left the line since.
+  const [detailOpen, setDetailOpen] = useState(defaultDetail !== null)
+  const lastDetailed = useRef<GoingOnItem | undefined>(undefined)
+  const detailed = items.find((item) => item.id === detail) ?? lastDetailed.current
+  lastDetailed.current = detailed
 
   function details(id: string): void {
     setOpen(null)
     setDetail(id)
-  }
-
-  /** Something over, read and put away, is something seen: it may leave the line then. */
-  function seen(item: GoingOnItem | undefined): void {
-    if (item !== undefined && goingOnStateOf(item) !== 'running') onSeen?.(item)
+    requestAnimationFrame(() => setDetailOpen(true))
   }
 
   return (
     <div role="group" aria-label="What goes on in this Session" className={LINE}>
-      {items.length === 0 && <span className={QUIET}>{emptyLabel}</span>}
       <AnimatePresence initial={false}>
         {chips.map((item) => (
           <Slot key={item.id}>
@@ -351,10 +344,7 @@ export function GoingOnLine({
               align="start"
               label={nameOf(item)}
               open={open === item.id}
-              onOpenChange={(next) => {
-                setOpen(next ? item.id : null)
-                if (!next) seen(item)
-              }}
+              onOpenChange={(next) => setOpen(next ? item.id : null)}
               onClosed={() => {
                 if (leaving?.id !== item.id) return
                 setLeaving(null)
@@ -440,10 +430,8 @@ export function GoingOnLine({
       {detailed !== undefined && (
         <GoingOnDetails
           item={detailed}
-          onClose={() => {
-            setDetail(null)
-            seen(detailed)
-          }}
+          open={detailOpen}
+          onClose={() => setDetailOpen(false)}
           onStop={onStop}
           onOpenUrl={onOpenUrl}
           onAddToCatalogue={onAddToCatalogue}

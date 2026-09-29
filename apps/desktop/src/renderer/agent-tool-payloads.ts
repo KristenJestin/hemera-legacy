@@ -1,5 +1,19 @@
-import { COMMAND_TYPES, TOOL_LABELS, type ToolMark, hemeraToolNamed } from '@hemera/core'
-import { type CommandRun, type SessionEntry, sectionNameSchema } from '@hemera/ipc'
+import {
+  COMMAND_TYPES,
+  TOOL_LABELS,
+  type ToolMark,
+  hemeraToolNamed,
+  setupChangeDetails,
+  setupChangeSubject,
+  setupChangeTitle,
+  setupChangeVerb,
+} from '@hemera/core'
+import {
+  type CommandRun,
+  type SessionEntry,
+  sectionNameSchema,
+  setupProposalSchema,
+} from '@hemera/ipc'
 import type {
   CommandProposalState,
   CommandState,
@@ -10,6 +24,8 @@ import type {
   PortClaim,
   PortConflict,
   Readiness,
+  SetupProposalDetail,
+  SetupProposalState,
   RunRepository,
   SpecTarget,
   ToolKind,
@@ -643,6 +659,52 @@ export function commandProposalOf(entry: SessionEntry): CommandProposalDrawn | n
   const read = readPayload(commandProposalPayloadSchema, entry.payload)
   if (read === null) return null
   return { ...read, folder: read.folder ?? '.' }
+}
+
+/** What a setup change is drawn from, read off a `setup_proposal` entry (#218). */
+export interface SetupProposalDrawn {
+  /** What Accept and Decline name the proposal by. */
+  readonly proposalId: string
+  /** What Accept all names the changes proposed together by. */
+  readonly batchId: string
+  /** The change in one line, as the Journal and the agent's answer say it. */
+  readonly title: string
+  /** What accepting it does, which the notices unfold: `Add service`. */
+  readonly verb: string
+  /** What it is about: a name, or a path. */
+  readonly subject: string
+  readonly mono: boolean
+  /** The line a command or a step would run, which opens in its block. */
+  readonly line: string | undefined
+  /** Every other field it would write; never a variable's value. */
+  readonly details: readonly SetupProposalDetail[]
+  readonly why: string
+  readonly state: SetupProposalState
+}
+
+/**
+ * `null` when the payload does not parse: the entry is left out rather than drawn from a guess.
+ * Everything said is said by the domain, as the Journal says it; the schema reads the change's
+ * fields and nothing else, so a value written into the entry by mistake never reaches the window.
+ */
+export function setupProposalOf(entry: SessionEntry): SetupProposalDrawn | null {
+  const read = readPayload(setupProposalSchema, entry.payload)
+  if (read === null) return null
+  const details = setupChangeDetails(read.change)
+  const subject = setupChangeSubject(read.change)
+  return {
+    proposalId: read.proposalId,
+    batchId: read.batchId,
+    title: setupChangeTitle(read.change),
+    verb: setupChangeVerb(read.change),
+    subject: subject.text,
+    mono: subject.path,
+    line: details.find((detail) => detail.label === 'Line')?.value,
+    // The line opens in its block, and what the change is about is its head: neither twice.
+    details: details.filter((detail) => detail.label !== 'Line' && detail.value !== subject.text),
+    why: read.why,
+    state: read.state,
+  }
 }
 
 /**

@@ -81,6 +81,7 @@ import { Preferences } from '../preferences.ts'
 import { Projects } from '../projects.ts'
 import { Sessions, type NativeRecord, type OptionChoice, type ThreadWrite } from '../sessions.ts'
 import { type SpecDelivery, briefFor, briefed, definedBy } from '../specs/brief.ts'
+import { rawInputShown } from '../setup/hidden.ts'
 import { Database } from '../storage/database.ts'
 import { ToolAccess } from '../tools/access.ts'
 import { ToolPermissions } from '../tools/permissions.ts'
@@ -1171,7 +1172,16 @@ export const runtimeLayer = Layer.effect(
           locations: said.locations.length === 0 ? (held?.locations ?? []) : said.locations,
           content:
             said.content.length === 0 ? (held?.content ?? []) : said.content.map(boundedBlock),
-          rawInput: said.rawInput === null ? (held?.rawInput ?? null) : bounded(said.rawInput),
+          // A variable's value a proposal carries is never kept in the thread (Decided 2 of #218).
+          rawInput:
+            said.rawInput === null
+              ? (held?.rawInput ?? null)
+              : bounded(
+                  rawInputShown(
+                    said.title === '' ? (held?.title ?? '') : said.title,
+                    said.rawInput,
+                  ),
+                ),
           rawOutput: said.rawOutput === null ? (held?.rawOutput ?? null) : bounded(said.rawOutput),
         }
         if (turn !== undefined) turn.calls.set(said.id, call)

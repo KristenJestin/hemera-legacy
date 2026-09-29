@@ -54,6 +54,7 @@ import {
   type UnknownProposalError,
 } from './commands/proposals.ts'
 import { Commands, type UnknownCommandError, type UnknownRunError } from './commands/service.ts'
+import { SetupProposals, type SetupRefusedError } from './setup/proposals.ts'
 import { type Context, type UnreadableInstructionsError } from './context/service.ts'
 import { contextOf } from './context/view.ts'
 import { type InvalidCursorError, Journal } from './journal.ts'
@@ -195,6 +196,7 @@ export function answer(
   | Launches
   | Recipe
   | Proposals
+  | SetupProposals
   | Specs
 > {
   return Effect.gen(function* () {
@@ -416,6 +418,20 @@ export function answer(
     if (decision.name === 'commands.proposeDecline') {
       const { sessionId, proposalId } = decision.argument
       return yield* (yield* Proposals).decline(sessionId, proposalId)
+    }
+    // What a human decides of a change to the Project's setup the agent proposed (#218): applied
+    // through the use case the settings call, one change or the whole batch at once.
+    if (decision.name === 'setup.accept') {
+      const { sessionId, proposalId } = decision.argument
+      return yield* (yield* SetupProposals).accept(sessionId, proposalId)
+    }
+    if (decision.name === 'setup.acceptAll') {
+      const { sessionId, batchId } = decision.argument
+      return yield* (yield* SetupProposals).acceptAll(sessionId, batchId)
+    }
+    if (decision.name === 'setup.decline') {
+      const { sessionId, proposalId } = decision.argument
+      return yield* (yield* SetupProposals).decline(sessionId, proposalId)
     }
     // What a Session was provided, may consult, and keeps to its agent (D6-10).
     if (decision.name === 'context.read') return yield* contextOf(decision.argument.sessionId)
@@ -668,4 +684,5 @@ export type Refusal =
   | WorkspaceFixedError
   | UnknownProposalError
   | ProposalDecidedError
+  | SetupRefusedError
   | PathOutsideBaseError

@@ -85,63 +85,43 @@ jobs:
       - name: Test
         working-directory: source
         timeout-minutes: 20
+        if: runner.os == 'Linux'
         run: pnpm test
 
-      # Temporary (#253): what the runner is, what a process costs on it, and where a test's time goes.
-      - name: Diagnostics · runner
-        if: always() && runner.os == 'Windows'
-        continue-on-error: true
-        shell: pwsh
-        run: |
-          Get-MpComputerStatus | Select-Object AMServiceEnabled, AntivirusEnabled, RealTimeProtectionEnabled, OnAccessProtectionEnabled, IoavProtectionEnabled, BehaviorMonitorEnabled | Format-List
-          "Exclusions: $((Get-MpPreference).ExclusionPath -join ', ')"
-          "TEMP: $env:TEMP"
-          Get-CimInstance Win32_Processor | Select-Object Name, NumberOfCores, NumberOfLogicalProcessors | Format-List
-          Get-PSDrive C, D -ErrorAction SilentlyContinue | Format-Table
-      - name: Diagnostics · process and git costs
+      # Temporary (#253): whether the tests wait on the disk their temporary folders are on.
+      - name: Diagnostics · process and git costs, temp on C
         if: always()
         continue-on-error: true
         working-directory: source
         run: node .github/diagnostics/bench.mjs 15
-      - name: Diagnostics · the repository project alone, traced
-        if: always()
-        continue-on-error: true
-        timeout-minutes: 20
-        working-directory: source
-        shell: bash
-        env:
-          HEMERA_SPAWN_TRACE: ${{ runner.temp }}/trace-alone
-        run: |
-          mkdir -p "$HEMERA_SPAWN_TRACE"
-          node .github/diagnostics/cpu.mjs "$HEMERA_SPAWN_TRACE/cpu.txt" &
-          status=0
-          pnpm exec vp test run --project repository --reporter=verbose --reporter=json --outputFile.json="$HEMERA_SPAWN_TRACE/vitest.json" || status=$?
-          kill %1
-          exit $status
-      - name: Diagnostics · every project, traced
-        if: always()
-        continue-on-error: true
-        timeout-minutes: 20
-        working-directory: source
-        shell: bash
-        env:
-          HEMERA_SPAWN_TRACE: ${{ runner.temp }}/trace-full
-        run: |
-          mkdir -p "$HEMERA_SPAWN_TRACE"
-          node .github/diagnostics/cpu.mjs "$HEMERA_SPAWN_TRACE/cpu.txt" &
-          status=0
-          pnpm exec vp test run --reporter=default --reporter=json --outputFile.json="$HEMERA_SPAWN_TRACE/vitest.json" || status=$?
-          kill %1
-          exit $status
-      - name: Diagnostics · Defender excludes the folders, then the costs again
+      - name: Diagnostics · process and git costs, temp on D
         if: always() && runner.os == 'Windows'
         continue-on-error: true
-        shell: pwsh
         working-directory: source
-        run: |
-          Add-MpPreference -ExclusionPath $env:TEMP, $env:GITHUB_WORKSPACE, $env:RUNNER_TEMP
-          Add-MpPreference -ExclusionProcess git.exe, node.exe
-          node .github/diagnostics/bench.mjs 15
+        env:
+          TEMP: ${{ runner.temp }}
+          TMP: ${{ runner.temp }}
+        run: node .github/diagnostics/bench.mjs 15
+      - name: Diagnostics · the repository project alone, temp on C
+        if: always()
+        continue-on-error: true
+        timeout-minutes: 20
+        working-directory: source
+        shell: bash
+        env:
+          HEMERA_SPAWN_TRACE: ${{ runner.temp }}/trace-c
+        run: bash .github/diagnostics/traced.sh --project repository
+      - name: Diagnostics · the repository project alone, temp on D
+        if: always() && runner.os == 'Windows'
+        continue-on-error: true
+        timeout-minutes: 20
+        working-directory: source
+        shell: bash
+        env:
+          HEMERA_SPAWN_TRACE: ${{ runner.temp }}/trace-d
+          TEMP: ${{ runner.temp }}\tmp
+          TMP: ${{ runner.temp }}\tmp
+        run: bash .github/diagnostics/traced.sh --project repository
       - uses: actions/upload-artifact@v4
         if: always()
         with:

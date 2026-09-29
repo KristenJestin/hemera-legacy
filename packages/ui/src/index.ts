@@ -312,11 +312,13 @@ export {
   type CommandProposalRecordProps,
   type CommandProposalState,
 } from './activity/command-proposal.tsx'
-/** A change to the Project's setup the agent proposes, and the human's answer (#218). */
+/** A change to the Project's setup the agent proposes, and what the thread keeps of it (#218). */
 export {
   SetupProposal,
+  SetupProposalRecord,
   type SetupProposalDetail,
   type SetupProposalProps,
+  type SetupProposalRecordProps,
   type SetupProposalState,
 } from './activity/setup-proposal.tsx'
 /** What stays in the thread of something that waited for a human (issue #237). */

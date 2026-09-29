@@ -217,7 +217,48 @@ describe('What an entry is to a run of calls', () => {
     expect(groupingOf(entryOf('thought', ''))).toBe('companion')
     expect(groupingOf(entryOf('diff', '[]'))).toBe('companion')
     expect(groupingOf(entryOf('message', ''))).toBe(null)
-    expect(groupingOf(entryOf('permission_request', '{}'))).toBe(null)
+    expect(groupingOf(entryOf('note', '{}'))).toBe(null)
     expect(groupingOf(entryOf('tool_call', '{'))).toBe(null)
+  })
+})
+
+describe('The quiet records fold into the work around them (#250)', () => {
+  test('a permission, a proposal, a question, the Spec proposed and a run are members', () => {
+    for (const kind of [
+      'permission_request',
+      'permission_decision',
+      'command_proposal',
+      'command_run',
+      'spec_proposal',
+      'spec_question',
+    ] as const) {
+      expect(groupingOf(entryOf(kind, '{}'))).toBe('member')
+    }
+  })
+
+  test('a member stays in the group, at either end, and is not counted', () => {
+    const pieces = groupActions([
+      { item: 'text', grouping: null },
+      { item: 'run', grouping: 'member' },
+      { item: 'read-1', grouping: READ },
+      { item: 'read-2', grouping: READ },
+      { item: 'question', grouping: 'member' },
+    ])
+    expect(pieces).toEqual([
+      { kind: 'one', item: 'text' },
+      {
+        kind: 'group',
+        items: ['run', 'read-1', 'read-2', 'question'],
+        count: 2,
+        status: 'completed',
+        latest: 'Read a file',
+      },
+    ])
+  })
+
+  test('nothing outside a group changes: a lone record stays its row', () => {
+    expect(groupActions([{ item: 'question', grouping: 'member' }])).toEqual([
+      { kind: 'one', item: 'question' },
+    ])
   })
 })

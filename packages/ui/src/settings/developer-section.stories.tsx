@@ -12,7 +12,10 @@ import {
  * What Hemera does behind the scenes, one card per panel (#294): Hemera Auto's latest decisions
  * across every Session, and the diagnostics that moved here from the Profile.
  */
-const RECORD = (fields: object) => JSON.stringify(fields, null, 2)
+/** A stored record's fields, as the engine keeps them. */
+type Fields = Readonly<Record<string, string | number | Readonly<Record<string, number>>>>
+
+const RECORD = (fields: Fields) => JSON.stringify(fields, null, 2)
 
 const ALLOWED_BY_RULES: DecisionLine = {
   id: 'd1',

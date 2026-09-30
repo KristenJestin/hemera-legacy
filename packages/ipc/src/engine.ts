@@ -20,6 +20,7 @@ import {
   agentProviderSchema,
   agentUpdateSchema,
   configOptionSchema,
+  promptIntentSchema,
   resumeStateSchema,
   stopReasonSchema,
 } from './agents.ts'
@@ -117,12 +118,22 @@ export type ComposerChoice = z.infer<typeof composerChoiceSchema>
 
 export const composersSchema = z.record(z.string(), composerChoiceSchema)
 
+/**
+ * Whether every ACP message of a Session is written to a trace beside the diagnostic (#131).
+ *
+ * Off unless the reader turned it on in the settings: a trace is for finding out why an agent
+ * went quiet, and a conversation written down by default is a conversation nobody asked to keep.
+ * A data folder, or a hint, written before it existed answers off.
+ */
+export const acpTraceSchema = z.boolean()
+
 export const displayPreferencesSchema = z.object({
   theme: themePreferenceSchema,
   sidebar: sidebarPreferenceSchema,
   activeProjectId: activeProjectSchema,
   activeSessions: activeSessionsSchema,
   composers: composersSchema,
+  acpTrace: acpTraceSchema.default(false),
 })
 
 export type DisplayPreferences = z.infer<typeof displayPreferencesSchema>
@@ -134,6 +145,7 @@ export const DEFAULT_DISPLAY_PREFERENCES: DisplayPreferences = {
   activeProjectId: null,
   activeSessions: {},
   composers: {},
+  acpTrace: false,
 }
 
 /** A change to what the window wears: what is absent is what the user did not touch. */
@@ -143,6 +155,7 @@ export const displayPreferencesChangeSchema = z.object({
   activeProjectId: activeProjectSchema.optional(),
   activeSessions: activeSessionsSchema.optional(),
   composers: composersSchema.optional(),
+  acpTrace: acpTraceSchema.optional(),
 })
 
 export type DisplayPreferencesChange = z.infer<typeof displayPreferencesChangeSchema>
@@ -328,6 +341,7 @@ export const sessionEntryKindSchema = z.enum([
   'spec_answer',
   'spec_proposal',
   'command_proposal',
+  'setup_proposal',
 ])
 
 /**
@@ -388,6 +402,14 @@ export const sessionEntrySchema = z.object({
 
 export type SessionEntry = z.infer<typeof sessionEntrySchema>
 
+/** What an entry of a folder is, as a path field lists it (#109). */
+export const pathEntryKindSchema = z.enum(['folder', 'file'])
+
+/** One entry of a folder: its name alone, and what it is. */
+export const pathEntrySchema = z.object({ name: z.string(), kind: pathEntryKindSchema })
+
+export type PathEntryKind = z.infer<typeof pathEntryKindSchema>
+
 /**
  * Every use case of the process that holds the database.
  *
@@ -406,6 +428,14 @@ export const ENGINE_REQUESTS = {
   'engine.status': {
     arguments: nothingSchema,
     response: engineStatusSchema,
+  },
+  // What the main process asks once the window is shown (#114): every command marked to run when
+  // Hemera opens is run in its Project's `main`, a service still running stopped and started
+  // again. Answers what could not be started, each said, for the diagnostic log; a run that
+  // started and failed is the Project's to read, as any other.
+  'engine.atOpen': {
+    arguments: nothingSchema,
+    response: z.array(z.string()),
   },
 
   'projects.list': {
@@ -588,8 +618,13 @@ export const ENGINE_REQUESTS = {
   },
   'agents.prompt': {
     // Answered when the turn is over and not when it is sent: what the page is waiting for is
-    // why it ended, and the rest of the turn reaches it as it happens (design D5-12).
-    arguments: z.object({ sessionId: z.string(), text: z.string() }),
+    // why it ended, and the rest of the turn reaches it as it happens (design D5-12). The intent
+    // says what the message was sent for: `spec` is the Home's New Spec (issue #128).
+    arguments: z.object({
+      sessionId: z.string(),
+      text: z.string(),
+      intent: promptIntentSchema.optional(),
+    }),
     response: z.object({ stopReason: stopReasonSchema }),
   },
   'agents.stop': {
@@ -611,6 +646,12 @@ export const ENGINE_REQUESTS = {
   'agents.resume': {
     arguments: z.object({ sessionId: z.string() }),
     response: z.object({ state: resumeStateSchema, reason: z.string().nullable() }),
+  },
+  // What waits for a Session's agent, handed over again after a delivery it did not take: the
+  // Retry of the row that said so (issue #211). Answered at once; the delivery is a turn of its own.
+  'agents.handOver': {
+    arguments: z.object({ sessionId: z.string() }),
+    response: z.void(),
   },
 
   // What the Agents section of the settings asks for, and what it does about the answer
@@ -656,6 +697,7 @@ export const ENGINE_REQUESTS = {
       scope: commandScopeSchema,
       portless: z.boolean(),
       portlessName: z.string().nullable(),
+      runAtOpen: z.boolean(),
     }),
     response: commandSchema,
   },
@@ -672,6 +714,7 @@ export const ENGINE_REQUESTS = {
       scope: commandScopeSchema,
       portless: z.boolean(),
       portlessName: z.string().nullable(),
+      runAtOpen: z.boolean(),
     }),
     response: commandSchema,
   },
@@ -695,6 +738,12 @@ export const ENGINE_REQUESTS = {
     response: commandRunSchema,
   },
   'commands.stop': {
+    arguments: z.object({ sessionId: z.string(), runId: z.string() }),
+    response: commandRunSchema,
+  },
+  // A run of the Session run again, from its chip or the history (issue #237): a command of the
+  // catalogue as the command, a one-off as the same line in the same folder, by the reader.
+  'commands.runAgain': {
     arguments: z.object({ sessionId: z.string(), runId: z.string() }),
     response: commandRunSchema,
   },
@@ -727,6 +776,22 @@ export const ENGINE_REQUESTS = {
     response: commandSchema,
   },
   'commands.proposeDecline': {
+    arguments: z.object({ sessionId: z.string(), proposalId: z.string() }),
+    response: z.void(),
+  },
+  // What a human decides of a change to the Project's setup the agent proposed (#218): accepted,
+  // it is applied through the use case the settings call; `acceptAll` accepts every change still
+  // waiting of the batch it was proposed in, in order, and stops at the first one refused.
+  // Each answers the Project the changes were applied to, for the window to read it again.
+  'setup.accept': {
+    arguments: z.object({ sessionId: z.string(), proposalId: z.string() }),
+    response: z.object({ projectId: z.string(), accepted: z.number() }),
+  },
+  'setup.acceptAll': {
+    arguments: z.object({ sessionId: z.string(), batchId: z.string() }),
+    response: z.object({ projectId: z.string(), accepted: z.number() }),
+  },
+  'setup.decline': {
     arguments: z.object({ sessionId: z.string(), proposalId: z.string() }),
     response: z.void(),
   },
@@ -769,6 +834,9 @@ export const ENGINE_REQUESTS = {
       projectId: z.string(),
       specId: z.string().nullable(),
       name: z.string(),
+      // The folder chosen in the dialog for this Workspace alone, or left out (or null) for the
+      // Project's own folder of Workspaces, which stays the default (#136).
+      root: z.string().nullable().optional(),
       repositories: z.array(worktreeSchema),
     }),
     response: workspaceSchema,
@@ -878,6 +946,19 @@ export const ENGINE_REQUESTS = {
     response: z.void(),
   },
 
+  // The entries of one folder under a base, one level at a time: what a path field offers while
+  // it is typed (#109). `base` is an absolute folder, `relative` a folder under it, '' for the
+  // base itself; a `relative` that is absolute, climbs with `..` or leads outside the base is
+  // refused, and a folder that is not there answers nothing.
+  'paths.entries': {
+    arguments: z.object({
+      base: z.string(),
+      relative: z.string(),
+      kinds: z.array(pathEntryKindSchema).min(1),
+    }),
+    response: z.array(pathEntrySchema),
+  },
+
   // The Specs a `define` Session writes and a human freezes (D7-01).
   ...SPEC_REQUESTS,
   // The build of a ready Spec: asking for one, reading where it stands, starting a refused one
@@ -896,6 +977,13 @@ export const ENGINE_REQUESTS = {
     // agent is told at once, in a turn of its own (issue #130).
     arguments: z.object({ sessionId: z.string(), proposalId: z.string() }),
     response: z.void(),
+  },
+  'specs.acceptExisting': {
+    // The agent's proposal accepted when it points to a Spec that exists (issue #198): this
+    // `free` Session turns `define` on it, its writer when it has none and a reader otherwise.
+    // No Spec is created. A Session already `define` is refused.
+    arguments: z.object({ sessionId: z.string(), proposalId: z.string() }),
+    response: z.object({ session: sessionSchema, snapshot: specSnapshotSchema }),
   },
   'specs.openSession': {
     // A new `define` Session on an existing Spec, from a list of Specs: the writer when the Spec
@@ -1007,11 +1095,17 @@ export const ENGINE_EVENTS = {
     event: z.literal('build.changed'),
     sessionId: z.string(),
   }),
+  /**
+   * What this machine has of the agents changed since the window last listed them: a version
+   * that answered after the list went without it, or an agent updated since. About the machine
+   * and nothing else, so it carries nothing: the window asks `agents.list` again.
+   */
+  agents_changed: z.object({ event: z.literal('agents.changed') }),
 } as const
 
 export type EngineEventName = keyof typeof ENGINE_EVENTS
 
-/** One pushed message, of whichever of the ten names it carries. */
+/** One pushed message, of whichever of the eleven names it carries. */
 export type EngineEvent = z.infer<(typeof ENGINE_EVENTS)[EngineEventName]>
 
 /**

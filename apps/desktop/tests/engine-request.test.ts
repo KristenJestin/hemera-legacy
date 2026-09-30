@@ -10,7 +10,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
-import { Effect, Layer } from 'effect'
+import { Duration, Effect, Fiber, Layer, Option } from 'effect'
 
 import { DEFINE_MISSION_BRIEF, DELIVERY_MARKER, contextUri, readerLine } from '@hemera/core'
 import type { EngineArguments, EngineRequestName, EngineResponse } from '@hemera/ipc'
@@ -23,10 +23,14 @@ import { type FakeAgent, fakeAgent, fakeSupervisor } from '#engine/agents/fake.t
 import { clockLayer, poolLayer } from '#engine/agents/pool.ts'
 import { StderrSink } from '#engine/agents/supervisor.ts'
 import { agentDirectoriesLayer } from '#engine/agents/bare.ts'
+import { acpTracesLayer } from '#engine/agents/trace.ts'
 import { heldWordsLayer } from '#engine/agents/held.ts'
 import type { Builds } from '#engine/build/build.ts'
 import { type ProjectChecks, projectChecksLayer } from '#engine/build/checks.ts'
+import { sessionModesLayer } from '#engine/agents/modes.ts'
 import { type Proposals, proposalsLayer } from '#engine/commands/proposals.ts'
+import { type SetupProposals, setupProposalsLayer } from '#engine/setup/proposals.ts'
+import { setupValuesLayer } from '#engine/setup/values.ts'
 import { type Commands, UnknownRunError, commandsLayer } from '#engine/commands/service.ts'
 import { type Context, contextLayer } from '#engine/context/service.ts'
 import { carriedMigrations, openProfile } from '#engine/migrate.ts'
@@ -34,7 +38,9 @@ import { type Journal, journalLayer } from '#engine/journal.ts'
 import { type Preferences, preferencesLayer } from '#engine/preferences.ts'
 import { Projects, projectsLayer } from '#engine/projects.ts'
 import { answer, decideRequest } from '#engine/request.ts'
+import { PATIENCE } from '#main/engine-conversation.ts'
 import { Sessions, sessionsLayer } from '#engine/sessions.ts'
+import { domainEventsLayer } from '#engine/domain-events.ts'
 import { NoSpecNotices } from '#engine/specs/notices.ts'
 import { Specs, specsLayer } from '#engine/specs/specs.ts'
 import { type EngineStatus, engineStatusLayer } from '#engine/status.ts'
@@ -104,19 +110,25 @@ function running<A, E>(
     | Proposals
     | ProjectChecks
     | Builds
+    | SetupProposals
     | Launches
   >,
   agent: FakeAgent = fakeAgent(),
+  readVersion: (command: string) => Effect.Effect<string | undefined> = () =>
+    Effect.succeed('1.0.0'),
 ) {
+  // The list this test reads: an engine an earlier test left running past its timeout still
+  // tells its own, never this one's.
+  const tellTo = told
   // The agents are the fake ones here: a suite that asks for a turn is asking whether the message
   // reaches the runtime, and the runtime itself is proved by its own suite, on the fake provider.
   const agents = Layer.mergeAll(
     Layer.succeed(MachineEnvironment, {
       home: '/home/ana',
       env: {},
-      locate: () => Effect.succeed('/usr/local/bin/claude'),
+      locate: (command) => Effect.succeed(`/usr/local/bin/${command}`),
       bundled: () => Effect.succeed('/opt/hemera/node_modules/adapter/dist/index.js'),
-      readVersion: () => Effect.succeed('1.0.0'),
+      readVersion,
       holds: () => Effect.succeed(true),
       read: () => Effect.succeed(undefined),
     }),
@@ -127,9 +139,10 @@ function running<A, E>(
       changed: () => undefined,
       ran: () => undefined,
       workspace: (projectId, workspaceId) => {
-        told.push({ projectId, workspaceId })
+        tellTo.push({ projectId, workspaceId })
       },
       launched: () => undefined,
+      agents: () => undefined,
     }),
     Layer.succeed(StderrSink, { write: () => Effect.void }),
   )
@@ -157,7 +170,12 @@ function running<A, E>(
     check: () => Effect.succeed([]),
     update: () => Effect.die('nothing in this file updates an agent'),
   })
-  const lent = tools.pipe(Layer.provide(rows), Layer.provide(agents), Layer.provide(heldWordsLayer))
+  const lent = tools.pipe(
+    Layer.provide(rows),
+    Layer.provide(agents),
+    Layer.provide(heldWordsLayer),
+    Layer.provide(sessionModesLayer),
+  )
   const runtime = runtimeLayer.pipe(
     Layer.provideMerge(discoveryLayer),
     Layer.provide(rows),
@@ -170,7 +188,9 @@ function running<A, E>(
     Layer.provide(poolLayer.pipe(Layer.provide(clockLayer))),
     Layer.provide(agents),
     Layer.provide(heldWordsLayer),
+    Layer.provide(sessionModesLayer),
     Layer.provide(agentDirectoriesLayer(dataFolder)),
+    Layer.provide(acpTracesLayer(dataFolder)),
   )
 
   // The launches, which start the builds a ready Workspace was waited for (D8-13).
@@ -180,6 +200,18 @@ function running<A, E>(
     Layer.provide(preferencesLayer),
     // A launch written tells the window (D8-13), through the same notices this harness holds.
     Layer.provide(agents),
+  )
+
+  const places = preparationLayer.pipe(
+    Layer.provideMerge(Layer.mergeAll(workspacesLayer, recipeLayer)),
+    Layer.provide(variablesLayer),
+    Layer.provide(gitLayer()),
+    Layer.provide(hostLinks),
+    Layer.provide(Layer.succeed(WorkspacesRoot, join(dataFolder, 'workspaces'))),
+    // A `run` step is a run of the very commands the tools run (Decided 11).
+    Layer.provide(lent),
+    Layer.provide(agents),
+    Layer.provideMerge(launches),
   )
 
   const services: Layer.Layer<
@@ -199,6 +231,7 @@ function running<A, E>(
     | Preparation
     | Recipe
     | Proposals
+    | SetupProposals
     | Launches
     | ProjectChecks
     | Builds
@@ -218,18 +251,20 @@ function running<A, E>(
     projectChecksLayer.pipe(Layer.provide(lent)),
     // The Workspaces of the Projects, made under the data folder over the machine's `git`, and
     // prepared in the scope of these services: what a background preparation runs in.
-    preparationLayer.pipe(
-      Layer.provideMerge(Layer.mergeAll(workspacesLayer, recipeLayer)),
-      Layer.provide(variablesLayer),
-      Layer.provide(gitLayer()),
-      Layer.provide(hostLinks),
-      Layer.provide(Layer.succeed(WorkspacesRoot, join(dataFolder, 'workspaces'))),
-      // A `run` step is a run of the very commands the tools run (Decided 11).
+    places,
+    // What a human decides of the setup changes the agent proposed, on the very Workspaces (#218).
+    setupProposalsLayer.pipe(
+      Layer.provide(places),
       Layer.provide(lent),
+      Layer.provide(rows),
       Layer.provide(agents),
-      Layer.provideMerge(launches),
+      Layer.provide(setupValuesLayer),
     ),
-  ).pipe(Layer.provideMerge(databaseLayer(join(dataFolder, 'hemera.sqlite'))))
+  ).pipe(
+    Layer.provideMerge(
+      Layer.mergeAll(databaseLayer(join(dataFolder, 'hemera.sqlite')), domainEventsLayer),
+    ),
+  )
 
   return Effect.runPromise(
     // The program's scope closes before the services': what it holds ends first.
@@ -324,6 +359,7 @@ describe('Un message conforme est traité', () => {
       activeProjectId: null,
       activeSessions: {},
       composers: {},
+      acpTrace: false,
     })
   })
 })
@@ -394,6 +430,60 @@ function asked<K extends EngineRequestName>(name: K, argument: EngineArguments<K
     Effect.map((value) => value as EngineResponse<K>),
   )
 }
+
+describe('agents.list answers while an agent start is in flight', () => {
+  test('the list comes back well within the window’s patience, without a version to wait for', async () => {
+    // The Session's agent is held in its cold start, and every version question hangs: the
+    // machine is loaded, which is when the menu came back empty (`agents.list` timed out).
+    let release: () => void = () => undefined
+    const held = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const agent = fakeAgent({ holdsStart: async () => await held })
+    const versions: string[] = []
+    const hanging = (command: string) => {
+      versions.push(command)
+      return Effect.never
+    }
+
+    const seen = await running(
+      Effect.gen(function* () {
+        const project = yield* asked('projects.create', {
+          name: 'Atlas',
+          tone: 'primary',
+          mainPath: dataFolder,
+        })
+        const sessions = yield* Sessions
+        const session = yield* sessions.create(project.id, 'claude')
+        // The reopened Session's agent, being started and not yet answering.
+        const starting = yield* Effect.forkChild(asked('agents.options', { sessionId: session.id }))
+        yield* until(
+          Effect.sync(() => agent.starts.length),
+          (count) => count > 0,
+        )
+
+        const started = performance.now()
+        const listed = yield* asked('agents.list', {}).pipe(Effect.timeoutOption(PATIENCE))
+        const took = performance.now() - started
+
+        release()
+        yield* Fiber.join(starting)
+        return { listed, took, starts: agent.starts.length }
+      }),
+      agent,
+      hanging,
+    )
+
+    expect(Option.isSome(seen.listed)).toBe(true)
+    const agents = Option.getOrThrow(seen.listed).agents
+    expect(agents.map((one) => one.id)).toEqual(['claude', 'codex', 'opencode'])
+    expect(agents.every((one) => one.found && one.version === null)).toBe(true)
+    expect(seen.took).toBeLessThan(Duration.toMillis(PATIENCE) / 2)
+    // The start itself asked no version: a Session has no use for one.
+    expect(versions.toSorted()).toEqual(['claude', 'codex', 'opencode'])
+    expect(seen.starts).toBe(1)
+  })
+})
 
 describe('Every Workspace channel reaches its use case', () => {
   let main: string
@@ -529,7 +619,7 @@ describe('Every Workspace channel reaches its use case', () => {
     expect(seen.moved.map((step) => step.kind)).toEqual(['link', 'copy'])
     expect(seen.recipe.map((step) => [step.kind, step.path])).toEqual([['copy', './.env']])
 
-    expect(seen.plan).toMatchObject({ name: 'login-form', gitAvailable: true })
+    expect(seen.plan).toMatchObject({ name: 'hem-7-login-form', gitAvailable: true })
     // The plan names its locations and reads none of them; each read answers on its own (#110).
     expect(seen.plan.repositories).toEqual(['./sources/api'])
     expect(seen.reads).toEqual([
@@ -545,12 +635,13 @@ describe('Every Workspace channel reaches its use case', () => {
     expect(seen.twice.message).toBe('this Workspace is already being prepared')
     expect(seen.listed.map((one) => [one.name, one.main])).toEqual([
       ['main', true],
-      ['login-form', false],
+      ['hem-7-login-form', false],
     ])
     expect(seen.steps.map((step) => step.state)).toEqual(['done', 'done'])
     expect(seen.status).toEqual([
       {
         relativePath: './sources/api',
+        step: null,
         git: expect.objectContaining({ ok: true, branch: 'atlas/HEM-7-login-form' }),
       },
     ])
@@ -924,5 +1015,11 @@ describe('A Session that takes the write right is briefed as the writer at the n
     // Taken over, it is briefed again at once, as the writer: no reader line any more.
     expect(agent.answers.prompts).toEqual([DELIVERY_MARKER])
     expect(handedAt(agent, 0, contextUri('brief'))?.startsWith(DEFINE_MISSION_BRIEF)).toBe(true)
+  })
+})
+
+describe('The main process asks for the commands to run at open', () => {
+  test('engine.atOpen asked with no argument answers what could not start: nothing, here', async () => {
+    expect(await send('engine.atOpen', {})).toEqual([])
   })
 })

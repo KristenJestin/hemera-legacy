@@ -17,7 +17,7 @@
  */
 
 import { execFileSync } from 'node:child_process'
-import { readFileSync, readdirSync } from 'node:fs'
+import { existsSync, readFileSync, readdirSync } from 'node:fs'
 import { join, relative } from 'node:path'
 import { describe, expect, test } from 'vite-plus/test'
 
@@ -93,6 +93,9 @@ const CATALOGUE: Catalogued[] = [
   // Lot 20, recette of 24 September 2026: a box to tick, drawn in the theme, which every box of
   // the application is instead of the platform's own.
   { name: 'Checkbox', folder: 'checkbox', keyboard: true },
+  // Issue #140: what an agent is doing, said by Hemera's face. A thing to read and not a thing to
+  // operate, like the dot it will stand beside.
+  { name: 'Face', folder: 'face', keyboard: false },
 ]
 
 /** The pieces of the shell, which are components with a story each and no catalogue entry. */
@@ -145,7 +148,7 @@ const SURFACES = {
     'blocker-block',
     'build-spec-panel',
     'review-card',
-    'build-session',
+    'build-panel',
   ],
 }
 
@@ -188,7 +191,10 @@ const NAMED_STATES = new Map([
       'Keyboard',
     ],
   ],
-  ['workspace/workspace-repositories', ['Ready', 'Empty', 'Cleaned', 'Loading', 'GitError']],
+  [
+    'workspace/workspace-repositories',
+    ['Ready', 'Empty', 'Cleaned', 'Loading', 'GitError', 'Preparing'],
+  ],
   [
     'workspace/create-workspace-dialog',
     [
@@ -229,16 +235,7 @@ const NAMED_STATES = new Map([
   // path picked outside its base.
   [
     'project/preparation-editor',
-    [
-      'Empty',
-      'Filled',
-      'Adding',
-      'Editing',
-      'SourceMissing',
-      'OwnLine',
-      'PickedOutside',
-      'Keyboard',
-    ],
+    ['Empty', 'Filled', 'Adding', 'Editing', 'SourceMissing', 'OwnLine', 'Suggestions', 'Keyboard'],
   ],
   // Recette 1 of lot 20: the settings of a Project, one section at a time, each its story.
   [
@@ -284,9 +281,10 @@ const NAMED_STATES = new Map([
   ['build/review-card', ['WaitingForYourReview', 'OpeningTheChat']],
   ['build/build-spec-panel', ['ReadOnly', 'Tasks', 'Keyboard']],
   // Lot 22: the page of a `build` Session, `Complete` first for the UI gate, then one screen per
-  // moment of the build, then the paths through it.
+  // moment of the build, then the paths through it: the panel folded to its band and the chat it
+  // pushes, and "Spec" opening the frozen revision in the view's place.
   [
-    'build/build-session',
+    'build/build-panel',
     [
       'Complete',
       'GettingReady',
@@ -296,14 +294,13 @@ const NAMED_STATES = new Map([
       'Paused',
       'FinalChecks',
       'Accepted',
-      // Lot 5c (issue #115): the chat is minimised rather than folded — one word for one
-      // movement, the panel growing over the chat instead of the chat closing — it comes back,
-      // and "Spec" opens the frozen revision beside the view rather than in its place.
-      'ChatMinimised',
-      'ChatComesBack',
+      'Folded',
+      'FoldPushesTheChat',
       'SpecOpen',
-      'SpecOpensBesideTheView',
-      'BannerOpensTheTask',
+      'SpecTakesTheViewsPlace',
+      'NoticeOpensTheTask',
+      'YoursAmongTheNotices',
+      'ReviewAmongTheNotices',
       'Keyboard',
     ],
   ],
@@ -472,6 +469,8 @@ describe('Catalogue, coquille et surfaces, et rien d’autre', () => {
       'Sidebar',
       'Gutter',
       'CommandPalette',
+      // What the window shows while it starts, before its first page is ready.
+      'StartScreen',
     ]
     const surfaces = [
       'ProjectDialog',
@@ -532,7 +531,10 @@ describe('Catalogue, coquille et surfaces, et rien d’autre', () => {
       'ToolCallCard',
       'TerminalOutput',
       'DiffBlock',
+      // #149: the calls of a turn between two things the agent said, folded into one row.
+      'ActionGroup',
       'PermissionRequest',
+      'PermissionRecord',
       'DecisionSummary',
       // The agent, its model and its effort are one control since the trial of 22 September
       // 2026: three selectors in the foot of the composer, plus the agent's own at the far end
@@ -545,11 +547,18 @@ describe('Catalogue, coquille et surfaces, et rien d’autre', () => {
       // marker the thread already had.
       'ActivityRow',
       'UsageMeter',
+      // Issue #134: the two share the row above the box, and the meter stands at its foot.
+      'TurnLine',
+      'SessionNotices',
+      'SessionHistory',
+      'SessionCatalogue',
       'BlockedBanner',
       'AgentsSection',
       'PlanPanel',
       'SessionDetails',
       'StoppedTurn',
+      // #131: what an agent reported outside the conversation, or asked and nobody could see.
+      'AgentReport',
       'ResumeFallbackBanner',
       // HEM-18: Hemera lends the agent its own tools. A call to one of them is a block of the
       // thread with the mark that tells it from a native call, a command it runs is a block of
@@ -557,7 +566,21 @@ describe('Catalogue, coquille et surfaces, et rien d’autre', () => {
       'HemeraToolCall',
       'CommandRun',
       'CommandProposal',
-      'CommandsPanel',
+      // #218: a change to the Project's setup the agent proposes, a row of the notices per
+      // change, and the quiet line the thread keeps of one whose call it cannot find.
+      'SetupProposal',
+      'SetupProposalRecord',
+      'CallOutcome',
+      'CallOutcomeDetails',
+      'CommandProposalRecord',
+      'NoticeRecord',
+      // Issue #219: what goes on in a Session, as a line under its title — the commands Hemera
+      // runs, those the agent runs in its own shell, its sub-agents — which the Commands tab of
+      // the Session's details, and its panel, gave way to.
+      'GoingOnLine',
+      // The Run at the end of that line: the catalogue matched as it is typed, and any other line
+      // run once.
+      'RunCommand',
       'ContextView',
       'BareModeState',
       'CommandList',
@@ -573,36 +596,27 @@ describe('Catalogue, coquille et surfaces, et rien d’autre', () => {
       'PreparationSteps',
       'WorkspaceList',
       'CleanupDialog',
-      // Lot 19: the Spec panel of a `define` Session, its rail and its parts, and the three
-      // blocks of the thread: what the agent was handed, a question of the Spec asked in the
-      // chat, and the agent proposing a Spec in a `free` Session.
+      // Lot 19: the Spec panel of a `define` Session and its parts — folded to a small frame and
+      // open as one column since #164 — and the three blocks of the thread: what the agent was
+      // handed, a question of the Spec asked in the chat, and the agent proposing a Spec in a
+      // `free` Session.
       'SpecPanel',
       'SpecPart',
-      'SpecStage',
-      'SpecRail',
       'SpecHead',
       'SectionPart',
       'StoriesPart',
       'TasksPart',
       'QuestionsPart',
-      'ConflictBanner',
       'ReaderBar',
       'ReworkDialog',
       'MissionBrief',
       'SpecQuestion',
+      'SpecQuestionRecord',
       'CreateSpecProposal',
+      'SpecProposalRecord',
       // The build of a frozen Spec: what it is launched in, and where that launch stands
       // (D8-12, D8-13).
       'WorkspaceActions',
-      // The shell the Spec panel stands in, which any mission's panel opens in beside the chat,
-      // and the rail it is fed with.
-      'MissionPanel',
-      'MissionRail',
-      // Lot 5c (issue #115): the page of a Session whatever its mission — the chat at the centre,
-      // the panel on its right, the head across the top — and the control at the head's right end
-      // that minimises the chat and wears what the chat is doing in its ring.
-      'SessionLayout',
-      'ChatButton',
       // Recette 1 of lot 20: every addition and every edit of the settings is a dialog.
       'CommandDialog',
       'RepositoryDialog',
@@ -613,10 +627,7 @@ describe('Catalogue, coquille et surfaces, et rien d’autre', () => {
       'BlockerBlock',
       'ReviewCard',
       'BuildSpecPanel',
-      'BuildSession',
-      // Lot 5c (issue #115): the banner above the chat's composer, which opens what waits for the
-      // user in the build on the view's stage.
-      'BuildBanner',
+      'BuildPanel',
       'BuildChecks',
       'CheckDialog',
     ]
@@ -655,11 +666,17 @@ describe('Catalogue, coquille et surfaces, et rien d’autre', () => {
       // hand, and on what.
       'waitsOf',
       'waitingOf',
+      // What a build waits for the user on, as one kind of the Session's notices (issue #237).
+      'buildNotices',
+      'buildNoticeItems',
       'HOME_ENTRY',
       'JOURNAL_ENTRY',
       'NESTED_RADIUS',
       'PROJECT_SETTINGS_ENTRY',
       'PROJECT_TONES',
+      // #131: how long a running turn may hear nothing before its line says so, and offers more.
+      'QUIET_AFTER_MS',
+      'STUCK_AFTER_MS',
       // Recette 1 of lot 20: the icons a repository may be drawn with.
       'REPOSITORY_ICONS',
       'SIDEBAR_DEFAULT',
@@ -704,7 +721,9 @@ describe('Surfaces du lot 4 montrées en Storybook', () => {
  * entry that more than one file feeds are named after the state they show.
  */
 describe('Les cinq racines du catalogue', () => {
-  const ROOTS = ['Foundations', 'Components', 'Blocks', 'Surfaces', 'Shell']
+  // `Explorations` is the sixth, last: a design question drawn in several variants, deleted once
+  // one of them is built (`AGENTS.md`).
+  const ROOTS = ['Foundations', 'Components', 'Blocks', 'Surfaces', 'Shell', 'Explorations']
 
   /**
    * The order is not the alphabet's: a reader is given the five roots in the order above, and,
@@ -726,10 +745,15 @@ describe('Les cinq racines du catalogue', () => {
       'Session',
       'Complete',
       'Shell',
+      'Explorations',
     ])
     // The alphabet, asked for rather than hoped for: Storybook keeps the index's own order for
     // every name the list above does not mention, so the method is what makes the rule true.
     expect(settings).toContain("method: 'alphabetical'")
+  })
+
+  test('an exploration goes once the variant chosen is built: the questions, card B (#199)', () => {
+    expect(existsSync(join(designSystem, 'explorations', 'questions'))).toBe(false)
   })
 
   test('every story file is filed under one of the five roots', () => {

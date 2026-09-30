@@ -2,6 +2,8 @@ import type { Meta, StoryObj } from '@storybook/react-vite'
 import { useState } from 'react'
 import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
 
+import { arrived } from '../../.storybook/reveal.ts'
+
 import type { VariableLine } from './services-model.ts'
 import { VariablesEditor, type VariablesEditorProps } from './variables-editor.tsx'
 
@@ -239,6 +241,8 @@ export const KeyExists: Story = {
     const dialog = within(await dialogShown())
     await userEvent.type(dialog.getByRole('textbox', { name: 'Key' }), 'PORT')
     await expect(dialog.getByRole('alert')).toHaveTextContent('PORT is already set for atlas.')
+    // It comes in with the dialog growing around it, rather than at once (issue #183).
+    await arrived(dialog.getByRole('alert'))
     await expect(dialog.getByRole('button', { name: 'Add' })).toBeDisabled()
     await userEvent.click(dialog.getByRole('button', { name: 'Edit PORT' }))
     await expect(dialog.getByRole('heading', { name: 'Edit variable' })).toBeInTheDocument()

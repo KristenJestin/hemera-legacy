@@ -239,6 +239,7 @@ describe('a proposal the catalogue cannot take as it stands', () => {
             scope: 'workspace',
             portless: false,
             portlessName: null,
+            runAtOpen: false,
           },
           false,
         )
@@ -279,6 +280,7 @@ describe('a proposal the catalogue cannot take as it stands', () => {
             scope: 'workspace',
             portless: false,
             portlessName: null,
+            runAtOpen: false,
           },
           false,
         )

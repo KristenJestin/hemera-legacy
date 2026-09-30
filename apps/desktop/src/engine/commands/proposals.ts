@@ -179,6 +179,7 @@ export const proposalsLayer: Layer.Layer<
               scope: 'workspace',
               portless: false,
               portlessName: null,
+              runAtOpen: false,
             },
             false,
           )

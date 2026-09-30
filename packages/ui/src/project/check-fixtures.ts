@@ -30,6 +30,7 @@ function command(
     portlessName: null,
     folderBase,
     folder: '',
+    runAtOpen: false,
   }
 }
 

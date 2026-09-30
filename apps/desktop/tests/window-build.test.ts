@@ -13,7 +13,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
 
-import type { BuildView } from '@hemera/ipc'
+import type { BuildView, Launch } from '@hemera/ipc'
 
 import {
   acceptBuild,
@@ -55,6 +55,26 @@ async function until(ready: (view: BuildView) => boolean): Promise<BuildView> {
   throw new Error(`never came: ${JSON.stringify(buildSnapshot().view)}`)
 }
 
+/**
+ * Asks the window for a build of a Spec, and waits for the engine to start it: a request is
+ * answered `waiting`, and the build starts right after, in the engine (#132).
+ */
+async function launchFrom(
+  window: OpenWindow,
+  specId: string,
+  workspaceId: string,
+): Promise<Launch> {
+  await window.bridge.invoke('launches.request', { specId, workspaceId })
+  for (let tries = 0; tries < 400; tries += 1) {
+    // oxlint-disable-next-line no-await-in-loop -- each look waits for the one before it: this is a poll
+    const { launch } = await window.bridge.invoke('launches.forSpec', { specId })
+    if (launch !== null && launch.state !== 'waiting' && launch.state !== 'starting') return launch
+    // oxlint-disable-next-line no-await-in-loop -- each look waits for the one before it: this is a poll
+    await new Promise((resolve) => setTimeout(resolve, 25))
+  }
+  throw new Error('the build never started')
+}
+
 const HUMAN = [
   { title: 'Write the exporter' },
   { title: 'Sign the export format', executor: 'human' as const },
@@ -70,10 +90,7 @@ describe('A human task waits for the user', () => {
     stop = listenToBuilds((title) => notified.push(title))
     const spec = await opened.running(aReadySpec(dataFolder, HUMAN))
 
-    const launch = await opened.bridge.invoke('launches.request', {
-      specId: spec.specId,
-      workspaceId: spec.workspaceId,
-    })
+    const launch = await launchFrom(opened, spec.specId, spec.workspaceId)
     expect(launch.state).toBe('started')
     const sessionId = launch.sessionId ?? ''
     await openBuild(sessionId)
@@ -110,10 +127,7 @@ describe('A human task waits for the user', () => {
     install(opened.bridge)
     stop = listenToBuilds(() => undefined)
     const spec = await opened.running(aReadySpec(dataFolder, HUMAN))
-    const launch = await opened.bridge.invoke('launches.request', {
-      specId: spec.specId,
-      workspaceId: spec.workspaceId,
-    })
+    const launch = await launchFrom(opened, spec.specId, spec.workspaceId)
     await openBuild(launch.sessionId ?? '')
     const view = await until((one) => one.tasks[0]?.state === 'done')
 

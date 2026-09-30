@@ -152,6 +152,10 @@ describe('Un paquet lit son canal dans son manifeste', () => {
     expect(versionFrom('0.3.0\n')).toBe('0.3.0')
   })
 
+  test('a beta built from its tag carries the tag version', () => {
+    expect(versionFrom('v0.5.0-beta.1\n')).toBe('0.5.0-beta.1')
+  })
+
   test('a repository with no tag answers a hash, carried behind a version that starts with a digit', () => {
     expect(versionFrom('abc1234\n')).toBe('0.0.0-abc1234')
     expect(versionFrom('3dcdb99\n')).toBe('3dcdb99')
@@ -192,6 +196,9 @@ describe('Un paquet lit son canal dans son manifeste', () => {
       // The exclusion holds only when the pattern reaches git without a shell in between.
       expect(git(...DESCRIBE_ARGUMENTS)).toMatch(/^v0\.0\.0-2-g[0-9a-f]+$/)
       expect(DESCRIBE_ARGUMENTS.join(' ')).not.toContain("'")
+      // The beta semantic-release tags on dev is a version tag, and the one a beta is built from.
+      git('tag', 'v0.1.0-beta.1')
+      expect(versionFrom(git(...DESCRIBE_ARGUMENTS))).toBe('0.1.0-beta.1')
     } finally {
       rmSync(folder, { recursive: true, force: true })
     }

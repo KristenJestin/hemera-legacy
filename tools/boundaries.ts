@@ -120,6 +120,21 @@ export const PACKAGE_RULES: PackageRule[] = [
     directory: 'apps/desktop',
     forbidden: [...NO_RAW_ICONS, ...NO_STORAGE_OUTSIDE_THE_ENGINE],
   },
+  {
+    // The face lab (issue #140) is a page and nothing more: it plays the design system's face and
+    // reaches nothing of Hemera beyond it, and nothing of a platform either.
+    name: '@hemera/face-lab',
+    directory: 'apps/face-lab',
+    forbidden: [
+      ...NO_PLATFORM,
+      ...NO_ELECTRON,
+      ...NO_RAW_ICONS,
+      {
+        pattern: /^@hemera\/(core|ipc|desktop)(\/|$)/,
+        reason: 'a package the face lab must not depend on',
+      },
+    ],
+  },
 ]
 
 export interface Violation {

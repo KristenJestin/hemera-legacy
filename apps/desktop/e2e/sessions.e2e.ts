@@ -165,8 +165,15 @@ describe('Création dans un Projet', () => {
 describe('Agent and model are shown', () => {
   it('says on the Session which agent runs it and which model it is on', async () => {
     // Two values and not one: the agent the Session was made with, which it keeps (D5-06), and
-    // the model it is on, which is one of those the agent published.
-    expect(await shows('opencode')).toBe(true)
+    // the model it is on, which is one of those the agent published. Both are the composer's
+    // since the head names the Project alone (issue #149): the box is addressed to the agent,
+    // and the menu beside it says the model.
+    const box = await browser.execute(
+      () =>
+        document.querySelector('[role="textbox"][contenteditable]')?.getAttribute('aria-label') ??
+        '',
+    )
+    expect(box).toContain('opencode')
     expect(await shows(MODELS[1].name)).toBe(true)
   })
 })
@@ -198,7 +205,7 @@ describe('A read inside the Workspace goes through on its own', () => {
 })
 
 describe('The agent starts the app and the user opens it', () => {
-  it('starts a command of the catalogue from the Commands panel, and shows how it ended', async () => {
+  it('starts a command of the catalogue from the Run of the line, and shows how it ended', async () => {
     // The catalogue is the Project's: the command is added in its settings, from the dialog of
     // their Commands section.
     await press('Project settings')
@@ -212,31 +219,29 @@ describe('The agent starts the app and the user opens it', () => {
     await pressIn('[role="dialog"]', 'Add command')
     await awaits('checked')
 
-    // Back in the Session, the Commands tab of its details runs it by name.
+    // Back in the Session, the Run at the end of the line under its title runs it by name
+    // (issue #219): typed, then Enter.
     await press(NAMED)
     await browser.pause(900)
-    await press('Session details')
+    await pressIn('[aria-label="What goes on in this Session"]', 'Run')
     await browser.pause(400)
-    // The tab of the details, pressed as a hand presses it: the pointer, not a click event.
-    const tabs = await browser.$$('[role="tab"]')
-    for (const tab of tabs) {
-      // oxlint-disable-next-line no-await-in-loop -- the tabs are read one after the other, in order
-      if ((await tab.getText()).includes('Commands')) {
-        // oxlint-disable-next-line no-await-in-loop -- the one found is pressed, then the loop ends
-        await tab.click()
-        break
-      }
-    }
-    await browser.pause(400)
-    await fill('Run a line', 'check')
-    await press('Run')
+    await fill('Command', 'check')
+    await browser.pause(200)
+    await browser.keys('Enter')
 
     // One process, run by Hemera in the Workspace root: it ends on its own with its exit code,
-    // in the panel and in the thread alike.
-    await awaits('Exited 0')
-    // The details close on Escape, and the Session is in front again.
-    await browser.keys('Escape')
-    await browser.pause(400)
+    // in the thread, and it is on the line.
+    // Its dot says it is over, and beside it the code it exited with.
+    await awaits('exit 0')
+    await browser.waitUntil(
+      async () =>
+        await browser.execute(() =>
+          (
+            document.querySelector('[aria-label="What goes on in this Session"]')?.textContent ?? ''
+          ).includes('check'),
+        ),
+      { timeout: 20_000, interval: 200, timeoutMsg: 'the line never showed the check' },
+    )
   })
 })
 

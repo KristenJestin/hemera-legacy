@@ -568,13 +568,17 @@ describe('Aucune suppression proposée', () => {
       'append',
       'archive',
       'chooseAgent',
+      'chooseWorkspace',
       'create',
       'list',
+      'mainOf',
       'one',
       'read',
+      'recordChoices',
       'recordNative',
       'rename',
       'restore',
+      'workspace',
       'write',
     ])
   })

@@ -1,5 +1,7 @@
 import type { JournalEntry } from '@hemera/ipc'
 
+import { patiently } from './patiently.ts'
+
 /**
  * What nobody has been shown yet, every Project at once (design D4-05, D4-11).
  *
@@ -41,7 +43,8 @@ function replace(next: NotificationsState): void {
 /** Asks what is unseen, which is what the bell and every tab's dot are drawn from. */
 export async function loadUnseen(): Promise<void> {
   try {
-    const answered = await window.hemera.invoke('journal.unseen', {})
+    // Asked again when it fails: read once at start, a bell that failed then stayed empty.
+    const answered = await patiently(async () => await window.hemera.invoke('journal.unseen', {}))
     replace({
       entries: answered.entries,
       byProject: new Map(answered.byProject),

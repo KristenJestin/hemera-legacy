@@ -20,10 +20,29 @@ import {
   agentProviderSchema,
   agentUpdateSchema,
   configOptionSchema,
+  promptIntentSchema,
   resumeStateSchema,
   stopReasonSchema,
 } from './agents.ts'
-import { commandKindSchema, commandRunSchema, commandSchema, contextViewSchema } from './tools.ts'
+import {
+  commandRunSchema,
+  commandSchema,
+  commandScopeSchema,
+  commandTypeSchema,
+  contextViewSchema,
+} from './tools.ts'
+import {
+  planRepositorySchema,
+  recipeKindSchema,
+  recipeStepSchema,
+  repositoryStateSchema,
+  variableSchema,
+  workspacePlanSchema,
+  workspaceSchema,
+  workspaceStepSchema,
+  worktreeSchema,
+} from './workspaces.ts'
+import { LAUNCH_REQUESTS } from './launches.ts'
 import { SPEC_REQUESTS, missionSchema, specSnapshotSchema, specTypeSchema } from './specs.ts'
 
 /**
@@ -98,12 +117,22 @@ export type ComposerChoice = z.infer<typeof composerChoiceSchema>
 
 export const composersSchema = z.record(z.string(), composerChoiceSchema)
 
+/**
+ * Whether every ACP message of a Session is written to a trace beside the diagnostic (#131).
+ *
+ * Off unless the reader turned it on in the settings: a trace is for finding out why an agent
+ * went quiet, and a conversation written down by default is a conversation nobody asked to keep.
+ * A data folder, or a hint, written before it existed answers off.
+ */
+export const acpTraceSchema = z.boolean()
+
 export const displayPreferencesSchema = z.object({
   theme: themePreferenceSchema,
   sidebar: sidebarPreferenceSchema,
   activeProjectId: activeProjectSchema,
   activeSessions: activeSessionsSchema,
   composers: composersSchema,
+  acpTrace: acpTraceSchema.default(false),
 })
 
 export type DisplayPreferences = z.infer<typeof displayPreferencesSchema>
@@ -115,6 +144,7 @@ export const DEFAULT_DISPLAY_PREFERENCES: DisplayPreferences = {
   activeProjectId: null,
   activeSessions: {},
   composers: {},
+  acpTrace: false,
 }
 
 /** A change to what the window wears: what is absent is what the user did not touch. */
@@ -124,6 +154,7 @@ export const displayPreferencesChangeSchema = z.object({
   activeProjectId: activeProjectSchema.optional(),
   activeSessions: activeSessionsSchema.optional(),
   composers: composersSchema.optional(),
+  acpTrace: acpTraceSchema.optional(),
 })
 
 export type DisplayPreferencesChange = z.infer<typeof displayPreferencesChangeSchema>
@@ -158,13 +189,38 @@ export type EngineStatus = z.infer<typeof engineStatusSchema>
  */
 export const projectToneSchema = z.enum(['primary', 'info', 'success', 'warning', 'neutral'])
 
-export const entityKindSchema = z.enum(['project', 'profile', 'session', 'spec'])
+export const entityKindSchema = z.enum([
+  'project',
+  'profile',
+  'session',
+  'spec',
+  'workspace',
+  'command',
+  'launch',
+])
 
 export const eventAuthorSchema = z.enum(['human', 'hemera', 'agent', 'mcp', 'system'])
 
 export const eventSourceSchema = z.enum(['ui', 'system'])
 
 /** A Project as the interface is handed one: the domain's own, its path and its locations. */
+/**
+ * The icons a repository may wear (recette 1, item 11): a fixed set the design system draws, and
+ * the same list as the domain's.
+ */
+export const repositoryIconSchema = z.enum([
+  'folder',
+  'server',
+  'browser',
+  'database',
+  'package',
+  'book',
+  'mobile',
+  'terminal',
+])
+
+export type RepositoryIcon = z.infer<typeof repositoryIconSchema>
+
 export const projectSchema = z.object({
   id: z.string(),
   name: z.string(),
@@ -175,8 +231,16 @@ export const projectSchema = z.object({
   version: z.number(),
   mainPath: z.string(),
   repositories: z.array(z.string()),
+  /** Where its dedicated Workspaces are made, and null for Hemera's own folder (D8-02). */
+  workspacesRoot: z.string().nullable(),
+  /** What their branches start with, and null for the Project's name as a slug (D8-04). */
+  branchPrefix: z.string().nullable(),
+  /** The repositories a dedicated Workspace gets a worktree of unless left out (D8-04). */
+  included: z.array(z.string()),
   /** What the keys of its Specs start with, `PREFIX-n` (D7-02). */
   specPrefix: z.string(),
+  /** The icon each repository wears, keyed by its path; one that wears none is absent. */
+  repositoryIcons: z.record(z.string(), repositoryIconSchema),
 })
 
 export type Project = z.infer<typeof projectSchema>
@@ -215,6 +279,16 @@ const limitSchema = z.number().int().positive().max(200)
 
 /** What every change to an existing Project carries: which one, and the version it was read at. */
 const addressedSchema = z.object({ id: z.string(), version: z.number().int().nonnegative() })
+
+/**
+ * A setting whose blank is its default (Decided 17): a field left empty, or holding only spaces,
+ * crosses as null, and null is what the engine reads as "the default". The engine's contract
+ * stays one value for the default; a cleared field in the settings is that value on the way in.
+ */
+const blankAsDefaultSchema = z
+  .string()
+  .nullable()
+  .transform((value) => (value === null || value.trim() === '' ? null : value))
 
 /** A call that takes no argument, which both declarations say the same way. */
 export const nothingSchema = z.object({})
@@ -264,6 +338,8 @@ export const sessionEntryKindSchema = z.enum([
   'spec_question',
   'spec_answer',
   'spec_proposal',
+  'command_proposal',
+  'setup_proposal',
 ])
 
 /**
@@ -285,6 +361,10 @@ export const sessionSchema = z.object({
   provider: agentProviderSchema.nullable(),
   model: z.string().nullable(),
   nativeState: nativeStateSchema,
+  /** The Workspace it works in, and null for `main` (D8-08). */
+  workspaceId: z.string().nullable(),
+  /** Whether that Workspace is fixed: from the first message, or once an agent started (D8-08). */
+  workspaceFixed: z.boolean(),
   /** What the Session is for, and the Spec it defines, independent of each other (D7-07). */
   mission: missionSchema,
   specId: z.string().nullable(),
@@ -320,6 +400,14 @@ export const sessionEntrySchema = z.object({
 
 export type SessionEntry = z.infer<typeof sessionEntrySchema>
 
+/** What an entry of a folder is, as a path field lists it (#109). */
+export const pathEntryKindSchema = z.enum(['folder', 'file'])
+
+/** One entry of a folder: its name alone, and what it is. */
+export const pathEntrySchema = z.object({ name: z.string(), kind: pathEntryKindSchema })
+
+export type PathEntryKind = z.infer<typeof pathEntryKindSchema>
+
 /**
  * Every use case of the process that holds the database.
  *
@@ -338,6 +426,14 @@ export const ENGINE_REQUESTS = {
   'engine.status': {
     arguments: nothingSchema,
     response: engineStatusSchema,
+  },
+  // What the main process asks once the window is shown (#114): every command marked to run when
+  // Hemera opens is run in its Project's `main`, a service still running stopped and started
+  // again. Answers what could not be started, each said, for the diagnostic log; a run that
+  // started and failed is the Project's to read, as any other.
+  'engine.atOpen': {
+    arguments: nothingSchema,
+    response: z.array(z.string()),
   },
 
   'projects.list': {
@@ -374,6 +470,33 @@ export const ENGINE_REQUESTS = {
   },
   'repositories.remove': {
     arguments: addressedSchema.extend({ relativePath: z.string() }),
+    response: projectSchema,
+  },
+  // A repository rewritten at once (recette 1, item 11): its path, validated as an added one is,
+  // its icon, and whether a dedicated Workspace gets it by default. The commands and the recipe
+  // steps that named its old path follow it to the new one.
+  'repositories.update': {
+    arguments: addressedSchema.extend({
+      relativePath: z.string(),
+      newPath: z.string(),
+      icon: repositoryIconSchema.nullable(),
+      included: z.boolean(),
+    }),
+    response: projectSchema,
+  },
+  // What a Project's dedicated Workspaces are made with: their folder, absolute and outside
+  // `main` (D8-02), the prefix of their branches (D8-04), and whether each repository gets a
+  // worktree unless left out. Null, or a blank, is the default for the first two.
+  'projects.setWorkspacesRoot': {
+    arguments: addressedSchema.extend({ path: blankAsDefaultSchema }),
+    response: projectSchema,
+  },
+  'projects.setBranchPrefix': {
+    arguments: addressedSchema.extend({ prefix: blankAsDefaultSchema }),
+    response: projectSchema,
+  },
+  'projects.setRepositoryIncluded': {
+    arguments: addressedSchema.extend({ path: z.string(), included: z.boolean() }),
     response: projectSchema,
   },
 
@@ -415,14 +538,23 @@ export const ENGINE_REQUESTS = {
     // The agent is chosen when the Session is made, and it is not optional: a Session nothing
     // can answer is refused (NoAgentError). `null` still crosses, because every Session written
     // before the agents existed holds nothing there and is still read (design D5-06).
+    //
+    // The Workspace it works in is optional: none is `main` (D8-08).
     arguments: z.object({
       projectId: z.string().nullable(),
       provider: agentProviderSchema.nullable(),
+      workspaceId: z.string().nullable().optional(),
     }),
     response: sessionSchema,
   },
   'sessions.rename': {
     arguments: addressedSchema.extend({ title: z.string() }),
+    response: sessionSchema,
+  },
+  'sessions.chooseWorkspace': {
+    // One of the Project's `ready` Workspaces, or null for `main`; refused once the agent has
+    // started, because its own session was opened in that folder (D8-08).
+    arguments: addressedSchema.extend({ workspaceId: z.string().nullable() }),
     response: sessionSchema,
   },
   'sessions.archive': { arguments: addressedSchema, response: sessionSchema },
@@ -484,8 +616,13 @@ export const ENGINE_REQUESTS = {
   },
   'agents.prompt': {
     // Answered when the turn is over and not when it is sent: what the page is waiting for is
-    // why it ended, and the rest of the turn reaches it as it happens (design D5-12).
-    arguments: z.object({ sessionId: z.string(), text: z.string() }),
+    // why it ended, and the rest of the turn reaches it as it happens (design D5-12). The intent
+    // says what the message was sent for: `spec` is the Home's New Spec (issue #128).
+    arguments: z.object({
+      sessionId: z.string(),
+      text: z.string(),
+      intent: promptIntentSchema.optional(),
+    }),
     response: z.object({ stopReason: stopReasonSchema }),
   },
   'agents.stop': {
@@ -508,6 +645,12 @@ export const ENGINE_REQUESTS = {
     arguments: z.object({ sessionId: z.string() }),
     response: z.object({ state: resumeStateSchema, reason: z.string().nullable() }),
   },
+  // What waits for a Session's agent, handed over again after a delivery it did not take: the
+  // Retry of the row that said so (issue #211). Answered at once; the delivery is a turn of its own.
+  'agents.handOver': {
+    arguments: z.object({ sessionId: z.string() }),
+    response: z.void(),
+  },
 
   // What the Agents section of the settings asks for, and what it does about the answer
   // (design D5-18). `check` is the one use case here that leaves the machine: it reads the
@@ -525,20 +668,34 @@ export const ENGINE_REQUESTS = {
   },
 
   // The commands of a Project and the runs they become (design D6-12). The catalogue is the
-  // Project's, edited in its settings: a command is named once, and `folder` is where it runs —
-  // null for the Workspace root, or one of the Project's repositories as the Project declares it.
+  // Project's, edited in its settings: a command is named once, and it runs in `folder` under
+  // `folderBase` — a base null for the Workspace root or one of the Project's repositories as the
+  // Project declares it, a folder relative to that base and null for the base itself.
   // A name the catalogue already holds is refused by `create` and is what `update` rewrites.
   'commands.list': {
     arguments: z.object({ projectId: z.string() }),
     response: z.array(commandSchema),
+  },
+  // Whether `portless` is on this machine's PATH, looked up once per engine: what a Portless box
+  // says before a launch is refused for it (D8-10 as amended by recette 1).
+  'commands.portless': {
+    arguments: nothingSchema,
+    response: z.object({ installed: z.boolean() }),
   },
   'commands.create': {
     arguments: z.object({
       projectId: z.string(),
       name: z.string(),
       line: z.string(),
-      kind: commandKindSchema,
+      lineWindows: z.string().nullable(),
+      lineLinux: z.string().nullable(),
+      type: commandTypeSchema,
+      folderBase: z.string().nullable(),
       folder: z.string().nullable(),
+      scope: commandScopeSchema,
+      portless: z.boolean(),
+      portlessName: z.string().nullable(),
+      runAtOpen: z.boolean(),
     }),
     response: commandSchema,
   },
@@ -547,8 +704,15 @@ export const ENGINE_REQUESTS = {
       projectId: z.string(),
       name: z.string(),
       line: z.string(),
-      kind: commandKindSchema,
+      lineWindows: z.string().nullable(),
+      lineLinux: z.string().nullable(),
+      type: commandTypeSchema,
+      folderBase: z.string().nullable(),
       folder: z.string().nullable(),
+      scope: commandScopeSchema,
+      portless: z.boolean(),
+      portlessName: z.string().nullable(),
+      runAtOpen: z.boolean(),
     }),
     response: commandSchema,
   },
@@ -575,9 +739,59 @@ export const ENGINE_REQUESTS = {
     arguments: z.object({ sessionId: z.string(), runId: z.string() }),
     response: commandRunSchema,
   },
+  // A run of the Session run again, from its chip or the history (issue #237): a command of the
+  // catalogue as the command, a one-off as the same line in the same folder, by the reader.
+  'commands.runAgain': {
+    arguments: z.object({ sessionId: z.string(), runId: z.string() }),
+    response: commandRunSchema,
+  },
   'commands.output': {
     arguments: z.object({ sessionId: z.string(), runId: z.string() }),
     response: commandRunSchema,
+  },
+  // Any run of a Project by its id, whoever started it: how a preparation step's run, which no
+  // Session asked for, is read with its output and its exit code (Decided 11).
+  'commands.runOf': {
+    arguments: z.object({ projectId: z.string(), runId: z.string() }),
+    response: commandRunSchema,
+  },
+  // The services of a Workspace: every `serve` run of it that is running, whoever started it,
+  // oldest first; `workspaceId` null is `main` (D8-08, D8-09).
+  'commands.services': {
+    arguments: z.object({ projectId: z.string(), workspaceId: z.string().nullable() }),
+    response: z.array(commandRunSchema),
+  },
+  // Stops one of them from the Workspace's settings, where no Session is asking: the run is found
+  // by its id among the Project's, and that instance alone is stopped (D8-08).
+  'commands.stopService': {
+    arguments: z.object({ projectId: z.string(), runId: z.string() }),
+    response: commandRunSchema,
+  },
+  // What a human decides of a command the agent proposed in a Session (D8-11): accepted, it is
+  // written into the catalogue and answered; declined, nothing enters it.
+  'commands.proposeAccept': {
+    arguments: z.object({ sessionId: z.string(), proposalId: z.string() }),
+    response: commandSchema,
+  },
+  'commands.proposeDecline': {
+    arguments: z.object({ sessionId: z.string(), proposalId: z.string() }),
+    response: z.void(),
+  },
+  // What a human decides of a change to the Project's setup the agent proposed (#218): accepted,
+  // it is applied through the use case the settings call; `acceptAll` accepts every change still
+  // waiting of the batch it was proposed in, in order, and stops at the first one refused.
+  // Each answers the Project the changes were applied to, for the window to read it again.
+  'setup.accept': {
+    arguments: z.object({ sessionId: z.string(), proposalId: z.string() }),
+    response: z.object({ projectId: z.string(), accepted: z.number() }),
+  },
+  'setup.acceptAll': {
+    arguments: z.object({ sessionId: z.string(), batchId: z.string() }),
+    response: z.object({ projectId: z.string(), accepted: z.number() }),
+  },
+  'setup.decline': {
+    arguments: z.object({ sessionId: z.string(), proposalId: z.string() }),
+    response: z.void(),
   },
 
   // What a Session was provided, what it may consult, and what stays its agent's (design D6-10).
@@ -586,14 +800,187 @@ export const ENGINE_REQUESTS = {
     response: contextViewSchema,
   },
 
+  // The Workspaces of a Project (D8-01, D8-02): listed `main` first, planned and created from
+  // the plan the user edited (D8-04), made on a folder the user picked, observed through Git
+  // when shown (D8-15), and cleaned up on a click (D8-14).
+  'workspaces.list': {
+    arguments: z.object({ projectId: z.string() }),
+    response: z.array(workspaceSchema),
+  },
+  'workspaces.plan': {
+    // `key` and `slug` are the Spec's: the branch proposed is `<prefix>/<key>-<slug>` (D8-04). A
+    // null key is a dedicated Workspace made from the Project's settings, with no Spec: its
+    // branch is `<prefix>/<slug>`.
+    arguments: z.object({ projectId: z.string(), key: z.string().nullable(), slug: z.string() }),
+    response: workspacePlanSchema,
+  },
+  'workspaces.planRepository': {
+    // One location of that plan, read on its own so that a repository that is slow, refused or
+    // gone holds back its own row alone, and never the dialog (#110).
+    arguments: z.object({
+      projectId: z.string(),
+      key: z.string().nullable(),
+      slug: z.string(),
+      relativePath: z.string(),
+    }),
+    response: planRepositorySchema,
+  },
+  'workspaces.create': {
+    // Every check runs before anything is written, and one that fails refuses the whole
+    // creation, naming it; what comes back is the Workspace `preparing`, nothing on disk (D8-04).
+    arguments: z.object({
+      projectId: z.string(),
+      specId: z.string().nullable(),
+      name: z.string(),
+      // The folder chosen in the dialog for this Workspace alone, or left out (or null) for the
+      // Project's own folder of Workspaces, which stays the default (#136).
+      root: z.string().nullable().optional(),
+      repositories: z.array(worktreeSchema),
+    }),
+    response: workspaceSchema,
+  },
+  'workspaces.createOnFolder': {
+    // `ready` at once, with no worktree and no step; named after the folder unless named (D8-02).
+    arguments: z.object({ projectId: z.string(), path: z.string(), name: z.string().optional() }),
+    response: workspaceSchema,
+  },
+  'workspaces.status': {
+    arguments: z.object({ id: z.string() }),
+    response: z.array(repositoryStateSchema),
+  },
+  'workspaces.cleanup': {
+    arguments: z.object({ id: z.string() }),
+    response: workspaceSchema,
+  },
+
+  // The preparation of a Workspace (D8-05). `prepare` and `resume` answer at once with the steps
+  // as they stand and run in the engine: a preparation can take minutes, and the window follows
+  // it through the `workspace` event. One already running is refused by name.
+  'preparation.steps': {
+    arguments: z.object({ workspaceId: z.string() }),
+    response: z.array(workspaceStepSchema),
+  },
+  'preparation.prepare': {
+    arguments: z.object({ workspaceId: z.string() }),
+    response: z.array(workspaceStepSchema),
+  },
+  'preparation.resume': {
+    arguments: z.object({ workspaceId: z.string() }),
+    response: z.array(workspaceStepSchema),
+  },
+
+  // The Project's recipe, which each dedicated Workspace is prepared from (D8-05). Every change
+  // answers the recipe as it now is. A copy or a link names a file or a folder by its `path`
+  // under its `base` — a repository the Project declares, null for the Workspace root — and is
+  // refused, naming it, when that source is not in `main` (D8-05 as amended by recette 1).
+  // A `run` starts a command of the catalogue by its `commandId`, or a line of its own in `line`,
+  // `lineWindows` and `lineLinux` — which the catalogue never sees and the agent never reads — and
+  // `path` is then the folder it runs in (recette 2). `update` rewrites a step in its place.
+  'recipe.list': {
+    arguments: z.object({ projectId: z.string() }),
+    response: z.array(recipeStepSchema),
+  },
+  'recipe.add': {
+    arguments: z.object({
+      projectId: z.string(),
+      kind: recipeKindSchema,
+      base: z.string().nullable(),
+      path: z.string().nullable(),
+      commandId: z.string().nullable(),
+      line: z.string().nullable(),
+      lineWindows: z.string().nullable(),
+      lineLinux: z.string().nullable(),
+    }),
+    response: z.array(recipeStepSchema),
+  },
+  'recipe.update': {
+    arguments: z.object({
+      projectId: z.string(),
+      id: z.string(),
+      kind: recipeKindSchema,
+      base: z.string().nullable(),
+      path: z.string().nullable(),
+      commandId: z.string().nullable(),
+      line: z.string().nullable(),
+      lineWindows: z.string().nullable(),
+      lineLinux: z.string().nullable(),
+    }),
+    response: z.array(recipeStepSchema),
+  },
+  'recipe.remove': {
+    arguments: z.object({ projectId: z.string(), id: z.string() }),
+    response: z.array(recipeStepSchema),
+  },
+  'recipe.move': {
+    arguments: z.object({
+      projectId: z.string(),
+      id: z.string(),
+      direction: z.enum(['up', 'down']),
+    }),
+    response: z.array(recipeStepSchema),
+  },
+
+  // The variables of a Project, and those a Workspace sets over them (D8-06): `workspaceId` null
+  // is the Project's own scope.
+  'variables.list': {
+    arguments: z.object({ projectId: z.string(), workspaceId: z.string().nullable() }),
+    response: z.array(variableSchema),
+  },
+  'variables.set': {
+    arguments: z.object({
+      projectId: z.string(),
+      workspaceId: z.string().nullable(),
+      key: z.string(),
+      value: z.string(),
+    }),
+    response: variableSchema,
+  },
+  'variables.remove': {
+    arguments: z.object({
+      projectId: z.string(),
+      workspaceId: z.string().nullable(),
+      key: z.string(),
+    }),
+    response: z.void(),
+  },
+
+  // The entries of one folder under a base, one level at a time: what a path field offers while
+  // it is typed (#109). `base` is an absolute folder, `relative` a folder under it, '' for the
+  // base itself; a `relative` that is absolute, climbs with `..` or leads outside the base is
+  // refused, and a folder that is not there answers nothing.
+  'paths.entries': {
+    arguments: z.object({
+      base: z.string(),
+      relative: z.string(),
+      kinds: z.array(pathEntryKindSchema).min(1),
+    }),
+    response: z.array(pathEntrySchema),
+  },
+
   // The Specs a `define` Session writes and a human freezes (D7-01).
   ...SPEC_REQUESTS,
+  // The build of a ready Spec: asking for one, reading where it stands, starting a refused one
+  // again (D8-12, D8-13).
+  ...LAUNCH_REQUESTS,
   // The two that make a Session `define` answer the Session as well as the Spec: its mission,
   // its Spec and its version changed with them (D7-07).
   'specs.create': {
     // The agent's proposal accepted: the Spec is created, this Session becomes its writer and
     // turns `define`, in one transaction. A Session already `define` is refused.
     arguments: z.object({ sessionId: z.string(), type: specTypeSchema, title: z.string() }),
+    response: z.object({ session: sessionSchema, snapshot: specSnapshotSchema }),
+  },
+  'specs.declineProposal': {
+    // The agent's proposal declined: its entry is kept declined, the Session stays free, and the
+    // agent is told at once, in a turn of its own (issue #130).
+    arguments: z.object({ sessionId: z.string(), proposalId: z.string() }),
+    response: z.void(),
+  },
+  'specs.acceptExisting': {
+    // The agent's proposal accepted when it points to a Spec that exists (issue #198): this
+    // `free` Session turns `define` on it, its writer when it has none and a reader otherwise.
+    // No Spec is created. A Session already `define` is refused.
+    arguments: z.object({ sessionId: z.string(), proposalId: z.string() }),
     response: z.object({ session: sessionSchema, snapshot: specSnapshotSchema }),
   },
   'specs.openSession': {
@@ -656,9 +1043,27 @@ export const ENGINE_EVENTS = {
    * A run changed: it started, published its address, printed something, or ended (D6-12).
    *
    * The run itself crosses rather than an entry: the Commands panel draws its output as it grows,
-   * and a thread entry per line printed is what the panel exists to avoid.
+   * and a thread entry per line printed is what the panel exists to avoid. `sessionId` is null
+   * for a run no Session asked for: a preparation's step (Decided 11).
    */
-  run: z.object({ event: z.literal('run'), sessionId: z.string(), run: commandRunSchema }),
+  run: z.object({
+    event: z.literal('run'),
+    sessionId: z.string().nullable(),
+    run: commandRunSchema,
+  }),
+  /**
+   * A Workspace or its steps changed (D8-01, D8-05): it was created, made on a folder, cleaned
+   * up, a step of its preparation changed state, or the preparation ended. Only the names cross:
+   * the page that shows that Workspace asks for it again, as it stands.
+   *
+   * It is about a Project and not a Session, which is why it carries no `sessionId`. What a run
+   * of a preparation step does travels as any run does, on `run` above.
+   */
+  workspace: z.object({
+    event: z.literal('workspace'),
+    projectId: z.string(),
+    workspaceId: z.string(),
+  }),
   // A Spec changed, whoever wrote it: about a Spec and not a Session, so a shape of its own, and
   // never a top-level `id`, which is what tells an answer from an event.
   spec_changed: z.object({
@@ -666,11 +1071,27 @@ export const ENGINE_EVENTS = {
     specId: z.string(),
     projectId: z.string(),
   }),
+  /**
+   * The launch of a Spec changed (D8-13): asked for, started, refused, started again, or taken
+   * back by a Rework. Only the names cross — the panel open on that Spec reads it again, as it
+   * stands — and it is about a Spec rather than a Session, like the change above it.
+   */
+  launch_changed: z.object({
+    event: z.literal('launch.changed'),
+    specId: z.string(),
+    projectId: z.string(),
+  }),
+  /**
+   * What this machine has of the agents changed since the window last listed them: a version
+   * that answered after the list went without it, or an agent updated since. About the machine
+   * and nothing else, so it carries nothing: the window asks `agents.list` again.
+   */
+  agents_changed: z.object({ event: z.literal('agents.changed') }),
 } as const
 
 export type EngineEventName = keyof typeof ENGINE_EVENTS
 
-/** One pushed message, of whichever of the eight names it carries. */
+/** One pushed message, of whichever of the eleven names it carries. */
 export type EngineEvent = z.infer<(typeof ENGINE_EVENTS)[EngineEventName]>
 
 /**

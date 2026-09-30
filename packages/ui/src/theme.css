@@ -83,7 +83,9 @@
 
   --success: #16a34a;
   --success-muted: #ecfdf3;
-  --success-muted-foreground: #15803d;
+  /* A shade under green-700: its own counts (a diff's +N) are read on the page itself, where
+     green-700 made 4.29:1 on the background and the catalogue asks 4.5:1 of small text. */
+  --success-muted-foreground: #157a3a;
   --warning: #d97706;
   --warning-muted: #fffbeb;
   --warning-muted-foreground: #b45309;
@@ -386,6 +388,11 @@
   --spacing-icon-md: 1.125rem;
   --spacing-icon-lg: 1.375rem;
 
+  /* How big the face is drawn as the subject of a page (issue #140): the Home before anything
+     runs, an empty state. Past the largest step of the scale, so it reads as what the page is
+     about rather than as an icon grown up. */
+  --spacing-face-hero: 8rem;
+
   /* How tall a control is drawn, one step per size of the components (design D2-07). A named
      step and not a number: `h-control-md` is a class the scale check knows the whole list of,
      and a change of density is these three lines rather than a search through the catalogue. */
@@ -436,20 +443,26 @@
      is the window it has to leave a margin in: enough for a page of its own, short of the edges. */
   --spacing-dialog-wide: 70vh;
 
-  /* How wide the rail of a mission panel stands beside its stage (lot 19, revisions 3, 4 and 4b):
-     wide enough for the Spec's `Expected outcome` after its glyph, for `Decompose` and
-     `Show all` after its glyph, and for `3/7 · 4 things before ready` on one line at its foot. */
-  --spacing-rail: 13rem;
+  /* The Spec folded (issue #164): the small frame at the window's edge, the three phases' glyphs
+     in their squares — a square, the room around it and the two borders of a frame. Its width is a
+     token rather than what it holds, because it is one end of the slot the swap moves. */
+  --spacing-spec-frame: 3.5rem;
 
-  /* A mission panel folded (lot 19, revision 4): the band of the rail's glyphs beside the chat,
-     a group's square, the set-in squares of its items and the margin around them. */
-  --spacing-mission-band: 3rem;
+  /* How tall what waits above the composer may grow before it scrolls of its own: several blocking
+     questions at once would otherwise push the thread out of the window. A share of the window,
+     for the reason a wide dialog is one: it is the thread above that has to keep its room. */
+  --spacing-pinned: 40vh;
 
-  /* A mission panel unfolded: a share of the Session's row, the container it is asked of. A length
-     of the row rather than a fraction of the panel's own box, because the panel's box is what
-     changes while it unfolds: what the panel holds is laid at this width from the first frame,
-     so nothing inside it reflows on the way. */
-  --spacing-mission-panel: 45cqw;
+  /* How wide the Session's notices open above the composer (issue #237): wide enough for a
+     one-off's whole line to wrap over a few rows rather than one row a word, narrower than the
+     thread's column so the panel still reads as the pill's and not as a page of its own. */
+  --spacing-notices: 36rem;
+
+  /* The Spec open: a share of the Session's row, the container it is asked of. A length of the
+     row rather than a fraction of the panel's own box, because the panel's box is what slides in
+     while it opens: what the panel holds is laid at this width from the first frame, so nothing
+     inside it reflows on the way. */
+  --spacing-spec-panel: 45cqw;
 
   /* The motion personality, CSS side: the same curve and the same durations `src/motion.ts`
      gives the spring, for the transitions Base UI drives through data attributes. */
@@ -565,17 +578,29 @@
   grid-template-columns: var(--sidebar-current-width, var(--spacing-sidebar)) 1fr;
 }
 
-/* The slot a mission panel takes in a Session's row (lot 19, revision 4b): the band, the unfolded
-   width, or a width between the two, which the panel writes as `--mission-panel-open` on every
-   frame of a fold — 0 folded, 1 unfolded — so the chat beside it is pushed as it moves. A share
-   and not a length, because the two ends are lengths of different kinds, rems and a share of the row, and
-   only the browser can put them on one line; at rest it is one of the two tokens exactly, and
-   stays so while the window is resized. The fallback is the band, which the panel opens at. */
-@utility mission-panel-slot {
+/* The slot the Spec takes in a Session's row (issue #164): its small frame, the open panel, or a
+   width between the two, which the panel writes as `--spec-open` on every frame of the swap — 0
+   folded, 1 open — so the chat beside it is pushed as it moves. A share and not a length, because
+   the two ends are lengths of different kinds, rems and a share of the row, and only the browser
+   can put them on one line; at rest it is one of the two tokens exactly, and stays so while the
+   window is resized. `--spec-in` scales the whole of it, from nothing to 1, while a Spec that has
+   just been created arrives in the row (issue #130); it is 1 for a Spec that was already there. */
+@utility spec-slot {
   width: calc(
-    var(--spacing-mission-band) + (var(--spacing-mission-panel) - var(--spacing-mission-band)) *
-      var(--mission-panel-open, 0)
+    (var(--spacing-spec-frame) + (var(--spacing-spec-panel) - var(--spacing-spec-frame)) *
+        var(--spec-open, 0)) *
+      var(--spec-in, 1)
   );
+}
+
+/* The open panel, drawn from the same shares as its slot: out past its clip by its whole width
+   and the margin it keeps at the content's edge folded, or not arrived yet, and in place open. One
+   value moves both, so the panel and the chat it pushes never fall out of step and never overlap,
+   and a swap turned round half-way turns both round together. The margin is the dock's `pr-3`,
+   which the clip reaches across (issue #181): the panel comes in from the content's edge, as the
+   small frame leaves by it, and not from inside the margin. */
+@utility spec-panel-in {
+  translate: calc((1 - var(--spec-open, 0) * var(--spec-in, 1)) * (100% + var(--spacing) * 3)) 0;
 }
 
 /* Where the active tab meets the sheet it opens (design D2-02).
@@ -598,11 +623,11 @@
    instead, and they find those edges the same way the cut does: through the two properties that
    say where they are. */
 @utility tab-mark-start {
-  right: calc(100% - var(--tab-mark-left, 0px));
+  right: calc(100% - var(--mark-left, 0px));
 }
 
 @utility tab-mark-end {
-  left: calc(100% - var(--tab-mark-right, 0px));
+  left: calc(100% - var(--mark-right, 0px));
 }
 
 @utility tab-flare {
@@ -714,8 +739,7 @@
      belongs to is a mark with nothing to say, and the other default — cut nothing — is a sheet
      lying across the whole strip. */
   clip-path: inset(
-    0 var(--tab-mark-right, 100%) 0 var(--tab-mark-left, 0px) round var(--radius-md)
-      var(--radius-md) 0 0
+    0 var(--mark-right, 100%) 0 var(--mark-left, 0px) round var(--radius-md) var(--radius-md) 0 0
   );
 }
 
@@ -802,8 +826,11 @@
   }
 }
 
+/* The veil behind a dialog fades, and fades only: its blur stays what it is from the first frame
+   to the last. A blur that is itself in transition is computed again over the whole window on
+   every frame, which is the frame the page behind it is seen to jump on (issue #183). */
 @utility backdrop-motion {
-  transition-property: opacity, backdrop-filter;
+  transition-property: opacity;
   transition-duration: var(--duration-base);
   transition-timing-function: var(--ease-calm);
   @media (prefers-reduced-motion: reduce) {
@@ -821,6 +848,25 @@
    A popup comes down from its trigger and folds back up into it rather than growing out of a
    corner: a scale from an origin reads as a direction nobody asked for, and the direction a
    list opens in is the first thing the eye uses to find where it came from. */
+/* Where a popup that grows is drawn: everything but what is still below its anchor's edge, so it
+   rises from behind the anchor. Its shadow is kept on the three other sides; the fourth is the
+   anchor's edge, the `sideOffset` under the popup. Written for a popup that opens upwards. */
+@utility popup-emerges {
+  clip-path: inset(-3rem -3rem -0.25rem -3rem);
+}
+
+/* What comes out of what opens it: the same beat as `popup-motion`, scaling from the point the
+   popup hangs from, which Base UI writes as `--transform-origin` (issue #237). */
+@utility popup-grows {
+  transform-origin: var(--transform-origin);
+  transition-property: opacity, scale, translate;
+  transition-duration: var(--duration-base);
+  transition-timing-function: var(--ease-calm);
+  @media (prefers-reduced-motion: reduce) {
+    transition-property: none;
+  }
+}
+
 @utility popup-motion {
   /* `translate` and `scale` and not `transform`: Tailwind 4 writes its transform utilities as
      the individual properties, and a transition naming `transform` never sees them — the popup
@@ -842,6 +888,18 @@
 @utility thumb-motion {
   transition-property: box-shadow, scale;
   transition-duration: var(--duration-fast);
+  transition-timing-function: var(--ease-calm);
+  @media (prefers-reduced-motion: reduce) {
+    transition-property: none;
+  }
+}
+
+/* What the box of a checkbox does as it is checked and unchecked: its fill and its edge fade on
+   the beat its tick draws on, so a tick undrawing is still drawn on the fill it is the colour of,
+   rather than white on white the moment the box lets go. */
+@utility check-motion {
+  transition-property: background-color, border-color;
+  transition-duration: var(--duration-base);
   transition-timing-function: var(--ease-calm);
   @media (prefers-reduced-motion: reduce) {
     transition-property: none;

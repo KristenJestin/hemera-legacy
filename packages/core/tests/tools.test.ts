@@ -22,16 +22,25 @@ describe('Every tool has a label and a mark', () => {
     expect(TOOL_LABELS.fs_read.label).toBe('Read file')
     expect(TOOL_LABELS.fs_list.label).toBe('List folder')
     expect(TOOL_LABELS.commands_output.label).toBe('Command output')
+    expect(TOOL_LABELS.commands_propose.label).toBe('Propose command')
     expect(TOOL_LABELS.session_get.label).toBe('Session')
+  })
+
+  test('each says what it is doing while it runs, as a present participle (#170)', () => {
+    for (const tool of TOOL_NAMES) expect(TOOL_LABELS[tool].doing).toMatch(/^[A-Z][a-z]*ing /)
+    expect(TOOL_LABELS.spec_write.doing).toBe('Writing the Spec')
+    expect(TOOL_LABELS.fs_read.doing).toBe('Reading a file')
   })
 })
 
 describe('A mission is offered its own tools', () => {
-  test('a free Session is offered the code tools and spec_propose alone, a build one none', () => {
+  test('a free Session is offered the code tools and spec_propose alone, a build one the same', () => {
     expect(offeredTools('free')).toEqual(
       TOOL_NAMES.filter((tool) => !['spec_read', 'spec_write'].includes(tool)),
     )
-    expect(offeredTools('build')).toEqual([])
+    // A build Session is offered what a `free` one is, until its own set is written: an agent
+    // with no tool at all is not a build.
+    expect(offeredTools('build')).toEqual(offeredTools('free'))
   })
 })
 

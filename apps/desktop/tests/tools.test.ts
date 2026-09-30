@@ -1332,6 +1332,63 @@ describe('Every Hemera Auto decision leaves one line in the diagnostic log', () 
   })
 })
 
+describe('Changing the strictness applies to the next call, in every Session', () => {
+  it('asks for a significant change at normal, and lets it through once permissive', async () => {
+    // A significant change nobody asked for, as Jev scores it every time.
+    const transport: JevTransport = { send: async () => jevResponse(2, 0.2, 0.18) }
+    const human = humanSaying('refused')
+    const seen = await engine(
+      human,
+      transport,
+    )(
+      Effect.gen(function* () {
+        const first = yield* opened
+        const sessions = yield* Sessions
+        const other = yield* sessions.create(first.projectId, 'codex')
+        yield* (yield* ToolAccess).granted(other.id, 'agent-2', 'free')
+        const settings = yield* ClassifierSettings
+        yield* settings.replaceKey('ciphertext', 'private-key')
+        yield* settings.setConsent(true)
+        yield* settings.select('hemera-auto')
+        const write = (sessionId: string, path: string) =>
+          calling({ sessionId, tool: 'fs_write', arguments: { path, content: 'x', key: path } })
+        const asked = yield* write(first.sessionId, 'normal.md')
+        yield* settings.selectStrictness('permissive')
+        const elsewhere = yield* write(other.id, 'elsewhere.md')
+        const again = yield* write(first.sessionId, 'again.md')
+        return {
+          states: [asked, elsewhere, again].map((one) => one.state),
+          lines: yield* journalLines(first.projectId),
+          entries: yield* threadEntries(first.sessionId),
+        }
+      }),
+    )
+    expect(seen.states).toEqual(['refused', 'completed', 'completed'])
+    expect(human.asked).toHaveLength(1)
+    // Each decision says the level it was taken at, as the policy it belongs to.
+    const decisions = seen.lines
+      .filter((line) => line.type === 'classifier.decision')
+      .map((line) => line.payload)
+      .reverse()
+    expect(decisions).toMatchObject([
+      { verdict: 'ask', policy: '2', strictness: 'normal' },
+      { verdict: 'allow', policy: '2', strictness: 'permissive' },
+      { verdict: 'allow', policy: '2', strictness: 'permissive' },
+    ])
+    const record = seen.entries.find(
+      (entry) => entry.kind === 'permission_decision' && entry.state === 'completed',
+    )
+    expect(JSON.parse(record?.payload ?? '{}')).toMatchObject({
+      policyVersion: '2',
+      strictness: 'permissive',
+    })
+    const lines = diagnostics.filter((line) => line.startsWith('hemera-auto: fs_write'))
+    expect(lines[0]).toContain('policy=2 strictness=normal')
+    expect(lines[1]).toContain('policy=2 strictness=permissive')
+    expect(lines[2]).toContain('policy=2 strictness=permissive')
+  })
+})
+
 describe('Secrets are masked before any evaluation', () => {
   it('masks a Workspace credential in any tool, and keeps a plain variable readable', async () => {
     const sent: string[] = []

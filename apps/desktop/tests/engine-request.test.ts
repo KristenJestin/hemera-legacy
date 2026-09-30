@@ -34,7 +34,7 @@ import { setupValuesLayer } from '#engine/setup/values.ts'
 import { type Commands, UnknownRunError, commandsLayer } from '#engine/commands/service.ts'
 import { type Context, contextLayer } from '#engine/context/service.ts'
 import { carriedMigrations, openProfile } from '#engine/migrate.ts'
-import { type Journal, journalLayer } from '#engine/journal.ts'
+import { Journal, journalLayer } from '#engine/journal.ts'
 import { type Preferences, preferencesLayer } from '#engine/preferences.ts'
 import { ClassifierSettings, classifierSettingsLayer } from '#engine/classifier/settings.ts'
 import { Projects, projectsLayer } from '#engine/projects.ts'
@@ -1036,12 +1036,14 @@ describe('A key can be saved replaced and removed safely', () => {
     )
     expect(first.before).toEqual({
       mode: 'agent-default',
+      strictness: 'normal',
       key: 'private-one',
       consent: false,
       generation: 1,
     })
     expect(first.after).toEqual({
       mode: 'hemera-auto',
+      strictness: 'normal',
       key: 'private-one',
       consent: false,
       generation: 2,
@@ -1062,6 +1064,66 @@ describe('A key can be saved replaced and removed safely', () => {
     await send('classifier.key.remove', {})
     expect(await send('classifier.ciphertext.read', {})).toBeNull()
     expect(await send('classifier.state', {})).toMatchObject({ mode: 'hemera-auto', hasKey: false })
+  })
+})
+
+describe('The strictness of Hemera Auto is kept in the Profile', () => {
+  test('it is normal until chosen, and a change is journalled without a new generation', async () => {
+    expect(await send('classifier.state', {})).toMatchObject({ strictness: 'normal' })
+    await send('classifier.strictness.write', { strictness: 'careful' })
+    expect(await send('classifier.state', {})).toMatchObject({ strictness: 'careful' })
+    await send('classifier.strictness.write', { strictness: 'permissive' })
+    expect(await send('classifier.state', {})).toMatchObject({ strictness: 'permissive' })
+    // The decisions under way stay valid: a new level is for the next call, not a new classifier.
+    const generations = await running(
+      Effect.gen(function* () {
+        const settings = yield* ClassifierSettings
+        const before = (yield* settings.current).generation
+        yield* settings.selectStrictness('normal')
+        return { before, after: (yield* settings.current).generation }
+      }),
+    )
+    expect(generations.after).toBe(generations.before)
+    const changes = await running(
+      Effect.gen(function* () {
+        const project = yield* (yield* Projects).create({
+          name: 'Atlas',
+          tone: 'primary',
+          mainPath: dataFolder,
+        })
+        const read = yield* (yield* Journal).read({ projectId: project.id })
+        return read.entries.filter((line) => line.type === 'classifier.strictness_changed')
+      }),
+    )
+    expect(changes.map((line) => line.payload)).toEqual([
+      { from: 'permissive', to: 'normal' },
+      { from: 'careful', to: 'permissive' },
+      { from: 'normal', to: 'careful' },
+    ])
+  })
+
+  test('a change keeps every live agent running', async () => {
+    const agent = fakeAgent()
+    const state = await running(
+      Effect.gen(function* () {
+        const project = yield* (yield* Projects).create({
+          name: 'Atlas',
+          tone: 'primary',
+          mainPath: dataFolder,
+        })
+        const session = yield* (yield* Sessions).create(project.id, 'claude')
+        const runtime = yield* AgentRuntime
+        yield* runtime.start(session.id)
+        const before = yield* runtime.alive
+        const decision = decideRequest('classifier.strictness.write', { strictness: 'careful' })
+        if (!decision.accepted) throw new Error(decision.reason)
+        yield* answer(decision)
+        return { before, after: yield* runtime.alive }
+      }),
+      agent,
+    )
+    expect(state.before).toHaveLength(1)
+    expect(state.after).toEqual(state.before)
   })
 })
 

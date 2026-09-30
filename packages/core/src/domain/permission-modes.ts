@@ -91,9 +91,17 @@ interface AgentOption {
   readonly category: string | null
 }
 
-/** Whether Hemera Auto governs this value of this option: a permission value of the mode. */
+/**
+ * Whether Hemera Auto governs this value of this option: a permission value of the mode other than
+ * the agent's neutral one. The neutral mode is where Hemera Auto puts an agent, so going back to
+ * it stays the user's — which is how Claude's plan is left again.
+ */
 export function autoGoverns(agent: string, option: AgentOption, value: string): boolean {
-  return (option.id === 'mode' || option.category === 'mode') && permissionMode(agent, value)
+  return (
+    (option.id === 'mode' || option.category === 'mode') &&
+    permissionMode(agent, value) &&
+    value !== neutralMode(agent)
+  )
 }
 
 /**

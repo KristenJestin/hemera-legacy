@@ -1095,13 +1095,13 @@ describe('Hemera Auto replaces native permission controls in the model menu', ()
     const marked = (provider: string | null, values: readonly string[]) =>
       modeStage([mode(values)], provider)?.choices.map((choice) => [choice.id, choice.permission])
     expect(marked('claude', ['default', 'acceptEdits', 'plan', 'bypassPermissions'])).toEqual([
-      ['default', true],
+      ['default', false],
       ['acceptEdits', true],
       ['plan', false],
       ['bypassPermissions', true],
     ])
     expect(marked('codex', ['read-only', 'agent', 'agent-full-access'])).toEqual([
-      ['read-only', true],
+      ['read-only', false],
       ['agent', true],
       ['agent-full-access', true],
     ])

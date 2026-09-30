@@ -25,6 +25,7 @@ interface PlaygroundArgs {
   folded: boolean
   over: boolean
   stuck: boolean
+  live: boolean
 }
 
 /** The kind's helpers, the first one silent when a stuck helper is asked for. */
@@ -37,20 +38,21 @@ function helpersOf(kind: Kind, stuck: boolean): readonly Helper[] {
   return [silent, ...rest]
 }
 
-function Page({ kind, head, taskGrouping, folded, over, stuck }: PlaygroundArgs): ReactNode {
+function Page({ kind, head, taskGrouping, folded, over, stuck, live }: PlaygroundArgs): ReactNode {
   return (
     <TooltipProvider>
       <div className="h-screen">
         {/* What the page starts from is drawn again when a control changes it; where the head
-            line stands and how a helper opens are read live. */}
+            line stands is read live. */}
         <SessionPage
-          key={[kind, taskGrouping, folded, over, stuck].join(':')}
+          key={[kind, taskGrouping, folded, over, stuck, live].join(':')}
           kind={kind}
           head={head}
           helpers={helpersOf(kind, stuck)}
           defaultGrouping={taskGrouping}
           defaultFolded={folded}
           defaultOver={over}
+          live={live}
         />
       </div>
     </TooltipProvider>
@@ -69,6 +71,7 @@ const meta = {
     folded: false,
     over: false,
     stuck: true,
+    live: true,
   },
   argTypes: {
     kind: {
@@ -95,6 +98,10 @@ const meta = {
     folded: { description: 'The panel folded to its small frame', control: 'boolean' },
     over: { description: 'The panel over the chat', control: 'boolean' },
     stuck: { description: 'A helper silent for too long', control: 'boolean' },
+    live: {
+      description: 'The build goes on by itself: tasks and runs change every few seconds',
+      control: 'boolean',
+    },
   },
 } satisfies Meta<typeof Page>
 

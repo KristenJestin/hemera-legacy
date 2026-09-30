@@ -14,18 +14,17 @@ import {
   IconFileDescription,
   IconFileDiff,
   IconFlask,
-  IconHandStop,
   IconLayoutList,
   IconListTree,
   IconMessages,
   IconPlayerPause,
-  IconPlayerSkipForward,
   IconPlayerStop,
   IconRobot,
   IconUser,
 } from '../../icons.ts'
-import { collapse, expand, fold, useTransition } from '../../motion.ts'
+import { check as checkKind, collapse, expand, fold, useTransition } from '../../motion.ts'
 import { HelperIcon } from './helper-icons.tsx'
+import { type MarkState, StatusMark } from './status-mark.tsx'
 import { type BoardTask, type TaskReturn, TASK_STORIES } from './tasks-fixtures.ts'
 
 /**
@@ -116,6 +115,11 @@ const STATE = 'flex size-icon-md shrink-0 items-center justify-center'
 const LABEL = 'w-8 shrink-0 font-mono text-xs text-muted-foreground'
 
 const TASK_TITLE = 'min-w-0 flex-1 truncate'
+
+const TASK_TITLE_DONE = 'min-w-0 flex-1 truncate text-muted-foreground'
+
+/** The stroke across a done task's title, drawn from its start. */
+const STRIKE = 'absolute inset-0 flex origin-left items-center'
 
 const STORIES = 'shrink-0 font-mono text-xs text-muted-foreground'
 
@@ -338,7 +342,7 @@ function Counts({ tasks }: { tasks: readonly BoardTask[] }): ReactNode {
         const label = `${String(count)} ${word}`
         return (
           <span key={bucket} role="img" aria-label={label} className={COUNT}>
-            <BucketIcon bucket={bucket} />
+            <StatusMark state={BUCKET_MARKS[bucket]} label={word} />
             {count}
           </span>
         )
@@ -347,38 +351,59 @@ function Counts({ tasks }: { tasks: readonly BoardTask[] }): ReactNode {
   )
 }
 
-function BucketIcon({ bucket }: { bucket: Bucket }): ReactNode {
-  if (bucket === 'done') {
-    return <IconCircleCheck size="sm" aria-hidden="true" className="text-success" />
-  }
-  if (bucket === 'progress') return <StatusDot status="running" />
-  if (bucket === 'you') {
-    return <IconHandStop size="sm" aria-hidden="true" className="text-destructive" />
-  }
-  return <IconCircleDashed size="sm" aria-hidden="true" className="text-muted-foreground" />
+const BUCKET_MARKS: Record<Bucket, MarkState> = {
+  done: 'done',
+  progress: 'progress',
+  you: 'yours',
+  todo: 'todo',
 }
 
-/** A task's state, drawn: a dot while it moves, an icon once it stands somewhere. */
-function StateMark({ state }: { state: BuildTaskState }): ReactNode {
-  const word = TASK_STATE_LABELS[state]
-  const icons: Partial<Record<BuildTaskState, ReactNode>> = {
-    done: <IconCircleCheck size="sm" aria-label={word} className="text-success" />,
-    skipped: (
-      <IconPlayerSkipForward size="sm" aria-label={word} className="text-muted-foreground" />
-    ),
-    checking: <IconFlask size="sm" aria-label={word} className="text-warning" />,
-    yours: <IconUser size="sm" aria-label={word} className="text-destructive" />,
-    blocked: <IconHandStop size="sm" aria-label={word} className="text-destructive" />,
-    waiting: <IconCircleDashed size="sm" aria-label={word} className="text-muted-foreground" />,
-  }
-  const tones: Partial<Record<BuildTaskState, StatusTone>> = {
-    in_progress: 'running',
-    ready: 'pending',
-  }
-  const tone = tones[state]
+/** A task's state as the mark that changes in place with it. */
+const TASK_MARKS: Record<BuildTaskState, MarkState> = {
+  done: 'done',
+  skipped: 'skipped',
+  in_progress: 'progress',
+  checking: 'progress',
+  yours: 'yours',
+  blocked: 'blocked',
+  ready: 'todo',
+  waiting: 'todo',
+}
+
+/** How far a task being checked is: its checks over, out of the checks its last try runs. */
+function progressOf(task: BoardTask): number | undefined {
+  if (task.state !== 'checking') return undefined
+  const checks = task.attempts.at(-1)?.checks ?? []
+  if (checks.length === 0) return undefined
+  return Math.max(
+    0.15,
+    checks.filter((one) => one.verdict !== 'skipped').length / (checks.length + 1),
+  )
+}
+
+/** A task's title, struck through as it is done: the stroke draws itself across it. */
+function Title({ done, children }: { done: boolean; children: ReactNode }): ReactNode {
+  const drawing = useTransition(checkKind.draw)
   return (
-    <span className={STATE}>
-      {tone !== undefined ? <StatusDot status={tone} label={word} /> : icons[state]}
+    <span className={done ? TASK_TITLE_DONE : TASK_TITLE}>
+      <span className="relative">
+        {children}
+        <AnimatePresence initial={false}>
+          {done && (
+            <motion.span
+              key="strike"
+              aria-hidden="true"
+              className={STRIKE}
+              initial={{ scaleX: 0 }}
+              animate={{ scaleX: 1 }}
+              exit={{ scaleX: 0 }}
+              transition={drawing}
+            >
+              <span className="w-full border-t border-current" />
+            </motion.span>
+          )}
+        </AnimatePresence>
+      </span>
     </span>
   )
 }
@@ -422,9 +447,15 @@ function TaskRow({
         data-task={task.label}
         onClick={onToggle}
       >
-        <StateMark state={task.state} />
+        <span className={STATE}>
+          <StatusMark
+            state={TASK_MARKS[task.state]}
+            progress={progressOf(task)}
+            label={TASK_STATE_LABELS[task.state]}
+          />
+        </span>
         <span className={LABEL}>{task.label}</span>
-        <span className={TASK_TITLE}>{task.title}</span>
+        <Title done={task.state === 'done'}>{task.title}</Title>
         {showStories && (
           <span className={STORIES}>{stories.map((story) => story.key).join(' ')}</span>
         )}

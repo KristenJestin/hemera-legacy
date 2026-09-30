@@ -9,7 +9,6 @@ import { Tooltip } from '../../components/tooltip/tooltip.tsx'
 import { IconChevronLeft, IconHammer, IconShield } from '../../icons.ts'
 import { MessageScroller, type ScrollerEntry } from '../../message/scroller/scroller.tsx'
 import { CROSSFADE, crossfade, instant, swap, useTransition } from '../../motion.ts'
-import { GOING_ON } from '../../session/going-on-fixtures.ts'
 import { GoingOnLine } from '../../session/going-on-line.tsx'
 import { NoticeRow } from '../../session/notice-row.tsx'
 import { RunCommand } from '../../session/run-command.tsx'
@@ -26,8 +25,9 @@ import { DEFINE_HELPERS, FREE_HELPERS, type Helper, STUCK } from './fixtures.ts'
 import { HelperChips } from './helper-chips.tsx'
 import { HelperIcon } from './helper-icons.tsx'
 import { HelperViewer } from './helper-viewer.tsx'
+import { useLiveSession } from './live.ts'
 import { PanelDock } from './panel-dock.tsx'
-import { BOARD } from './tasks-fixtures.ts'
+import { RunChips } from './run-chips.tsx'
 import { DEFINE_THREAD, FREE_THREAD, MAIN_THREAD, stoppedEntry } from './threads.tsx'
 
 /**
@@ -59,10 +59,9 @@ export interface SessionPageProps {
   defaultTask?: string | null | undefined
   /** The helper whose glance is open as the page is drawn. */
   defaultGlance?: string | null | undefined
+  /** Whether the build goes on by itself, a beat every few seconds, as in the Playground. */
+  live?: boolean | undefined
 }
-
-/** The two runs of the Session: its dev server and its tests. */
-const RUNS = GOING_ON.few.slice(0, 2)
 
 const CATALOGUE = [
   { name: 'dev', command: 'pnpm dev', type: 'serve' as const, running: true },
@@ -117,8 +116,10 @@ export function SessionPage({
   defaultGrouping = 'story',
   defaultTask = null,
   defaultGlance = null,
+  live = false,
 }: SessionPageProps): ReactNode {
   const [folded, setFolded] = useState(defaultFolded)
+  const session = useLiveSession(live)
   const [stopped, setStopped] = useState<readonly string[]>([])
   const helpers = given.map((helper) => (stopped.includes(helper.id) ? stoppedOf(helper) : helper))
   const [over, setOver] = useState(defaultOver)
@@ -156,12 +157,15 @@ export function SessionPage({
   const line = (
     <SessionHeader title={TITLES[kind]} onRename={fn()} onOpenDetails={fn()}>
       <GoingOnLine
-        items={kind === 'define' ? [] : RUNS}
+        items={[]}
         onStop={fn()}
         onOpenUrl={fn()}
         onAddToCatalogue={fn()}
         end={
           <>
+            {kind !== 'define' && (
+              <RunChips runs={session.runs} onStop={session.stop} onRetry={session.retry} />
+            )}
             <HelperChips
               helpers={helpers}
               onDetails={setOpen}
@@ -205,7 +209,7 @@ export function SessionPage({
   const tasks = {
     specKey: 'ATL-7',
     title: 'CSV invoice export',
-    tasks: BOARD,
+    tasks: session.tasks,
     grouping,
     onGrouping: setGrouping,
     open: task,

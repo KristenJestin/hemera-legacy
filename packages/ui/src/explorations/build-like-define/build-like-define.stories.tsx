@@ -1,11 +1,17 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
-import type { ReactNode } from 'react'
+import { type FunctionComponent, type ReactNode, useState } from 'react'
 import { expect, userEvent, waitFor, within } from 'storybook/test'
 
 import { StatusDot } from '../../components/status-dot/status-dot.tsx'
 import { TooltipProvider } from '../../components/tooltip/tooltip.tsx'
-import { HelperIcon, type HelperIconName, type HelperIconSet } from './helper-icons.tsx'
+import { IconBolt, IconDatabase, type IconProps, IconWorld } from '../../icons.ts'
+import { HelperIcon, type HelperIconName, type HelperIconSize, TiledIcon } from './helper-icons.tsx'
+import type { CommandState } from '../../activity/command-run.tsx'
+import { GOING_ON } from '../../session/going-on-fixtures.ts'
+import type { GoingOnRun } from '../../session/going-on.ts'
 import { type SessionPageProps, SessionPage } from './page.tsx'
+import { type LiveRun, RunChips as Chips } from './run-chips.tsx'
+import { type MarkState, StatusMark } from './status-mark.tsx'
 
 /**
  * A Session laid as `define` lays it, for every kind (design exploration of 30 September 2026,
@@ -236,12 +242,6 @@ export const HelperInFree: Story = {
   },
 }
 
-const SETS: readonly { set: HelperIconSet; name: string }[] = [
-  { set: 'face', name: 'A · the face, as it was' },
-  { set: 'sign', name: 'B · the tile and a sign (recommended)' },
-  { set: 'glyph', name: 'C · the catalogue’s icons' },
-]
-
 const ICONS: readonly { icon: HelperIconName; name: string }[] = [
   { icon: 'free', name: 'Free helper' },
   { icon: 'reviewer', name: 'Test review' },
@@ -250,45 +250,242 @@ const ICONS: readonly { icon: HelperIconName; name: string }[] = [
   { icon: 'prototyper', name: 'Prototyper' },
 ]
 
+/** Helpers not written yet, to show the rule: any icon of the catalogue in the same tile. */
+const NEW_HELPERS: readonly { glyph: FunctionComponent<IconProps>; name: string }[] = [
+  { glyph: IconDatabase, name: 'Migrator' },
+  { glyph: IconWorld, name: 'Translator' },
+  { glyph: IconBolt, name: 'Performance review' },
+]
+
 const SAMPLE_CHIP =
   'inline-flex h-control-sm items-center gap-1.5 rounded-md border border-border bg-card px-2 text-xs'
 
+const ICON_CELL = 'flex w-menu-side flex-col items-start gap-3'
+
+const ICON_BIG =
+  'flex size-16 items-center justify-center rounded-xl border border-border bg-card text-foreground'
+
+/** One helper's icon, large and on a chip. */
+function IconCell({
+  icon,
+  name,
+}: {
+  icon: (size: HelperIconSize) => ReactNode
+  name: string
+}): ReactNode {
+  return (
+    <div className={ICON_CELL}>
+      <span className={ICON_BIG}>{icon('xl')}</span>
+      <span className={SAMPLE_CHIP}>
+        <span className="flex text-muted-foreground">{icon('md')}</span>
+        <StatusDot status="running" size="sm" />
+        {name}
+      </span>
+    </div>
+  )
+}
+
 /**
- * The helper icons, three sets side by side, each large and at the size of a chip. A is the set
- * so far: every helper a departure from Hemera's face, which reads at 40 px and blurs at a chip's
- * 16. B keeps Hemera's tile for every helper and puts one sign in it — the eyes, a tick, a shield,
- * lines, a plus on a dashed tile — which still reads at 16. C is the catalogue's own icons: the
- * clearest at a chip's size, and nothing of Hemera left in them.
+ * The helper icons, the maintainer's choice: Hemera's tile, holding one icon of the catalogue
+ * that says what the helper is for — large, and at a chip's size. The last row is the rule: a new
+ * defined helper picks an icon of the catalogue, and the tile makes it one of the family.
  */
 export const HelperIcons: Story = {
   render: () => (
     <div className="flex min-h-screen flex-col gap-8 bg-background p-8 text-foreground">
-      {SETS.map(({ set, name }) => (
-        <section key={set} aria-label={name} className="flex flex-col gap-3">
-          <h2 className="text-sm font-medium">{name}</h2>
-          <div className="flex flex-wrap gap-6">
-            {ICONS.map(({ icon, name: helper }) => (
-              <div key={icon} className="flex w-menu-side flex-col items-start gap-3">
-                <span className="flex size-16 items-center justify-center rounded-xl border border-border bg-card">
-                  <HelperIcon name={icon} set={set} size="xl" />
-                </span>
-                <span className={SAMPLE_CHIP}>
-                  <span className="flex text-muted-foreground">
-                    <HelperIcon name={icon} set={set} size="md" />
-                  </span>
-                  <StatusDot status="running" size="sm" />
-                  {helper}
-                </span>
-              </div>
-            ))}
-          </div>
-        </section>
-      ))}
+      <section aria-label="The helpers" className="flex flex-col gap-3">
+        <h2 className="text-sm font-medium">The helpers</h2>
+        <div className="flex flex-wrap gap-6">
+          {ICONS.map(({ icon, name }) => (
+            <IconCell
+              key={icon}
+              name={name}
+              icon={(size) => <HelperIcon name={icon} size={size} />}
+            />
+          ))}
+        </div>
+      </section>
+      <section aria-label="A new helper" className="flex flex-col gap-3">
+        <h2 className="text-sm font-medium">
+          A new helper · any icon of the catalogue, in the tile
+        </h2>
+        <div className="flex flex-wrap gap-6">
+          {NEW_HELPERS.map(({ glyph, name }) => (
+            <IconCell
+              key={name}
+              name={name}
+              icon={(size) => <TiledIcon glyph={glyph} size={size} />}
+            />
+          ))}
+        </div>
+      </section>
     </div>
   ),
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    await expect(canvas.getAllByRole('region')).toHaveLength(3)
+    await expect(canvas.getAllByRole('region')).toHaveLength(2)
+  },
+}
+
+const MARKS: readonly { state: MarkState; word: string; progress?: number }[] = [
+  { state: 'todo', word: 'To do' },
+  { state: 'progress', word: 'In progress' },
+  { state: 'progress', word: 'In progress · 40%', progress: 0.4 },
+  { state: 'done', word: 'Done' },
+  { state: 'failed', word: 'Failed' },
+  { state: 'yours', word: 'Waits for you' },
+  { state: 'blocked', word: 'Blocked' },
+  { state: 'skipped', word: 'Skipped' },
+]
+
+const BENCH = 'flex min-h-screen flex-col gap-8 bg-background p-8 text-foreground'
+
+const MARK_CELL = 'flex w-menu-side items-center gap-2 text-sm'
+
+const PICK =
+  'rounded-md border border-border px-2 py-1 text-xs outline-none hover:bg-accent focus-ring aria-pressed:bg-accent aria-pressed:font-medium'
+
+/** One mark driven by hand, to watch it change in place from any state to any other. */
+function MarkBench(): ReactNode {
+  const [shown, setShown] = useState(0)
+  const mark = MARKS[shown] ?? MARKS[0]!
+  return (
+    <section aria-label="One mark, changing" className="flex flex-col gap-3">
+      <h2 className="text-sm font-medium">One mark, changing in place</h2>
+      <div className="flex items-center gap-4">
+        <span className="flex size-10 items-center justify-center rounded-lg border border-border bg-card">
+          <StatusMark state={mark.state} progress={mark.progress} label={mark.word} />
+        </span>
+        <div role="group" aria-label="Its state" className="flex flex-wrap gap-1.5">
+          {MARKS.map((one, index) => (
+            <button
+              key={one.word}
+              type="button"
+              className={PICK}
+              aria-pressed={index === shown}
+              onClick={() => setShown(index)}
+            >
+              {one.word}
+            </button>
+          ))}
+        </div>
+      </div>
+    </section>
+  )
+}
+
+/**
+ * The status mark: every state, then one mark driven by hand from any state to any other — the
+ * ring closing, the tick and the cross drawing themselves, the arc turning or standing at its
+ * share, the dot of what waits for you ringing.
+ */
+export const StatusMarks: Story = {
+  render: () => (
+    <div className={BENCH}>
+      <section aria-label="Every state" className="flex flex-col gap-3">
+        <h2 className="text-sm font-medium">Every state</h2>
+        <div className="flex flex-wrap gap-4">
+          {MARKS.map((one) => (
+            <span key={one.word} className={MARK_CELL}>
+              <StatusMark state={one.state} progress={one.progress} label={one.word} />
+              {one.word}
+            </span>
+          ))}
+        </div>
+      </section>
+      <MarkBench />
+    </div>
+  ),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const bench = within(canvas.getByRole('region', { name: 'One mark, changing' }))
+    await userEvent.click(bench.getByRole('button', { name: 'Done' }))
+    await expect(bench.getByRole('img', { name: 'Done' })).toBeVisible()
+    await userEvent.click(bench.getByRole('button', { name: 'Failed' }))
+    await expect(bench.getByRole('img', { name: 'Failed' })).toBeVisible()
+  },
+}
+
+/** Runs in each state, driven by hand: running, done, failed, and run again. */
+function RunBench(): ReactNode {
+  const now = Date.now()
+  const base = GOING_ON.few.flatMap((item) => (item.kind === 'run' ? [item] : []))
+  const [runs, setRuns] = useState<readonly LiveRun[]>(() =>
+    base.flatMap((item, index) =>
+      (['running', 'finished', 'failed'] as const).map((state) => ({
+        item: runOf(item, `${item.id}-${state}`, state),
+        startedAt: now - (index + 1) * 83_000,
+        endedAt: state === 'running' ? null : now - 12_000,
+      })),
+    ),
+  )
+  function set(id: string, state: CommandState): void {
+    setRuns((all) =>
+      all.map((run) =>
+        run.item.id !== id
+          ? run
+          : {
+              item: runOf(run.item, id, state),
+              startedAt: state === 'running' ? Date.now() : run.startedAt,
+              endedAt: state === 'running' ? null : Date.now(),
+            },
+      ),
+    )
+  }
+  const driven = runs.find((run) => run.item.id === 'run-test-running')
+  return (
+    <div className={BENCH}>
+      <div
+        role="group"
+        aria-label="What goes on in this Session"
+        className="flex flex-wrap gap-y-2"
+      >
+        <Chips
+          runs={runs}
+          onStop={(id) => set(id, 'stopped')}
+          onRetry={(id) => set(id, 'running')}
+        />
+      </div>
+      <div role="group" aria-label="Drive the tests" className="flex gap-1.5">
+        <button type="button" className={PICK} onClick={() => set('run-test-running', 'finished')}>
+          Finish the tests
+        </button>
+        <button type="button" className={PICK} onClick={() => set('run-test-running', 'failed')}>
+          Fail the tests
+        </button>
+        <button type="button" className={PICK} onClick={() => set('run-test-running', 'running')}>
+          Run them again
+        </button>
+        <span className="text-xs text-muted-foreground">{driven?.item.state}</span>
+      </div>
+    </div>
+  )
+}
+
+/** A run, under an id of its own, in a state. */
+function runOf(item: GoingOnRun, id: string, state: CommandState): GoingOnRun {
+  return { ...item, id, state }
+}
+
+/**
+ * The run chips: running (a tint wiping across, the duration ticking), done (one wash of the
+ * success tint), failed (the failure's tint, one short shake, the retry glyph beside it), and
+ * the tests driven by hand from one to another.
+ */
+export const RunChips: Story = {
+  render: () => (
+    <TooltipProvider>
+      <RunBench />
+    </TooltipProvider>
+  ),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await userEvent.click(canvas.getByRole('button', { name: 'Run test again' }))
+    await expect(canvas.getAllByRole('button', { name: 'test, running' })).toHaveLength(2)
+    await userEvent.click(canvas.getByRole('button', { name: 'Fail the tests' }))
+    await waitFor(() =>
+      expect(canvas.getAllByRole('button', { name: 'Run test again' })).toHaveLength(1),
+    )
   },
 }
 

@@ -25,7 +25,7 @@ function stored(payload: string, state: string | null = 'completed'): SessionEnt
   }
 }
 
-const SESSION = { id: 's1', title: 'Fix the parser' }
+const SESSION = { id: 's1', title: 'Fix the parser', projectId: 'p1' }
 const AT = (ms: number) => `at ${ms}`
 
 describe('A Hemera Auto decision becomes one row', () => {

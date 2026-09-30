@@ -318,7 +318,7 @@ export interface SessionsService {
 /** One of Hemera Auto's decisions, as `decisions` reads it. */
 export interface DecisionRead {
   readonly entry: SessionEntry
-  readonly session: { readonly id: string; readonly title: string }
+  readonly session: { readonly id: string; readonly title: string; readonly projectId: string }
 }
 
 /** How many decisions are read when no limit is asked for. */
@@ -1236,7 +1236,7 @@ export const sessionsLayer = Layer.effect(
       decisions: (limit) =>
         withDatabase(
           database
-            .select({ entry: sessionEntries, title: sessions.title })
+            .select({ entry: sessionEntries, title: sessions.title, projectId: sessions.projectId })
             .from(sessionEntries)
             .innerJoin(sessions, eq(sessions.id, sessionEntries.sessionId))
             .where(
@@ -1250,12 +1250,10 @@ export const sessionsLayer = Layer.effect(
             .limit(limit ?? DECISIONS)
             .pipe(
               Effect.map((rows) =>
-                rows.map(
-                  ({ entry, title }): DecisionRead => ({
-                    entry: { ...entryOf(entry), payload: redactRecord(entry.payload) },
-                    session: { id: entry.sessionId, title },
-                  }),
-                ),
+                rows.map(({ entry, title, projectId }): DecisionRead => ({
+                  entry: { ...entryOf(entry), payload: redactRecord(entry.payload) },
+                  session: { id: entry.sessionId, title, projectId },
+                })),
               ),
               Effect.mapError(failed('reading Hemera Auto decisions')),
             ),

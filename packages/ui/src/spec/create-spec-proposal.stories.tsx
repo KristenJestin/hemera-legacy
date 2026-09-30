@@ -10,7 +10,7 @@ import { CreateSpecProposal, SpecProposalRecord } from './create-spec-proposal.t
 const meta = {
   title: 'Blocks/Spec/CreateSpecProposal',
   component: CreateSpecProposal,
-  tags: ['autodocs', 'updated'],
+  tags: ['autodocs'],
   parameters: { layout: 'padded' },
   args: {
     title: 'CSV invoice export',

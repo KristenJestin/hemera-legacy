@@ -55,7 +55,7 @@ const REPOSITORY = {
 }
 
 const meta = {
-  tags: ['autodocs', 'new'],
+  tags: ['autodocs'],
   title: 'Blocks/Activity/SetupProposal',
   component: SetupProposal,
   parameters: { layout: 'padded' },

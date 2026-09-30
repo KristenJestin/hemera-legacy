@@ -1,10 +1,10 @@
-import type { ReactNode } from 'react'
+import type { FunctionComponent, ReactNode } from 'react'
 
 import { Disclosure } from '../activity/disclosure.tsx'
-import { Badge, type BadgeProps } from '../components/badge/badge.tsx'
 import { Button } from '../components/button/button.tsx'
 import { Card } from '../components/card/card.tsx'
-import { IconRefresh } from '../icons.ts'
+import { StatusDot, type StatusTone } from '../components/status-dot/status-dot.tsx'
+import { IconArrowUp, IconCheck, type IconProps, IconRefresh, IconShield, IconX } from '../icons.ts'
 
 /**
  * The agents this machine has, and the one thing the reader can do about them (design D17-01,
@@ -65,11 +65,46 @@ const VALUE = 'min-w-0 truncate font-mono text-sm'
 const SAID =
   'scroll-quiet max-h-40 overflow-auto rounded-md border border-border bg-muted px-2 py-1.5 font-mono text-xs whitespace-pre-wrap text-foreground'
 
-/** How an agent's standing is drawn: found, absent, or waiting for a sign-in. */
-const STANDING: Record<AgentStanding, { word: string; tone: NonNullable<BadgeProps['tone']> }> = {
+/** A state, and the word the dot that says it is named by. */
+interface Said {
+  tone: StatusTone
+  word: string
+}
+
+/**
+ * How an agent's standing is drawn: found, absent, or waiting for a sign-in — as a dot, whose word
+ * is its name and its hover and is never drawn (states are dots, not words).
+ */
+const STANDING: Record<AgentStanding, Said> = {
   ready: { word: 'Found', tone: 'success' },
-  missing: { word: 'Not installed', tone: 'neutral' },
-  unauthenticated: { word: 'Not signed in', tone: 'warning' },
+  missing: { word: 'Not installed', tone: 'cancelled' },
+  unauthenticated: { word: 'Not signed in', tone: 'pending' },
+}
+
+/** A value's line, where a dot or an icon sits beside what it says. */
+const MARKED = 'inline-flex items-center gap-1.5'
+
+/** Bare mode's folded line: a shield and a dot, quiet as the note it replaced. */
+const BARE_LINE = 'inline-flex items-center gap-1.5 text-muted-foreground'
+
+/** A state said by a dot: its word is what a screen reader hears and what the hover shows. */
+function Dot({ tone, word }: Said): ReactNode {
+  return <StatusDot status={tone} label={word} title={word} />
+}
+
+/** A state said by an icon, named and hovered the way a dot is. */
+function Mark({
+  icon: Icon,
+  word,
+}: {
+  icon: FunctionComponent<IconProps>
+  word: string
+}): ReactNode {
+  return (
+    <span role="img" aria-label={word} title={word} className="inline-flex text-muted-foreground">
+      <Icon size="sm" aria-hidden="true" />
+    </span>
+  )
 }
 
 /** What the machine can say about an agent. */
@@ -162,10 +197,16 @@ export function AgentsSection({
               <li key={agent.id} className={ITEM}>
                 <div className={HEAD}>
                   <span className={NAME}>{agent.name}</span>
-                  <Badge tone={standing.tone}>{standing.word}</Badge>
+                  <Dot tone={standing.tone} word={standing.word} />
                 </div>
                 <dl className={ROW}>
-                  <Pair label="Signed in">{agent.authenticated ? 'yes' : 'no'}</Pair>
+                  <Pair label="Signed in">
+                    {agent.authenticated ? (
+                      <Mark icon={IconCheck} word="yes" />
+                    ) : (
+                      <Mark icon={IconX} word="no" />
+                    )}
+                  </Pair>
                   <Pair label="Installed">{installedOf(agent)}</Pair>
                   {agent.found ? (
                     <Pair label="Updates">{updatesOf(agent, checked)}</Pair>
@@ -237,12 +278,15 @@ function Pair({ label, children }: { label: string; children: ReactNode }): Reac
  * would otherwise all say the same words.
  */
 function BareFold({ agent, bare }: { agent: string; bare: BareMode }): ReactNode {
+  const line = bare.qualified ? "Runs with Hemera's tools only" : 'Not available here'
   return (
     <Disclosure
       summary={
-        <span className={NOTE}>
-          <span className="sr-only">{`${agent}: `}</span>
-          {bare.qualified ? "Runs with Hemera's tools only" : 'Not available here'}
+        // A shield and a dot: the words are the fold's name and the line's hover, never drawn.
+        <span className={BARE_LINE} title={line}>
+          <span className="sr-only">{`${agent}: ${line}`}</span>
+          <IconShield size="sm" aria-hidden="true" />
+          <StatusDot status={bare.qualified ? 'success' : 'failure'} />
         </span>
       }
     >
@@ -259,10 +303,10 @@ function standingOf(agent: AgentOnTheMachine): AgentStanding {
   return agent.authenticated ? 'ready' : 'unauthenticated'
 }
 
-/** What was found, in the version the command itself reports. */
-function installedOf(agent: AgentOnTheMachine): string {
-  if (!agent.found) return 'not on this machine'
-  return agent.version ?? 'no version reported'
+/** What was found, in the version the command itself reports; a dot where there is none. */
+function installedOf(agent: AgentOnTheMachine): ReactNode {
+  if (!agent.found) return <Dot tone="cancelled" word="Not on this machine" />
+  return agent.version ?? <Dot tone="cancelled" word="No version reported" />
 }
 
 /**
@@ -274,11 +318,22 @@ function installedOf(agent: AgentOnTheMachine): string {
  * was published and leaves the comparison alone. An installed version ahead of the published one
  * (a snapshot, a release the registry has not caught up with) is up to date, not behind.
  */
-function updatesOf(agent: AgentOnTheMachine, checked: boolean): string {
-  if (agent.latest === null) return checked ? 'Could not check' : 'Checking…'
+function updatesOf(agent: AgentOnTheMachine, checked: boolean): ReactNode {
+  if (agent.latest === null)
+    return checked ? (
+      <Dot tone="failure" word="Could not check" />
+    ) : (
+      <Dot tone="running" word="Checking…" />
+    )
   const order = agent.version === null ? null : compareVersions(agent.version, agent.latest)
   if (order === null) return `Latest ${agent.latest}`
-  return order < 0 ? `Update available ${agent.latest}` : 'Up to date'
+  if (order >= 0) return <Dot tone="success" word="Up to date" />
+  return (
+    <span className={MARKED}>
+      <Mark icon={IconArrowUp} word="Update available" />
+      {agent.latest}
+    </span>
+  )
 }
 
 /**

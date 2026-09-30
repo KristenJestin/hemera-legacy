@@ -3,6 +3,7 @@ import { describe, expect, test } from 'vite-plus/test'
 import {
   evaluateJev,
   JEV_ACTION_LIMIT,
+  JEV_DEADLINE_MS,
   JEV_MODEL,
   type JevTransport,
 } from '#engine/classifier/jev.ts'
@@ -271,5 +272,29 @@ describe('Only credential variables are known secrets', () => {
         EMPTY_TOKEN: '',
       }).toSorted(),
     ).toEqual(['abc', 'ghp_x', 'hunter2', 'k-123456'])
+  })
+})
+
+describe('Jev never waits indefinitely', () => {
+  test('a transport that never answers, or a body that never ends, is unavailable at the deadline', async () => {
+    const silent: JevTransport = { send: () => new Promise<Response>(() => {}) }
+    const endless: JevTransport = {
+      send: async () => new Response(new ReadableStream({ start: () => {} }), { status: 200 }),
+    }
+    const began = performance.now()
+    const results = await Promise.all(
+      [silent, endless].map((hanging) =>
+        evaluateJev(state, 'test-key', new AbortController().signal, hanging, [], 30),
+      ),
+    )
+    expect(results).toEqual([
+      { kind: 'unavailable', reason: 'network' },
+      { kind: 'unavailable', reason: 'network' },
+    ])
+    expect(performance.now() - began).toBeLessThan(2_000)
+  })
+
+  test('the deadline is the documented ten seconds', () => {
+    expect(JEV_DEADLINE_MS).toBe(10_000)
   })
 })

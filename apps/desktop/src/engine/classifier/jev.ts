@@ -76,6 +76,7 @@ export async function evaluateJev(
   signal: AbortSignal,
   transport: JevTransport,
   knownSecrets: readonly string[] = [],
+  deadlineMs = JEV_DEADLINE_MS,
 ): Promise<JevResult> {
   const action = redactAction(state.action, [key, ...knownSecrets])
   if (
@@ -114,13 +115,20 @@ export async function evaluateJev(
       },
     },
   })
-  const deadline = AbortSignal.timeout(JEV_DEADLINE_MS)
+  const deadline = AbortSignal.timeout(deadlineMs)
   const combined = AbortSignal.any([signal, deadline])
+  // The deadline is Hemera's, not the transport's: a transport or a body that ignores the signal
+  // still loses the race, so a call never waits on Jev past it (D59-04).
+  const aborted = new Promise<never>((_, reject) => {
+    if (combined.aborted) reject(combined.reason)
+    combined.addEventListener('abort', () => reject(combined.reason), { once: true })
+  })
+  aborted.catch(() => {})
   try {
-    const response = await transport.send(body, key, combined)
+    const response = await Promise.race([transport.send(body, key, combined), aborted])
     if (!response.ok || combined.aborted) return { kind: 'unavailable', reason: 'network' }
     // SAFETY: JSON from a network response is untrusted until the schema parses it below.
-    const json: unknown = await response.json()
+    const json: unknown = await Promise.race([response.json(), aborted])
     if (combined.aborted) return { kind: 'unavailable', reason: 'network' }
     const parsed = responseSchema.safeParse(json)
     if (!parsed.success) return { kind: 'unavailable', reason: 'response' }

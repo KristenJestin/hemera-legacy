@@ -6,10 +6,10 @@
  * `ready` itself is not: Electron emits it once this module has finished evaluating, so a
  * top-level `await app.whenReady()` waits for an event its own waiting prevents.
  *
- * Which data folder this start opens is decided here, first of all and before anything is
- * created (design D3-06): `userData` is moved onto it, so the single instance lock, the
- * persisted window state and everything else Electron files under `userData` follow the data
- * folder rather than the machine.
+ * Which folders this start opens is decided here, first of all and before anything is created
+ * (design D3-06, #262): the data folder Hemera writes to, and the profile `userData` is moved
+ * onto, so the single instance lock, the persisted window state and everything else Electron
+ * files under `userData` follow the channel and the checkout rather than the machine.
  */
 
 import { dirname, join } from 'node:path'
@@ -25,6 +25,7 @@ import {
   channel,
   chooseData,
   dataDirectory,
+  readCheckout,
 } from './channel.ts'
 import { registerChannels } from './channels.ts'
 import { openDiagnosticLog, reported, writeDiagnosticTo } from './diagnostic.ts'
@@ -67,7 +68,10 @@ const identity: ApplicationIdentity = {
   version: applicationVersion(app.isPackaged, app.getVersion(), process.env),
 }
 
-const choice = chooseData(identity.channel, process.platform, process.env, process.argv)
+/** Which checkout a development run is from; a package is not asked, it has no checkout. */
+const checkout = identity.channel === 'dev' ? readCheckout(app.getAppPath()) : undefined
+
+const choice = chooseData(identity.channel, process.platform, process.env, process.argv, checkout)
 
 /**
  * A start that was refused, said where it can still be read.
@@ -76,19 +80,22 @@ const choice = chooseData(identity.channel, process.platform, process.env, proce
  * refusal goes to the data folder this channel would have opened on its own.
  */
 function refuse(reason: string): never {
-  openDiagnosticLog(dataDirectory(identity.channel, process.platform, process.env), 'main')(reason)
+  const own = dataDirectory(identity.channel, process.platform, process.env, checkout)
+  openDiagnosticLog(own, 'main')(reason)
   app.exit(1)
   // `app.exit` leaves immediately; its type does not say so, and the folder is a `string`.
   throw new Error(reason)
 }
 
-const data = choice.accepted ? choice.directory : refuse(choice.reason)
+const { directory: data, profile } = choice.accepted ? choice : refuse(choice.reason)
 
-app.setPath('userData', data)
+app.setPath('userData', profile)
 
 const log = openDiagnosticLog(data, 'main')
 writeDiagnosticTo(log)
-log(`starting channel ${identity.channel}, version ${identity.version}, data folder ${data}`)
+log(
+  `starting channel ${identity.channel}, version ${identity.version}, data folder ${data}, profile ${profile}`,
+)
 
 /**
  * No menu at all, which also takes its keystrokes with it.
@@ -101,7 +108,8 @@ log(`starting channel ${identity.channel}, version ${identity.version}, data fol
 Menu.setApplicationMenu(null)
 
 /**
- * One instance per data folder, and the lock is on the folder because `userData` is.
+ * One instance per data folder, and the lock is on the profile because `userData` is: each data
+ * folder has exactly one profile — `prod` and `beta` share both — so the one lock is enough.
  *
  * A second start on the same folder has nothing to do but hand the window back: two programs
  * on one database is how a data folder gets two writers. Two folders run side by side, which
@@ -152,6 +160,21 @@ if (!app.requestSingleInstanceLock()) {
     const window = createWindow(main)
     registerChannels(window, identity, engine, data)
     await loadWindow(window)
+
+    // What the Projects run each time Hemera opens, asked once the window is shown and never
+    // before, so opening is not slowed down (#114). Nothing waits for it: a run that fails is the
+    // Project's to show, and what could not be started at all is written down here.
+    void Effect.runPromise(
+      engine.ask('engine.atOpen', {}).pipe(
+        Effect.match({
+          onSuccess: (refused) => {
+            for (const one of refused) log(one)
+          },
+          onFailure: (failed) =>
+            log(`the commands to run at open were not run: ${reported(failed)}`),
+        }),
+      ),
+    )
 
     if (process.argv.includes(REPORT_FLAG)) {
       // The transition is played and counted in the page, because that is where frames are

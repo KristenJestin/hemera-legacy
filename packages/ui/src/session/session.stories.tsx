@@ -3,12 +3,18 @@ import { cn } from 'cn'
 import { useState } from 'react'
 import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
 
+import { expectNeverBuried, watchThereAndBack } from '../../.storybook/sliding-mark.ts'
 import { TooltipProvider } from '../components/tooltip/tooltip.tsx'
+import { onOneLine } from '../../.storybook/one-line.ts'
+import { SidebarMark } from '../shell/sidebar-mark.tsx'
+import { GOING_ON } from './going-on-fixtures.ts'
+import { GoingOnLine } from './going-on-line.tsx'
 import {
   ArchivedSessions,
   SessionEmpty,
   SessionHeader,
   type SessionHeaderProps,
+  type SessionRenaming,
   SidebarSessionEntry,
 } from './session.tsx'
 
@@ -26,30 +32,72 @@ import {
  * is the screen itself, and what is shown here is named after the state it shows.
  */
 
+/** What a Session was renamed to, in the stories: one spy, cleared per story. */
+const RENAMED = fn()
+
+/** The head's props, and whether the Session's row opens on its field. */
+type HarnessProps = SessionHeaderProps & { renaming?: boolean | undefined }
+
 /**
- * The page's half of the title: it holds the name and whether the field is open.
- *
- * Written out rather than hidden, because it is exactly what the application does with the
- * same component — keep the name, open the field, keep what comes back — and because a rename
- * that never reached the page would be a story that proves nothing about the page.
+ * The page and its sidebar, as the application holds them: the head's Rename turns the Session's
+ * own row of the sidebar into its field (review of #250), what is typed there renames it, and the
+ * head never changes.
  */
-function Harness({ title, editing = false, ...rest }: SessionHeaderProps) {
+function Harness({ title, renaming = false, ...rest }: HarnessProps) {
   const [name, setName] = useState(title)
-  const [open, setOpen] = useState(editing)
+  const [open, setOpen] = useState(renaming)
   return (
-    <SessionHeader
-      {...rest}
-      title={name}
-      editing={open}
-      onRename={(next) => {
-        rest.onRename(next)
-        setName(next)
-        setOpen(false)
-      }}
-      onStartEditing={() => setOpen(true)}
-      onCancelEditing={() => setOpen(false)}
-    />
+    <TooltipProvider>
+      <div className="flex items-start gap-6">
+        <Panel
+          active="csv"
+          names={{ csv: name }}
+          renaming={
+            open
+              ? {
+                  id: 'csv',
+                  onCommit: (next) => {
+                    RENAMED(next)
+                    setName(next)
+                    setOpen(false)
+                  },
+                  onCancel: () => setOpen(false),
+                }
+              : null
+          }
+        />
+        <div className="min-w-0 flex-1">
+          <SessionHeader
+            {...rest}
+            title={name}
+            onRename={() => {
+              rest.onRename?.()
+              setOpen(true)
+            }}
+          />
+        </div>
+      </div>
+    </TooltipProvider>
   )
+}
+
+/** What goes on in the Session, as the page hands it to the head (issue #219). */
+function Line({ items = GOING_ON.few }: { items?: typeof GOING_ON.few }) {
+  return <GoingOnLine items={items} onStop={fn()} onOpenUrl={fn()} onAddToCatalogue={fn()} />
+}
+
+/**
+ * Opens the field the way the head offers it: from the `…`, the title being on the page no more.
+ */
+async function openRename(canvas: ReturnType<typeof within>, title: string): Promise<void> {
+  await userEvent.click(canvas.getByRole('button', { name: `Commands for ${title}` }))
+  const menu = await waitFor(() => within(document.body).getByRole('menu'))
+  const rename = within(menu).getByRole('menuitem', { name: /Rename/ })
+  await readyFor(rename)
+  await userEvent.click(rename)
+  await waitFor(() => {
+    expect(within(document.body).queryByRole('menu')).toBeNull()
+  })
 }
 
 /** What the page does with what it is told, on fixtures: one spy per act, cleared per story. */
@@ -80,34 +128,36 @@ const SESSIONS = [
 ]
 
 const meta = {
-  tags: ['autodocs'],
+  tags: ['autodocs', 'updated'],
   title: 'Surfaces/Session',
   component: SessionHeader,
   render: (args) => <Harness {...args} />,
   parameters: { layout: 'padded' },
   args: {
     title: 'CSV invoice export',
-    projectName: 'Atlas',
-    meta: 'created 3 days ago · 5 messages',
-    editing: false,
+    archiveDisabled: false,
     onRename: fn(),
-    onStartEditing: fn(),
-    onCancelEditing: fn(),
+    onArchive: fn(),
+    children: <Line />,
   },
   argTypes: {
     title: { control: 'text', description: 'What the Session is called.' },
-    projectName: { control: 'text', description: 'The Project it belongs to.' },
-    meta: {
-      control: 'text',
-      description: "The rest of the head's line, already written for the platform.",
+    archiveDisabled: {
+      control: 'boolean',
+      description: 'Whether there is anything to archive yet.',
     },
-    editing: { control: 'boolean', description: 'Whether the title is being typed right now.' },
-    onRename: { control: false, description: 'What the title becomes, on Enter.' },
-    onStartEditing: { control: false, description: 'Opens the field.' },
-    onCancelEditing: { control: false, description: 'Closes it without keeping what was typed.' },
+    onRename: {
+      control: false,
+      description: 'Renames the Session, in its row of the sidebar where its title lives.',
+    },
+    onArchive: { control: false, description: 'Takes the Session out of the sidebar.' },
     onOpenDetails: {
       control: false,
       description: 'Opens the Session details: its activity, its commands and its context.',
+    },
+    children: {
+      control: false,
+      description: 'What goes on in the Session, on the head’s own row.',
     },
   },
 } satisfies Meta<typeof Harness>
@@ -116,52 +166,62 @@ export default meta
 type Story = StoryObj<typeof meta>
 
 /**
- * A Session with a name and a Project, and no command menu: what is done with a Session stands
- * where the Session is.
- *
- * The head is one line (review of #40, defect 4): the title and the Project it lives in, with the
- * one control the layout puts at the end of the line. The title is itself the control that opens
- * the field, because the hand that wants the name changed is already on the words, and Archive
- * stands on the Session's row in the sidebar (lot 5c, issue #115).
+ * The head, with what goes on in the Session on its own row (issue #241): the chips and the Run
+ * where the title was, the ⓘ and the `…` at the end of the same line. The title is not drawn: the
+ * sidebar already says it, and the room is the thread's.
  */
-export const Named: Story = {
+export const WithChips: Story = {
+  args: { onOpenDetails: fn() },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    expect(canvas.getByRole('heading', { level: 1 })).toHaveTextContent('CSV invoice export')
-    expect(canvas.getByText('Atlas · created 3 days ago · 5 messages')).toBeInTheDocument()
-    expect(canvas.getByRole('button', { name: 'CSV invoice export' })).toBeInTheDocument()
-    // The head holds no command menu: Rename is the title itself, and Archive is the sidebar
-    // row's (lot 5c, issue #115).
-    expect(canvas.queryByRole('button', { name: /^Commands for/ })).toBeNull()
-    // Nothing is being typed, so there is no field: the title is a heading until it is not.
+    // No title on the page, and nothing that only served it: the sidebar's row says it.
+    expect(canvas.queryByRole('heading')).toBeNull()
+    expect(canvas.getAllByText('CSV invoice export')).toHaveLength(1)
+    expect(canvas.getByText('CSV invoice export').closest('button')).toHaveAccessibleName(
+      'CSV invoice export',
+    )
     expect(canvas.queryByRole('textbox')).toBeNull()
+    // One row: the line's chips, the ⓘ and the `…`.
+    const line = canvas.getByRole('group', { name: 'What goes on in this Session' })
+    const chip = within(line).getAllByRole('button')[0]!
+    const details = canvas.getByRole('button', { name: 'Session details' })
+    const menu = canvas.getByRole('button', { name: 'Commands for CSV invoice export' })
+    expect(onOneLine(chip, details), 'the line left the head’s row').toBe(true)
+    expect(onOneLine(chip, menu), 'the line left the head’s row').toBe(true)
+    // The line first, the commands at the end.
+    expect(line.compareDocumentPosition(details) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  },
+}
+
+/** The same row with nothing going on: the line is empty, and the row keeps its commands. */
+export const WithoutChips: Story = {
+  args: { onOpenDetails: fn(), children: <Line items={[]} /> },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    expect(canvas.queryByRole('heading')).toBeNull()
+    // Nothing goes on: no sentence says so, and the row keeps its ⓘ and its `…`.
+    expect(canvas.queryByText(/Nothing running/)).toBeNull()
+    expect(
+      onOneLine(
+        canvas.getByRole('button', { name: 'Session details' }),
+        canvas.getByRole('button', { name: 'Commands for CSV invoice export' }),
+      ),
+    ).toBe(true)
   },
 }
 
 /**
- * The head and the row in the shapes they are drawn in: the title read and the title typed
- * into, and a Session's line at the panel's width and folded to its rail.
- *
- * The two heads are the same head — only whether the name is being typed changes — and the two
- * panels are the same panel, so what a reader learns from one is true of the other.
+ * The head and the row in the shapes they are drawn in: the head beside the Session's row being
+ * renamed, the field in its title's place (review of #250), and a Session's line at the panel's
+ * width and folded to its rail. The head is the same head either way.
  */
 export const ReadAndTyped: Story = {
   parameters: { layout: 'padded', controls: { disable: true } },
   render: () => (
     <div className="flex w-full flex-col gap-8">
-      <Harness
-        title="CSV invoice export"
-        projectName="Atlas"
-        meta="created 3 days ago · 5 messages"
-        onRename={fn()}
-      />
-      <Harness
-        title="CSV invoice export"
-        projectName="Atlas"
-        meta="created 3 days ago · 5 messages"
-        editing
-        onRename={fn()}
-      />
+      <Harness title="CSV invoice export" renaming onRename={fn()} onArchive={fn()}>
+        <Line />
+      </Harness>
       <div className="flex items-start gap-4">
         <Panel active="search" onRename={RENAMED_A_SESSION} onArchive={ARCHIVED_A_SESSION} />
         <Panel collapsed />
@@ -170,20 +230,18 @@ export const ReadAndTyped: Story = {
   ),
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-
-    // The title is read or it is typed into, and never both at once: while it is a field,
-    // Rename is the field itself.
-    expect(canvas.getAllByRole('heading', { level: 1 })).toHaveLength(1)
+    // No title is drawn in the head, and the head keeps its line while the name is typed.
+    expect(canvas.queryByRole('heading')).toBeNull()
+    expect(canvas.getAllByRole('group', { name: 'What goes on in this Session' })).toHaveLength(1)
     expect(canvas.getAllByRole('textbox')).toHaveLength(1)
     expect(canvas.getByRole('textbox', { name: 'Title of the Session' })).toHaveValue(
       'CSV invoice export',
     )
-
+    // No sentence explains the field's keys.
+    expect(canvas.queryByText(/Enter to save/)).toBeNull()
     // A row is the same row at either width: the name is always there, and the two commands are
-    // the part that goes with the room. The head carries no command of its own — the title and
-    // the details are all of it — and the rows' two commands are still named by the Session they
-    // act on.
-    expect(canvas.getAllByRole('button', { name: 'CSV invoice export' })).toHaveLength(3)
+    // the part that goes with the room.
+    expect(canvas.getAllByRole('button', { name: 'CSV invoice export' })).toHaveLength(2)
     expect(canvas.getAllByRole('button', { name: /^Rename / })).toHaveLength(3)
     expect(canvas.getAllByRole('button', { name: /^Archive / })).toHaveLength(3)
   },
@@ -193,24 +251,23 @@ export const ReadAndTyped: Story = {
  * The three states a Session is seen in, one under the other: nobody has written in it yet, it
  * has been named and written in, and it was taken out of the sidebar.
  *
- * A new Session is archived from its row in the sidebar and not from its head (lot 5c, issue
- * #115), so the head is the same head before and after the first line is written. An archived
- * Session is kept whole and has one verb, because nothing in this lot is ever deleted.
+ * A new Session has nothing to archive, and its Archive is drawn refused rather than hidden, so
+ * the head is the same head before and after the first line is written. An archived Session is
+ * kept whole and has one verb, because nothing in this lot is ever deleted.
  */
 export const NewNamedAndArchived: Story = {
   parameters: { layout: 'padded', controls: { disable: true } },
   render: () => (
     <div className="flex w-full flex-col gap-10">
       <div className="flex flex-col gap-6">
-        <Harness title="Untitled" projectName="Atlas" meta="just now" editing onRename={fn()} />
+        <Harness title="Untitled" renaming archiveDisabled onRename={fn()} onArchive={fn()}>
+          <Line items={[]} />
+        </Harness>
         <SessionEmpty />
       </div>
-      <Harness
-        title="CSV invoice export"
-        projectName="Atlas"
-        meta="created 3 days ago · 5 messages"
-        onRename={fn()}
-      />
+      <Harness title="CSV invoice export" onRename={fn()} onArchive={fn()}>
+        <Line />
+      </Harness>
       <ArchivedSessions sessions={ARCHIVED_SESSIONS} onRestore={RESTORED} />
     </div>
   ),
@@ -218,18 +275,28 @@ export const NewNamedAndArchived: Story = {
     RESTORED.mockClear()
     const canvas = within(canvasElement)
 
-    // New: the page says nothing has been written.
+    // New: the page says nothing has been written, and offers nothing to archive.
     expect(canvas.getByText('Nothing written yet')).toBeInTheDocument()
-    // The head has nothing to archive in it: a Session is archived from its row in the sidebar,
-    // and while the title is a field there is no Rename in the head either — the field is the
-    // renaming (lot 5c, issue #115).
-    expect(canvas.queryByRole('button', { name: /^Commands for/ })).toBeNull()
-    expect(canvas.queryByRole('button', { name: 'Untitled' })).toBeNull()
+    // The command is refused rather than hidden, so the head is the same head before and after
+    // the first line is written — it is drawn in the menu, and it does not act. A field being
+    // typed into carries no Rename either: the field is the renaming.
+    await userEvent.click(canvas.getByRole('button', { name: 'Commands for Untitled' }))
+    const fresh = await waitFor(() => within(document.body).getByRole('menu'))
+    expect(within(fresh).getByRole('menuitem', { name: /Archive/ })).toHaveAttribute(
+      'aria-disabled',
+      'true',
+    )
+    // And Rename is offered all the same: a Session with nothing written in it still has a name
+    // to give, and the field is the only way to give it.
+    expect(within(fresh).getByRole('menuitem', { name: /Rename/ })).toBeEnabled()
+    await userEvent.keyboard('{Escape}')
+    await waitFor(() => {
+      expect(within(document.body).queryByRole('menu')).toBeNull()
+    })
 
-    // Named: the title is a heading again, over the Project it belongs to.
-    expect(
-      canvas.getByRole('heading', { level: 1, name: 'CSV invoice export' }),
-    ).toBeInTheDocument()
+    // Named: the head draws no title, and the sidebar is where the name is read.
+    expect(canvas.queryByRole('heading', { name: 'CSV invoice export' })).toBeNull()
+    expect(canvas.getByRole('button', { name: 'Commands for CSV invoice export' })).toBeEnabled()
 
     // Archived: kept whole, and one press brings it back.
     expect(
@@ -241,102 +308,72 @@ export const NewNamedAndArchived: Story = {
 }
 
 /**
- * Renaming: the title is edited where it stands, and it is kept when it is said so.
- *
- * Enter is the whole of the save. The field opens on the name it already had, the page is told
- * once, and the head goes back to a heading — which is what the story asserts, because a field
- * that stayed open after a save would be a field that never saved anything.
+ * Renaming: the `…`'s Rename turns the Session's row of the sidebar into its field (review of
+ * #250), where its title lives; the head never changes. Enter is the whole of the save.
  */
 export const Renaming: Story = {
-  play: async ({ canvasElement, args }) => {
-    args.onRename.mockClear()
+  play: async ({ canvasElement }) => {
+    RENAMED.mockClear()
     const canvas = within(canvasElement)
-
-    await userEvent.click(canvas.getByRole('button', { name: 'CSV invoice export' }))
+    await openRename(canvas, 'CSV invoice export')
     const field = canvas.getByRole('textbox', { name: 'Title of the Session' })
     expect(field).toHaveValue('CSV invoice export')
-    expect(canvas.getByText('Enter to save · Esc to cancel')).toBeInTheDocument()
-    // While it is being typed, Rename is the field: the title is not a control, and a second
-    // control for the same act would be a control that does nothing.
-    expect(canvas.queryByRole('button', { name: 'CSV invoice export' })).toBeNull()
-
+    // The head keeps its line: the field is in the sidebar, and nothing explains its keys.
+    expect(canvas.getByRole('group', { name: 'What goes on in this Session' })).toBeVisible()
+    expect(canvas.queryByText(/Enter to save/)).toBeNull()
+    await waitFor(() => {
+      expect(field).toHaveFocus()
+    })
     await userEvent.clear(field)
     await userEvent.type(field, 'Invoices, one file a month')
     await userEvent.keyboard('{Enter}')
-
-    expect(args.onRename).toHaveBeenCalledTimes(1)
-    expect(args.onRename).toHaveBeenCalledWith('Invoices, one file a month')
+    expect(RENAMED).toHaveBeenCalledTimes(1)
+    expect(RENAMED).toHaveBeenCalledWith('Invoices, one file a month')
     await waitFor(() => {
-      expect(canvas.getByRole('heading', { level: 1 })).toHaveTextContent(
-        'Invoices, one file a month',
-      )
+      expect(canvas.queryByRole('textbox')).toBeNull()
     })
-    // And the keyboard is back where it was: the title, which is the control that opened the
-    // field, has it again — rather than the page dropping it at the top of everything.
-    await waitFor(() => {
-      expect(canvas.getByRole('button', { name: 'Invoices, one file a month' })).toHaveFocus()
-    })
+    expect(canvas.getByRole('button', { name: 'Invoices, one file a month' })).toBeVisible()
   },
 }
 
-/**
- * Escape: what was typed is let go, and the Session keeps the name it had.
- *
- * A name is not a thing to lose to a keystroke pressed by accident, so the way out of the
- * field is a way out and not a save.
- */
+/** Escape: what was typed is let go, and the Session keeps the name it had. */
 export const EscapingTheField: Story = {
-  play: async ({ canvasElement, args }) => {
-    args.onRename.mockClear()
+  play: async ({ canvasElement }) => {
+    RENAMED.mockClear()
     const canvas = within(canvasElement)
-
-    await userEvent.click(canvas.getByRole('button', { name: 'CSV invoice export' }))
+    await openRename(canvas, 'CSV invoice export')
     const field = canvas.getByRole('textbox', { name: 'Title of the Session' })
     await userEvent.clear(field)
     await userEvent.type(field, 'Something I thought better of')
     await userEvent.keyboard('{Escape}')
-
-    expect(args.onRename).not.toHaveBeenCalled()
-    expect(canvas.getByRole('heading', { level: 1 })).toHaveTextContent('CSV invoice export')
-    expect(canvas.queryByRole('textbox')).toBeNull()
+    expect(RENAMED).not.toHaveBeenCalled()
+    await waitFor(() => {
+      expect(canvas.queryByRole('textbox')).toBeNull()
+    })
+    expect(canvas.getByRole('button', { name: 'CSV invoice export' })).toBeVisible()
   },
 }
 
-/**
- * A name is not empty: Enter on a field nobody typed in is the way out, not a Session that has
- * lost the name it had.
- */
+/** A name is not empty: Enter on an emptied field is the way out, not a Session without a name. */
 export const AnEmptyTitleIsNoName: Story = {
-  play: async ({ canvasElement, args }) => {
-    args.onRename.mockClear()
+  play: async ({ canvasElement }) => {
+    RENAMED.mockClear()
     const canvas = within(canvasElement)
-
-    await userEvent.click(canvas.getByRole('button', { name: 'CSV invoice export' }))
+    await openRename(canvas, 'CSV invoice export')
     const field = canvas.getByRole('textbox', { name: 'Title of the Session' })
     await userEvent.clear(field)
     await userEvent.keyboard('{Enter}')
-
-    expect(args.onRename).not.toHaveBeenCalled()
-    expect(canvas.getByRole('heading', { level: 1 })).toHaveTextContent('CSV invoice export')
+    expect(RENAMED).not.toHaveBeenCalled()
+    expect(canvas.getByRole('button', { name: 'Commands for CSV invoice export' })).toBeEnabled()
   },
 }
 
-/**
- * Leaving the field is an ending like any other (recette of 20 September).
- *
- * The field closes when the caret leaves it: a question left open in the head of a page is a
- * question asked again every time the eye passes over it, and a field that stays open after the
- * person is done with it never got its answer. What was typed is kept, because whoever typed it
- * meant it — and leaving it without having typed anything is not a renaming, so the name the
- * Project derived is still the name it derived.
- */
+/** Leaving the field is an ending like any other: what was typed is kept, nothing typed is none. */
 export const LeavingTheField: Story = {
-  play: async ({ canvasElement, args }) => {
-    args.onRename.mockClear()
+  play: async ({ canvasElement }) => {
+    RENAMED.mockClear()
     const canvas = within(canvasElement)
-
-    // Typed, then left: kept, and the field is gone.
-    await userEvent.click(canvas.getByRole('button', { name: 'CSV invoice export' }))
+    await openRename(canvas, 'CSV invoice export')
     const field = canvas.getByRole('textbox', { name: 'Title of the Session' })
     await userEvent.clear(field)
     await userEvent.type(field, 'Invoices, quarterly')
@@ -344,33 +381,32 @@ export const LeavingTheField: Story = {
     await waitFor(() => {
       expect(canvas.queryByRole('textbox')).toBeNull()
     })
-    expect(args.onRename).toHaveBeenCalledWith('Invoices, quarterly')
+    expect(RENAMED).toHaveBeenCalledWith('Invoices, quarterly')
 
-    // Opened and left without a word: the field closes, and nothing was renamed.
-    args.onRename.mockClear()
-    await userEvent.click(canvas.getByRole('button', { name: 'Invoices, quarterly' }))
+    RENAMED.mockClear()
+    await openRename(canvas, 'Invoices, quarterly')
     await userEvent.click(document.body)
     await waitFor(() => {
       expect(canvas.queryByRole('textbox')).toBeNull()
     })
-    expect(args.onRename).not.toHaveBeenCalled()
+    expect(RENAMED).not.toHaveBeenCalled()
   },
 }
 
 /**
- * A new Session, empty, with its title open (the prototype's screen 5).
+ * A new Session, empty, with its name open (the prototype's screen 5).
  *
  * The field has the caret, because the name is the one thing this Session has to say about
- * itself. The head and the empty thread are the whole page — no entry is faked to fill it — and
- * what can be done with the Session is not in the head: it is on the Session's row in the
- * sidebar, where the Session is kept.
+ * itself, and Archive is drawn refused: there is nothing written to keep, and a row in a list
+ * of things the user never meant to make is a row that has to be tidied away afterwards. The
+ * head and the empty thread are the whole page — no entry is faked to fill it.
  */
 export const NewAndEmpty: Story = {
   parameters: { layout: 'fullscreen', controls: { disable: true } },
-  args: { title: 'Untitled', meta: 'just now', editing: true },
+  args: { title: 'Untitled', archiveDisabled: true, children: <Line items={[]} /> },
   render: (args) => (
     <div className="mx-auto flex w-full max-w-3xl flex-col gap-6 px-6 py-10">
-      <Harness {...args} />
+      <Harness {...args} renaming />
       <SessionEmpty />
     </div>
   ),
@@ -381,49 +417,81 @@ export const NewAndEmpty: Story = {
     await waitFor(() => {
       expect(field).toHaveFocus()
     })
-    // The head of a Session with nothing in it is the head of any other: no command menu, and
-    // the title as a field (lot 5c, issue #115).
-    expect(canvas.queryByRole('button', { name: /^Commands for/ })).toBeNull()
+    // Archive is drawn refused rather than hidden, so the head is the same head before and after
+    // the first line is written.
+    await userEvent.click(canvas.getByRole('button', { name: 'Commands for Untitled' }))
+    const menu = await waitFor(() => within(document.body).getByRole('menu'))
+    expect(within(menu).getByRole('menuitem', { name: /Archive/ })).toHaveAttribute(
+      'aria-disabled',
+      'true',
+    )
+    await userEvent.keyboard('{Escape}')
+    await waitFor(() => {
+      expect(within(document.body).queryByRole('menu')).toBeNull()
+    })
     expect(canvas.getByText('Nothing written yet')).toBeInTheDocument()
   },
 }
 
+/** The press waits for the pointer Base UI holds off what is inside a popup while it enters. */
+async function readyFor(element: HTMLElement): Promise<void> {
+  await waitFor(() => {
+    expect(getComputedStyle(element).pointerEvents).not.toBe('none')
+  })
+}
+
 /**
- * The head's one way to name a Session: the title itself, with no command menu beside it (lot 5c,
- * issue #115).
+ * The head's two commands, behind one menu at the end of its line (review of #40, defect 4).
  *
- * The click that renames is on the words being changed — the hand that wants the name different is
- * already there — and what the field does with Enter and Escape is the whole of it, which is what
- * this story presses. Archive stands on the Session's row in the sidebar, where the Session is
- * listed, and not in the head of the page it opens.
+ * The menu is reached by the keyboard like any other control: the `…` opens on an arrow and hands
+ * the focus back on Escape. Rename is not an act of its own — it opens the field — so having read
+ * the menu renames nothing, and Archive is the one command that does something.
  */
-export const RenameIsTheTitle: Story = {
+export const TheHeadCommands: Story = {
   parameters: { controls: { disable: true } },
   play: async ({ canvasElement, args }) => {
-    args.onRename.mockClear()
+    RENAMED.mockClear()
+    args.onArchive?.mockClear()
     const canvas = within(canvasElement)
+    const trigger = canvas.getByRole('button', { name: 'Commands for CSV invoice export' })
 
-    // The title is the first control of the page: the hand that wants the name changed is on it.
-    await userEvent.tab()
-    expect(document.activeElement).toBe(canvas.getByRole('button', { name: 'CSV invoice export' }))
+    trigger.focus()
+    expect(document.activeElement).toBe(trigger)
+    await userEvent.keyboard('{ArrowDown}')
+    const menu = await waitFor(() => within(document.body).getByRole('menu'))
+    const rename = within(menu).getByRole('menuitem', { name: /Rename/ })
+    await readyFor(rename)
 
-    // There is no `…` at the end of the line to find, and no command menu behind one.
-    expect(canvas.queryByRole('button', { name: /^Commands for/ })).toBeNull()
-
-    await userEvent.click(canvas.getByRole('button', { name: 'CSV invoice export' }))
+    await userEvent.click(rename)
     const field = canvas.getByRole('textbox', { name: 'Title of the Session' })
     expect(field).toHaveValue('CSV invoice export')
     await userEvent.keyboard('{Escape}')
     await waitFor(() => {
       expect(canvas.queryByRole('textbox')).toBeNull()
     })
-    expect(args.onRename).not.toHaveBeenCalled()
+    expect(RENAMED).not.toHaveBeenCalled()
+    // The menu Rename closed is gone before it is opened again: still leaving, it is the menu the
+    // next look finds, and its Archive is out of the page by the time it is pressed.
+    await waitFor(() => {
+      expect(within(document.body).queryByRole('menu')).toBeNull()
+    })
+
+    // Archive is the command that acts, once.
+    await userEvent.click(trigger)
+    const again = await waitFor(() => within(document.body).getByRole('menu'))
+    const archive = within(again).getByRole('menuitem', { name: /Archive/ })
+    await readyFor(archive)
+    await userEvent.click(archive)
+    expect(args.onArchive).toHaveBeenCalledTimes(1)
+    await waitFor(() => {
+      expect(within(document.body).queryByRole('menu')).toBeNull()
+    })
   },
 }
 
 /**
- * The Session's details are one press away, at the end of the head's line: what the turn has done,
- * what the Session runs and what its agent works from.
+ * The Session's details are one press away, at the end of the head's line, before the `…`: what
+ * the turn has done, what the Session runs and what its agent works from.
  */
 export const DetailsWithinReach: Story = {
   parameters: { controls: { disable: true } },
@@ -431,8 +499,8 @@ export const DetailsWithinReach: Story = {
   play: async ({ canvasElement, args }) => {
     const canvas = within(canvasElement)
     const details = canvas.getByRole('button', { name: 'Session details' })
-    const title = canvas.getByRole('button', { name: 'CSV invoice export' })
-    expect(title.compareDocumentPosition(details) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    const menu = canvas.getByRole('button', { name: 'Commands for CSV invoice export' })
+    expect(details.compareDocumentPosition(menu) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     await userEvent.click(details)
     expect(args.onOpenDetails).toHaveBeenCalledTimes(1)
   },
@@ -502,33 +570,49 @@ export const NoArchive: Story = {
 function Panel({
   collapsed = false,
   active = 'csv',
+  names = {},
+  renaming = null,
   onRename,
   onArchive,
+  onChoose,
 }: {
   collapsed?: boolean
   active?: string
+  /** The names the page holds, over the fixtures'. */
+  names?: Readonly<Record<string, string>>
+  /** The row that is its title field right now. */
+  renaming?: SessionRenaming | null
   onRename?: (id: string) => void
   onArchive?: (id: string) => void
+  /** Told which row was pressed, for a panel that moves its mark to it. */
+  onChoose?: (id: string) => void
 }) {
   return (
     <TooltipProvider>
       <div
         className={cn(
-          'flex flex-col gap-1 bg-sidebar p-2',
+          'relative isolate flex flex-col gap-1 bg-sidebar p-2',
           collapsed ? 'w-sidebar-rail' : 'w-sidebar',
         )}
       >
         {SESSIONS.map((session) => (
           <SidebarSessionEntry
             key={session.id}
-            title={session.title}
+            id={session.id}
+            title={names[session.id] ?? session.title}
             active={session.id === active}
             collapsed={collapsed}
-            onSelect={SELECTED}
+            onSelect={() => {
+              SELECTED()
+              onChoose?.(session.id)
+            }}
             onRename={onRename === undefined ? undefined : () => onRename(session.id)}
             onArchive={onArchive === undefined ? undefined : () => onArchive(session.id)}
+            renaming={renaming?.id === session.id ? renaming : undefined}
           />
         ))}
+        {/* The mark is the panel's, as in the sidebar: drawn once, after every row. */}
+        <SidebarMark target={active} />
       </div>
     </TooltipProvider>
   )
@@ -598,5 +682,33 @@ export const TheRowCommands: Story = {
     await userEvent.hover(row)
     await userEvent.click(canvas.getByRole('button', { name: 'Archive Full-text search' }))
     expect(ARCHIVED_A_SESSION).toHaveBeenCalledWith('search')
+  },
+}
+
+/** The panel holding which row is looked at, so that its mark has somewhere to go. */
+function Choosing() {
+  const [active, setActive] = useState('csv')
+  return <Panel active={active} onChoose={setActive} />
+}
+
+/**
+ * The panel's mark crossing its Sessions, down to the last and back up to the first: on every
+ * frame of the way it is drawn over the row it crosses and never under it (issue #127).
+ */
+export const MarkCrossing: Story = {
+  parameters: { layout: 'padded', controls: { disable: true } },
+  render: () => <Choosing />,
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const watched = await watchThereAndBack(
+      canvasElement,
+      () => userEvent.click(canvas.getByRole('button', { name: 'Migrate to Drizzle 1.0' })),
+      () => userEvent.click(canvas.getByRole('button', { name: 'CSV invoice export' })),
+    )
+    expect(canvas.getByRole('button', { name: 'CSV invoice export' })).toHaveAttribute(
+      'aria-current',
+      'true',
+    )
+    expectNeverBuried(watched)
   },
 }

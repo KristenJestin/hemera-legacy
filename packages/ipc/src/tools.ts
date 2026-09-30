@@ -49,6 +49,8 @@ export const commandSchema = z.object({
   portless: z.boolean(),
   /** The name Portless serves it under, null for the Project's name as a slug (D8-10). */
   portlessName: z.string().nullable(),
+  /** Whether Hemera runs it in the Project's `main` each time it opens (#114). */
+  runAtOpen: z.boolean(),
   createdAt: z.number(),
 })
 
@@ -153,8 +155,14 @@ export const providedSchema = z.object({
     'answer',
     'edit',
     'internal',
+    'notice',
+    'request',
   ]),
-  /** The file it came from, `''` for the base, which is not one, and what a brief was composed for. */
+  /**
+   * The file it came from, `''` for the base, which is not one; what a brief was composed for
+   * (`shape · revision 1 · writer`), the sections an edit touched (`scope,plan`), the question an
+   * answer answered, and `''` for a sub-agent's result, a notice and the New Spec request.
+   */
   path: z.string(),
   fingerprint: z.string(),
   deliveredAt: z.string(),

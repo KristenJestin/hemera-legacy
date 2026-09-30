@@ -11,14 +11,30 @@ import { MAIN_WORKSPACE } from '@hemera/core'
 import { and, asc, eq } from 'drizzle-orm'
 import { Effect } from 'effect'
 
-import { DatabaseError, type EngineDatabase } from '../storage/database.ts'
-import { projectRepositories, workspaceRepositories, workspaces } from '../storage/schema.ts'
+import { DatabaseError, type EngineDatabase, type EngineTransaction } from '../storage/database.ts'
+import { projectRepositories, specs, workspaceRepositories, workspaces } from '../storage/schema.ts'
 
 /** A Workspace was asked for by an identifier nothing answers to. */
 export class UnknownWorkspaceError extends Error {
   constructor(readonly id: string) {
     super(`no Workspace has the identifier "${id}"`)
     this.name = 'UnknownWorkspaceError'
+  }
+}
+
+/**
+ * A Workspace made for another Spec, asked for a Spec it was not made for: one Spec, one
+ * Workspace (D8-12). The engine refuses it itself, whatever the window offers.
+ */
+export class WorkspaceTakenError extends Error {
+  constructor(
+    readonly workspace: string,
+    readonly key: string,
+  ) {
+    super(
+      `the Workspace ${workspace} was made for ${key}: a Spec is built in a Workspace of its own`,
+    )
+    this.name = 'WorkspaceTakenError'
   }
 }
 
@@ -35,6 +51,28 @@ export interface DescribedWorkspace {
 }
 
 const failed = (doing: string) => (cause: unknown) => new DatabaseError({ doing, cause })
+
+/**
+ * The Spec a Workspace was made for, when it is not `specId` (D8-12): its key, which is what the
+ * refusal names, or null when the Workspace is free for it — made by hand, `main`, or its own.
+ */
+export const takenBy = (
+  transaction: EngineDatabase | EngineTransaction,
+  workspaceId: string,
+  specId: string,
+): Effect.Effect<string | null, DatabaseError> =>
+  transaction
+    .select({ owner: workspaces.specId, key: specs.key })
+    .from(workspaces)
+    .innerJoin(specs, eq(specs.id, workspaces.specId))
+    .where(eq(workspaces.id, workspaceId))
+    .pipe(
+      Effect.mapError(failed('reading the Spec the Workspace was made for')),
+      Effect.map((rows) => {
+        const made = rows[0]
+        return made === undefined || made.owner === specId ? null : made.key
+      }),
+    )
 
 /**
  * A Workspace of a Project (D8-08): its row — `main` for null, which is also what a row written

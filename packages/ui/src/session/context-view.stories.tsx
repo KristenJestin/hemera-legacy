@@ -7,7 +7,8 @@ import { ContextView } from './context-view.tsx'
  * What the agent is working from (design D6-10): its instructions, and the tools it is lent.
  *
  * One story per state of the instructions — nothing gone yet, `AGENTS.md` given at the start,
- * read by the agent, missing, and changed since — and one with the tools unfolded. Each is drawn
+ * read by the agent, missing, and changed since — one of what a `define` Session handed its agent
+ * since, and one with the tools unfolded. Each is drawn
  * at the width of a sidebar, narrower than the Session details it lives in: a row that reads whole
  * there reads whole in the dialog (trial of 23 September 2026).
  */
@@ -74,6 +75,10 @@ const meta = {
       control: 'object',
       description: 'How AGENTS.md, its last change and the base reached the agent, and when.',
     },
+    handed: {
+      control: 'object',
+      description: 'What a define Session handed the agent since, each with its time.',
+    },
     tools: { control: 'object', description: 'The tools it lends, with the bound of each.' },
     lentAt: { control: 'text', description: 'When the tools were lent.' },
     commands: { control: 'object', description: 'The commands of the catalogue.' },
@@ -119,6 +124,8 @@ export const GivenAtTheStart: Story = {
       'false',
     )
     await expect(canvas.queryByText('fs_read')).toBeNull()
+    // A Session that is not defining a Spec was handed nothing more: no part for it.
+    await expect(canvas.queryByRole('region', { name: 'Handed over' })).toBeNull()
     // Nothing is said of what the agent keeps to itself: that is Settings' to say.
     await expect(canvas.queryByText(/does not control/)).toBeNull()
   },
@@ -174,6 +181,35 @@ export const AfterADelivery: Story = {
     await expect(canvas.getByText('Last change')).toBeVisible()
     await expect(canvas.getByText('· 23 Sep 09:14')).toBeVisible()
     // Whole: no row is cut, and nothing is wider than the column it is read in.
+    await expect(cutRowsIn(canvasElement)).toEqual([])
+  },
+}
+
+/**
+ * A `define` Session (#74): under its instructions, what Hemera handed its agent since, one
+ * sentence each in the reader's words with its time — the instructions of a phase, the user's
+ * edits and answer, a sub-agent's result — and every line reads whole at the column's width.
+ */
+export const HandedOver: Story = {
+  args: {
+    handed: [
+      { label: 'The instructions for the Shape phase went to the agent', at: '23 Sep 08:02' },
+      { label: 'Your edits to Scope, Expected outcome went to the agent', at: '23 Sep 08:40' },
+      { label: 'Your answer to “Which format?” went to the agent', at: '23 Sep 08:41' },
+      { label: 'The result of a sub-agent went to the agent', at: '23 Sep 08:55' },
+      { label: 'The instructions for the Plan phase went to the agent', at: '23 Sep 09:10' },
+    ],
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const handed = canvas.getByRole('region', { name: 'Handed over' })
+    await expect(within(handed).getAllByRole('listitem')).toHaveLength(5)
+    await expect(
+      within(handed).getByText('Your edits to Scope, Expected outcome went to the agent'),
+    ).toBeVisible()
+    await expect(within(handed).getByText('· 23 Sep 08:41')).toBeVisible()
+    // Plain words: never the engine's name for a delivery.
+    await expect(canvas.queryByText(/mission_brief|brief|internal/)).toBeNull()
     await expect(cutRowsIn(canvasElement)).toEqual([])
   },
 }

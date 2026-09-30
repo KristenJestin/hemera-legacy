@@ -96,11 +96,13 @@ export default defineConfig({
           include: [
             'apps/*/tests/**/*.test.ts',
             'packages/*/tests/**/*.test.ts',
+            'tools/aur-publish.test.ts',
             'tools/boundaries.test.ts',
             'tools/environment-report.test.ts',
             'tools/git-flow.test.ts',
             'tools/motion-presets.test.ts',
             'tools/package-desktop.test.ts',
+            'tools/release-tag.test.ts',
             'tools/scales.test.ts',
             'tools/text-measure.test.ts',
             'tools/verification.test.ts',

@@ -52,6 +52,21 @@ const withMotion: Decorator = (Story) => (
   </MotionConfig>
 )
 
+/**
+ * What the accessibility check describes node by node: everything in the catalogue, where the
+ * panel shows it to a reader, and only what it refuses when the runner plays the stories.
+ *
+ * The runner is handed the whole report of every story it plays, and it is mostly passes — two
+ * hundred kilobytes of them for the one story of the loading states, over a hundred megabytes
+ * for a run of both themes. Reading that on the runner's one thread kept everything a story
+ * waits on from the runner waiting behind it. What decides a story is its violations, and those
+ * are reported whole either way; the rest is still counted, a node each.
+ */
+const RESULT_TYPES =
+  '__vitest_browser__' in globalThis
+    ? ['violations']
+    : ['violations', 'incomplete', 'passes', 'inapplicable']
+
 const preview: Preview = {
   decorators: [withMotion, withTheme],
   /**
@@ -85,10 +100,11 @@ const preview: Preview = {
       // trip `aria-hidden-focus` while a popup is open: they are the trap's mechanism, not
       // content, so the check leaves them out rather than the rule being turned off.
       context: { include: [['body']], exclude: [['[data-base-ui-focus-guard]']] },
+      options: { resultTypes: RESULT_TYPES },
     },
     /**
-     * The sidebar is five roots and nothing else (`AGENTS.md`, "Storybook sidebar, five roots"):
-     * the roots in the order written here, and the alphabetical order inside them, which
+     * The sidebar is five roots, and a sixth, last, for a design question under way (`AGENTS.md`,
+     * "Storybook sidebar, five roots"): the roots in the order written here, and the alphabetical order inside them, which
      * `method: 'alphabetical'` is what asks for — without it Storybook keeps whatever order the
      * index was built in for every name this list does not mention.
      *
@@ -108,6 +124,7 @@ const preview: Preview = {
           'Surfaces',
           ['Session', ['Complete']],
           'Shell',
+          'Explorations',
         ],
       },
     },

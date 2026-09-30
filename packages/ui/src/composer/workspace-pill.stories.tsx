@@ -7,8 +7,7 @@ import { WorkspacePill } from './workspace-pill.tsx'
  * Which Workspace a Session works in (D8-08).
  *
  * The pill offers the Project's Workspaces that are `ready`, `main` first, and the choice is
- * fixed once the agent has started. A Project with no dedicated Workspace offers `main` alone. A
- * Session bound to a Spec says its Workspace as a label: there was never a choice to make.
+ * fixed once the agent has started. A Project with no dedicated Workspace offers `main` alone.
  */
 const meta = {
   tags: ['autodocs'],
@@ -20,7 +19,6 @@ const meta = {
     workspace: 'main',
     onWorkspaceChange: fn(),
     fixed: false,
-    bound: false,
   },
   argTypes: {
     workspaces: {
@@ -32,11 +30,6 @@ const meta = {
     fixed: {
       control: 'boolean',
       description: 'Whether the agent has started, which fixes the choice.',
-      table: { defaultValue: { summary: 'false' } },
-    },
-    bound: {
-      control: 'boolean',
-      description: "Whether the Session is bound to its Spec's Workspace, which is then a label.",
       table: { defaultValue: { summary: 'false' } },
     },
   },
@@ -59,8 +52,8 @@ const SEVERAL = [
 export const Single: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    await expect(canvas.getByLabelText('Workspace')).toHaveTextContent('main')
-    await expect(canvas.getByLabelText('Workspace')).toBeEnabled()
+    await expect(canvas.getByLabelText(/^Workspace:/)).toHaveTextContent('main')
+    await expect(canvas.getByLabelText(/^Workspace:/)).toBeEnabled()
   },
 }
 
@@ -70,7 +63,7 @@ export const Several: Story = {
   play: async ({ canvasElement, args }) => {
     args.onWorkspaceChange.mockClear()
     const canvas = within(canvasElement)
-    await userEvent.click(canvas.getByLabelText('Workspace'))
+    await userEvent.click(canvas.getByLabelText(/^Workspace:/))
     const list = await waitFor(() => within(document.body).getByRole('listbox'))
     await expect(
       within(list)
@@ -85,17 +78,32 @@ export const Several: Story = {
   },
 }
 
-/** Once the agent has started, the select is off and the sentence says why. */
+/**
+ * Once the agent has started, the choice is a plain label with the Workspace's name, and the
+ * reason is its tooltip only: no sentence stays on screen for the whole Session (issue #128).
+ */
 async function theWorkspaceIsFixedOnceTheAgentHasStarted({ canvasElement, args }: StoryContext) {
   // "The Workspace is fixed once the agent has started"
   args.onWorkspaceChange.mockClear()
   const canvas = within(canvasElement)
-  const pill = canvas.getByLabelText('Workspace')
-  await expect(pill).toBeDisabled()
-  await expect(pill).toHaveTextContent('login-form')
-  await expect(canvas.getByText('The Workspace is fixed once the agent has started.')).toBeVisible()
-  // A press on it opens nothing and changes nothing: the pointer is refused as the key would be.
-  await userEvent.click(pill, { pointerEventsCheck: 0 })
+  // A screen reader hears the reason with the name, not only a pointer on its tooltip.
+  const label = canvas.getByRole('img', {
+    name: 'Workspace: login-form. The Workspace is fixed once the agent has started.',
+  })
+  await expect(label).toHaveTextContent('login-form')
+  // Not a choice any more, and not drawn as one.
+  await expect(canvas.queryByRole('combobox')).toBeNull()
+  await expect(canvas.queryByText('The Workspace is fixed once the agent has started.')).toBeNull()
+  // The reason is the tooltip, reached by the keyboard as by the pointer.
+  await userEvent.tab()
+  await expect(document.activeElement).toBe(label)
+  await waitFor(() => {
+    expect(within(document.body).getByRole('tooltip')).toHaveTextContent(
+      'The Workspace is fixed once the agent has started.',
+    )
+  })
+  // A press on it opens nothing and changes nothing.
+  await userEvent.click(label)
   await expect(within(document.body).queryByRole('listbox')).toBeNull()
   await expect(args.onWorkspaceChange).not.toHaveBeenCalled()
 }
@@ -105,22 +113,11 @@ export const Fixed: Story = {
   play: theWorkspaceIsFixedOnceTheAgentHasStarted,
 }
 
-/** A `define` or `build` Session: the Workspace came with the Spec, and is said, not offered. */
-export const Bound: Story = {
-  args: { workspaces: SEVERAL, workspace: 'login-form', bound: true },
-  play: async ({ canvasElement }) => {
-    const canvas = within(canvasElement)
-    await expect(canvas.getByText('login-form')).toBeVisible()
-    await expect(canvas.queryByRole('combobox')).toBeNull()
-    await expect(canvas.queryByRole('button')).toBeNull()
-  },
-}
-
 /** The pill is one stop of the tab order: Enter opens it, Escape closes it back onto it. */
 export const Keyboard: Story = {
   args: { workspaces: SEVERAL },
   play: async ({ canvasElement }) => {
-    const pill = within(canvasElement).getByLabelText('Workspace')
+    const pill = within(canvasElement).getByLabelText(/^Workspace:/)
     await userEvent.tab()
     await expect(document.activeElement).toBe(pill)
     await userEvent.keyboard('{Enter}')
@@ -133,6 +130,50 @@ export const Keyboard: Story = {
     })
     await waitFor(() => {
       expect(document.activeElement).toBe(pill)
+    })
+  },
+}
+
+/** A Workspace named after a long branch, as the recette of 27 September 2026 met one. */
+const LONG = 'atoms-progress-bar-des-atomes-restent-allumes-au-debut-fin-l'
+
+/**
+ * A long name does not stretch the select across the composer (issue #180): the select stops at a
+ * width of the theme and cuts the name short with an ellipsis, the whole name in its tooltip and
+ * its accessible name, and the list it opens shows every name whole.
+ */
+export const LongName: Story = {
+  args: {
+    workspaces: [{ name: 'main', path: '/home/someone/Projects/atlas' }, { name: LONG }],
+    workspace: LONG,
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const pill = canvas.getByRole('combobox', { name: `Workspace: ${LONG}` })
+    // Bounded by the theme's width, whatever the name.
+    const bound = Number.parseFloat(
+      getComputedStyle(document.documentElement).getPropertyValue('--container-3xs'),
+    )
+    const rem = Number.parseFloat(getComputedStyle(document.documentElement).fontSize)
+    await expect(pill.getBoundingClientRect().width).toBeLessThanOrEqual(bound * rem + 1)
+    // The name is cut short on one line, with an ellipsis.
+    const value = within(pill).getByText(LONG)
+    await expect(value.scrollWidth).toBeGreaterThan(value.clientWidth)
+    await expect(getComputedStyle(value).textOverflow).toBe('ellipsis')
+    // The whole name is its tooltip, reached by the keyboard as by the pointer.
+    await userEvent.tab()
+    await expect(document.activeElement).toBe(pill)
+    await waitFor(() => {
+      expect(within(document.body).getByRole('tooltip')).toHaveTextContent(LONG)
+    })
+    // The list keeps the whole name.
+    await userEvent.keyboard('{Enter}')
+    const list = await waitFor(() => within(document.body).getByRole('listbox'))
+    const option = within(list).getByRole('option', { name: LONG })
+    await expect(option.scrollWidth).toBeLessThanOrEqual(option.clientWidth)
+    await userEvent.keyboard('{Escape}')
+    await waitFor(() => {
+      expect(within(document.body).queryByRole('listbox')).toBeNull()
     })
   },
 }

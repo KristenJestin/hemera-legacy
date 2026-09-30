@@ -23,11 +23,13 @@ import {
   processSupervisorLayer,
 } from '#engine/agents/supervisor.ts'
 import { heldWordsLayer } from '#engine/agents/held.ts'
+import { sessionModesLayer } from '#engine/agents/modes.ts'
 import { NoNotices } from '#engine/agents/notices.ts'
 import { commandsLayer, type Commands } from '#engine/commands/service.ts'
 import { openProfile } from '#engine/migrate.ts'
 import { Projects, projectsLayer } from '#engine/projects.ts'
 import { Sessions, sessionsLayer } from '#engine/sessions.ts'
+import { domainEventsLayer } from '#engine/domain-events.ts'
 import { NoSpecNotices } from '#engine/specs/notices.ts'
 import { specsLayer } from '#engine/specs/specs.ts'
 import { databaseLayer } from '#engine/storage/database.ts'
@@ -37,6 +39,7 @@ import { toolCatalogueLayer, type ToolCatalogue } from '#engine/tools/catalogue.
 import { ToolPermissions, type ToolPermissionsService } from '#engine/tools/permissions.ts'
 import { ToolServer, toolServerLayer } from '#engine/tools/server.ts'
 import { variablesLayer } from '#engine/workspaces/variables.ts'
+import { setupPlaces } from './application.ts'
 
 import { idleBuilds } from './build-harness.ts'
 
@@ -149,15 +152,21 @@ function engine(
     Layer.provideMerge(Layer.succeed(ToolPermissions, permissions)),
     Layer.provideMerge(commandsLayer),
     Layer.provide(variablesLayer),
+    Layer.provide(setupPlaces(folder)),
     Layer.provideMerge(
       Layer.mergeAll(
         projectsLayer,
         sessionsLayer,
         specsLayer.pipe(Layer.provide(NoSpecNotices)),
-      ).pipe(Layer.provideMerge(databaseLayer(join(folder, 'hemera.sqlite')))),
+      ).pipe(
+        Layer.provideMerge(
+          Layer.mergeAll(databaseLayer(join(folder, 'hemera.sqlite')), domainEventsLayer),
+        ),
+      ),
     ),
     Layer.provide(Layer.mergeAll(processes, sink)),
     Layer.provide(heldWordsLayer),
+    Layer.provide(sessionModesLayer),
     // Nobody is watching: these suites read the thread and the runs, not what was pushed.
     Layer.provide(NoNotices),
   )

@@ -35,6 +35,8 @@ export const TOOL_NAMES = [
   'commands_stop',
   'commands_propose',
   'project_get',
+  'setup_read',
+  'setup_propose',
   'session_get',
   'spec_read',
   'spec_write',
@@ -63,6 +65,8 @@ export type ToolMark =
   | 'command-output'
   | 'propose-command'
   | 'project'
+  | 'read-setup'
+  | 'propose-setup'
   | 'session'
   | 'read-spec'
   | 'write-spec'
@@ -71,10 +75,16 @@ export type ToolMark =
   | 'finish-task'
   | 'block-task'
 
-/** What a reader calls a tool, and the mark it wears. */
+/** What a reader calls a tool, the mark it wears, and what the turn is doing while it runs. */
 export interface ToolLabel {
   readonly label: string
   readonly mark: ToolMark
+  /**
+   * What the turn is doing while the tool runs, as a phrase of its own: "Writing the Spec". The
+   * row above the box reads it whole, where "Running" and the label read "Running Write Spec"
+   * (issue #170).
+   */
+  readonly doing: string
 }
 
 /**
@@ -84,24 +94,38 @@ export interface ToolLabel {
  * reader's, and it is what the line is read by.
  */
 export const TOOL_LABELS: Readonly<Record<ToolName, ToolLabel>> = {
-  fs_read: { label: 'Read file', mark: 'read-file' },
-  fs_list: { label: 'List folder', mark: 'list-folder' },
-  search: { label: 'Search', mark: 'search' },
-  fs_write: { label: 'Write file', mark: 'write-file' },
-  fs_edit: { label: 'Edit file', mark: 'edit-file' },
-  commands_run: { label: 'Run command', mark: 'run-command' },
-  commands_stop: { label: 'Stop command', mark: 'stop-command' },
-  commands_list: { label: 'List commands', mark: 'list-commands' },
-  commands_output: { label: 'Command output', mark: 'command-output' },
-  commands_propose: { label: 'Propose command', mark: 'propose-command' },
-  project_get: { label: 'Project', mark: 'project' },
-  session_get: { label: 'Session', mark: 'session' },
-  spec_read: { label: 'Read Spec', mark: 'read-spec' },
-  spec_write: { label: 'Write Spec', mark: 'write-spec' },
-  spec_propose: { label: 'Propose', mark: 'propose-spec' },
-  build_read: { label: 'Read build', mark: 'read-build' },
-  task_finished: { label: 'Task finished', mark: 'finish-task' },
-  task_blocked: { label: 'Task blocked', mark: 'block-task' },
+  fs_read: { label: 'Read file', mark: 'read-file', doing: 'Reading a file' },
+  fs_list: { label: 'List folder', mark: 'list-folder', doing: 'Listing a folder' },
+  search: { label: 'Search', mark: 'search', doing: 'Searching the code' },
+  fs_write: { label: 'Write file', mark: 'write-file', doing: 'Writing a file' },
+  fs_edit: { label: 'Edit file', mark: 'edit-file', doing: 'Editing a file' },
+  commands_run: { label: 'Run command', mark: 'run-command', doing: 'Running a command' },
+  commands_stop: { label: 'Stop command', mark: 'stop-command', doing: 'Stopping a command' },
+  commands_list: { label: 'List commands', mark: 'list-commands', doing: 'Listing the commands' },
+  commands_output: {
+    label: 'Command output',
+    mark: 'command-output',
+    doing: 'Reading the output of a command',
+  },
+  commands_propose: {
+    label: 'Propose command',
+    mark: 'propose-command',
+    doing: 'Proposing a command',
+  },
+  project_get: { label: 'Project', mark: 'project', doing: 'Reading the Project' },
+  setup_read: { label: 'Project setup', mark: 'read-setup', doing: 'Reading the Project setup' },
+  setup_propose: {
+    label: 'Propose setup',
+    mark: 'propose-setup',
+    doing: 'Proposing changes to the Project setup',
+  },
+  session_get: { label: 'Session', mark: 'session', doing: 'Reading the Session' },
+  spec_read: { label: 'Read Spec', mark: 'read-spec', doing: 'Reading the Spec' },
+  spec_write: { label: 'Write Spec', mark: 'write-spec', doing: 'Writing the Spec' },
+  spec_propose: { label: 'Propose', mark: 'propose-spec', doing: 'Proposing a Spec' },
+  build_read: { label: 'Read build', mark: 'read-build', doing: 'Reading the build' },
+  task_finished: { label: 'Task finished', mark: 'finish-task', doing: 'Finishing a task' },
+  task_blocked: { label: 'Task blocked', mark: 'block-task', doing: 'Blocking a task' },
 }
 
 /** The most `fs_read` hands back in one call, and the page a long file is read in. */
@@ -148,21 +172,11 @@ export interface SearchResult {
   readonly skippedCount: number
 }
 
-/** What a `free` and a `build` Session work on the code with: every tool of files and commands. */
-const CODE_TOOLS = [
-  'fs_read',
-  'fs_edit',
-  'fs_write',
-  'fs_list',
-  'search',
-  'commands_list',
-  'commands_run',
-  'commands_output',
-  'commands_stop',
-  'commands_propose',
-  'project_get',
-  'session_get',
-] as const satisfies readonly ToolName[]
+/** The Spec tools only a `define` Session writes its Spec with. */
+const SPEC_WRITING: ReadonlySet<ToolName> = new Set(['spec_read', 'spec_write'])
+
+/** The build's own three, which only a `build` Session is offered (D10-13). */
+const BUILDING: ReadonlySet<ToolName> = new Set(['build_read', 'task_finished', 'task_blocked'])
 
 /** What a `define` Session reads the code with: nothing that writes a file or runs a command. */
 const READ_ONLY_CODE_TOOLS = [
@@ -178,11 +192,11 @@ const READ_ONLY_CODE_TOOLS = [
 /**
  * The tools of a Session, by its mission.
  *
- * A `free` Session is offered the code tools, and of the Spec's only `spec_propose`: it has no
- * Spec to read or write, and proposes one to the human through it (D7-07). A `define` Session
+ * A `free` Session is offered the code tools, the setup tools (#218), and of the Spec's only
+ * `spec_propose`: it has no Spec to read or write, and proposes one to the human through it (D7-07). A `define` Session
  * produces a Spec and not code (D7-14): it reads the Workspace, never writes to it nor runs
  * anything, and writes its Spec through the three Spec tools. A `build` Session executes a frozen
- * Spec (D10-13): the code tools, and the build's three — `build_read` reads the frozen Spec and
+ * Spec (D10-13): the code tools, the setup tools, and the build's three — `build_read` reads the frozen Spec and
  * where the build stands, `task_finished` and `task_blocked` are the agent's only words about a
  * task, and Hemera decides its state. No Spec tool: the contract does not move during a build.
  * Neither of the other two missions is offered a build tool.
@@ -190,11 +204,11 @@ const READ_ONLY_CODE_TOOLS = [
 export function offeredTools(mission: Mission): readonly ToolName[] {
   switch (mission) {
     case 'free':
-      return [...CODE_TOOLS, 'spec_propose']
+      return TOOL_NAMES.filter((name) => !SPEC_WRITING.has(name) && !BUILDING.has(name))
     case 'define':
       return [...READ_ONLY_CODE_TOOLS, 'spec_read', 'spec_write', 'spec_propose']
     case 'build':
-      return [...CODE_TOOLS, 'build_read', 'task_finished', 'task_blocked']
+      return TOOL_NAMES.filter((name) => !SPEC_WRITING.has(name) && name !== 'spec_propose')
   }
 }
 

@@ -95,6 +95,37 @@ const BUILD_MIGRATION = '20260926170340_build'
 /** Lot 5e (issue #117): the stamp a build waits under while the user reviews it. */
 const REVIEW_MIGRATION = '20260926170412_review'
 
+/**
+ * The migration that keeps a sub-agent's result queued for its Session's next safe point across
+ * a quit: the one a profile that ran the choices' has never heard of (issue #72).
+ */
+const QUEUED_MIGRATION = '20260926173604_queued_results'
+
+/**
+ * The migration that lets a command of the catalogue run each time Hemera opens: the one a
+ * profile that ran the queued results' has never heard of (issue #114).
+ */
+const RUN_AT_OPEN_MIGRATION = '20260926185430_run_at_open'
+
+/**
+ * The migration that lets the Context view list Hemera's own words to the agent — a declined
+ * proposal and the New Spec request: the one a profile that ran the run at open's has never heard
+ * of.
+ */
+const CONTEXT_WORDS_MIGRATION = '20260926224349_context_notices'
+
+/**
+ * The migration that records what a Session's agent was told of each run (issue #238): the one a
+ * profile that ran the context notices' has never heard of.
+ */
+const RUN_TOLD_MIGRATION = '20260928202306_run_told'
+
+/**
+ * The migration that lets a thread hold a change to the Project's setup the agent proposed
+ * (#218): the one a profile that ran the run told's has never heard of.
+ */
+const SETUP_MIGRATION = '20260929153321_setup_proposals'
+
 /** A folder carrying the shipped migrations up to one of them, as an older version did. */
 function shippedUpTo(last: string): string {
   const folder = join(workspace, `shipped-${last}`)
@@ -519,14 +550,18 @@ describe('A profile of lot 6 is migrated to lot 19 (specs)', () => {
 
     const standing = await on(dataFolder, openProfile(dataFolder, SHIPPED, '0.6.0'))
 
-    // Behind by this migration and the ones after it, the Workspaces', the choices' and the
-    // build's, and the copy is named after the first.
+    // Behind by this migration and every one after it, and the copy is named after the first.
     expect(standing.behind).toEqual([
       SPECS_MIGRATION,
       WORKSPACES_MIGRATION,
       CHOICES_MIGRATION,
       BUILD_MIGRATION,
       REVIEW_MIGRATION,
+      QUEUED_MIGRATION,
+      RUN_AT_OPEN_MIGRATION,
+      CONTEXT_WORDS_MIGRATION,
+      RUN_TOLD_MIGRATION,
+      SETUP_MIGRATION,
     ])
     expect(readdirSync(join(dataFolder, BACKUPS_FOLDER))).toEqual([`${SPECS_MIGRATION}.sqlite`])
 
@@ -900,6 +935,11 @@ describe('Un profil du lot 5 est migré vers le lot 6', () => {
       CHOICES_MIGRATION,
       BUILD_MIGRATION,
       REVIEW_MIGRATION,
+      QUEUED_MIGRATION,
+      RUN_AT_OPEN_MIGRATION,
+      CONTEXT_WORDS_MIGRATION,
+      RUN_TOLD_MIGRATION,
+      SETUP_MIGRATION,
     ])
     expect(readdirSync(join(dataFolder, BACKUPS_FOLDER))).toEqual([`${TOOLS_MIGRATION}.sqlite`])
 
@@ -1043,6 +1083,11 @@ describe('A profile of lot 19 is migrated to lot 20', () => {
       CHOICES_MIGRATION,
       BUILD_MIGRATION,
       REVIEW_MIGRATION,
+      QUEUED_MIGRATION,
+      RUN_AT_OPEN_MIGRATION,
+      CONTEXT_WORDS_MIGRATION,
+      RUN_TOLD_MIGRATION,
+      SETUP_MIGRATION,
     ])
     expect(readdirSync(join(dataFolder, BACKUPS_FOLDER))).toEqual([
       `${WORKSPACES_MIGRATION}.sqlite`,
@@ -1164,7 +1209,7 @@ describe('A profile of lot 19 is migrated to lot 20', () => {
       'profile.backed_up',
       'profile.migrated',
     ])
-    expect(JSON.parse(kept.events.at(-1)!.payload)).toEqual({ migration: REVIEW_MIGRATION })
+    expect(JSON.parse(kept.events.at(-1)!.payload)).toEqual({ migration: SETUP_MIGRATION })
   })
 
   test('a command of a word of lot 18, or a step of an unknown state, is refused', async () => {
@@ -1365,7 +1410,16 @@ describe('A profile that ran the Workspaces gains the choices of its Sessions', 
     )
 
     const standing = await on(dataFolder, openProfile(dataFolder, SHIPPED, '0.4.0'))
-    expect(standing.behind).toEqual([CHOICES_MIGRATION, BUILD_MIGRATION, REVIEW_MIGRATION])
+    expect(standing.behind).toEqual([
+      CHOICES_MIGRATION,
+      BUILD_MIGRATION,
+      REVIEW_MIGRATION,
+      QUEUED_MIGRATION,
+      RUN_AT_OPEN_MIGRATION,
+      CONTEXT_WORDS_MIGRATION,
+      RUN_TOLD_MIGRATION,
+      SETUP_MIGRATION,
+    ])
     expect(readdirSync(join(dataFolder, BACKUPS_FOLDER))).toEqual([`${CHOICES_MIGRATION}.sqlite`])
 
     const kept = await on(
@@ -1431,7 +1485,15 @@ describe('A profile of lot 20 is migrated to lot 22', () => {
     )
 
     const standing = await on(dataFolder, openProfile(dataFolder, SHIPPED, '0.5.0'))
-    expect(standing.behind).toEqual([BUILD_MIGRATION, REVIEW_MIGRATION])
+    expect(standing.behind).toEqual([
+      BUILD_MIGRATION,
+      REVIEW_MIGRATION,
+      QUEUED_MIGRATION,
+      RUN_AT_OPEN_MIGRATION,
+      CONTEXT_WORDS_MIGRATION,
+      RUN_TOLD_MIGRATION,
+      SETUP_MIGRATION,
+    ])
     expect(readdirSync(join(dataFolder, BACKUPS_FOLDER))).toEqual([`${BUILD_MIGRATION}.sqlite`])
 
     const schema = (await on(dataFolder, schemaOf)).join('\n')
@@ -1729,5 +1791,230 @@ describe('A profile of lot 20 is migrated to lot 22', () => {
     expect(plans.attempts).toContain('INDEX attempt_by_session (session_id=?)')
     expect(plans.results).toContain('INDEX check_result_by_attempt (attempt_id=?)')
     expect(plans.blockers).toContain('INDEX blocker_by_session (session_id=?)')
+  })
+})
+
+describe('A profile that ran the choices keeps a queued result across a quit', () => {
+  test('a Session is kept whole, and a result queued for it goes with it when it is deleted', async () => {
+    const dataFolder = join(workspace, 'from-choices')
+    await on(dataFolder, openProfile(dataFolder, shippedUpTo(CHOICES_MIGRATION), '0.4.0'))
+    await on(
+      dataFolder,
+      Effect.gen(function* () {
+        const sql = yield* SqliteClient
+        const at = '2026-09-26T10:00:00.000Z'
+        yield* sql`INSERT INTO projects (id, name, tone, created_at, updated_at, version)
+          VALUES ('atlas', 'Atlas', 'primary', ${at}, ${at}, 1)`
+        yield* sql`INSERT INTO sessions (id, project_id, title, title_source, provider, native_session_id, native_state, cwd, created_at, last_written_at, version)
+          VALUES ('session-1', 'atlas', 'Shape the export', 'derived', 'claude', 'native-1', 'attached', '/work/atlas', ${at}, ${at}, 3)`
+      }),
+    )
+
+    const standing = await on(dataFolder, openProfile(dataFolder, SHIPPED, '0.4.0'))
+    expect(standing.behind).toEqual([
+      BUILD_MIGRATION,
+      REVIEW_MIGRATION,
+      QUEUED_MIGRATION,
+      RUN_AT_OPEN_MIGRATION,
+      CONTEXT_WORDS_MIGRATION,
+      RUN_TOLD_MIGRATION,
+      SETUP_MIGRATION,
+    ])
+    expect(readdirSync(join(dataFolder, BACKUPS_FOLDER))).toEqual([`${BUILD_MIGRATION}.sqlite`])
+
+    const read = await on(
+      dataFolder,
+      Effect.gen(function* () {
+        const sql = yield* SqliteClient
+        yield* sql`PRAGMA foreign_keys = ON`
+        yield* sql`INSERT INTO queued_results (id, session_id, text, queued_at)
+          VALUES ('result-1', 'session-1', 'Two call sites.', '2026-09-26T10:01:00.000Z')`
+        const queued = yield* sql<{ text: string }>`SELECT text FROM queued_results`
+        const kept = yield* sql<{
+          title: string
+        }>`SELECT title FROM sessions WHERE id = 'session-1'`
+        yield* sql`DELETE FROM sessions WHERE id = 'session-1'`
+        const left = yield* sql<{ id: string }>`SELECT id FROM queued_results`
+        return { queued, kept, left }
+      }),
+    )
+    expect(read).toEqual({
+      queued: [{ text: 'Two call sites.' }],
+      kept: [{ title: 'Shape the export' }],
+      left: [],
+    })
+  })
+})
+
+describe('A profile that ran the queued results keeps its commands, none run at open', () => {
+  test('a command of the catalogue is kept whole, and is not run when Hemera opens', async () => {
+    const dataFolder = join(workspace, 'from-queued')
+    await on(dataFolder, openProfile(dataFolder, shippedUpTo(QUEUED_MIGRATION), '0.4.0'))
+    await on(
+      dataFolder,
+      Effect.gen(function* () {
+        const sql = yield* SqliteClient
+        const at = '2026-09-26T10:00:00.000Z'
+        yield* sql`INSERT INTO projects (id, name, tone, created_at, updated_at, version)
+          VALUES ('atlas', 'Atlas', 'primary', ${at}, ${at}, 1)`
+        yield* sql`INSERT INTO project_commands (id, project_id, name, line, type, created_at, updated_at)
+          VALUES ('command-1', 'atlas', 'up', 'docker compose up -d', 'script', ${at}, ${at})`
+      }),
+    )
+
+    const standing = await on(dataFolder, openProfile(dataFolder, SHIPPED, '0.4.0'))
+    expect(standing.behind).toEqual([
+      RUN_AT_OPEN_MIGRATION,
+      CONTEXT_WORDS_MIGRATION,
+      RUN_TOLD_MIGRATION,
+      SETUP_MIGRATION,
+    ])
+    expect(readdirSync(join(dataFolder, BACKUPS_FOLDER))).toEqual([
+      `${RUN_AT_OPEN_MIGRATION}.sqlite`,
+    ])
+
+    const kept = await on(
+      dataFolder,
+      Effect.gen(function* () {
+        const sql = yield* SqliteClient
+        return yield* sql<{
+          name: string
+          line: string
+          run_at_open: number
+        }>`SELECT name, line, run_at_open FROM project_commands`
+      }),
+    )
+    expect(kept).toEqual([{ name: 'up', line: 'docker compose up -d', run_at_open: 0 }])
+  })
+})
+
+describe('A profile that ran the commands at open keeps what its Sessions were provided', () => {
+  test('a delivery is kept whole, and a notice and a New Spec request can be recorded', async () => {
+    const dataFolder = join(workspace, 'from-run-at-open')
+    await on(dataFolder, openProfile(dataFolder, shippedUpTo(RUN_AT_OPEN_MIGRATION), '0.4.0'))
+    await on(
+      dataFolder,
+      Effect.gen(function* () {
+        const sql = yield* SqliteClient
+        const at = '2026-09-26T10:00:00.000Z'
+        yield* sql`INSERT INTO projects (id, name, tone, created_at, updated_at, version)
+          VALUES ('atlas', 'Atlas', 'primary', ${at}, ${at}, 1)`
+        yield* sql`INSERT INTO sessions (id, project_id, title, title_source, provider, native_session_id, native_state, cwd, created_at, last_written_at, version)
+          VALUES ('session-1', 'atlas', 'Shape the export', 'derived', 'claude', 'native-1', 'attached', '/work/atlas', ${at}, ${at}, 3)`
+        yield* sql`INSERT INTO context_deliveries (id, session_id, kind, path, fingerprint, delivered_at)
+          VALUES ('delivery-1', 'session-1', 'internal', '', 'f1', ${at})`
+      }),
+    )
+
+    const standing = await on(dataFolder, openProfile(dataFolder, SHIPPED, '0.4.0'))
+    expect(standing.behind).toEqual([CONTEXT_WORDS_MIGRATION, RUN_TOLD_MIGRATION, SETUP_MIGRATION])
+    expect(readdirSync(join(dataFolder, BACKUPS_FOLDER))).toEqual([
+      `${CONTEXT_WORDS_MIGRATION}.sqlite`,
+    ])
+
+    const kinds = await on(
+      dataFolder,
+      Effect.gen(function* () {
+        const sql = yield* SqliteClient
+        yield* sql`INSERT INTO context_deliveries (id, session_id, kind, path, fingerprint, delivered_at)
+          VALUES ('delivery-2', 'session-1', 'notice', '', 'f2', '2026-09-26T10:01:00.000Z')`
+        yield* sql`INSERT INTO context_deliveries (id, session_id, kind, path, fingerprint, delivered_at)
+          VALUES ('delivery-3', 'session-1', 'request', '', 'f3', '2026-09-26T10:02:00.000Z')`
+        return yield* sql<{
+          id: string
+          kind: string
+        }>`SELECT id, kind FROM context_deliveries ORDER BY id`
+      }),
+    )
+    expect(kinds).toEqual([
+      { id: 'delivery-1', kind: 'internal' },
+      { id: 'delivery-2', kind: 'notice' },
+      { id: 'delivery-3', kind: 'request' },
+    ])
+  })
+})
+
+describe('A profile that ran the context notices keeps its runs, none owed to an agent', () => {
+  test('a run of before is kept whole and counts as told, and a new one can be written as not', async () => {
+    const dataFolder = join(workspace, 'from-context-notices')
+    await on(dataFolder, openProfile(dataFolder, shippedUpTo(CONTEXT_WORDS_MIGRATION), '0.4.0'))
+    await on(
+      dataFolder,
+      Effect.gen(function* () {
+        const sql = yield* SqliteClient
+        const at = '2026-09-27T10:00:00.000Z'
+        yield* sql`INSERT INTO projects (id, name, tone, created_at, updated_at, version)
+          VALUES ('atlas', 'Atlas', 'primary', ${at}, ${at}, 1)`
+        yield* sql`INSERT INTO sessions (id, project_id, title, title_source, provider, native_session_id, native_state, cwd, created_at, last_written_at, version)
+          VALUES ('session-1', 'atlas', 'Shape the export', 'derived', 'claude', 'native-1', 'attached', '/work/atlas', ${at}, ${at}, 3)`
+        yield* sql`INSERT INTO command_runs (id, session_id, name, line, type, cwd, state, exit_code, output, started_by, started_at, ended_at)
+          VALUES ('run-1', 'session-1', 'check', 'v2 check', 'test', '/work/atlas', 'failed', 1, 'uv not found', 'user', ${at}, ${at})`
+      }),
+    )
+
+    const standing = await on(dataFolder, openProfile(dataFolder, SHIPPED, '0.4.0'))
+    expect(standing.behind).toEqual([RUN_TOLD_MIGRATION, SETUP_MIGRATION])
+    expect(readdirSync(join(dataFolder, BACKUPS_FOLDER))).toEqual([`${RUN_TOLD_MIGRATION}.sqlite`])
+
+    const runs = await on(
+      dataFolder,
+      Effect.gen(function* () {
+        const sql = yield* SqliteClient
+        yield* sql`INSERT INTO command_runs (id, session_id, name, line, type, cwd, state, started_by, started_at, told)
+          VALUES ('run-2', 'session-1', 'check', 'v2 check', 'test', '/work/atlas', 'running', 'user', '2026-09-28T10:00:00.000Z', 'none')`
+        return yield* sql<{
+          id: string
+          output: string
+          told: string
+        }>`SELECT id, output, told FROM command_runs ORDER BY id`
+      }),
+    )
+    // A run of before was never handed over, and is not handed over all at once after an update.
+    expect(runs).toEqual([
+      { id: 'run-1', output: 'uv not found', told: 'ended' },
+      { id: 'run-2', output: '', told: 'none' },
+    ])
+  })
+})
+
+describe('A profile that ran the run told keeps its threads, and holds a setup proposal', () => {
+  test('an entry is kept whole, and a setup proposal can be written beside it', async () => {
+    const dataFolder = join(workspace, 'from-run-told')
+    await on(dataFolder, openProfile(dataFolder, shippedUpTo(RUN_TOLD_MIGRATION), '0.4.0'))
+    await on(
+      dataFolder,
+      Effect.gen(function* () {
+        const sql = yield* SqliteClient
+        const at = '2026-09-27T10:00:00.000Z'
+        yield* sql`INSERT INTO projects (id, name, tone, created_at, updated_at, version)
+          VALUES ('atlas', 'Atlas', 'primary', ${at}, ${at}, 1)`
+        yield* sql`INSERT INTO sessions (id, project_id, title, title_source, provider, native_session_id, native_state, cwd, created_at, last_written_at, version)
+          VALUES ('session-1', 'atlas', 'Set it up', 'derived', 'claude', 'native-1', 'attached', '/work/atlas', ${at}, ${at}, 3)`
+        yield* sql`INSERT INTO session_entries (id, session_id, seq, role, kind, body, payload, correlation_id, state, created_at)
+          VALUES ('entry-1', 'session-1', 1, 'hemera', 'command_proposal', 'seed', '{}', 'proposal:p1', 'pending', ${at})`
+      }),
+    )
+
+    const standing = await on(dataFolder, openProfile(dataFolder, SHIPPED, '0.4.0'))
+    expect(standing.behind).toEqual([SETUP_MIGRATION])
+    expect(readdirSync(join(dataFolder, BACKUPS_FOLDER))).toEqual([`${SETUP_MIGRATION}.sqlite`])
+
+    const entries = await on(
+      dataFolder,
+      Effect.gen(function* () {
+        const sql = yield* SqliteClient
+        yield* sql`INSERT INTO session_entries (id, session_id, seq, role, kind, body, payload, correlation_id, state, created_at)
+          VALUES ('entry-2', 'session-1', 2, 'hemera', 'setup_proposal', 'Declare the repository ./api', '{}', 'setup:s1', 'pending', '2026-09-27T10:01:00.000Z')`
+        return yield* sql<{
+          id: string
+          kind: string
+          correlation_id: string
+        }>`SELECT id, kind, correlation_id FROM session_entries ORDER BY seq`
+      }),
+    )
+    expect(entries).toEqual([
+      { id: 'entry-1', kind: 'command_proposal', correlation_id: 'proposal:p1' },
+      { id: 'entry-2', kind: 'setup_proposal', correlation_id: 'setup:s1' },
+    ])
   })
 })

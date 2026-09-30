@@ -26,6 +26,14 @@ describe('Raccourci hors saisie', () => {
     expect(inFields('Mod+,')).toBe(true)
   })
 
+  test("Run's menu opens from the keyboard, the composer's caret included (#250)", () => {
+    const run = SHORTCUTS.find((shortcut) => shortcut.action.kind === 'run')
+    expect(run?.combination).toBe('Mod+Shift+E')
+    expect(run?.inFields).toBe(true)
+    // Nothing Electron or the reload of the window already answers.
+    expect(['Mod+R', 'Mod+Shift+R']).not.toContain(run?.combination)
+  })
+
   test('the registration says it the way the manager reads it, which is the other way round', () => {
     const registrations = registrationsOf(SHORTCUTS, () => undefined)
     const ignoresInputs = (combination: string): boolean | undefined =>

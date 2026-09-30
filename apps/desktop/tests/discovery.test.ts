@@ -19,6 +19,7 @@ import { Effect, Layer } from 'effect'
 import type { AgentProvider } from '#engine/agents/adapter.ts'
 import { codex } from '#engine/agents/adapters/codex.ts'
 import { opencode } from '#engine/agents/adapters/opencode.ts'
+import { AgentNotices } from '#engine/agents/notices.ts'
 import {
   AgentAdapterMissingError,
   AgentNotInstalledError,
@@ -29,6 +30,8 @@ import {
   machineEnvironmentLayer,
   shimsOf,
 } from '#engine/agents/discovery.ts'
+
+import { until } from './application.ts'
 
 /** What a machine has of one command: where it is, and what it answers for a version. */
 interface Installed {
@@ -64,6 +67,7 @@ function machineOf(
   installed: Readonly<Record<string, Installed>>,
   logins: readonly string[] = [],
   carried: readonly string[] = CARRIED,
+  answers: () => Promise<void> = () => Promise.resolve(),
 ): Machine {
   const asked: string[] = []
   const sought: string[] = []
@@ -83,7 +87,7 @@ function machineOf(
     },
     readVersion: (command: string) => {
       asked.push(`${command} --version`)
-      return Effect.succeed(installed[command]?.version)
+      return Effect.promise(answers).pipe(Effect.map(() => installed[command]?.version))
     },
     holds: (paths: readonly string[]) => {
       sought.push(...paths)
@@ -105,10 +109,30 @@ const CLAUDE = { path: '/usr/local/bin/claude', version: '2.0.31 (Claude Code)' 
 const CODEX = { path: '/usr/local/bin/codex', version: 'codex-cli 0.154.0' }
 const OPENCODE = { path: '/usr/local/bin/opencode', version: '1.18.31' }
 
-/** Runs a program against a scripted machine. Discovery is the only service it asks for. */
-async function on<A, E>(machine: Machine, program: Effect.Effect<A, E, Discovery>): Promise<A> {
+/**
+ * Runs a program against a scripted machine. Discovery is the only service it asks for, and what
+ * it tells the window is counted in `told`, when a suite hands one.
+ */
+async function on<A, E>(
+  machine: Machine,
+  program: Effect.Effect<A, E, Discovery>,
+  told: { agents: number } = { agents: 0 },
+): Promise<A> {
+  const notices = Layer.succeed(AgentNotices, {
+    wrote: () => undefined,
+    changed: () => undefined,
+    ran: () => undefined,
+    workspace: () => undefined,
+    launched: () => undefined,
+    agents: () => {
+      told.agents += 1
+    },
+  })
   return await Effect.runPromise(
-    Effect.provide(program, discoveryLayer.pipe(Layer.provide(machine.layer))),
+    Effect.provide(
+      program,
+      discoveryLayer.pipe(Layer.provide(machine.layer), Layer.provide(notices)),
+    ),
   )
 }
 
@@ -273,6 +297,48 @@ describe('The Agents page tells what is available', () => {
     expect(machine.asked).toContain('opencode --version')
     expect(machine.asked).not.toContain('opencode acp')
     expect(machine.asked).not.toContain('opencode acp --version')
+  })
+})
+
+describe('A list never waits on a version being printed', () => {
+  test('a version that answers late is given without, then announced and kept', async () => {
+    let answer: () => void = () => undefined
+    const late = new Promise<void>((resolve) => {
+      answer = resolve
+    })
+    const machine = machineOf({ claude: CLAUDE }, [], CARRIED, async () => await late)
+    const told = { agents: 0 }
+
+    const seen = await on(
+      machine,
+      Effect.gen(function* () {
+        const discovery = yield* Discovery
+        const first = yield* discovery.list()
+        const toldBefore = told.agents
+        answer()
+        yield* until(
+          Effect.sync(() => told.agents),
+          (count) => count > 0,
+        )
+        const second = yield* discovery.list()
+        return { first, toldBefore, second }
+      }),
+      told,
+    )
+
+    // Found without a version, and nothing announced yet: the command had not answered.
+    expect(seen.first[0]).toMatchObject({ id: 'claude', found: true })
+    expect(seen.first[0]?.version).toBeUndefined()
+    expect(seen.toldBefore).toBe(0)
+    // Once it answered, the window was told once, and the next list gives what it printed.
+    expect(told.agents).toBe(1)
+    expect(seen.second[0]).toMatchObject({ id: 'claude', version: '2.0.31' })
+  })
+
+  test('starting a Session asks no version at all', async () => {
+    const machine = machineOf({ claude: CLAUDE }, [join(HOME, '.claude', '.credentials.json')])
+    await on(machine, resolving('claude'))
+    expect(machine.asked.some((one) => one.endsWith('--version'))).toBe(false)
   })
 })
 

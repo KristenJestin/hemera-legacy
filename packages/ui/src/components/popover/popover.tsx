@@ -27,6 +27,14 @@ import { useOverlayContainer } from '../../overlay.ts'
 const POPUP =
   'min-w-48 rounded-lg border border-border bg-card p-3 text-sm text-card-foreground shadow-lg outline-none translate-y-0 popup-motion data-starting-style:-translate-y-2 data-starting-style:opacity-0 data-ending-style:-translate-y-2 data-ending-style:opacity-0'
 
+/**
+ * A popup that comes out of what opens it (issue #237, the Session's notices): it rises from behind
+ * its anchor while it scales and fades in from the point Base UI says it hangs from, and sinks back
+ * behind it as it closes, rather than sliding in from beside it.
+ */
+const POPUP_GROWS =
+  'min-w-48 rounded-lg border border-border bg-card p-3 text-sm text-card-foreground shadow-lg outline-none translate-y-0 scale-100 opacity-100 popup-grows data-starting-style:translate-y-4 data-starting-style:scale-50 data-starting-style:opacity-0 data-ending-style:translate-y-4 data-ending-style:scale-50 data-ending-style:opacity-0'
+
 export interface PopoverProps {
   /** What opens it: the caller's own control, whatever shape it has. */
   trigger: ReactElement
@@ -65,6 +73,10 @@ export interface PopoverProps {
    * every screen reader announces as one.
    */
   anchorOnly?: boolean | undefined
+  /** Whether it comes out of what opens it, scaling from its side, rather than sliding in. */
+  grows?: boolean | undefined
+  /** Said once it has finished closing, its exit played: what waits for it to be gone. */
+  onClosed?: (() => void) | undefined
 }
 
 export function Popover({
@@ -78,18 +90,34 @@ export function Popover({
   keepFocus = false,
   label,
   anchorOnly = false,
+  grows = false,
+  onClosed,
 }: PopoverProps): ReactNode {
   const anchor = useRef<HTMLSpanElement>(null)
   const container = useOverlayContainer()
   return (
-    <BasePopover.Root open={open} onOpenChange={(next) => onOpenChange?.(next)}>
+    <BasePopover.Root
+      open={open}
+      onOpenChange={(next) => onOpenChange?.(next)}
+      onOpenChangeComplete={(next) => {
+        if (!next) onClosed?.()
+      }}
+    >
       <span ref={anchor} className="inline-flex">
         {anchorOnly ? trigger : <BasePopover.Trigger render={trigger} />}
       </span>
       <BasePopover.Portal container={container}>
-        <BasePopover.Positioner anchor={anchor} side={side} align={align} sideOffset={4}>
+        <BasePopover.Positioner
+          anchor={anchor}
+          side={side}
+          align={align}
+          sideOffset={4}
+          // What grows rises from behind what opens it: the part still below the anchor's edge is
+          // not drawn, so it reads as coming out from under it.
+          className={grows ? 'popup-emerges' : undefined}
+        >
           <BasePopover.Popup
-            className={POPUP}
+            className={grows ? POPUP_GROWS : POPUP}
             aria-label={title === undefined ? label : undefined}
             initialFocus={keepFocus ? false : undefined}
             finalFocus={keepFocus ? false : undefined}

@@ -279,7 +279,6 @@ describe('The Spec is read only in a build', () => {
     const view = specViewOf({
       snapshot: spec,
       revisions,
-      buffers: [],
       journal: [],
       readyRefused: null,
     })

@@ -29,7 +29,7 @@ import { Effect } from 'effect'
 import { Projects, UnknownProjectError } from '../projects.ts'
 import { Sessions } from '../sessions.ts'
 import { Variables } from '../workspaces/variables.ts'
-import { Commands, UnknownCommandError, commandCwd } from './service.ts'
+import { Commands, UnknownCommandError, UnknownRunError, commandCwd } from './service.ts'
 
 /** A base that is neither the Workspace root nor one of the Project's repositories. */
 export class UnknownCommandFolderError extends Error {
@@ -65,6 +65,8 @@ export interface CommandDraft {
   readonly portless: boolean
   /** The name Portless serves it under, and null for the Project's name as a slug (D8-10). */
   readonly portlessName: string | null
+  /** Whether Hemera runs it in the Project's `main` each time it opens (#114). */
+  readonly runAtOpen: boolean
 }
 
 /** The Project a command or a Session belongs to, read among every Project. */
@@ -245,6 +247,47 @@ export const runFromPanel = (
       workspaceId: workspace.id,
       workspaceName: workspace.name,
       environment: yield* variables.givenFor(project.id, workspace.id),
+      startedBy: 'user',
+    })
+  })
+
+/**
+ * Runs again a run of the Session, from its chip or its row in the history (issue #237).
+ *
+ * The reader's own act, as Run is: a command of the catalogue runs again as the command it is
+ * now, by its name, in its folder; a one-off runs again as the one-off it was — the same line, in
+ * the same folder of the same Workspace, and still out of the catalogue. A command the catalogue
+ * no longer holds is run again as the line it ran. A run the Session never had is refused.
+ */
+export const runAgain = (sessionId: string, runId: string) =>
+  Effect.gen(function* () {
+    const runs = yield* runsOf(sessionId)
+    const ran = runs.find((one) => one.id === runId)
+    if (ran === undefined) return yield* Effect.fail(new UnknownRunError(runId))
+    const commands = yield* Commands
+    const variables = yield* Variables
+    if (ran.commandId !== null) {
+      const catalogue = yield* commands.list(ran.projectId)
+      const entry = catalogue.find((one) => one.id === ran.commandId)
+      if (entry !== undefined) return yield* runFromPanel(sessionId, entry.name, undefined)
+    }
+    return yield* commands.run({
+      sessionId,
+      projectId: ran.projectId,
+      commandId: null,
+      name: ran.name,
+      line: ran.line,
+      lineWindows: null,
+      lineLinux: null,
+      type: ran.type,
+      scope: 'workspace',
+      portless: false,
+      portlessName: null,
+      folder: ran.folder,
+      cwd: ran.cwd,
+      workspaceId: ran.workspaceId,
+      workspaceName: ran.workspaceName,
+      environment: yield* variables.givenFor(ran.projectId, ran.workspaceId),
       startedBy: 'user',
     })
   })

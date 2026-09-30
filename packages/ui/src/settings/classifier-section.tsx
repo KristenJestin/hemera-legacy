@@ -79,6 +79,12 @@ const SLOT = 'relative flex rounded-md border border-border bg-muted'
 const SELECTED = 'absolute inset-0 rounded-md border border-primary bg-primary-muted'
 const NOTE = 'text-sm text-muted-foreground'
 
+/** A state, and the word the dot that says it is named by. */
+interface Standing {
+  tone: StatusTone
+  word: string
+}
+
 /**
  * Where Hemera Auto stands, as a dot (the rule of #138: states are dots, not words). The word is
  * the dot's name, which a screen reader says, and its hover.
@@ -87,7 +93,7 @@ function standingOf(
   credential: CredentialStatus,
   evaluator: EvaluatorStatus,
   consent: boolean,
-): { tone: StatusTone; word: string } {
+): Standing {
   if (evaluator === 'transitioning') return { tone: 'running', word: 'Changing across Sessions…' }
   if (evaluator === 'unavailable') return { tone: 'failure', word: 'Evaluator unavailable' }
   if (credential === 'storage-unavailable')
@@ -99,7 +105,7 @@ function standingOf(
 }
 
 /** A dot that says its state by its name and on hover, and by nothing on screen. */
-function Standing({ tone, word }: { tone: StatusTone; word: string }): ReactNode {
+function StandingDot({ tone, word }: Standing): ReactNode {
   return <StatusDot status={tone} label={word} title={word} />
 }
 
@@ -182,7 +188,7 @@ export function ClassifierSection({
                     <span className="font-medium">{option.label}</span>
                     <span className={NOTE}>{option.description}</span>
                   </span>
-                  {!option.available && <Standing tone="cancelled" word="Unavailable" />}
+                  {!option.available && <StandingDot tone="cancelled" word="Unavailable" />}
                 </Radio.Root>
               </span>
             ))}
@@ -203,7 +209,7 @@ export function ClassifierSection({
                   <div role="status" className="flex flex-wrap items-center gap-2">
                     <IconBrandHemeraAuto size="sm" aria-hidden="true" />
                     <p className="min-w-0 flex-1 text-sm font-medium">Hemera Auto</p>
-                    <Standing tone={standing.tone} word={standing.word} />
+                    <StandingDot tone={standing.tone} word={standing.word} />
                   </div>
                   <p className={NOTE}>
                     Local rules settle clear cases. Other calls are evaluated by the engine below.
@@ -243,7 +249,7 @@ export function ClassifierSection({
                                 <span className={NOTE}>{option.description}</span>
                               </span>
                               {!option.available && (
-                                <Standing tone="cancelled" word="Unavailable" />
+                                <StandingDot tone="cancelled" word="Unavailable" />
                               )}
                             </Radio.Root>
                           </span>
@@ -260,7 +266,7 @@ export function ClassifierSection({
                           label="Jev API key"
                           labelTrailing={
                             credential === 'saved' ? (
-                              <Standing tone="success" word="Saved" />
+                              <StandingDot tone="success" word="Saved" />
                             ) : undefined
                           }
                           inputRef={keyField}

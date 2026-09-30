@@ -168,7 +168,8 @@ export type BuildBriefInput =
       readonly tasks: readonly BriefTask[]
       readonly ready: readonly BriefTask[]
       readonly failures: readonly BriefFailure[]
-      readonly feedback?: BriefRound
+      /** The round being fixed, in `feedback`; none elsewhere. */
+      readonly feedback?: BriefRound | null
     }
   | {
       readonly kind: 'review'
@@ -395,7 +396,8 @@ export function composeBuildBrief(input: BuildBriefInput): string {
       ]
       if (input.phase === 'execute') parts.push(readyText(input.ready))
       if (input.failures.length > 0) parts.push(failuresText(input.failures))
-      if (input.feedback !== undefined) parts.push(feedbackText(input.feedback))
+      const round = input.feedback ?? null
+      if (round !== null) parts.push(feedbackText(round))
       return parts.join('\n\n')
     }
     case 'review':

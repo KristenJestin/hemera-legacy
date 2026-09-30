@@ -2,8 +2,9 @@
  * The build: its protocol, its loop, the tools its agent signals with, and what the user does to it
  * (design D10-01 to D10-14).
  *
- * A `build` Session works through a frozen Spec in `prepare`, `execute` and `verify`, then waits
- * for the user's Accept (D10-01). Its phase and every task's state are rows, so a restart resumes
+ * A `build` Session works through a frozen Spec in `prepare`, `execute`, `verify` and `review`, then
+ * waits for the user on a review round: Accept, or Fix, which sends it through `feedback` and back
+ * (D10-01, protocol v2 of issue #279). Its phase and every task's state are rows, so a restart resumes
  * exactly; what is kept in memory is only what a restart asks again — which agent is due the resume
  * brief, which build was just paused, which Hemera call is running. Hemera owns the tasks' states
  * (D10-04): the agent says it finished a task, or that a task contradicts the Spec, and the verdict
@@ -23,6 +24,8 @@ import { join } from 'node:path'
 
 import {
   ATTEMPTS_BEFORE_YOURS,
+  FEEDBACK_KINDS,
+  ROUND_STATES,
   type AttemptResult,
   type AttemptScope,
   type BuildPhase,
@@ -37,6 +40,7 @@ import {
   attemptResult,
   dependantsOf,
   renderSpecMarkdown,
+  roundAcceptRefusal,
   stateAfterAttempt,
   taskLabels,
 } from '@hemera/core'
@@ -54,13 +58,14 @@ import {
   buildBlockers,
   buildCheckResults,
   buildTasks,
+  reviewRounds,
   sessionEntries,
   sessions,
   specs,
 } from '../storage/schema.ts'
 import { failed, now, reading, specRow } from '../specs/snapshot.ts'
 import type { ParsedCall } from '../tools/arguments.ts'
-import { type ReviewRoundView, ReviewRounds } from '../review/round.ts'
+import { type ReviewRoundView, ReviewRounds, insertRound } from '../review/round.ts'
 import { mutate } from '../transaction.ts'
 import { describedWorkspace } from '../workspaces/described.ts'
 import {
@@ -86,6 +91,7 @@ import {
   attemptsOn,
   buildEvent,
   changesFor,
+  closeRound,
   follow,
   moveTask,
   movePhase,
@@ -100,6 +106,7 @@ import {
   specTaskOf,
   stateOf,
   taskEvent,
+  unclosedRound,
   verdictOf,
   waitsForUser,
 } from './tasks.ts'
@@ -210,7 +217,8 @@ export interface StoryView {
 /**
  * A build as the window draws it (D10-12): the Spec it builds, its phase, whether it is paused and
  * why it stopped, the agent's approach note, the tasks with their attempts and evidence, the
- * blockers, the stories and the end checks' attempts, and whether Accept is offered (D10-11).
+ * blockers, the stories and the end checks' attempts, and whether Accept is offered (D10-11, issue
+ * #279).
  */
 export interface BuildView {
   readonly sessionId: string
@@ -308,7 +316,7 @@ const WHEN: Readonly<Record<AttemptScope, CheckWhen>> = {
 }
 
 /** The phases a build works through; the other two close it. */
-const ACTIVE: readonly BuildPhase[] = ['prepare', 'execute', 'verify']
+const ACTIVE: readonly BuildPhase[] = ['prepare', 'execute', 'verify', 'review', 'feedback']
 
 /** The rows of a build the user acts on, or the refusal of a build that is closed. */
 function stillOpen(rows: BuildRows) {
@@ -401,8 +409,17 @@ export interface BuildsService {
   readonly pause: (sessionId: string) => Effect.Effect<BuildView, BuildRefusal>
   /** D10-09: the agent is handed the resume brief at once. */
   readonly resume: (sessionId: string) => Effect.Effect<BuildView, BuildRefusal>
-  /** D10-11: only when `verify` is green and nothing waits for the user. */
+  /**
+   * D10-11, issue #279: only on a review round that is open and not stale, with no feedback waiting
+   * for a fix, and with the end checks green; the round closes with the build.
+   */
   readonly accept: (sessionId: string) => Effect.Effect<BuildView, BuildRefusal>
+  /**
+   * The user asks for a fix of the round open (issue #279): the round moves to `fixing` and the
+   * build to `feedback`, whose agent is handed the round's feedback. Refused without an open round,
+   * or with no feedback on it.
+   */
+  readonly fix: (sessionId: string) => Effect.Effect<BuildView, BuildRefusal>
   /** The build is closed and stays readable. */
   readonly stop: (sessionId: string) => Effect.Effect<BuildView, BuildRefusal>
   /** A task of this build waiting for the user, done by them (D10-08). */
@@ -429,12 +446,6 @@ export interface BuildsService {
     blockerId: string,
     note: string | null,
   ) => Effect.Effect<BuildView, BuildRefusal>
-  /**
-   * The message the user sent while this build waited for their review (issue #117): the build goes
-   * back to work on it, and the agent is handed the review brief in front of it. Any other message,
-   * and any other Session, moves nothing.
-   */
-  readonly review: (sessionId: string) => Effect.Effect<void, BuildRefusal>
   /**
    * At the engine's start (D10-09): the checks a stopped engine left running run again, and every
    * build that is not paused has its agent started and handed the resume brief.
@@ -481,22 +492,11 @@ function refusedAnswer(reason: string): BuildAnswer {
 const NOT_REPLAYED = 'The bug’s reproduction was not replayed.'
 
 /**
- * Whether the user's message is the review of a build: it waits for the user's review, or for the
- * replay of its bug's reproduction alone — which the user asks the agent for in the chat, and which
- * the end checks that follow the review's turn take with them (issue #203).
+ * Why the end checks do not let the build go on, or null when they are green (D10-11): nothing
+ * waits for the user, the last attempt at every story's checks and at the end checks ended, none
+ * red, and a `bug`'s end checks carry the replay of its reproduction.
  */
-function awaitsReview(rows: BuildRows): boolean {
-  const refusal = acceptRefusal(rows)
-  return refusal === null || refusal === NOT_REPLAYED
-}
-
-/** Why Accept is not offered, or null when it is (D10-11). */
-function acceptRefusal(rows: BuildRows): string | null {
-  // A review sent the build back to work (issue #117): Accept waits for the checks it runs again,
-  // and this says why, rather than the words meant for a build that never reached them.
-  if (rows.session.buildReviewAt !== null) return 'The build went back to work on your review.'
-  if (rows.phase !== 'verify') return 'The build has not reached its final checks.'
-  if (rows.session.buildPausedAt !== null) return 'The build is paused.'
+function endChecksRefusal(rows: BuildRows): string | null {
   const states = rows.tasks.map(stateOf)
   if (states.includes('yours')) return 'A task waits for you.'
   if (states.includes('blocked') || rows.blockers.some((one) => one.dismissedAt === null)) {
@@ -517,6 +517,42 @@ function acceptRefusal(rows: BuildRows): string | null {
   // last end checks carry the replay reported before them, or Accept waits (issue #203).
   if (rows.snapshot.revision.type === 'bug' && end.reproduction === null) return NOT_REPLAYED
   return null
+}
+
+/**
+ * Whether `verify` is over and the build goes on to `review` (issue #279): its end checks are green.
+ * A `bug` whose replay is missing goes on all the same, and Accept waits for it: the user asks for it
+ * through a Fix.
+ */
+function verifyGreen(rows: BuildRows): boolean {
+  const refusal = endChecksRefusal(rows)
+  return refusal === null || refusal === NOT_REPLAYED
+}
+
+/**
+ * Why Accept is not offered, or null when it is (D10-11, issue #279): the build is in `review`, not
+ * paused, on a round that is open and not stale with no feedback waiting for a fix, and its end
+ * checks are green.
+ */
+function acceptRefusal(rows: BuildRows): string | null {
+  if (rows.phase !== 'review') return 'The build has not reached its review.'
+  if (rows.session.buildPausedAt !== null) return 'The build is paused.'
+  const round = unclosedRound(rows)
+  const refusal = roundAcceptRefusal(
+    round === undefined
+      ? null
+      : {
+          state: ROUND_STATES.find((state) => state === round.state) ?? 'closed',
+          stale: rows.staleRounds.has(round.id),
+          feedback: rows.feedback
+            .filter((one) => one.roundId === round.id)
+            .map((one) => ({
+              kind: FEEDBACK_KINDS.find((kind) => kind === one.kind) ?? 'general',
+              withdrawnAt: one.withdrawnAt,
+            })),
+        },
+  )
+  return refusal ?? endChecksRefusal(rows)
 }
 
 function checkView(row: BuildRows['results'][number]): CheckResultView {
@@ -897,6 +933,26 @@ export const buildsLayer = Layer.effect(
       )
 
     /**
+     * `verify` is green and the build enters `review` (issue #279). With Git, its agent is handed
+     * the `review` brief, and the round opens once that turn is over; without, `review` is skipped
+     * and the round opens now, with no repository to freeze.
+     */
+    const reviewBegins = (
+      transaction: EngineTransaction,
+      rows: BuildRows,
+      at: string,
+      gitless: boolean,
+    ) =>
+      Effect.gen(function* () {
+        yield* movePhase(transaction, rows.session.id, 'review')
+        const events = [buildEvent(rows, 'build.phase_started', 'hemera', { phase: 'review' })]
+        if (!gitless) return events
+        const number = yield* insertRound(transaction, rows.session.id, crypto.randomUUID(), [], at)
+        events.push(buildEvent(rows, 'review.round_opened', 'hemera', { number, kind: 'spec' }))
+        return events
+      })
+
+    /**
      * What an attempt's checks said (D10-07). A task's: all green, or none, is done; red goes back
      * in progress as a new attempt, whose failures the agent is told at its next safe point; the
      * third red comes back to the user. A story's or the build's: the attempt is recorded, and a
@@ -928,6 +984,8 @@ export const buildsLayer = Layer.effect(
           judged.scope === 'task' && next === 'in_progress'
             ? yield* snapshotsOf(before)
             : { trees: [], failures: [] }
+        // Whether the Workspace holds no Git repository, where `review` is skipped (issue #279).
+        const gitless = judged.scope !== 'task' && (yield* repositoriesOf(before)).length === 0
         const at = now()
         const jobs = yield* withDatabase(
           mutate('judging an attempt', (transaction) =>
@@ -942,16 +1000,12 @@ export const buildsLayer = Layer.effect(
                 .set(judged.scope === 'task' ? { result } : { result, endedAt: at })
                 .where(eq(buildAttempts.id, judged.id))
                 .pipe(Effect.mapError(failed('writing the verdict')))
-              // The checks a review sent the build back to (issue #117) are over: the user decides
-              // again on what they answered — green, or red and handed to the agent.
-              if (judged.scope === 'build' && current.session.buildReviewAt !== null) {
-                yield* transaction
-                  .update(sessions)
-                  .set({ buildReviewAt: null })
-                  .where(eq(sessions.id, sessionId))
-                  .pipe(Effect.mapError(failed('closing the review')))
-              }
               const rows = yield* readBuild(transaction, sessionId)
+              // The end checks are green: `verify` is over, and the build goes on to `review`
+              // (issue #279).
+              if (judged.scope !== 'task' && rows?.phase === 'verify' && verifyGreen(rows)) {
+                return { result: [], events: yield* reviewBegins(transaction, rows, at, gitless) }
+              }
               const task = rows?.tasks.find((one) => one.id === judged.buildTaskId)
               if (rows === null || task === undefined || stateOf(task) !== 'checking') {
                 return { result: [], events: [] }
@@ -1378,7 +1432,8 @@ export const buildsLayer = Layer.effect(
     /**
      * `reproduction_replayed` (issue #203): what the replay of a bug's reproduction showed, held on
      * the Session until the end checks that follow the turn take it with them. Only a `bug` has a
-     * reproduction, and only its final checks — or a review, which runs them again — ask for it.
+     * reproduction, and only its final checks — or the fix of a round's feedback, which runs them
+     * again (issue #279) — ask for it.
      */
     const replay = (
       sessionId: string,
@@ -1398,10 +1453,10 @@ export const buildsLayer = Layer.effect(
                   events: [],
                 }
               }
-              if (rows.phase !== 'verify' && rows.session.buildReviewAt === null) {
+              if (rows.phase !== 'verify' && rows.phase !== 'feedback') {
                 return {
                   result:
-                    'the reproduction is replayed in the final checks, once every task is settled',
+                    'the reproduction is replayed in the final checks, once every task is settled, or while fixing the feedback of a review',
                   events: [],
                 }
               }
@@ -1458,8 +1513,9 @@ export const buildsLayer = Layer.effect(
 
     const view = (sessionId: string) =>
       Effect.gen(function* () {
-        const rows = yield* must(sessionId)
-        return viewOf(rows, yield* rounds.read(sessionId))
+        // The rounds first: reading them marks a stale one, which Accept is then judged on.
+        const checked = yield* rounds.read(sessionId)
+        return viewOf(yield* must(sessionId), checked)
       })
 
     /** A change the user made, written with its line, then what follows it started. */
@@ -1767,20 +1823,45 @@ export const buildsLayer = Layer.effect(
               yield* wake(sessionId)
             }
           }
-          if (delivery.kind === 'review') {
-            // The turn that carried the user's review is over (issue #117): every task stands where
-            // it stood, the build goes on to `verify`, and the whole Spec is checked again — the
-            // check the user's Accept rests on cannot be the one that ran before their review.
+          if (delivery.phase === 'review') {
+            // The turn that handed the `review` brief — or a resume in `review` — is over: the
+            // review of the helpers is done, and the user's begins: a round opens on the result as
+            // it stands now (issue #279). A round already open, or a build that moved on, is left.
+            const rows = yield* read(sessionId)
+            if (
+              rows !== null &&
+              rows.phase === 'review' &&
+              rows.session.buildPausedAt === null &&
+              unclosedRound(rows) === undefined
+            ) {
+              yield* rounds.open(sessionId).pipe(logged(`opening the review round of ${sessionId}`))
+            }
+          }
+          if (delivery.phase === 'feedback') {
+            // The turn that handed the feedback of a round is over (issue #279): the round is
+            // closed, the focus goes back to `execute`, which every task being settled goes on to
+            // `verify`, and the end checks of the whole Spec run again on what the fix changed.
             const at = now()
             const jobs = yield* withDatabase(
-              mutate('closing the review', (transaction) =>
+              mutate('closing the fix of the feedback', (transaction) =>
                 Effect.gen(function* () {
                   const rows = yield* readBuild(transaction, sessionId)
-                  if (rows === null || rows.phase !== 'execute') return { result: [], events: [] }
+                  const round = rows === null ? undefined : unclosedRound(rows)
+                  if (rows === null || rows.phase !== 'feedback' || round?.state !== 'fixing') {
+                    return { result: [], events: [] }
+                  }
+                  const events: NewEvent[] = [
+                    yield* closeRound(transaction, rows, round, at, 'hemera'),
+                  ]
+                  yield* movePhase(transaction, sessionId, 'execute')
+                  events.push(
+                    buildEvent(rows, 'build.phase_started', 'hemera', { phase: 'execute' }),
+                  )
                   const followed = yield* follow(transaction, sessionId, at)
+                  events.push(...followed.events)
                   const fresh = yield* readBuild(transaction, sessionId)
                   if (fresh === null || fresh.phase !== 'verify') {
-                    return { result: followed.jobs, events: followed.events }
+                    return { result: followed.jobs, events }
                   }
                   const ends = fresh.attempts.filter((attempt) => attempt.scope === 'build')
                   const attemptId = yield* openAttempt(transaction, {
@@ -1793,7 +1874,7 @@ export const buildsLayer = Layer.effect(
                     trees: [],
                   })
                   const job: CheckJob = { attemptId, when: 'end' }
-                  return { result: [...followed.jobs, job], events: followed.events }
+                  return { result: [...followed.jobs, job], events }
                 }),
               ),
             )
@@ -1922,30 +2003,80 @@ export const buildsLayer = Layer.effect(
       accept: (sessionId) =>
         Effect.gen(function* () {
           yield* open(sessionId)
-          return yield* acted(sessionId, 'accepting the build', (transaction, rows) =>
+          // The round is compared with the Workspace first: a stale one is marked before Accept.
+          yield* rounds.read(sessionId)
+          return yield* acted(sessionId, 'accepting the build', (transaction, rows, at) =>
             Effect.gen(function* () {
               const refusal = acceptRefusal(rows)
-              if (refusal !== null) {
-                return yield* Effect.fail(new BuildRefusedError({ reason: refusal }))
+              const round = unclosedRound(rows)
+              if (refusal !== null || round === undefined) {
+                return yield* Effect.fail(
+                  new BuildRefusedError({ reason: refusal ?? 'No review round is open.' }),
+                )
               }
               // The Spec stays in progress, and nothing touches the branch or the files: delivery
-              // is a later lot's (D10-11).
+              // is a later lot's (D10-11). The round the user accepted on is over with the build.
               yield* movePhase(transaction, sessionId, 'accepted')
-              return { events: [buildEvent(rows, 'build.accepted', 'human')], follows: false }
+              return {
+                events: [
+                  yield* closeRound(transaction, rows, round, at, 'human'),
+                  buildEvent(rows, 'build.accepted', 'human'),
+                ],
+                follows: false,
+              }
             }),
           ).pipe(Effect.tap(() => stopChecks(sessionId)))
+        }),
+
+      fix: (sessionId) =>
+        Effect.gen(function* () {
+          yield* open(sessionId)
+          return yield* acted(sessionId, 'asking for a fix', (transaction, rows, at) =>
+            Effect.gen(function* () {
+              const refuse = (reason: string) => Effect.fail(new BuildRefusedError({ reason }))
+              const round = unclosedRound(rows)
+              if (rows.phase !== 'review' || round === undefined || round.state !== 'open') {
+                return yield* refuse('No review round is open.')
+              }
+              if (rows.session.buildPausedAt !== null) return yield* refuse('The build is paused.')
+              const given = rows.feedback.filter(
+                (one) => one.roundId === round.id && one.withdrawnAt === null,
+              )
+              if (given.length === 0) return yield* refuse('The round has no feedback to fix.')
+              yield* transaction
+                .update(reviewRounds)
+                .set({ state: 'fixing', fixingAt: at })
+                .where(eq(reviewRounds.id, round.id))
+                .pipe(Effect.mapError(failed('moving the review round to fixing')))
+              yield* movePhase(transaction, sessionId, 'feedback')
+              return {
+                events: [
+                  buildEvent(rows, 'review.round_moved', 'human', {
+                    number: round.number,
+                    state: 'fixing',
+                  }),
+                  buildEvent(rows, 'build.phase_started', 'hemera', { phase: 'feedback' }),
+                ],
+                follows: false,
+              }
+            }),
+          )
         }),
 
       stop: (sessionId) =>
         Effect.gen(function* () {
           yield* open(sessionId)
-          const stopped = yield* acted(sessionId, 'stopping the build', (transaction, rows) =>
-            movePhase(transaction, sessionId, 'stopped', { buildDetail: STOPPED }).pipe(
-              Effect.as({
-                events: [buildEvent(rows, 'build.stopped', 'human', { reason: STOPPED })],
-                follows: false,
-              }),
-            ),
+          const stopped = yield* acted(sessionId, 'stopping the build', (transaction, rows, at) =>
+            Effect.gen(function* () {
+              yield* movePhase(transaction, sessionId, 'stopped', { buildDetail: STOPPED })
+              const events = [buildEvent(rows, 'build.stopped', 'human', { reason: STOPPED })]
+              // A round of a stopped build is over: nothing is reviewed or fixed in it any more.
+              const round = unclosedRound(rows)
+              if (round !== undefined) {
+                events.unshift(yield* closeRound(transaction, rows, round, at, 'human'))
+              }
+              return { events, follows: false }
+            }),
           )
           yield* stopChecks(sessionId)
           yield* stopTurn(sessionId)
@@ -2076,37 +2207,6 @@ export const buildsLayer = Layer.effect(
             }),
           )
         }),
-
-      /**
-       * The user's review (issue #117): their message is the review itself, so nothing is carried
-       * over but the build sent back to work — and its whole Spec checked again once that turn is
-       * over, in `turnEnded`, never beside it.
-       */
-      review: (sessionId) =>
-        read(sessionId).pipe(
-          Effect.flatMap((rows) =>
-            // A build that waits for the review and nothing else: any other message is the user
-            // talking to the agent, and moves no phase.
-            rows === null || !awaitsReview(rows)
-              ? Effect.void
-              : acted(sessionId, "taking the user's review", (transaction, fresh, at) =>
-                  Effect.gen(function* () {
-                    yield* movePhase(transaction, sessionId, 'execute')
-                    yield* transaction
-                      .update(sessions)
-                      .set({ buildReviewAt: at })
-                      .where(eq(sessions.id, sessionId))
-                      .pipe(Effect.mapError(failed('recording the review of the user')))
-                    return {
-                      events: [buildEvent(fresh, 'build.reviewed', 'human')],
-                      // The ready set is not looked at here: every task stands where it stood, and
-                      // `follow` moves the phase on once the review's own turn is over.
-                      follows: false,
-                    }
-                  }),
-                ).pipe(Effect.asVoid),
-          ),
-        ),
 
       recover: () =>
         Effect.gen(function* () {

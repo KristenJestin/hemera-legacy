@@ -2755,8 +2755,7 @@ export const runtimeLayer = Layer.effect(
     /**
      * Hands over what waits, if anything does, right before the prompt of a turn the user
      * started: it goes out inside that turn, and whatever the agent answers it lands there. What
-     * it handed is answered with, so the end of that turn is the end of theirs: the review of a
-     * build handed with the user's message is over when the turn is (issue #117).
+     * it handed is answered with, so the end of that turn is the end of theirs.
      */
     const handOver = (sessionId: string, held: Live) =>
       Effect.gen(function* () {
@@ -3036,10 +3035,6 @@ export const runtimeLayer = Layer.effect(
           closed: null,
         }
         starting.set(sessionId, turn)
-
-        // The user's message is their review when the build waits for one (issue #117): the build
-        // goes back to work on it, and this very turn is the one handed the review brief.
-        yield* attempt("taking the user's review", builds.review(sessionId))
 
         return yield* announcedTurn(sessionId, text, turn, intent).pipe(
           Effect.ensuring(

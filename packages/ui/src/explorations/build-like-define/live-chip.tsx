@@ -2,14 +2,14 @@ import { AnimatePresence, motion, useAnimate } from 'motion/react'
 import { type ReactNode, type RefObject, useEffect, useRef, useState } from 'react'
 
 import { IconCheck, IconPlayerStop, IconX } from '../../icons.ts'
-import { CROSSFADE, crossfade, instant, morph, pinging, pop, useTransition } from '../../motion.ts'
+import { CROSSFADE, crossfade, instant, morph, pop, useTransition } from '../../motion.ts'
 
 /**
  * What the run chips and the helper chips share (maintainer's spec of 30 September on issue #77):
  * the chip's own neutral surface, no dot, and a background that moves and never stays tinted.
  *
- * - working · a tint wipes across the background on the running dot's beat; the chip's own icon
- *   stands, and the duration ticks in seconds (`112 s`);
+ * - working · a calm sign that it works (`WorkingLook`); the chip's own icon stands, and the
+ *   duration ticks in seconds (`112s`);
  * - still · working and silent for too long: the same chip, and nothing moving across it;
  * - done · the wipe crosses once in the success tint and leaves the chip neutral; the chip's icon
  *   gives way to a plain tick, the one thing coloured;
@@ -26,7 +26,21 @@ export type ChipState = 'working' | 'still' | 'finished' | 'failed' | 'stopped'
 export const CHIP =
   'relative isolate inline-flex h-control-sm max-w-menu-side min-w-0 items-center gap-1.5 overflow-hidden rounded-md border border-border bg-card px-2 text-xs outline-none hover:bg-accent focus-ring data-popup-open:bg-accent'
 
-const WIPE = 'pointer-events-none absolute inset-0 -z-10 bg-warning-muted'
+/**
+ * How a chip says it is working, calmly (maintainer's feedback: a head line of chips wiping at once
+ * was disturbing). Nothing travels across it any more while the progress is not known:
+ *
+ * - `faint` · the whole background, a faint tint breathing on the running dot's beat;
+ * - `line` · a thin line along its foot, still. Recommended: nothing on the line moves while a run
+ *   works, and the seconds ticking already say it does.
+ */
+export type WorkingLook = 'faint' | 'line'
+
+const WORKING: Record<WorkingLook, string> = {
+  faint:
+    'pointer-events-none absolute inset-0 -z-10 bg-warning-muted opacity-50 motion-safe:animate-breathe',
+  line: 'pointer-events-none absolute inset-x-0 bottom-0 -z-10 h-0.5 bg-warning/60',
+}
 
 const LAST_WIPE: Record<'finished' | 'failed', string> = {
   finished: 'pointer-events-none absolute inset-0 -z-10 bg-success-muted',
@@ -47,7 +61,13 @@ const ENDED: Record<'finished' | 'failed' | 'stopped', string> = {
 
 const LABEL = 'min-w-0 truncate font-medium'
 
-const TIME = 'shrink-0 font-mono text-muted-foreground tabular-nums'
+/**
+ * The duration's room, reserved for three digits and the unit (`999s`) and set against its end,
+ * so the chip does not move as a digit is added; past 999 s it steps once to four.
+ */
+const TIME = 'w-8 shrink-0 text-right font-mono text-muted-foreground tabular-nums'
+
+const TIME_LONG = 'w-10 shrink-0 text-right font-mono text-muted-foreground tabular-nums'
 
 /**
  * The one short shake of what failed: out and back, once, on the pop's beat. A kind of the
@@ -55,9 +75,9 @@ const TIME = 'shrink-0 font-mono text-muted-foreground tabular-nums'
  */
 const SHAKE = { x: [0, -3, 2, 0] }
 
-/** A duration in seconds and nothing else: `42 s`, `112 s`. */
+/** A duration in seconds and nothing else, the unit against the number: `1s`, `42s`, `112s`. */
 export function durationOf(ms: number): string {
-  return `${String(Math.max(0, Math.floor(ms / 1000)))} s`
+  return `${String(Math.max(0, Math.floor(ms / 1000)))}s`
 }
 
 /** The time now, read again each second while something works. */
@@ -117,11 +137,19 @@ export interface ChipFaceProps {
   icon: ReactNode
   name: string
   time: string
+  /** How it says it is working. */
+  working?: WorkingLook | undefined
 }
 
 /** What a chip holds: the moving background, its icon or the end that replaced it, name and time. */
-export function ChipFace({ live, state, icon, name, time }: ChipFaceProps): ReactNode {
-  const looping = useTransition(pinging)
+export function ChipFace({
+  live,
+  state,
+  icon,
+  name,
+  time,
+  working = 'line',
+}: ChipFaceProps): ReactNode {
   const ending = useTransition(morph)
   const fade = useTransition(crossfade)
   const { shows } = live
@@ -129,15 +157,7 @@ export function ChipFace({ live, state, icon, name, time }: ChipFaceProps): Reac
   const ended = end !== null
   return (
     <>
-      {state === 'working' && looping !== instant && (
-        <motion.span
-          aria-hidden="true"
-          className={WIPE}
-          initial={{ x: '-100%' }}
-          animate={{ x: '100%' }}
-          transition={looping}
-        />
-      )}
+      {state === 'working' && <span aria-hidden="true" className={WORKING[working]} />}
       {live.wiping && (state === 'finished' || state === 'failed') && (
         <motion.span
           key="last"
@@ -176,7 +196,7 @@ export function ChipFace({ live, state, icon, name, time }: ChipFaceProps): Reac
         </AnimatePresence>
       </span>
       <span className={LABEL}>{name}</span>
-      <span className={TIME}>{time}</span>
+      <span className={time.length > 4 ? TIME_LONG : TIME}>{time}</span>
     </>
   )
 }

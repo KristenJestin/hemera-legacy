@@ -1,4 +1,3 @@
-import { AnimatePresence, motion } from 'motion/react'
 import { type ReactNode, useState } from 'react'
 
 import type { CommandState } from '../../activity/command-run.tsx'
@@ -8,7 +7,6 @@ import { Popover } from '../../components/popover/popover.tsx'
 import { StatusDot } from '../../components/status-dot/status-dot.tsx'
 import { Tooltip } from '../../components/tooltip/tooltip.tsx'
 import { IconInfoCircle, IconPlayerStop, IconRefresh } from '../../icons.ts'
-import { fold, useTransition } from '../../motion.ts'
 import {
   GOING_ON_TONES,
   GOING_ON_WORDS,
@@ -16,22 +14,21 @@ import {
   GoingOnOutput,
 } from '../../session/going-on-details.tsx'
 import { type GoingOnRun, goingOnStateOf } from '../../session/going-on.ts'
-import { CHIP, ChipFace, type ChipState, durationOf, useLiveChip, useNow } from './live-chip.tsx'
+import {
+  CHIP,
+  ChipFace,
+  type ChipState,
+  type WorkingLook,
+  durationOf,
+  useLiveChip,
+  useNow,
+} from './live-chip.tsx'
 
 /**
  * The runs of the head line as chips that say what they are doing (maintainer's spec of 30
- * September on issue #77, after React Bits' "call chip", written again on the design system's own
- * kinds). The chip is the run's own, neutral, with no dot; only its background moves, and only
- * for a moment, and only its icon ever takes a colour. Its glance and ⓘ are what they were.
- *
- * - running · a tint wipes across the background on the running dot's beat; the type icon stays,
- *   and the duration ticks in seconds (`112 s`);
- * - done · the same wipe crosses once in the success tint and leaves the chip neutral; the type
- *   icon gives way to a plain tick, in the success colour;
- * - failed · the same wipe once in the failure's tint, one short shake, the chip neutral again; the
- *   type icon gives way to a plain cross, in the failure's colour, and a retry glyph opens beside it.
- *
- * Asked for less movement, no wipe and no shake: the icon is there at once.
+ * September on issue #77): the run's own neutral chip, no dot, a calm sign while it works, one wipe
+ * in the tint it ends on and its type icon given way to a plain tick or cross — what `live-chip`
+ * holds for run and helper chips alike. Running it again is in its glance. Its ⓘ is what it was.
  */
 
 /** A run and the moments its duration is read from. */
@@ -43,15 +40,9 @@ export interface LiveRun {
 
 const SLOT = 'flex shrink-0 items-center pr-1.5'
 
-const OPENS = 'flex shrink-0 overflow-hidden'
-
 const ICON = 'flex shrink-0 text-muted-foreground'
 
 const LABEL = 'min-w-0 truncate font-medium'
-
-const SHOWN = { width: 'auto', filter: 'opacity(1)' } as const
-
-const HIDDEN = { width: 0, filter: 'opacity(0)' } as const
 
 const GLANCE = 'flex w-menu-panel flex-col gap-2'
 
@@ -69,11 +60,13 @@ const CHIP_STATES: Record<CommandState, ChipState> = {
 
 export interface RunChipsProps {
   runs: readonly LiveRun[]
+  /** How a running chip says it works; the calm line unless a story compares. */
+  working?: WorkingLook | undefined
   onStop: (id: string) => void
   onRetry: (id: string) => void
 }
 
-export function RunChips({ runs, onStop, onRetry }: RunChipsProps): ReactNode {
+export function RunChips({ runs, working, onStop, onRetry }: RunChipsProps): ReactNode {
   const [details, setDetails] = useState<string | null>(null)
   const shown = runs.find((run) => run.item.id === details)
   return (
@@ -82,6 +75,7 @@ export function RunChips({ runs, onStop, onRetry }: RunChipsProps): ReactNode {
         <RunChip
           key={run.item.id}
           run={run}
+          working={working}
           onStop={() => onStop(run.item.id)}
           onRetry={() => onRetry(run.item.id)}
           onDetails={() => setDetails(run.item.id)}
@@ -102,11 +96,13 @@ export function RunChips({ runs, onStop, onRetry }: RunChipsProps): ReactNode {
 
 function RunChip({
   run,
+  working,
   onStop,
   onRetry,
   onDetails,
 }: {
   run: LiveRun
+  working: WorkingLook | undefined
   onStop: () => void
   onRetry: () => void
   onDetails: () => void
@@ -118,7 +114,6 @@ function RunChip({
   const [glance, setGlance] = useState(false)
   const chipState = CHIP_STATES[item.state]
   const live = useLiveChip(chipState)
-  const opening = useTransition(fold)
   const Icon = COMMAND_TYPE_ICONS[item.type]
   const name = `${item.name}, ${GOING_ON_WORDS[state]}`
   const time = durationOf((run.endedAt ?? now) - run.startedAt)
@@ -146,6 +141,7 @@ function RunChip({
                 icon={<Icon size="sm" aria-hidden="true" />}
                 name={item.name}
                 time={time}
+                working={working}
               />
             </button>
           }
@@ -191,22 +187,6 @@ function RunChip({
           </div>
         </Popover>
       </span>
-      <AnimatePresence initial={false}>
-        {state === 'failed' && (
-          <motion.span
-            key="retry"
-            className={OPENS}
-            initial={HIDDEN}
-            animate={SHOWN}
-            exit={HIDDEN}
-            transition={opening}
-          >
-            <Act label={`Run ${item.name} again`} tip="Run again" onPress={onRetry}>
-              <IconRefresh size="sm" />
-            </Act>
-          </motion.span>
-        )}
-      </AnimatePresence>
     </span>
   )
 }

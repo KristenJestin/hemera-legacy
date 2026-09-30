@@ -1,6 +1,7 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
 import { type ReactNode, useEffect, useState } from 'react'
 import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
+import { type Journey, journeyOf } from '../../.storybook/journey.ts'
 import { movesLess } from '../../.storybook/reduced-motion.ts'
 
 import { CreateWorkspaceDialog } from './create-workspace-dialog.tsx'
@@ -418,10 +419,11 @@ function Arriving({ name }: { name: string }): ReactNode {
   )
 }
 
-/** The height of a room and of what it holds, one pair per frame. */
+/** The height of a room and of what it holds, one pair per frame, and when each frame came. */
 interface Frames {
   room: number[]
   held: number[]
+  at: number[]
 }
 
 /** What is watched while the row is open, and the way to stop watching. */
@@ -437,11 +439,12 @@ interface Followed {
  * what has to stop being a number the room decided once.
  */
 function following(room: HTMLElement, content: HTMLElement): Followed {
-  const frames: Frames = { room: [], held: [] }
+  const frames: Frames = { room: [], held: [], at: [] }
   let running = true
   const tick = (): void => {
     frames.room.push(room.getBoundingClientRect().height)
     frames.held.push(content.getBoundingClientRect().height)
+    frames.at.push(performance.now())
     if (running) requestAnimationFrame(tick)
   }
   requestAnimationFrame(tick)
@@ -464,47 +467,67 @@ export const Unfolding: Story = {
     const canvas = within(canvasElement)
     const row = rowOf(canvasElement, 'login-form')
     const disclosure = row.getByRole('button', { name: 'Details of login-form' })
-    await userEvent.click(disclosure)
-
-    const room = await waitFor(() => {
-      const element = document.getElementById(disclosure.getAttribute('aria-controls')!)
-      expect(element, 'the room is not open').not.toBeNull()
-      return element!
-    })
-    const content = room.firstElementChild
-    if (!(content instanceof HTMLElement)) throw new Error('the room holds no details')
+    const roomOf = (): HTMLElement | null =>
+      document.getElementById(disclosure.getAttribute('aria-controls') ?? '')
     const height = (element: HTMLElement): number => element.getBoundingClientRect().height
 
-    // What Git is reading is already the height it will answer in; the steps are not there yet,
-    // and it is the growth that the room has to play rather than take.
-    const seen = following(room, content)
-    const before = height(content)
-    await waitFor(
-      () => {
-        expect(canvas.queryByText('Reading Git…')).toBeNull()
-        expect(Math.abs(height(room) - height(content))).toBeLessThan(0.5)
-      },
-      { timeout: 5000 },
-    )
-    seen.stop()
+    const unfold = async (tries: number): Promise<Journey> => {
+      await userEvent.click(disclosure)
+      const room = await waitFor(() => {
+        const element = roomOf()
+        expect(element, 'the room is not open').not.toBeNull()
+        return element!
+      })
+      const content = room.firstElementChild
+      if (!(content instanceof HTMLElement)) throw new Error('the room holds no details')
 
-    // The fold ends at the full height…
-    expect(height(content)).toBeGreaterThan(before)
-    expect(height(room)).toBeCloseTo(height(content), 0)
-    // …and it got there over frames rather than in one: between the height it started at and the
-    // height it now holds, the room was seen on a height of its own, which a jump never gives —
-    // a jump is the first height and then the second, and nothing between. What is counted is the
-    // frames it was seen on, not a duration: a loaded machine shows the journey on fewer of them,
-    // and the one is what tells a journey from a jump. A system that asked for less movement
-    // plays no journey at all — the fold is `instant` — and the end state read above is then the
-    // whole of what this story answers for.
-    const moving = seen.frames.room.filter(
-      (sample, index) => sample > before + 1 && sample < seen.frames.held[index]! - 1,
-    )
+      // What Git is reading is already the height it will answer in; the steps are not there yet,
+      // and it is the growth that the room has to play rather than take.
+      const seen = following(room, content)
+      const before = height(content)
+      await waitFor(
+        () => {
+          expect(canvas.queryByText('Reading Git…')).toBeNull()
+          expect(Math.abs(height(room) - height(content))).toBeLessThan(0.5)
+        },
+        { timeout: 5000 },
+      )
+      // One more frame read, so that the watch has seen it land and not only the way there.
+      await new Promise((drawn) => requestAnimationFrame(drawn))
+      seen.stop()
+
+      // The fold ends at the full height…
+      const to = height(content)
+      expect(to).toBeGreaterThan(before)
+      expect(height(room)).toBeCloseTo(to, 0)
+      // …and it got there over frames rather than in one: between the height it started at and
+      // the height it now holds, the room was seen on a height of its own, which a jump never
+      // gives. The room's own opening, under the height Git's lines take, is not the growth, so
+      // it reads as the height it started at. Each frame carries the time it came: a growth no
+      // frame was there to see, because a frame came later than the whole of it on a machine busy
+      // with the rest of the run, is told from a jump, and the row is folded and unfolded again,
+      // up to five times. A jump seen between frames close together fails on the first try.
+      const { room: rooms, at } = seen.frames
+      const journey = journeyOf(
+        rooms.map((value, index) => ({ at: at[index]!, value: Math.max(value, before) })),
+        before,
+        to,
+      )
+      if (journey !== 'unseen' || tries === 1) return journey
+      await userEvent.click(disclosure)
+      await waitFor(() => {
+        expect(roomOf()).toBeNull()
+      })
+      return unfold(tries - 1)
+    }
+
+    // A system that asked for less movement plays no journey at all — the fold is `instant` — and
+    // the end state read above is then the whole of what this story answers for.
+    const journey = await unfold(movesLess() ? 1 : 5)
     if (movesLess()) {
-      expect(moving).toHaveLength(0)
+      expect(journey).not.toBe('travelled')
     } else {
-      expect(moving.length).toBeGreaterThan(0)
+      expect(journey, 'the room jumped to the height of what it holds').toBe('travelled')
     }
   },
 }

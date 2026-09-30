@@ -2,6 +2,7 @@ import type { Meta, StoryObj } from '@storybook/react-vite'
 import { type ReactNode, useState } from 'react'
 import { expect, userEvent, waitFor, within } from 'storybook/test'
 
+import { WHOLE_WAY } from '../../.storybook/journey.ts'
 import { AT_ONCE, movesLess, withinFrames } from '../../.storybook/reduced-motion.ts'
 import { Button } from '../components/button/button.tsx'
 import { Disclosure } from './disclosure.tsx'
@@ -64,6 +65,10 @@ function roomOf(canvasElement: HTMLElement, row: HTMLElement): HTMLElement | nul
 interface FoldFrame {
   closed: boolean
   height: number
+  /** Whether the body was still in the page on that frame. */
+  present: boolean
+  /** When the frame came, in milliseconds. */
+  at: number
 }
 
 /**
@@ -81,6 +86,8 @@ function foldOverFrames(row: HTMLElement, room: HTMLElement): Promise<FoldFrame[
       seen.push({
         closed: row.getAttribute('aria-expanded') === 'false',
         height: room.getBoundingClientRect().height,
+        present: room.isConnected,
+        at: performance.now(),
       })
       const closedAt = seen.findIndex((frame) => frame.closed)
       if (left === 0 || (closedAt !== -1 && seen.length >= closedAt + 4)) {
@@ -127,25 +134,34 @@ export const ClosedWhileOpening: Story = {
     const row = canvas.getByRole('button', { name: /Read src\/session\/session\.tsx/ })
     const written = /\[11\] packages\/ui\/src\/session\/session\.tsx/
 
-    await userEvent.click(row)
-    await expect(row).toHaveAttribute('aria-expanded', 'true')
-    // Mid-opening, not at the end of it: the spring has made some of its room and is still
-    // growing when the press lands.
-    // Waited for by frames, never by the clock: a saturated machine may give the spring no frame
-    // in any fixed time, and a press on a room still at 0 px would prove nothing.
-    await expect(
-      await withinFrames(() => {
-        const opening = roomOf(canvasElement, row)
-        return opening !== null && opening.getBoundingClientRect().height > MID_OPENING
-      }, PATIENCE),
-      'the fold never started to open',
-    ).toBe(true)
-    const room = roomOf(canvasElement, row)
-    expect(room, 'the fold is open, so the body is in the page').not.toBeNull()
+    const closeWhileOpening = async (tries: number): Promise<FoldFrame[]> => {
+      await userEvent.click(row)
+      await expect(row).toHaveAttribute('aria-expanded', 'true')
+      // Mid-opening, not at the end of it: the spring has made some of its room and is still
+      // growing when the press lands.
+      // Waited for by frames, never by the clock: a saturated machine may give the spring no frame
+      // in any fixed time, and a press on a room still at 0 px would prove nothing.
+      await expect(
+        await withinFrames(() => {
+          const opening = roomOf(canvasElement, row)
+          return opening !== null && opening.getBoundingClientRect().height > MID_OPENING
+        }, PATIENCE),
+        'the fold never started to open',
+      ).toBe(true)
+      const room = roomOf(canvasElement, row)
+      expect(room, 'the fold is open, so the body is in the page').not.toBeNull()
 
-    const watched = foldOverFrames(row, room!)
-    await userEvent.click(row)
-    const seen = await watched
+      const watched = foldOverFrames(row, room!)
+      await userEvent.click(row)
+      const seen = await watched
+      if (tries === 1 || movesLess() || !unseen(seen)) return seen
+      await waitFor(() => {
+        expect(canvas.queryByText(written)).toBeNull()
+      })
+      return closeWhileOpening(tries - 1)
+    }
+
+    const seen = await closeWhileOpening(5)
     const closedAt = seen.findIndex((frame) => frame.closed)
     expect(closedAt, 'the line never said the fold was closed').toBeGreaterThanOrEqual(0)
 
@@ -157,13 +173,13 @@ export const ClosedWhileOpening: Story = {
       )
       return
     }
-    // Mid-exit: the line already says the fold is closed, and the body is still in the page,
-    // folding away from where the opening had got to.
-    await expect(canvas.getByText(written)).toBeInTheDocument()
-    const heights = seen.slice(closedAt, closedAt + 4).map((frame) => frame.height)
-    await expect(heights).toHaveLength(4)
-    // The three frames of the closing, each against the one before it: no step of the way down
-    // is upwards. A spring carrying the opening's speed grows on the first of them — 6.8 to 7.4 px
+    // Mid-exit: on the frame the line first says the fold is closed, the body is still in the
+    // page, folding away from where the opening had got to. Read on that frame, and not once the
+    // frames are over: by then a fold on a busy machine may rightly have finished leaving.
+    await expect(seen[closedAt]!.present, 'the body left with the press').toBe(true)
+    const heights = foldingAway(seen.slice(closedAt, closedAt + 4))
+    // The frames of the closing, each against the one before it: no step of the way down is
+    // upwards. A spring carrying the opening's speed grows on the first of them — 6.8 to 7.4 px
     // measured against dev — and this is what reads it.
     const steps = heights.slice(1).map((height, frame) => height - heights[frame]!)
     await expect(
@@ -174,6 +190,34 @@ export const ClosedWhileOpening: Story = {
       expect(canvas.queryByText(written)).toBeNull()
     })
   },
+}
+
+/**
+ * The heights of the closing up to the first frame it had folded all the way, which is the end of
+ * the way down: the frames after it read a room at nothing, or gone, and say nothing of the way.
+ */
+function foldingAway(frames: readonly FoldFrame[]): number[] {
+  const gone = frames.findIndex((frame) => frame.height === 0)
+  return (gone === -1 ? frames : frames.slice(0, gone + 1)).map((frame) => frame.height)
+}
+
+/**
+ * Whether the frames were too far apart to see the way down: the fold was all the way down by the
+ * frame after the press, or the one after that, and a frame came later than the whole of a spring
+ * of the preset after the one before it. On a machine busy with the rest of the run such a gap can
+ * swallow the frame a spring carrying the opening's speed grew on, so nothing was seen either way
+ * and the fold is opened and closed again. Frames close together that see the room at nothing at
+ * once have seen a fold that jumped, and that is judged.
+ */
+function unseen(seen: readonly FoldFrame[]): boolean {
+  const closedAt = seen.findIndex((frame) => frame.closed)
+  if (closedAt === -1) return false
+  const closing = seen.slice(Math.max(0, closedAt - 1), closedAt + 4)
+  const heights = foldingAway(closing)
+  if (heights.length > 3) return false
+  return closing
+    .slice(1, heights.length)
+    .some((frame, index) => frame.at - closing[index]!.at >= WHOLE_WAY)
 }
 
 /** The press the body holds, which is what the keyboard reaches while the fold is open. */

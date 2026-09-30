@@ -6,10 +6,10 @@ import type { TagBadgeParameters } from 'storybook-addon-tag-badges/manager-help
 /**
  * The two badges of the sidebar, and the whole of what the catalogue shows beside an entry.
  *
- * A lot's stories are found by looking, not by reading a diff: the story file it created wears
- * `new`, the one whose component it changed wears `updated`. The badge is the lot's and not the
- * component's — the lot that follows takes the previous one's off — so what it says is always
- * about what is being reviewed, and `pnpm test` refuses a badge the branch did not earn.
+ * A branch's stories are found by looking, not by reading a diff: the story file it created wears
+ * `new`, the one whose file or component it changed wears `updated`. Git decides, when Storybook
+ * indexes the stories (`badges.ts`), so what a badge says is always about what is being reviewed
+ * and no story file writes one.
  *
  * The addon ships a wider default set (alpha, deprecated, version…): none of it is kept, because
  * a badge nobody asked for is a badge nobody reads. It also picks the first badge an entry

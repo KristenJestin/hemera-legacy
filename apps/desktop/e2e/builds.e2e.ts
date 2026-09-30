@@ -30,7 +30,7 @@ import { repository } from '../tests/repositories.ts'
 import { fakeWorkspace } from './agent/install.ts'
 import { APPROACH, BUILDABLE, BUILDABLE_SECTIONS, FIXED, STORY } from './agent/script.ts'
 import { addProject, awaits, press, pressIn, region, shows, sidebar } from './hand.ts'
-import { buildNow, pressExactly, unfoldTasks } from './build-hand.ts'
+import { awaitsYours, buildNow, pressExactly, unfoldTasks } from './build-hand.ts'
 
 /** The folder of `main`, kept for the second instance, which goes on in it. */
 const MAIN = fakeWorkspace('builds')
@@ -40,6 +40,20 @@ const KEY = 'ATL-1'
 
 /** What the build Session is listed under: it has no message of the user's to be named after. */
 const BUILD = 'New session'
+
+/** Unfolds the stage of a task from its row, unless it is the one already unfolded. */
+async function unfoldStage(label: string): Promise<void> {
+  const found = await browser.execute((task: string) => {
+    const row = [...document.querySelectorAll('ol[aria-label^="Stories of"] button')].find((one) =>
+      (one.textContent ?? '').trim().startsWith(`${task},`),
+    )
+    if (!(row instanceof HTMLButtonElement)) return false
+    if (row.getAttribute('aria-expanded') !== 'true') row.click()
+    return true
+  }, label)
+  expect(found).toBe(true)
+  await browser.pause(300)
+}
 
 /**
  * The check: a line of the user's, red while the file is missing at the Workspace root. Node's own
@@ -127,7 +141,19 @@ describe('A build prepares before it executes', () => {
       specId,
       workspaceId,
     )
-    expect(launch.state).toBe('started')
+    // Answered once the launch is written, never after the agent (#132): on a Workspace already
+    // ready it is started in the engine right after, and the window follows it.
+    expect(launch.state).toBe('waiting')
+    await browser.waitUntil(
+      async () =>
+        await browser.execute(
+          async (spec: string) =>
+            (await window.hemera.invoke('launches.forSpec', { specId: spec })).launch?.state ===
+            'started',
+          specId,
+        ),
+      { timeout: 20_000, interval: 200, timeoutMsg: 'the build was never started' },
+    )
 
     await browser.waitUntil(async () => (await sidebar()).includes(BUILD), {
       timeout: 20_000,
@@ -135,7 +161,14 @@ describe('A build prepares before it executes', () => {
     })
     await press(BUILD)
     await awaits(APPROACH)
-    expect(await shows(`BUILD · opencode`)).toBe(true)
+    // The head names the Project alone (#149): the agent is read off the composer, whose box is
+    // addressed to it.
+    const box = await browser.execute(
+      () =>
+        document.querySelector('[role="textbox"][contenteditable]')?.getAttribute('aria-label') ??
+        '',
+    )
+    expect(box).toContain('opencode')
     expect(await shows(KEY)).toBe(true)
   })
 })
@@ -178,8 +211,9 @@ describe('The build view draws the Spec and the progress of its tasks', () => {
     expect(rows.find((row) => row.startsWith('T2'))).toMatch(/, for \S/)
 
     // Its evidence is on its stage, read there and not in the thread beside it: the red try said
-    // in plain words, and the file it changed.
-    await pressIn('ol[aria-label^="Stories of"]', 'T1')
+    // in plain words, and the file it changed. Each task's row unfolds its stage, and the view may
+    // have unfolded T1's already: pressed only when folded, as a hand would.
+    await unfoldStage('T1')
     await browser.waitUntil(
       async () => (await region('ol[aria-label="Tries of T1"]')).includes('exited with 1'),
       { timeout: 20_000, timeoutMsg: 'the red try of T1 was never said on its stage' },
@@ -192,15 +226,18 @@ describe('The build view draws the Spec and the progress of its tasks', () => {
 })
 
 describe('A human task waits for the user', () => {
-  it('T2 is the user’s, said in the view and above the composer, and never handed to the agent', async () => {
+  it('T2 is the user’s, said among the Session’s notices, and never handed to the agent', async () => {
     await browser.waitUntil(async () => (await buildNow(KEY)).states.T2 === 'yours', {
       timeout: 20_000,
       timeoutMsg: 'T2 never became the user’s',
     })
-    await awaits('Yours: T2 · Sign the export format off')
+    // What waits for the user is answered from the notices on the composer's edge (#237).
+    await awaitsYours('T2', 'Sign the export format off')
     const build = await buildNow(KEY)
     expect(build.states).toEqual({ T1: 'done', T2: 'yours', T3: 'waiting' })
     expect(build.handed.T2).toBe(false)
+    await browser.keys('Escape')
+    await browser.pause(400)
   })
 })
 

@@ -88,6 +88,12 @@ export const Variants: Story = {
   // offering to change them would only be offering something that does not happen.
   parameters: { controls: { disable: true } },
   args: { collapsed: true },
+  play: async ({ canvasElement }) => {
+    // Folded to its rail, the bar keeps the application's own icon, the face, and nothing else
+    // of the brand.
+    expect(canvasElement.querySelector('header [data-app-icon="prod"]')).not.toBeNull()
+    expect(within(canvasElement).queryByText('Hemera')).toBeNull()
+  },
 }
 
 /** The bar of a first launch: the mark, and nothing that supposes a Project. */
@@ -96,6 +102,8 @@ export const WithoutAProject: Story = {
   args: { projects: [], activeProjectId: null },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
+    // The mark is the application's own icon, drawn by the component the packages are drawn from.
+    expect(canvasElement.querySelector('header [data-app-icon="prod"]')).not.toBeNull()
     expect(canvas.queryByRole('navigation', { name: 'Projects' })).toBeNull()
     expect(canvas.queryByRole('button', { name: 'Add a Project' })).toBeNull()
     expect(canvas.queryByRole('button', { name: /Notifications/ })).toBeNull()

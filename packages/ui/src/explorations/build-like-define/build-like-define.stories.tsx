@@ -10,7 +10,7 @@ import {
   type HelperIconLook,
   type HelperIconName,
   type HelperIconSize,
-  TiledIcon,
+  HelperGlyphs,
 } from './helper-icons.tsx'
 import type { CommandState } from '../../activity/command-run.tsx'
 import { GOING_ON } from '../../session/going-on-fixtures.ts'
@@ -257,9 +257,9 @@ const ICONS: readonly { icon: HelperIconName; name: string }[] = [
 ]
 
 const LOOKS: readonly { look: HelperIconLook; name: string }[] = [
-  { look: 'mark', name: 'A · the icon, and Hemera’s tile as a corner mark (recommended)' },
-  { look: 'tint', name: 'B · the icon on a tint of its role' },
-  { look: 'plain', name: 'C · the icon alone; the tile only at 40 px' },
+  { look: 'pair', name: 'A · the bot and its role, side by side (recommended)' },
+  { look: 'badge', name: 'B · the bot, its role on a disc over its corner' },
+  { look: 'role', name: 'C · the role, the bot on a disc over its corner' },
 ]
 
 const SIZES: readonly HelperIconSize[] = ['sm', 'md', 'xl']
@@ -272,11 +272,11 @@ const SAMPLE_CHIP =
   'inline-flex h-control-sm items-center gap-1.5 rounded-md border border-border bg-card px-2 text-xs text-foreground'
 
 /**
- * The helper icons: the catalogue's icon for the role, and three ways to say it is a helper, each
- * at 16, 20 and 40 px and on a chip. A keeps the icon at its full size and puts Hemera's tile as a
- * mark on its corner, the same for every helper — what tells a helper's chip from a run's, since a
- * test run is a flask too. B puts it on a tint of its role. C keeps the icon alone on a chip and the
- * tile once there is room. A is recommended; the last row shows a new helper made by the rule.
+ * The helper icons: the bot says "a helper", a second icon of the catalogue says its role, and a
+ * free helper is the bot alone. Three ways to put the two together, each at 16, 20 and 40 px and on
+ * a chip. A sets them side by side, both at full size, and is the one that reads at 16 px: nothing
+ * in it is shrunk. B and C put one of the two on a small disc, which is too small at a chip's size
+ * to say what it is. The last row shows a new helper made by A's rule.
  */
 export const HelperIcons: Story = {
   render: () => (
@@ -303,7 +303,9 @@ export const HelperIcons: Story = {
         </section>
       ))}
       <section aria-label="A new helper" className="flex flex-col gap-3">
-        <h2 className="text-sm font-medium">A new helper, by A · any icon of the catalogue</h2>
+        <h2 className="text-sm font-medium">
+          A new helper, by A · the bot and any icon of the catalogue
+        </h2>
         <div className={ROW}>
           {[
             { glyph: IconDatabase, name: 'Migrator' },
@@ -313,11 +315,11 @@ export const HelperIcons: Story = {
             <div key={name} className={CELL}>
               <span className="flex items-end gap-3 text-foreground">
                 {SIZES.map((size) => (
-                  <TiledIcon key={size} glyph={glyph} size={size} />
+                  <HelperGlyphs key={size} role={glyph} size={size} />
                 ))}
               </span>
               <span className={SAMPLE_CHIP}>
-                <TiledIcon glyph={glyph} size="sm" />
+                <HelperGlyphs role={glyph} size="sm" />
                 <StatusDot status="running" size="sm" />
                 {name}
               </span>

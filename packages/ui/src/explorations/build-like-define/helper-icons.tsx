@@ -10,26 +10,26 @@ import {
 } from '../../icons.ts'
 
 /**
- * The icons of the helper agents (issue #77): one icon of the catalogue that says what the helper
- * is for — the robot for a free helper, the flask, the shield, the book, the pencil — and one sign
- * that says it is a helper. The icon in Hemera's tile read at 40 px and not at a chip's 16 px, so
- * the sign is tried three ways, each at 16, 20 and 40 px (story `HelperIcons`):
+ * The icons of the helper agents (issue #77, the maintainer's direction of 30 September): the bot
+ * says "a helper", and a second icon of the catalogue says its role — the flask, the shield, the
+ * book, the pencil. A free helper is the bot alone. Three ways to put the two together, each at
+ * 16, 20 and 40 px (story `HelperIcons`):
  *
- * - `plain` · the icon alone at its full size on a chip; the tile only once there is room, at 40;
- * - `tint` · the icon at its full size on a tinted square, one tint a role;
- * - `mark` · the icon at its full size, and Hemera's tile as a small mark on its corner, the same
- *   for every helper: what tells a helper's chip from a run's, whose icons come from the same
- *   catalogue (a test run is a flask too). Recommended, and what the chips and the glance draw.
+ * - `pair` · the bot and the role side by side, both at full size: nothing is shrunk, so both
+ *   read at 16 px. Recommended, and what the chips, the glance and the dialog draw.
+ * - `badge` · the bot at full size, the role on a small disc over its lower corner;
+ * - `role` · the role at full size, the bot on the small disc instead.
  *
- * A new defined helper needs no drawing: it picks one icon of the catalogue.
+ * A new defined helper needs no drawing: it picks one icon of the catalogue for its role.
  */
 
 export type HelperIconName = 'free' | 'reviewer' | 'security' | 'documenter' | 'prototyper'
 
-export type HelperIconLook = 'plain' | 'tint' | 'mark'
+export type HelperIconLook = 'pair' | 'badge' | 'role'
 
-export const HELPER_GLYPHS: Record<HelperIconName, FunctionComponent<IconProps>> = {
-  free: IconRobot,
+/** The role's icon; a free helper has none. */
+export const HELPER_ROLES: Record<HelperIconName, FunctionComponent<IconProps> | null> = {
+  free: null,
   reviewer: IconFlask,
   security: IconShield,
   documenter: IconBook,
@@ -39,99 +39,74 @@ export const HELPER_GLYPHS: Record<HelperIconName, FunctionComponent<IconProps>>
 /** 16 px on a chip, 20 px in a head, 40 px on its own. */
 export type HelperIconSize = 'sm' | 'md' | 'xl'
 
+/** The catalogue's step each icon is drawn at. */
+const STEP: Record<HelperIconSize, 'sm' | 'md' | 'lg'> = { sm: 'sm', md: 'md', xl: 'lg' }
+
 const BOX: Record<HelperIconSize, string> = {
   sm: 'relative inline-flex size-icon-sm shrink-0 items-center justify-center',
   md: 'relative inline-flex size-5 shrink-0 items-center justify-center',
   xl: 'relative inline-flex size-10 shrink-0 items-center justify-center',
 }
 
-/** The catalogue's step the icon is drawn at, filling its box. */
-const STEP: Record<HelperIconSize, 'sm' | 'md' | 'lg'> = { sm: 'sm', md: 'md', xl: 'lg' }
-
-/** The tinted square of `tint`, one tint a role, as the notices' kinds wear theirs. */
-const TINTS: Record<HelperIconName, string> = {
-  free: 'absolute inset-0 rounded-sm bg-muted',
-  reviewer: 'absolute inset-0 rounded-sm bg-info-muted',
-  security: 'absolute inset-0 rounded-sm bg-primary-muted',
-  documenter: 'absolute inset-0 rounded-sm bg-success-muted',
-  prototyper: 'absolute inset-0 rounded-sm bg-warning-muted',
+const PAIR: Record<HelperIconSize, string> = {
+  sm: 'inline-flex shrink-0 items-center gap-0',
+  md: 'inline-flex shrink-0 items-center gap-0.5',
+  xl: 'inline-flex shrink-0 items-center gap-1',
 }
 
-const TINT_XL: Record<HelperIconName, string> = {
-  free: 'absolute inset-0 rounded-lg bg-muted',
-  reviewer: 'absolute inset-0 rounded-lg bg-info-muted',
-  security: 'absolute inset-0 rounded-lg bg-primary-muted',
-  documenter: 'absolute inset-0 rounded-lg bg-success-muted',
-  prototyper: 'absolute inset-0 rounded-lg bg-warning-muted',
+/** The small disc over the lower corner, cut out of what is behind it. */
+const DISC: Record<HelperIconSize, string> = {
+  sm: 'absolute -right-1 -bottom-1 flex size-2.5 items-center justify-center rounded-full bg-card ring-1 ring-card',
+  md: 'absolute -right-1 -bottom-1 flex size-3 items-center justify-center rounded-full bg-card ring-1 ring-card',
+  xl: 'absolute -right-1 -bottom-1 flex size-5 items-center justify-center rounded-full bg-card ring-2 ring-card',
 }
 
-/** The icon's colour on its tint, the tint's own foreground. */
-const ON_TINT: Record<HelperIconName, string> = {
-  free: 'relative flex text-foreground',
-  reviewer: 'relative flex text-info-muted-foreground',
-  security: 'relative flex text-primary-muted-foreground',
-  documenter: 'relative flex text-success-muted-foreground',
-  prototyper: 'relative flex text-warning-muted-foreground',
+/** The icon on the disc, drawn at the catalogue's smallest step and scaled down to it. */
+const ON_DISC: Record<HelperIconSize, string> = {
+  sm: 'flex scale-50',
+  md: 'flex scale-60',
+  xl: 'flex scale-90',
 }
 
-/** Hemera's tile as a small mark on the icon's lower corner, cut out of what is behind it. */
-const MARK: Record<HelperIconSize, string> = {
-  sm: 'absolute -right-0.5 -bottom-0.5 size-1.5 rounded-sm bg-primary ring-1 ring-card',
-  md: 'absolute -right-0.5 -bottom-0.5 size-2 rounded-sm bg-primary ring-1 ring-card',
-  xl: 'absolute -right-0.5 -bottom-0.5 size-2.5 rounded-sm bg-primary ring-2 ring-card',
-}
-
-/** The brand's tile, as an outline, for `plain` at 40 px. */
-const TILE = 'M8 3h8a5 5 0 0 1 5 5v8a5 5 0 0 1 -5 5h-8a5 5 0 0 1 -5 -5v-8a5 5 0 0 1 5 -5z'
-
-export interface TiledIconProps {
-  /** The catalogue's icon. */
-  glyph: FunctionComponent<IconProps>
-  /** Which role's tint it takes, for `tint`. */
-  role?: HelperIconName | undefined
+export interface HelperGlyphsProps {
+  /** The role's icon, or none for a free helper. */
+  role: FunctionComponent<IconProps> | null
   look?: HelperIconLook | undefined
   size?: HelperIconSize | undefined
 }
 
-/** Any icon of the catalogue as a helper's icon: how every helper's icon is made. */
-export function TiledIcon({
-  glyph: Glyph,
-  role = 'free',
-  look = 'mark',
+/** The bot and a role's icon put together: how every helper's icon is made. */
+export function HelperGlyphs({
+  role: Role,
+  look = 'pair',
   size = 'sm',
-}: TiledIconProps): ReactNode {
-  if (look === 'plain' && size === 'xl') {
+}: HelperGlyphsProps): ReactNode {
+  const step = STEP[size]
+  if (Role === null) {
     return (
       <span aria-hidden="true" className={BOX[size]}>
-        <svg
-          viewBox="0 0 24 24"
-          xmlns="http://www.w3.org/2000/svg"
-          fill="none"
-          strokeWidth="1.5"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          className="absolute inset-0 size-full stroke-current"
-        >
-          <path d={TILE} />
-        </svg>
-        <Glyph size="md" aria-hidden="true" />
+        <IconRobot size={step} aria-hidden="true" />
       </span>
     )
   }
-  if (look === 'tint') {
+  if (look === 'pair') {
     return (
-      <span aria-hidden="true" className={BOX[size]}>
-        <span className={size === 'xl' ? TINT_XL[role] : TINTS[role]} />
-        <span className={ON_TINT[role]}>
-          <Glyph size={size === 'xl' ? 'lg' : 'sm'} aria-hidden="true" />
-        </span>
+      <span aria-hidden="true" className={PAIR[size]}>
+        <IconRobot size={step} aria-hidden="true" />
+        <Role size={step} aria-hidden="true" />
       </span>
     )
   }
+  const Big = look === 'badge' ? IconRobot : Role
+  const Small = look === 'badge' ? Role : IconRobot
   return (
     <span aria-hidden="true" className={BOX[size]}>
-      <Glyph size={STEP[size]} aria-hidden="true" />
-      {look === 'mark' && <span className={MARK[size]} />}
+      <Big size={step} aria-hidden="true" />
+      <span className={DISC[size]}>
+        <span className={ON_DISC[size]}>
+          <Small size="sm" aria-hidden="true" />
+        </span>
+      </span>
     </span>
   )
 }
@@ -143,6 +118,6 @@ export interface HelperIconProps {
 }
 
 /** A helper agent's icon, in the colour of the text around it. */
-export function HelperIcon({ name, look = 'mark', size = 'sm' }: HelperIconProps): ReactNode {
-  return <TiledIcon glyph={HELPER_GLYPHS[name]} role={name} look={look} size={size} />
+export function HelperIcon({ name, look = 'pair', size = 'sm' }: HelperIconProps): ReactNode {
+  return <HelperGlyphs role={HELPER_ROLES[name]} look={look} size={size} />
 }

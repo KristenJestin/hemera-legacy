@@ -214,6 +214,21 @@ export function storyRowsOf(build: BuildViewData, stories: readonly StoryView[])
   })
 }
 
+/**
+ * The tasks no story of the build holds (issue #203): a Spec may have no story at all — a `bug` or a
+ * `maintenance` often has none — and a task may cover none of the stories it has. They are drawn in
+ * a group of their own, after the stories, so that every task of the build can be seen and opened.
+ */
+export function outsideOf(build: BuildViewData, rows: readonly BuildStoryRow[]): BuildTaskView[] {
+  return build.tasks.filter((task) => !rows.some((row) => row.tasks.includes(task)))
+}
+
+/** How many of the tasks are over — done, or skipped by the user — and of how many. */
+export function tasksProgressOf(tasks: readonly BuildTaskView[]) {
+  const done = tasks.filter((task) => task.state === 'done' || task.state === 'skipped').length
+  return { done, of: tasks.length }
+}
+
 /** Everything the build view draws, as the engine answers `build.read`. */
 export interface BuildViewData {
   sessionId: string

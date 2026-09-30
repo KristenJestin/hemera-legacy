@@ -18,8 +18,10 @@ import {
   STORY_PROGRESS_LABELS,
   lastAttempt,
   openBlockerOf,
+  outsideOf,
   storyRowsOf,
   taskStateLabel,
+  tasksProgressOf,
 } from './model.ts'
 import { ReviewCard } from './review-card.tsx'
 import { StopBuild } from './stop-build.tsx'
@@ -36,7 +38,8 @@ import { YoursBlock } from './yours-block.tsx'
  * it was written with, the criteria it is judged on, and where it stands — said by the tasks the
  * build split it into, and by nothing else. Those tasks are one unfold away, and a task unfolds the
  * stage 5a drew: its tries, the checks each try ran and their result, and the files it changed.
- * The checks of the whole Spec come last, when the build reaches them.
+ * The tasks no story holds come after the stories, in a group of their own (issue #203). The checks
+ * of the whole Spec come last, when the build reaches them.
  *
  * The chat says what is being done, the panel says what the Spec is now (D10-02): nothing here is
  * read from the chat — the story, its criteria and its progress are the frozen Spec's and the
@@ -190,7 +193,10 @@ function firstShown(build: BuildViewData): string | null {
   return build.tasks[0]?.id ?? null
 }
 
-/** The one line under the title: the phase in words, the stories done, the final checks. */
+/**
+ * The one line under the title: the phase in words, the stories done — the tasks done when the
+ * Spec has no story (issue #203) — and the final checks.
+ */
 function StateLine({
   build,
   stories,
@@ -202,6 +208,7 @@ function StateLine({
 }): ReactNode {
   const { word, tone } = phaseOf(build)
   const done = stories.filter((story) => story.progress === 'done').length
+  const tasks = tasksProgressOf(build.tasks)
   const final = lastAttempt(build.endAttempts)
   return (
     <div className={STATE_LINE}>
@@ -211,6 +218,9 @@ function StateLine({
       </span>
       {stories.length > 0 && (
         <span className={QUIET}>{`${String(done)} of ${String(stories.length)} stories done`}</span>
+      )}
+      {stories.length === 0 && tasks.of > 0 && (
+        <span className={QUIET}>{`${String(tasks.done)} of ${String(tasks.of)} tasks done`}</span>
       )}
       {build.phase === 'verify' && final !== undefined && (
         <span className={QUIET}>
@@ -339,6 +349,7 @@ export function BuildView({
   const paused = build.pausedAt !== null
   const storyIds = useId()
   const rows = storyRowsOf(build, stories)
+  const outside = outsideOf(build, rows)
   const finals = build.phase === 'verify' || build.endAttempts.length > 0
 
   // The story of the task that is unfolded is unfolded too: a stage nobody can see is a stage
@@ -384,14 +395,58 @@ export function BuildView({
     )
   }
 
-  /** The blockers still standing on the tasks of a story, each with the task it holds. */
-  function blockersOf(story: BuildStoryRow): { task: BuildTaskView; blocker: BuildBlockerView }[] {
+  /** The blockers still standing on some tasks, each with the task it holds. */
+  function blockersOf(
+    tasks: readonly BuildTaskView[],
+  ): { task: BuildTaskView; blocker: BuildBlockerView }[] {
     return build.blockers
       .filter((blocker) => blocker.dismissedAt === null)
       .flatMap((blocker) => {
-        const on = story.tasks.find((one) => one.id === blocker.taskId)
+        const on = tasks.find((one) => one.id === blocker.taskId)
         return on === undefined ? [] : [{ task: on, blocker }]
       })
+  }
+
+  /** The blockers standing on some tasks, each where it can be answered. */
+  function blockerBlocks(tasks: readonly BuildTaskView[]): ReactNode {
+    return blockersOf(tasks).map(({ task: blocked, blocker }) => (
+      <BlockerBlock
+        key={blocker.id}
+        blocker={blocker}
+        now={now}
+        suspended={dependantsOf(blocked.label, build.tasks)}
+        onDismiss={(note) => onDismissBlocker(blocker.id, note)}
+      />
+    ))
+  }
+
+  /** Some tasks, each a line that unfolds its stage, one stage at a time. */
+  function taskList(tasks: readonly BuildTaskView[]): ReactNode {
+    return (
+      <ul className="flex flex-col">
+        {tasks.map((one) => (
+          <li key={one.id}>
+            <Disclosure
+              open={shown === one.id}
+              onOpenChange={(next) => choose(next ? one.id : null)}
+              summary={
+                <span className={TASK}>
+                  <span className={TASK_LABEL}>{one.label}</span>
+                  <span className="sr-only">{', '}</span>
+                  <span className={TASK_TITLE}>{one.title}</span>
+                  <span className="sr-only">{', '}</span>
+                  <span className={TASK_META}>
+                    {`${taskStateLabel(one)}, ${taskTime(one, now)}`}
+                  </span>
+                </span>
+              }
+            >
+              <TaskStage task={one} now={now} attention={attentionOf(one)} />
+            </Disclosure>
+          </li>
+        ))}
+      </ul>
+    )
   }
 
   return (
@@ -439,7 +494,9 @@ export function BuildView({
       {!over && build.canAccept && <ReviewCard className={REVIEW} onOpenChat={onOpenChat} />}
       <Approach build={build} />
       <div className={BODY} role="region" tabIndex={0} aria-label={`The build of ${build.specKey}`}>
-        {rows.length === 0 && <p className={HINT}>No story of the Spec is being built yet.</p>}
+        {rows.length === 0 && outside.length === 0 && (
+          <p className={HINT}>No story of the Spec is being built yet.</p>
+        )}
         {rows.length > 0 && (
           <ol aria-label={`Stories of ${build.specKey}`} className={STORIES}>
             {rows.map((story) => {
@@ -464,15 +521,7 @@ export function BuildView({
                         ))}
                       </ul>
                     )}
-                    {blockersOf(story).map(({ task: blocked, blocker }) => (
-                      <BlockerBlock
-                        key={blocker.id}
-                        blocker={blocker}
-                        now={now}
-                        suspended={dependantsOf(blocked.label, build.tasks)}
-                        onDismiss={(note) => onDismissBlocker(blocker.id, note)}
-                      />
-                    ))}
+                    {blockerBlocks(story.tasks)}
                     {story.tasks.length > 0 && (
                       <Disclosure
                         open={open}
@@ -484,29 +533,7 @@ export function BuildView({
                           <span className={TASKS}>{`Tasks · ${String(story.tasks.length)}`}</span>
                         }
                       >
-                        <ul className="flex flex-col">
-                          {story.tasks.map((one) => (
-                            <li key={one.id}>
-                              <Disclosure
-                                open={shown === one.id}
-                                onOpenChange={(next) => choose(next ? one.id : null)}
-                                summary={
-                                  <span className={TASK}>
-                                    <span className={TASK_LABEL}>{one.label}</span>
-                                    <span className="sr-only">{', '}</span>
-                                    <span className={TASK_TITLE}>{one.title}</span>
-                                    <span className="sr-only">{', '}</span>
-                                    <span className={TASK_META}>
-                                      {`${taskStateLabel(one)}, ${taskTime(one, now)}`}
-                                    </span>
-                                  </span>
-                                }
-                              >
-                                <TaskStage task={one} now={now} attention={attentionOf(one)} />
-                              </Disclosure>
-                            </li>
-                          ))}
-                        </ul>
+                        {taskList(story.tasks)}
                       </Disclosure>
                     )}
                   </article>
@@ -514,6 +541,18 @@ export function BuildView({
               )
             })}
           </ol>
+        )}
+        {outside.length > 0 && (
+          // The tasks no story holds (issue #203): after the stories, in a group of their own,
+          // never folded, since nothing else of theirs stands above them to read first.
+          <section
+            aria-label={rows.length === 0 ? `Tasks of ${build.specKey}` : 'Outside any story'}
+            className={STORY}
+          >
+            {rows.length > 0 && <h2 className={STORY_TITLE}>Outside any story</h2>}
+            {blockerBlocks(outside)}
+            {taskList(outside)}
+          </section>
         )}
         {finals && <FinalChecks build={build} now={now} />}
       </div>

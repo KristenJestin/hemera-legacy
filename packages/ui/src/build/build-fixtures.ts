@@ -541,11 +541,23 @@ export const FINAL_CHECKS_RED: BuildViewData = {
   ],
 }
 
-/** `verify` green, nothing waiting for the user: Accept is offered. */
-export const READY_TO_ACCEPT: BuildViewData = {
+/** `review`: the final checks green, the result reviewed before the user's round opens. */
+export const IN_REVIEW: BuildViewData = {
   ...FINAL_CHECKS,
+  phase: 'review',
   endAttempts: [END_GREEN],
+}
+
+/** A round open on a green result, no feedback waiting for a fix: Accept is offered. */
+export const READY_TO_ACCEPT: BuildViewData = {
+  ...IN_REVIEW,
   canAccept: true,
+}
+
+/** `feedback`: the user asked for a fix of the round's feedback, which the agent works on. */
+export const FIXING: BuildViewData = {
+  ...IN_REVIEW,
+  phase: 'feedback',
 }
 
 /**

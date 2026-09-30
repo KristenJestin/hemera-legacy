@@ -17,9 +17,7 @@ import { SkipDialog } from './yours-block.tsx'
  *
  * - a task that is the user's: `Skip…`, then `Done`;
  * - a blocker the agent raised: `The Spec stands`, then `Open`, where a note can be written beside
- *   the answer;
- * - the review, once every story is done and the final checks are green: `Review`, which hands the
- *   keyboard to the composer the review is written in, then `Accept`.
+ *   the answer.
  *
  * The view keeps every one of them too: the notices are where they are answered at a glance, and
  * the view where they are read.
@@ -99,19 +97,6 @@ export function buildNoticeItems(
         ),
       })
     }
-  }
-  if (build.canAccept) {
-    items.push({
-      id: 'review',
-      content: (
-        <NoticeRow
-          name={`Review of ${build.specKey}`}
-          head={`${build.specKey} · ${build.specTitle}`}
-          refuse={{ label: 'Review', onPress: view.onOpenChat }}
-          accept={{ label: 'Accept', onPress: view.onAccept }}
-        />
-      ),
-    })
   }
   return items
 }

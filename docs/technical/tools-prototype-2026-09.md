@@ -1,15 +1,18 @@
 > The note on the maintainer's prototype of 22 September 2026 (`acp-chat`), compared with #18, kept as it was written.
 
-> **Later implementation (#59, 27 September 2026).** The recommendations and undecided
+> **Later implementation (#59, 27 and 30 September 2026).** The recommendations and undecided
 > questions below describe the earlier prototype review. Hemera Auto is now an optional,
-> application-wide mode in App Settings. The catalogue classifies exact admitted calls with
-> narrow local rules, then pinned Jev for unresolved calls when protected credentials and
-> consent are available; otherwise it asks the human once. It preserves mission, Workspace and
-> Session guards. It masks known secrets before evaluation and records sanitized verdicts,
-> policy/model versions and available scores. A mode change revokes the former agents' tool
-> grants, cancels their turns and restarts their native Sessions at a neutral mode before a new
-> prompt. This covers Hemera's tools, not an agent's unrelated external actions. The thresholds
-> are initial policy defaults and have not been calibrated with live Jev trials.
+> application-wide mode in App Settings, and a row of the permission-mode table Hemera's tools
+> follow. The catalogue classifies exact admitted calls that read or change files or start a
+> process with narrow local rules, then pinned Jev for unresolved calls when protected
+> credentials and consent are available; otherwise it asks the human once, in the Session's
+> notices. It preserves mission, Workspace and Session guards. It masks credential headers,
+> known token shapes and the Workspace's credential variables before evaluation, and records
+> sanitized verdicts, policy/model versions and available scores. A mode change revokes the
+> former agents' tool grants and cancels their turns; a Session on another permission mode than
+> its agent's neutral one is put back on it before a prompt. This covers Hemera's tools, not an
+> agent's unrelated external actions. The thresholds are initial policy defaults and have not
+> been calibrated with live Jev trials.
 
 # acp-chat prototype vs #18: tools, commands, permission classifier
 

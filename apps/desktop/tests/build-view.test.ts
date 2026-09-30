@@ -1,6 +1,6 @@
 /**
  * The engine's part of the build view: Accept and Stop, and the Journal a build writes (design
- * D10-11, D10-12, D10-14).
+ * D10-11, D10-12, D10-14), on protocol v2 (issue #279): Accept on a Spec review round.
  *
  * Named after the scenario of `Spec · build-view` it covers, over the whole engine on the fake
  * agent, with the Project's checks scripted green.
@@ -16,6 +16,7 @@ import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
 import type { FakeStep } from '#engine/agents/fake.ts'
 import { AgentRuntime } from '#engine/agents/runtime.ts'
 import { Builds } from '#engine/build/build.ts'
+import { ReviewRounds } from '#engine/review/round.ts'
 import { Specs } from '#engine/specs/specs.ts'
 
 import {
@@ -27,7 +28,6 @@ import {
   finished,
   journalOf,
   launched,
-  statesOf,
   scriptedChecks,
 } from './build-harness.ts'
 import { held } from './application.ts'
@@ -69,7 +69,7 @@ const writing = () =>
   })
 
 describe('Accept ends the build', () => {
-  test('only once verify is green; the Spec stays in progress and the branch and files stay', async () => {
+  test('only on a round once verify is green; the Spec stays in progress, the files stay', async () => {
     const { agent } = writing()
     opened = await openWindowChecked(dataFolder, green, agent)
     const seen = await opened.running(
@@ -104,8 +104,8 @@ describe('Accept ends the build', () => {
       }),
     )
     expect(seen.early.canAccept).toBe(false)
-    expect(seen.refused.message).toBe('The build has not reached its final checks.')
-    expect(seen.ready.phase).toBe('verify')
+    expect(seen.refused.message).toBe('The build has not reached its review.')
+    expect(seen.ready.phase).toBe('review')
     expect(seen.ready.endAttempts.map((attempt) => attempt.result)).toEqual(['green'])
     expect(seen.accepted.phase).toBe('accepted')
     expect(seen.accepted.canAccept).toBe(false)
@@ -155,7 +155,7 @@ describe('The end checks wait for the verify turn', () => {
     )
     expect(seen.still.endAttempts).toEqual([])
     expect(seen.still.canAccept).toBe(false)
-    expect(seen.refused.message).toBe('The final checks are still running.')
+    expect(seen.refused.message).toBe('The build has not reached its review.')
     expect(seen.after.endAttempts.map((attempt) => attempt.result)).toEqual(['green'])
   })
 })
@@ -184,6 +184,7 @@ describe('A build writes its Journal lines', () => {
       'prepare',
       'execute',
       'verify',
+      'review',
     ])
     for (const type of [
       'task.ready',
@@ -266,68 +267,26 @@ describe('Stop closes the build', () => {
   })
 })
 
-describe('A review sends the build back to work', () => {
-  test('a message sent while the build waits for it is its review, and the whole Spec is checked again', async () => {
-    // The review's turn is held before its one step, so what it leaves behind can be read.
-    const answer = held()
-    let reviewing = false
-    const { agent, handed } = buildAgent(
-      {
-        execute: (labels, text): readonly FakeStep[] => {
-          if (!text.includes("# The user's review")) return labels.map(finished)
-          reviewing = true
-          return [{ does: 'says', text: 'The exporter writes the header row first now.' }]
-        },
-      },
-      { between: () => (reviewing ? answer.promise : Promise.resolve()) },
-    )
+describe('A chat message during a round is an ordinary message', () => {
+  test('it moves no phase and no round, runs no check, and Accept is still offered', async () => {
+    const { agent } = buildAgent()
     opened = await openWindowChecked(dataFolder, green, agent)
     const seen = await opened.running(
       Effect.gen(function* () {
         const spec = yield* aReadySpec(dataFolder, THREE)
         const sessionId = yield* launched(spec.specId, spec.workspaceId)
-        const builds = yield* Builds
-        const runtime = yield* AgentRuntime
         const waiting = yield* eventually(buildOf(sessionId), (view) => view.canAccept)
-        // The review is written in the chat and sent like any other message (issue #117), so the
-        // turn it starts runs beside what the suite reads of the build while it is held.
-        const [, read] = yield* Effect.all(
-          [
-            runtime.prompt(sessionId, 'The export needs a header row; the reader is fine.'),
-            Effect.gen(function* () {
-              const working = yield* eventually(
-                buildOf(sessionId),
-                (view) => view.phase === 'execute' && !view.canAccept,
-              )
-              const refused = yield* Effect.flip(builds.accept(sessionId))
-              answer.carryOn()
-              const back = yield* eventually(buildOf(sessionId), (view) => view.canAccept)
-              return { working, refused, back }
-            }),
-          ],
-          { concurrency: 2 },
-        )
-        return {
-          waiting,
-          ...read,
-          handed,
-          lines: yield* journalOf(sessionId),
-        }
+        yield* (yield* AgentRuntime).prompt(sessionId, 'Why did you pick CSV?')
+        // Given the time a turn that moved something would have taken to show it.
+        yield* Effect.sleep('200 millis')
+        return { waiting, after: yield* buildOf(sessionId), lines: yield* journalOf(sessionId) }
       }),
     )
-    expect(seen.waiting.canAccept).toBe(true)
-    // Back to work: the phase is `execute` again, and Accept says what it waits for.
-    expect(seen.working.phase).toBe('execute')
-    expect(seen.refused.message).toBe('The build went back to work on your review.')
-    // The agent was handed the brief of a review, in front of the user's own message.
-    expect(seen.handed.some((text) => text.includes("# The user's review"))).toBe(true)
-    // Nothing was accepted: the whole Spec is checked again, and the build waits for the user once
-    // more — its tasks where they stood, its second round of end checks green.
-    expect(seen.back.endAttempts.map((attempt) => attempt.result)).toEqual(['green', 'green'])
-    expect(statesOf(seen.back)).toEqual({ T1: 'done', T2: 'done', T3: 'done' })
-    expect(
-      seen.lines.filter((line) => line.type === 'build.reviewed').map((line) => line.payload),
-    ).toEqual(['{}'])
+    expect(seen.after.phase).toBe('review')
+    expect(seen.after.canAccept).toBe(true)
+    expect(seen.after.rounds.map((round) => [round.number, round.state])).toEqual([[1, 'open']])
+    expect(seen.after.endAttempts).toEqual(seen.waiting.endAttempts)
+    expect(seen.lines.filter((line) => line.type === 'build.reviewed')).toEqual([])
   })
 })
 
@@ -371,12 +330,11 @@ describe("A bug's reproduction is replayed before Accept", () => {
     ).toEqual([{ gone: true }])
   })
 
-  test('without a replay, green end checks do not offer Accept; a review that replays it does', async () => {
-    let reviewing = false
+  test('without a replay, green end checks do not offer Accept; a Fix that replays it does', async () => {
+    let fixing = false
     const { agent } = buildAgent({
-      execute: (labels, text): readonly FakeStep[] => {
-        if (!text.includes("# The user's review")) return labels.map(finished)
-        reviewing = true
+      feedback: () => {
+        fixing = true
         return [replayed(true, OBSERVED), { does: 'says', text: 'Replayed: the bug is gone.' }]
       },
     })
@@ -386,20 +344,24 @@ describe("A bug's reproduction is replayed before Accept", () => {
         const spec = yield* aReadySpec(dataFolder, THREE, [], ['sources/api'], 'bug')
         const sessionId = yield* launched(spec.specId, spec.workspaceId)
         const builds = yield* Builds
-        const checked = yield* eventually(
-          buildOf(sessionId),
-          (view) => view.endAttempts.at(-1)?.result === 'green',
-        )
+        const checked = yield* eventually(buildOf(sessionId), (view) => view.rounds.length > 0)
         const refused = yield* Effect.flip(builds.accept(sessionId))
-        yield* (yield* AgentRuntime).prompt(sessionId, 'Replay the reproduction, please.')
+        yield* (yield* ReviewRounds).addFeedback(
+          sessionId,
+          'general',
+          'Replay the reproduction, please.',
+          null,
+        )
+        yield* builds.fix(sessionId)
         const back = yield* eventually(buildOf(sessionId), (view) => view.canAccept)
         return { checked, refused, back }
       }),
     )
     expect(seen.checked.canAccept).toBe(false)
     expect(seen.checked.endAttempts.map((attempt) => attempt.reproduction)).toEqual([null])
+    expect(seen.checked.endAttempts.map((attempt) => attempt.result)).toEqual(['green'])
     expect(seen.refused.message).toBe('The bug’s reproduction was not replayed.')
-    expect(reviewing).toBe(true)
+    expect(fixing).toBe(true)
     expect(seen.back.endAttempts.map((attempt) => attempt.reproduction)).toEqual([
       null,
       { observed: OBSERVED, gone: true },
@@ -425,7 +387,8 @@ describe("A bug's reproduction is replayed before Accept", () => {
     expect(await opened.running(replayedIn('bug'))).toMatchObject({
       ok: false,
       refused: true,
-      summary: 'the reproduction is replayed in the final checks, once every task is settled',
+      summary:
+        'the reproduction is replayed in the final checks, once every task is settled, or while fixing the feedback of a review',
     })
   })
 

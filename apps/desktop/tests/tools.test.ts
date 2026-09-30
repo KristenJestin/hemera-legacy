@@ -470,6 +470,7 @@ describe('Hemera Auto classifies one admitted tool call before execution', () =>
       by: 'judge',
       model: JEV_MODEL,
       scores: { risk: 1, approval: 0.2, userRequested: 0.9 },
+      roundTripMs: expect.any(Number),
     })
   })
 

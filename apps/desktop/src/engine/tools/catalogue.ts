@@ -184,6 +184,8 @@ interface Classified {
   readonly model?: string
   /** The call as the diagnostic log says it: its line or its path, masked, never its content. */
   readonly said?: string
+  /** How long Jev took to answer this call, when it was asked. */
+  readonly roundTripMs?: number | undefined
   readonly scores?:
     | {
         readonly risk: number
@@ -979,6 +981,7 @@ export const toolCatalogueLayer: Layer.Layer<
         )
         return {
           said,
+          roundTripMs: jevMs,
           verdict,
           generation: snapshot.generation,
           latestHumanSeq: context.latestHumanSeq,
@@ -1033,6 +1036,7 @@ export const toolCatalogueLayer: Layer.Layer<
           strictness: decision.strictness,
           model: decision.model === '' ? undefined : decision.model,
           scores: decision.scores,
+          roundTripMs: decision.roundTripMs,
           classifier: decision.correlationId,
         }),
         correlationId: `decision:${id}`,

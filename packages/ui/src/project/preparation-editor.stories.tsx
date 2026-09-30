@@ -581,11 +581,14 @@ async function aPathIsOfferedUnderItsBase({ canvasElement, args }: StoryContext)
   })
 
   // `.e` is enough for `.env`, which Enter takes and the list closes on: a file ends the path.
-  await userEvent.type(path, '.e')
+  // Typed where the caret already is: a click on the box is a press outside the open list, which
+  // would close it and let the typing open it again, and a row read between the two is one read
+  // on a list fading out.
+  await userEvent.type(path, '.e', { skipClick: true })
   await waitFor(() => {
     expect(within(document.body).getByRole('option', { name: '.env' })).toBeVisible()
+    expect(within(document.body).getByRole('option', { name: '.env.example' })).toBeVisible()
   })
-  await expect(within(document.body).getByRole('option', { name: '.env.example' })).toBeVisible()
   await userEvent.keyboard('{Enter}')
   await expect(path).toHaveValue('.env')
   await waitFor(() => {
@@ -594,7 +597,7 @@ async function aPathIsOfferedUnderItsBase({ canvasElement, args }: StoryContext)
 
   // Above the base: nothing is offered, and the field says why.
   await userEvent.clear(path)
-  await userEvent.type(path, '../')
+  await userEvent.type(path, '../', { skipClick: true })
   await waitFor(() => {
     expect(dialog.getByText('That path climbs above its base.')).toHaveStyle({ opacity: '1' })
   })
@@ -603,7 +606,7 @@ async function aPathIsOfferedUnderItsBase({ canvasElement, args }: StoryContext)
 
   // A folder is walked down: the list stays open on what it holds.
   await userEvent.clear(path)
-  await userEvent.type(path, 'sr')
+  await userEvent.type(path, 'sr', { skipClick: true })
   await waitFor(() => {
     expect(within(document.body).getByRole('option', { name: 'src/' })).toBeVisible()
   })

@@ -789,15 +789,15 @@ a `build` Session can perform an intermediate code review.
   stories. The final checks come last, once the build reaches them.
 - "Spec" opens the frozen revision the build works from, read only, in the view's place inside
   the panel, and closing it gives the view back as it was; the chat does not move either way.
-- What waits for the user in a build — a task that is theirs, a blocker the agent raised, the
-  review — is said in the view, where it is read, and is one kind of the Session's notices, on
-  the composer's edge, where it is answered at a glance: `Skip…` and `Done` for a task, `The Spec
-  stands` and `Open` for a blocker, `Review` and `Accept` for the review. A permission the agent
+- What waits for the user in a build — a task that is theirs, a blocker the agent raised — is said
+  in the view, where it is read, and is one kind of the Session's notices, on the composer's edge,
+  where it is answered at a glance: `Skip…` and `Done` for a task, `The Spec stands` and `Open` for
+  a blocker. A permission the agent
   asks is another kind of the same notices, so neither ever hides the other. A task that becomes
   the user's and a blocker raised are also told by a notification of the system.
-- Once every story is done and the final checks are green, the view opens on the review: a card
-  that asks for the user's review, written in the chat, above the approach, and Accept in its
-  head (see "What the first build runs").
+- Once a Spec review round is open on a green result, Accept stands in the view's head; while
+  Accept is not possible it is hidden, never replaced by a sentence saying why (see "What the
+  first build runs").
 
 When a Session has a mission, its interface shows the useful information about
 that mission. When it is linked to a Spec, it also shows the useful information
@@ -1086,21 +1086,26 @@ where it stood.
   not paused, hands the agent a brief of what is done with its evidence and what was in
   progress with its tries, and asks it to check the real state before redoing anything; the
   checks of a task left checking run again.
-- **Review**: once the end checks are green and nothing waits for the user, the build waits for
-  the user's review. The user writes it in the chat, as they would say it; the message they send
-  then is the review: the build goes back to `execute`, the agent is handed a brief of the review
-  in front of the message, every task stands where it stood, and once that turn is over the end
-  checks of the whole Spec run again. Accept is refused while that work runs, and the build waits
-  for the user again once they are green. Nothing else the user writes in the chat moves a phase.
-- **A bug's reproduction**: in `verify`, and in a review, the agent of a `bug` replays the
-  reproduction scenario and reports it through `reproduction_replayed` — whether the incorrect
-  behaviour is gone, and what it observed. Hemera keeps the report with the end checks that follow
-  the turn, and shows it under the final checks with a dot. Each round of end checks needs a replay
-  of its own; while the last one carries none, Accept is refused, and a message the user writes
-  then is the review that asks for it.
-- **Accept**: once the end checks are green, a `bug`'s reproduction replayed, and nothing waits
-  for the user, the build view offers Accept; the build is accepted, the Spec stays `in_progress`,
-  and the branch and the files stay in the Workspace for delivery. Stop closes a build for good; a stopped build stays
+- **Review** (protocol v2, since 0.6): once the end checks are green, the build enters `review`.
+  With Git, its agent is handed the `review` brief, and once that turn is over Hemera opens a
+  **Spec review round** — "Spec review · round 1", 2… — that freezes the result for the user;
+  without a Git repository the helpers' review is skipped and the round opens at once. A chat
+  message during a round is an ordinary message to the agent and moves no phase.
+- **Fix**: the user's Fix on an open round that holds feedback moves the round to `fixing` and the
+  build to `feedback`, whose agent is handed the round's feedback. Once that turn is over the round
+  is closed, the focus goes back to `execute`, then `verify` — the end checks of the whole Spec run
+  again — then `review`, and a new round opens.
+- **A bug's reproduction**: in `verify`, and while fixing the feedback of a round, the agent of a
+  `bug` replays the reproduction scenario and reports it through `reproduction_replayed` — whether
+  the incorrect behaviour is gone, and what it observed. Hemera keeps the report with the end checks
+  that follow the turn, and shows it under the final checks with a dot. Each round of end checks
+  needs a replay of its own; while the last one carries none, Accept is refused, and a Fix asks for
+  it.
+- **Accept**: only on a round that is open and not stale, with no product or general feedback
+  waiting for a fix, with the end checks green — a `bug`'s reproduction replayed — and nothing
+  waiting for the user. The build is accepted, its round closed, the Spec stays `in_progress`, and
+  the branch and the files stay in the Workspace for delivery. Stop closes a build for good, and its
+  round with it; a stopped build stays
   readable and frees its slot, but a Spec whose first task had started stays `in_progress` and is
   neither built again nor reworked: only a build stopped before its first task leaves the Spec
   `ready` for another.

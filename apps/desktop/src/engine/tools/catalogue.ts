@@ -689,6 +689,16 @@ export const toolCatalogueLayer: Layer.Layer<
         return { allowed: true as const, path: where }
       })
 
+    /** The human context of a call, without messages when the Session's did not read. */
+    const humanContextOf = (
+      mission: Mission,
+      entries: Parameters<typeof classifierHumanContext>[1] | undefined,
+      frozen: Parameters<typeof classifierHumanContext>[2] = [],
+    ) => {
+      const context = classifierHumanContext(mission, entries ?? [], frozen)
+      return entries === undefined ? { ...context, latestHumanSeq: -1 } : context
+    }
+
     /** A decision is scoped to this exact call, Session context and settings generation. */
     const classify = (
       asked: ToolCall,
@@ -701,19 +711,17 @@ export const toolCatalogueLayer: Layer.Layer<
       Effect.gen(function* () {
         const snapshot = yield* answered(classifier.current)
         if (snapshot === undefined) return { verdict: 'ask', generation: -1, latestHumanSeq: -1 }
+        // Context that does not read is context the judge does not get: the call is judged
+        // without it, so nothing the user said can lift it, and what needs their word asks them
+        // (D59-05). Only unreadable settings refuse, above.
         const entries = yield* answered(sessions.humanMessages(asked.sessionId))
-        if (entries === undefined) return { verdict: 'ask', generation: -1, latestHumanSeq: -1 }
         const frozen =
           mission === 'build' ? yield* answered(builds.view(asked.sessionId)) : undefined
-        if (mission === 'build' && frozen === undefined)
-          return { verdict: 'ask', generation: -1, latestHumanSeq: -1 }
         const frozenSnapshot =
           frozen === undefined
             ? undefined
             : yield* answered(specs.read(frozen.specId, frozen.revision))
-        if (mission === 'build' && frozenSnapshot === undefined)
-          return { verdict: 'ask', generation: -1, latestHumanSeq: -1 }
-        const context = classifierHumanContext(
+        const context = humanContextOf(
           mission,
           entries,
           frozenSnapshot?.sections.map((section) => ({
@@ -796,9 +804,7 @@ export const toolCatalogueLayer: Layer.Layer<
         const stale =
           currentSettings?.mode !== 'hemera-auto' ||
           currentSettings.generation !== snapshot.generation ||
-          currentMessages === undefined ||
-          classifierHumanContext(mission, currentMessages).latestHumanSeq !==
-            context.latestHumanSeq ||
+          humanContextOf(mission, currentMessages).latestHumanSeq !== context.latestHumanSeq ||
           !(yield* access.live(asked.sessionId))
         if (stale) {
           verdict = 'deny'
@@ -865,11 +871,10 @@ export const toolCatalogueLayer: Layer.Layer<
           answered(classifier.current),
           answered(sessions.humanMessages(asked.sessionId)),
         ])
-        if (entries === undefined) return false
         return (
           settings?.mode === 'hemera-auto' &&
           settings.generation === decision.generation &&
-          classifierHumanContext('free', entries).latestHumanSeq === decision.latestHumanSeq &&
+          humanContextOf('free', entries).latestHumanSeq === decision.latestHumanSeq &&
           (yield* access.live(asked.sessionId))
         )
       })

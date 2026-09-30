@@ -206,6 +206,23 @@ export type {
   TaskState,
 } from './domain/build.ts'
 export {
+  DIFF_SIDES,
+  FEEDBACK_KINDS,
+  ROUND_KINDS,
+  ROUND_STATES,
+  anchorRefusal,
+  feedbackRefusal,
+  roundMoveRefusal,
+  roundToolRefusal,
+} from './domain/review.ts'
+export type {
+  DiffSide,
+  FeedbackAnchor,
+  FeedbackKind,
+  RoundKind,
+  RoundState,
+} from './domain/review.ts'
+export {
   BASE_SECTIONS,
   DEFAULT_SPEC_PREFIX,
   DEFINE_PROTOCOL,

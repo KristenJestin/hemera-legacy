@@ -70,6 +70,44 @@ export function roundToolRefusal(state: RoundState | null, tool: ToolName): stri
   return `a review round is open: the user is reviewing the build, and nothing is written or run in the Workspace until it ends (${tool} refused)`
 }
 
+/** A round as the user reads it: `Spec review · round 2`, `Code review · round 1`. */
+export function roundName(kind: RoundKind, number: number): string {
+  return `${kind === 'spec' ? 'Spec' : 'Code'} review · round ${number}`
+}
+
+/** What of a feedback says whether it waits for a fix. */
+export interface FeedbackStanding {
+  readonly kind: FeedbackKind
+  readonly withdrawnAt: string | null
+}
+
+/**
+ * Whether some of a round's feedback waits for a fix (issue #279): a product or a general one the
+ * user did not withdraw. A question is answered, and never becomes a fix.
+ */
+export function waitsForFix(feedback: readonly FeedbackStanding[]): boolean {
+  return feedback.some((one) => one.withdrawnAt === null && one.kind !== 'question')
+}
+
+/**
+ * Why the user may not accept a build on its latest round, or null when the round allows it
+ * (issue #279): only on a round that is open, whose result is still what is on disk, and whose
+ * feedback waits for no fix. `round` is the build's round that is not closed, or null.
+ */
+export function roundAcceptRefusal(
+  round: {
+    readonly state: RoundState
+    readonly stale: boolean
+    readonly feedback: readonly FeedbackStanding[]
+  } | null,
+): string | null {
+  if (round === null || round.state === 'closed') return 'No review round is open.'
+  if (round.state === 'fixing') return 'The feedback of the round is being fixed.'
+  if (round.stale) return 'The Workspace changed since the round opened.'
+  if (waitsForFix(round.feedback)) return 'A feedback waits for a fix.'
+  return null
+}
+
 /** Why a round may not move from one state to another, or null: forward only, never back. */
 export function roundMoveRefusal(from: RoundState, to: RoundState): string | null {
   if (ROUND_STATES.indexOf(to) > ROUND_STATES.indexOf(from)) return null

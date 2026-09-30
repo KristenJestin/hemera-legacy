@@ -9,22 +9,20 @@ import { Tooltip } from '../../components/tooltip/tooltip.tsx'
 import { IconInfoCircle, IconX } from '../../icons.ts'
 import { AgentText } from '../../message/agent-text.tsx'
 import { fold, useTransition } from '../../motion.ts'
+import { CHIP, ChipFace, type ChipState, durationOf, useLiveChip, useNow } from './live-chip.tsx'
 import { HELPER_TONES, type Helper, helperName } from './fixtures.ts'
 import { HelperIcon } from './helper-icons.tsx'
 
 /**
  * The helper agents in the Session's head line, after the runs (decisions of 30 September on
- * issue #77): one chip a helper — its icon, its dot and its name — that behaves as a run's chip
- * does. Pressed, it opens its glance: the helper as its chip draws it, how long it has been at
+ * issue #77): one chip a helper that behaves exactly as a run's chip does — its own neutral
+ * surface, no dot, a background that moves and never stays tinted, the helper's icon given way to a
+ * plain tick or cross as it ends, its duration in seconds. Pressed, it opens its glance: the helper as its chip draws it, how long it has been at
  * it, the step it is in and its last line, and two tools, as a run's glance has them:
  *
  * - ⓘ opens its thread, live and read only, in a dialog;
  * - × stops it, once the reader has said so. The main agent is told, and decides what comes next.
  */
-
-/** The same chip as a run's, so a helper reads as one more thing going on. */
-const CHIP =
-  'inline-flex h-control-sm max-w-menu-side min-w-0 items-center gap-1.5 rounded-md border border-border bg-card px-2 text-xs outline-none hover:bg-accent focus-ring data-popup-open:bg-accent'
 
 const ICON = 'flex shrink-0 text-muted-foreground'
 
@@ -78,40 +76,20 @@ export function HelperChips({
             exit={HIDDEN}
             transition={transition}
           >
-            <Popover
-              side="bottom"
-              align="start"
-              label={helperName(helper)}
+            <HelperChip
+              helper={helper}
               open={glance === helper.id}
               onOpenChange={(next) => setGlance(next ? helper.id : null)}
-              trigger={
-                <button
-                  type="button"
-                  className={CHIP}
-                  aria-label={helperName(helper)}
-                  data-helper={helper.id}
-                >
-                  <span className={ICON}>
-                    <HelperIcon name={helper.icon} size="sm" />
-                  </span>
-                  <StatusDot status={HELPER_TONES[helper.state]} size="sm" />
-                  <span className={LABEL}>{helper.name}</span>
-                </button>
-              }
-            >
-              <Glance
-                helper={helper}
-                onDetails={() => {
-                  setGlance(null)
-                  onDetails(helper.id)
-                }}
-                onStop={() => {
-                  setGlance(null)
-                  setAsking(helper)
-                  setAskOpen(true)
-                }}
-              />
-            </Popover>
+              onDetails={() => {
+                setGlance(null)
+                onDetails(helper.id)
+              }}
+              onStop={() => {
+                setGlance(null)
+                setAsking(helper)
+                setAskOpen(true)
+              }}
+            />
           </motion.span>
         ))}
       </AnimatePresence>
@@ -137,6 +115,70 @@ export function HelperChips({
         }
       />
     </>
+  )
+}
+
+/** A helper's state as its chip says it: a stuck helper still works, and nothing moves on it. */
+const CHIP_STATES: Record<Helper['state'], ChipState> = {
+  running: 'working',
+  stuck: 'still',
+  finished: 'finished',
+  failed: 'failed',
+  stopped: 'stopped',
+}
+
+/** How long a helper has been at it, in milliseconds, from the minutes its fixture says. */
+function runFor(helper: Helper): number {
+  return Number.parseInt(helper.for, 10) * 60_000
+}
+
+/** One helper's chip: the run chip's logic, the helper's icon in the place of the command's type. */
+function HelperChip({
+  helper,
+  open,
+  onOpenChange,
+  onDetails,
+  onStop,
+}: {
+  helper: Helper
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  onDetails: () => void
+  onStop: () => void
+}): ReactNode {
+  const state = CHIP_STATES[helper.state]
+  const working = state === 'working' || state === 'still'
+  const [start] = useState(() => Date.now() - runFor(helper))
+  const now = useNow(working)
+  const live = useLiveChip(state)
+  return (
+    <span ref={live.chip} className="flex">
+      <Popover
+        side="bottom"
+        align="start"
+        label={helperName(helper)}
+        open={open}
+        onOpenChange={onOpenChange}
+        trigger={
+          <button
+            type="button"
+            className={CHIP}
+            aria-label={helperName(helper)}
+            data-helper={helper.id}
+          >
+            <ChipFace
+              live={live}
+              state={state}
+              icon={<HelperIcon name={helper.icon} size="sm" />}
+              name={helper.name}
+              time={durationOf(now - start)}
+            />
+          </button>
+        }
+      >
+        <Glance helper={helper} onDetails={onDetails} onStop={onStop} />
+      </Popover>
+    </span>
   )
 }
 

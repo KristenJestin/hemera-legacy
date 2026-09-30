@@ -44,6 +44,7 @@ import { setupValuesLayer } from './setup/values.ts'
 import { type Context, contextLayer } from './context/service.ts'
 import { toolAccessLayer } from './tools/access.ts'
 import { toolCatalogueLayer } from './tools/catalogue.ts'
+import { type Approvals, approvalsLayer } from './tools/approvals.ts'
 import { toolPermissionsLayer } from './tools/permissions.ts'
 import { toolServerLayer } from './tools/server.ts'
 import { openProfile } from './migrate.ts'
@@ -226,6 +227,7 @@ function buildNoticesTo(
 export type EngineServices =
   | Preferences
   | ClassifierSettings
+  | Approvals
   | EngineStatus
   | Projects
   | Journal
@@ -328,6 +330,9 @@ function servicesOf(
     Layer.provideMerge(builds),
     Layer.provideMerge(toolAccessLayer),
     Layer.provideMerge(toolPermissionsLayer),
+    // The questions that no longer hold their agent, and whether the window is looked at (#304):
+    // the catalogue leaves them there, the runtime hands their answers over.
+    Layer.provideMerge(approvalsLayer),
     Layer.provideMerge(commands),
     // The variables a run is given are the Project's overridden by the Workspace's (D8-06).
     Layer.provide(variablesLayer),

@@ -4,7 +4,12 @@ import { eq, sql } from 'drizzle-orm'
 import { Context, Effect, Layer } from 'effect'
 
 import { type ClassifierStrictness, DEFAULT_CLASSIFIER_STRICTNESS } from '@hemera/core'
-import { type ClassifierMode, classifierStrictnessSchema } from '@hemera/ipc'
+import {
+  APPROVAL_GRACE_DEFAULT,
+  type ClassifierMode,
+  approvalGraceSchema,
+  classifierStrictnessSchema,
+} from '@hemera/ipc'
 
 import { Database, DatabaseError } from '../storage/database.ts'
 import { appPreferences } from '../storage/schema.ts'
@@ -14,6 +19,13 @@ const MODE_KEY = 'classifier.mode'
 const CIPHERTEXT_KEY = 'classifier.jev.ciphertext'
 const CONSENT_KEY = 'classifier.jev.consent'
 const STRICTNESS_KEY = 'classifier.strictness'
+const GRACE_KEY = 'classifier.grace'
+
+/** The seconds a stored value names, or the default for none or one out of range (#304). */
+function graceOf(stored: string | undefined): number {
+  const parsed = approvalGraceSchema.safeParse(stored === undefined ? undefined : Number(stored))
+  return parsed.success ? parsed.data : APPROVAL_GRACE_DEFAULT
+}
 
 /** The level a stored value names, or the default for none or one no longer known (#298). */
 function strictnessOf(stored: string | undefined): ClassifierStrictness {
@@ -24,6 +36,11 @@ function strictnessOf(stored: string | undefined): ClassifierStrictness {
 export interface ClassifierSnapshot {
   readonly mode: ClassifierMode
   readonly strictness: ClassifierStrictness
+  /**
+   * How long, in seconds, a call that needs the human's answer waits for it while the window is
+   * focused, before the agent is told it waits and goes on (#304).
+   */
+  readonly grace: number
   readonly key: string | null
   readonly consent: boolean
   readonly generation: number
@@ -41,6 +58,8 @@ export class ClassifierSettings extends Context.Service<
     readonly selectStrictness: (
       strictness: ClassifierStrictness,
     ) => Effect.Effect<void, DatabaseError>
+    /** The grace of the next question, in every Session (#304). Not a new generation either. */
+    readonly selectGrace: (seconds: number) => Effect.Effect<void, DatabaseError>
     readonly setConsent: (consent: boolean) => Effect.Effect<void, DatabaseError>
     readonly ciphertext: Effect.Effect<string | null, DatabaseError>
     readonly replaceKey: (
@@ -80,15 +99,17 @@ export const classifierSettingsLayer = Layer.effect(
         )
     return {
       current: Effect.gen(function* () {
-        const [rows, consentRows, strictnessRows] = yield* Effect.all([
+        const [rows, consentRows, strictnessRows, graceRows] = yield* Effect.all([
           value(MODE_KEY),
           value(CONSENT_KEY),
           value(STRICTNESS_KEY),
+          value(GRACE_KEY),
         ])
         const mode = rows[0]?.value === 'hemera-auto' ? 'hemera-auto' : 'agent-default'
         return {
           mode,
           strictness: strictnessOf(strictnessRows[0]?.value),
+          grace: graceOf(graceRows[0]?.value),
           key,
           consent: consentRows[0]?.value === 'true',
           generation,
@@ -177,6 +198,8 @@ export const classifierSettingsLayer = Layer.effect(
           Effect.provideService(Database, database),
           Effect.asVoid,
         ),
+      selectGrace: (seconds) =>
+        write(GRACE_KEY, String(graceOf(String(seconds)))).pipe(Effect.asVoid),
       setConsent: (consent) =>
         write(CONSENT_KEY, String(consent)).pipe(
           Effect.tap(() =>

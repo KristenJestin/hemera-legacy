@@ -22,6 +22,13 @@ export type ClassifierMode = z.infer<typeof classifierModeSchema>
 export const classifierStrictnessSchema = z.enum(['careful', 'normal', 'permissive'])
 export type ClassifierStrictness = z.infer<typeof classifierStrictnessSchema>
 
+/**
+ * How long, in seconds, a call that needs the human's answer waits for it while Hemera's window
+ * is focused, before the agent is told it waits and goes on (#304). Zero never waits.
+ */
+export const approvalGraceSchema = z.number().int().min(0).max(60)
+export const APPROVAL_GRACE_DEFAULT = 10
+
 import {
   agentAvailabilitySchema,
   agentOfferSchema,
@@ -430,6 +437,7 @@ export const ENGINE_REQUESTS = {
     response: z.object({
       mode: classifierModeSchema,
       strictness: classifierStrictnessSchema,
+      grace: approvalGraceSchema,
       hasKey: z.boolean(),
       consent: z.boolean(),
       generation: z.number().int(),
@@ -442,6 +450,15 @@ export const ENGINE_REQUESTS = {
   'classifier.consent.write': { arguments: z.object({ consent: z.boolean() }), response: z.void() },
   'classifier.strictness.write': {
     arguments: z.object({ strictness: classifierStrictnessSchema }),
+    response: z.void(),
+  },
+  'classifier.grace.write': {
+    arguments: z.object({ grace: approvalGraceSchema }),
+    response: z.void(),
+  },
+  /** The main process says whether Hemera's window has the focus (#304). */
+  'window.focus.write': {
+    arguments: z.object({ focused: z.boolean() }),
     response: z.void(),
   },
   'classifier.ciphertext.read': { arguments: nothingSchema, response: z.string().nullable() },

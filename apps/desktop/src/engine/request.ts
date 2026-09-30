@@ -63,6 +63,7 @@ import { type InvalidCursorError, Journal } from './journal.ts'
 import { type PathOutsideBaseError, entriesUnder } from './paths.ts'
 import { Preferences } from './preferences.ts'
 import { ClassifierSettings } from './classifier/settings.ts'
+import { Approvals } from './tools/approvals.ts'
 import {
   type InvalidBranchPrefixError,
   type InvalidWorkspacesRootError,
@@ -185,6 +186,7 @@ export function answer(
   Refusal,
   | Preferences
   | ClassifierSettings
+  | Approvals
   | EngineStatus
   | Projects
   | Journal
@@ -211,6 +213,7 @@ export function answer(
       return {
         mode: current.mode,
         strictness: current.strictness,
+        grace: current.grace,
         hasKey: current.key !== null,
         consent: current.consent,
         generation: current.generation,
@@ -226,6 +229,13 @@ export function answer(
     if (decision.name === 'classifier.strictness.write') {
       // Read at every call: the next one, in every Session, is judged at the new level (#298).
       return yield* (yield* ClassifierSettings).selectStrictness(decision.argument.strictness)
+    }
+    if (decision.name === 'classifier.grace.write') {
+      // Read at every question: the next one, in every Session, waits the new grace (#304).
+      return yield* (yield* ClassifierSettings).selectGrace(decision.argument.grace)
+    }
+    if (decision.name === 'window.focus.write') {
+      return yield* (yield* Approvals).focus(decision.argument.focused)
     }
     if (decision.name === 'classifier.consent.write') {
       const settings = yield* ClassifierSettings

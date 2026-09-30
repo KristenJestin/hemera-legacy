@@ -43,6 +43,7 @@ export const CHANNELS = {
     response: z.object({
       mode: ENGINE_REQUESTS['classifier.state'].response.shape.mode,
       strictness: ENGINE_REQUESTS['classifier.state'].response.shape.strictness,
+      grace: ENGINE_REQUESTS['classifier.state'].response.shape.grace,
       credential: z.enum(['missing', 'saved', 'invalid', 'storage-unavailable']),
       consent: z.boolean(),
       generation: z.number().int(),
@@ -51,6 +52,7 @@ export const CHANNELS = {
   'classifier.mode.write': ENGINE_REQUESTS['classifier.mode.write'],
   'classifier.consent.write': ENGINE_REQUESTS['classifier.consent.write'],
   'classifier.strictness.write': ENGINE_REQUESTS['classifier.strictness.write'],
+  'classifier.grace.write': ENGINE_REQUESTS['classifier.grace.write'],
   'classifier.key.save': {
     arguments: z.object({ key: z.string().trim().min(1) }),
     response: z.void(),

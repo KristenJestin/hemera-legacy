@@ -30,6 +30,8 @@ export {
   channelSchema,
   classifierModeSchema,
   classifierStrictnessSchema,
+  approvalGraceSchema,
+  APPROVAL_GRACE_DEFAULT,
   composerChoiceSchema,
   composersSchema,
   displayPreferencesChangeSchema,

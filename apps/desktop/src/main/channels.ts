@@ -48,6 +48,7 @@ export function registerChannels(
       return {
         mode: state.mode,
         strictness: state.strictness,
+        grace: state.grace,
         credential: credentialStatus({ ready, hasKey: state.hasKey, ciphertext }),
         consent: state.consent,
         generation: state.generation,
@@ -61,6 +62,7 @@ export function registerChannels(
   handle('classifier.strictness.write', ({ strictness }) =>
     engine.ask('classifier.strictness.write', { strictness }),
   )
+  handle('classifier.grace.write', ({ grace }) => engine.ask('classifier.grace.write', { grace }))
   handle('classifier.key.save', ({ key }) => {
     const ciphertext = encryptClassifierKey(key)
     return ciphertext === null

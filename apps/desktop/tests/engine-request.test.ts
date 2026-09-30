@@ -48,6 +48,7 @@ import { type EngineStatus, engineStatusLayer } from '#engine/status.ts'
 import { DatabaseError, SqliteClient, databaseLayer } from '#engine/storage/database.ts'
 import type { Database } from '#engine/storage/database.ts'
 import { toolAccessLayer } from '#engine/tools/access.ts'
+import { Approvals, approvalsLayer } from '#engine/tools/approvals.ts'
 import { toolPermissionsLayer } from '#engine/tools/permissions.ts'
 import { ToolServer } from '#engine/tools/server.ts'
 import { gitLayer } from '#engine/git.ts'
@@ -94,6 +95,7 @@ function running<A, E>(
     E,
     | Preferences
     | ClassifierSettings
+    | Approvals
     | EngineStatus
     | Projects
     | Journal
@@ -153,6 +155,7 @@ function running<A, E>(
   const tools = Layer.mergeAll(
     toolAccessLayer,
     toolPermissionsLayer,
+    approvalsLayer,
     contextLayer.pipe(Layer.provide(gitLayer())),
     commandsLayer,
     variablesLayer,
@@ -220,6 +223,7 @@ function running<A, E>(
   const services: Layer.Layer<
     | Preferences
     | ClassifierSettings
+    | Approvals
     | EngineStatus
     | Projects
     | Journal
@@ -1043,6 +1047,7 @@ describe('A key can be saved replaced and removed safely', () => {
     expect(first.before).toEqual({
       mode: 'agent-default',
       strictness: 'normal',
+      grace: 10,
       key: 'private-one',
       consent: false,
       generation: 1,
@@ -1050,6 +1055,7 @@ describe('A key can be saved replaced and removed safely', () => {
     expect(first.after).toEqual({
       mode: 'hemera-auto',
       strictness: 'normal',
+      grace: 10,
       key: 'private-one',
       consent: false,
       generation: 2,
@@ -1130,6 +1136,32 @@ describe('The strictness of Hemera Auto is kept in the Profile', () => {
     )
     expect(state.before).toHaveLength(1)
     expect(state.after).toEqual(state.before)
+  })
+})
+
+describe('The grace of an approval is kept in the Profile', () => {
+  test('it is ten seconds until chosen, and a choice holds', async () => {
+    expect(await send('classifier.state', {})).toMatchObject({ grace: 10 })
+    await send('classifier.grace.write', { grace: 30 })
+    expect(await send('classifier.state', {})).toMatchObject({ grace: 30 })
+    await send('classifier.grace.write', { grace: 0 })
+    expect(await send('classifier.state', {})).toMatchObject({ grace: 0 })
+    expect(decideRequest('classifier.grace.write', { grace: 61 }).accepted).toBe(false)
+    expect(decideRequest('classifier.grace.write', { grace: 1.5 }).accepted).toBe(false)
+  })
+
+  test('the window says whether it has the focus', async () => {
+    const focused = await running(
+      Effect.gen(function* () {
+        const approvals = yield* Approvals
+        const before = approvals.focused()
+        const decision = decideRequest('window.focus.write', { focused: false })
+        if (!decision.accepted) throw new Error(decision.reason)
+        yield* answer(decision)
+        return { before, after: approvals.focused() }
+      }),
+    )
+    expect(focused).toEqual({ before: true, after: false })
   })
 })
 

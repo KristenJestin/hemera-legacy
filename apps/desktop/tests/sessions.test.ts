@@ -575,7 +575,7 @@ describe('Aucune suppression proposée', () => {
       'mainOf',
       'one',
       'read',
-      'recordChoice',
+      'recordChoices',
       'recordNative',
       'rename',
       'restore',

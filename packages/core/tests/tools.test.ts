@@ -27,9 +27,15 @@ describe('Every tool has a label and a mark', () => {
     expect(TOOL_LABELS.commands_output.label).toBe('Command output')
     expect(TOOL_LABELS.commands_propose.label).toBe('Propose command')
     expect(TOOL_LABELS.session_get.label).toBe('Session')
-    expect(TOOL_LABELS.build_read).toEqual({ label: 'Read build', mark: 'read-build' })
-    expect(TOOL_LABELS.task_finished).toEqual({ label: 'Task finished', mark: 'finish-task' })
-    expect(TOOL_LABELS.task_blocked).toEqual({ label: 'Task blocked', mark: 'block-task' })
+    expect(TOOL_LABELS.build_read).toMatchObject({ label: 'Read build', mark: 'read-build' })
+    expect(TOOL_LABELS.task_finished).toMatchObject({ label: 'Task finished', mark: 'finish-task' })
+    expect(TOOL_LABELS.task_blocked).toMatchObject({ label: 'Task blocked', mark: 'block-task' })
+  })
+
+  test('each says what it is doing while it runs, as a present participle (#170)', () => {
+    for (const tool of TOOL_NAMES) expect(TOOL_LABELS[tool].doing).toMatch(/^[A-Z][a-z]*ing /)
+    expect(TOOL_LABELS.spec_write.doing).toBe('Writing the Spec')
+    expect(TOOL_LABELS.fs_read.doing).toBe('Reading a file')
   })
 })
 

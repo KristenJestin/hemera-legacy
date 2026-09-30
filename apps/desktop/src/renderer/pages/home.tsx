@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import type { ReactNode } from 'react'
 
-import type { ComposerChoice } from '@hemera/ipc'
+import type { ComposerChoice, PromptIntent } from '@hemera/ipc'
 import {
   ActivityFrame,
   AgentModelMenu,
@@ -9,6 +9,7 @@ import {
   EmptyProject,
   Greeting,
   SessionsFrame,
+  type AgentListing,
   type HomeSession,
   type JournalLine,
   type OfferedAgent,
@@ -61,6 +62,8 @@ export function HomePage({
   entries,
   agents,
   classifier,
+  agentsListing,
+  onRetryAgents,
   choice,
   offeringOf,
   onChooseAgent,
@@ -72,6 +75,8 @@ export function HomePage({
   onPickFiles,
   workspaces,
   onSend,
+  focusComposer = false,
+  onFocusTaken,
 }: {
   projectName: string
   /** The last Sessions of this Project, most recently written first. */
@@ -80,6 +85,10 @@ export function HomePage({
   /** The agents this machine has, as the registry named them. */
   agents: OfferedAgent[]
   classifier?: MenuClassifier | undefined
+  /** Where that list stands: looked for, listed, or not read (`AgentListing`). */
+  agentsListing: AgentListing
+  /** Asks for the list again, which the menu offers when it could not be read. */
+  onRetryAgents: () => void
   /**
    * What this Project's composer was left on, as the data folder remembers it (design D5-17).
    *
@@ -106,9 +115,20 @@ export function HomePage({
   workspaces: readonly OfferedWorkspace[]
   /**
    * Starts the Session with the chosen agent in the chosen Workspace (null for `main`), and says
-   * what to write in it.
+   * what to write in it: with the intent `spec` when it was started by `New Spec` (issue #128).
    */
-  onSend: (text: string, agent: string, workspaceId: string | null) => Promise<string | null>
+  onSend: (
+    text: string,
+    agent: string,
+    workspaceId: string | null,
+    intent?: PromptIntent,
+  ) => Promise<string | null>
+  /**
+   * Whether the caret is asked for in the composer, now: the sidebar's `+` (issue #128). Let go
+   * of with `onFocusTaken` once the box has it.
+   */
+  focusComposer?: boolean | undefined
+  onFocusTaken?: (() => void) | undefined
 }): ReactNode {
   const [value, setValue] = useState('')
   const [files, setFiles] = useState<string[]>([])
@@ -179,6 +199,8 @@ export function HomePage({
           <AgentModelMenu
             classifier={classifier}
             agents={agents}
+            listing={agentsListing}
+            onRetryAgents={onRetryAgents}
             agent={agent}
             onAgentChange={choose}
             models={model?.choices ?? []}
@@ -205,11 +227,16 @@ export function HomePage({
           />
         }
         // The Home is where a Spec is made from the question that starts a Session; a Session is
-        // a conversation already under way and offers nothing of the sort (D4b-02).
-        spec
+        // a conversation already under way and offers nothing of the sort (D4b-02). The same
+        // Session as a send, whose agent is asked for a Spec proposal from it (issue #128).
+        onSpec={async (text) =>
+          agent === null ? NO_AGENT : await onSend(text, agent, workspace?.id ?? null, 'spec')
+        }
         onSend={async (text) =>
           agent === null ? NO_AGENT : await onSend(text, agent, workspace?.id ?? null)
         }
+        takeFocus={focusComposer}
+        onFocusTaken={onFocusTaken}
       />
       {sessions.length === 0 ? (
         <EmptyProject projectName={projectName} onOpenJournal={onOpenJournal} />

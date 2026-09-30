@@ -70,6 +70,14 @@ function placeWords(place: string): string {
   return place === '' ? 'at the Workspace root' : `in ${place}`
 }
 
+/** How far a Session's agent is attached to its own session, as the Journal says it. */
+const NATIVE_LINES = new Map([
+  ['attached', 'Agent attached to its own session'],
+  ['lost', 'Agent lost its own session'],
+  ['fallback', 'Agent given a context rebuilt from the thread'],
+  ['none', 'Agent not started yet'],
+])
+
 /** What each type of event says, with what its payload adds to it. */
 function labelOf(entry: JournalEntry): string {
   const payload = entry.payload
@@ -111,6 +119,12 @@ function labelOf(entry: JournalEntry): string {
       return 'Session restored'
     case 'session.mission_set':
       return `Mission set to ${said('mission')}`
+    // What the engine records of a Session's agent while it works: the option it stands on, and
+    // how far the session the agent keeps of its own is still attached (D5-06).
+    case 'session.choice_recorded':
+      return `Agent ${said('optionId')} set to ${said('value')}`
+    case 'session.agent_recorded':
+      return NATIVE_LINES.get(said('nativeState')) ?? 'Agent session recorded'
     // A Spec's steps (D7-13). The phase a step belongs to is a correlation of the event rather
     // than a word of its payload, and it is read from there.
     case 'spec.created':
@@ -119,6 +133,8 @@ function labelOf(entry: JournalEntry): string {
       return payload.writer === true
         ? 'Session opened on the Spec, as its writer'
         : 'Session opened on the Spec, as a reader'
+    case 'spec.heading_written':
+      return `Spec is the ${said('type')} “${said('title')}”`
     case 'spec.section_written':
       return `${said('name')} written by ${said('author')} · v${said('version')}`
     case 'spec.stories_written':

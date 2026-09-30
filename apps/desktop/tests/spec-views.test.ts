@@ -1,7 +1,7 @@
 /**
  * A Spec snapshot as the Spec panel draws it (design D7-01, D7-05, D7-08, D7-10, D7-11, D7-12).
  *
- * The mapping is pure: a snapshot, its revisions, its buffers and its Journal in, the
+ * The mapping is pure: a snapshot, its revisions and its Journal in, the
  * view of `@hemera/ui` out — one sentence of what is happening, a mark per part, the readiness
  * as seven checks and the things left before ready.
  */
@@ -22,16 +22,14 @@ import type {
   SpecSnapshot,
 } from '@hemera/ipc'
 import {
-  dayOf,
   launchOf,
-  nowOf,
+  provisionalViewOf,
   readerOf,
   readinessOf,
   revisionsOf,
   sectionsOf,
   specViewOf,
   specWorkspacesOf,
-  storiesWith,
   tasksOf,
 } from '#renderer/spec-views.ts'
 
@@ -157,64 +155,37 @@ function ready(at: string, revisionId: string): JournalEntry {
   }
 }
 
-describe('The panel says what is happening in one sentence', () => {
-  test('shape open: the agent is writing the first empty section of the type', () => {
-    expect(nowOf(snapshot())).toBe('Shape · the agent is writing the expected outcome')
-  })
-
-  test('a blocking question of the phase in focus: the answer is yours', () => {
-    const waiting = snapshot({ questions: [question('q', 'shape')] })
-    expect(nowOf(waiting)).toBe('Shape · waiting for your answer')
-    // Answered, or of another phase, it waits on nobody.
-    expect(nowOf(snapshot({ questions: [question('q', 'shape', true)] }))).not.toContain('waiting')
-    expect(nowOf(snapshot({ questions: [question('q', 'plan')] }))).not.toContain('waiting')
-  })
-
-  test('plan open: the agent is writing the plan', () => {
-    expect(nowOf(snapshot({ phases: phases('finished', 'open', 'pending') }))).toBe(
-      'Plan · the agent is writing the plan',
-    )
-  })
-
-  test('every phase finished and attested: the agent confirmed the Spec is complete', () => {
-    const done = snapshot({ phases: phases('finished', 'finished', 'finished') })
-    expect(nowOf({ ...done, revision: { ...done.revision, attestedContentVersion: 3 } })).toBe(
-      'Decompose · finished, the agent confirmed the Spec is complete',
-    )
-    expect(nowOf(done)).toBe(
-      'Decompose · finished, waiting for the agent to confirm the Spec is complete',
-    )
-  })
-
-  test('ready: frozen at its revision, a build can start from it', () => {
-    const frozen = snapshot()
-    expect(nowOf({ ...frozen, spec: { ...frozen.spec, status: 'ready' } })).toBe(
-      'Ready · frozen, a build can start from it',
-    )
-  })
-
-  test('after a Rework every phase is stale, and the agent re-declares each', () => {
-    const reworked = snapshot({ phases: phases('stale', 'stale', 'stale') })
-    expect(nowOf({ ...reworked, revision: { ...reworked.revision, number: 2 } })).toBe(
-      'Every phase to review · the agent goes over each again',
-    )
-    // A stale phase among finished ones is a new shaping's doing, not a Rework's.
-    expect(nowOf(snapshot({ phases: phases('finished', 'stale', 'pending') }))).toBe(
-      'Plan · to review, the agent goes over it again',
-    )
-  })
-
-  test('on revision 2, once shape is declared again, a stale plan is a new shaping', () => {
-    const redeclared = snapshot({ phases: phases('finished', 'stale', 'stale') })
-    expect(nowOf({ ...redeclared, revision: { ...redeclared.revision, number: 2 } })).toBe(
-      'Plan · to review, the agent goes over it again',
-    )
+describe('New Spec shows a provisional Spec before one exists (#198)', () => {
+  test('no key, the request as its title, nothing written, no phase begun, marked provisional', () => {
+    const view = provisionalViewOf('Read a text file aloud')
+    expect(view).toMatchObject({
+      key: '',
+      title: 'Read a text file aloud',
+      status: 'draft',
+      provisional: true,
+      revisions: [],
+      sections: [],
+      stories: [],
+      tasks: [],
+      questions: [],
+    })
+    expect(view.phases.map((phase) => phase.state)).toEqual([
+      'pending',
+      'pending',
+      'pending',
+      'unavailable',
+    ])
+    expect([view.storiesMark, view.tasksMark, view.questionsMark]).toEqual([
+      'empty',
+      'empty',
+      'empty',
+    ])
   })
 })
 
 describe('Each section wears its mark', () => {
   test('empty, written by the agent, edited by you', () => {
-    const marks = sectionsOf(snapshot(), []).map((one) => [one.name, one.mark, one.author])
+    const marks = sectionsOf(snapshot()).map((one) => [one.name, one.mark, one.author])
     expect(marks).toEqual([
       ['problem', 'agent', 'agent'],
       ['expected_outcome', 'empty', null],
@@ -232,53 +203,15 @@ describe('Each section wears its mark', () => {
         section('scope', 'In.', 1, 'agent'),
       ],
     })
-    expect(sectionsOf(stale, []).map((one) => one.mark)).toEqual(['stale', 'agent'])
+    expect(sectionsOf(stale).map((one) => one.mark)).toEqual(['stale', 'agent'])
   })
-})
-
-describe('An edit of yours is sent to the agent next turn', () => {
-  test('a human edit after the writer was last briefed is pending, and none once briefed', () => {
-    const pending = (briefedAt: number | null) =>
-      sectionsOf(snapshot({ briefedAt }), [])
-        .filter((one) => one.pendingForAgent === true)
-        .map((one) => one.name)
-    // The agent's section and the empty ones the Spec was born with are no edit of yours.
-    expect(pending(null)).toEqual(['scope'])
-    expect(pending(-1)).toEqual(['scope'])
-    expect(pending(0)).toEqual([])
-  })
-})
-
-describe('A conflict keeps the human’s text', () => {
-  test('a text kept on an older version is the conflict of its section', () => {
-    const kept = {
-      specId: 'spec-7',
-      name: 'scope' as const,
-      body: 'Mine.',
-      baseVersion: 1,
-      updatedAt: 0,
-    }
-    const scope = sectionsOf(snapshot(), [kept]).find((one) => one.name === 'scope')
-    expect(scope?.mark).toBe('conflict')
-    expect(scope?.conflict).toEqual({
-      base: 1,
-      current: 2,
-      mine: 'Mine.',
-      theirs: 'In: invoices of a month.',
-    })
-  })
-
-  test('a text kept on the version the section is at is no conflict', () => {
-    const kept = {
-      specId: 'spec-7',
-      name: 'scope' as const,
-      body: 'Mine.',
-      baseVersion: 2,
-      updatedAt: 0,
-    }
-    expect(sectionsOf(snapshot(), [kept]).find((one) => one.name === 'scope')?.conflict).toBe(
-      undefined,
-    )
+  test('writing while a spec_write of the running turn writes it, empty or not (issue #185)', () => {
+    const marks = (writing: 'problem' | 'expected_outcome' | null) =>
+      sectionsOf(snapshot(), writing).map((one) => [one.name, one.mark, one.body !== ''])
+    expect(marks('expected_outcome')[1]).toEqual(['expected_outcome', 'writing', false])
+    expect(marks('problem')[0]).toEqual(['problem', 'writing', true])
+    // The write over, failed or not, the section wears the mark of what it holds again.
+    expect(marks(null)[1]).toEqual(['expected_outcome', 'empty', false])
   })
 })
 
@@ -346,6 +279,16 @@ describe('The readiness bar says what is left', () => {
     ])
   })
 
+  test('a feature without a story is asked for a user story', () => {
+    const readiness = readinessOf(snapshot(), [failure('coverage', 'stories')])
+    expect(readiness.todo).toEqual([{ label: 'a user story', target: 'stories' }])
+    // The same, read from the gate of `@hemera/core` rather than handed in.
+    expect(readinessOf(snapshot()).todo).toContainEqual({
+      label: 'a user story',
+      target: 'stories',
+    })
+  })
+
   test('the readiness is the ready gate of the very snapshot on screen', () => {
     // Shaping has just begun: sections of the contract empty, no task, `shape` open, nothing
     // attested — and no question, no link, no cycle to fail, which is nothing met either.
@@ -408,11 +351,10 @@ describe('The readiness bar says what is left', () => {
     expect(readiness.todo).toEqual([])
   })
 
-  test('an obsolete request refused is said by the bar, and nothing is said otherwise', () => {
+  test('an obsolete request refused is said as it is, and nothing is said otherwise', () => {
     const reading = {
       snapshot: snapshot(),
       revisions: [snapshot().revision],
-      buffers: [],
       journal: [],
     }
     const said = 'ATL-7 changed since its gate was shown: read the gate again.'
@@ -420,17 +362,18 @@ describe('The readiness bar says what is left', () => {
     expect(specViewOf({ ...reading, readyRefused: null }).readiness.refused).toBe(undefined)
   })
 
-  test("a refusal listing the gate's failures is said without the engine's words", () => {
+  test("a refusal listing the gate's failures says what is left, without the engine's words", () => {
     const reading = {
       snapshot: snapshot(),
       revisions: [snapshot().revision],
-      buffers: [],
       journal: [],
       readyRefused:
         'ATL-7 does not pass its gate: the decompose phase is open, not finished; the attestation is missing.',
     }
+    const left = readinessOf(snapshot()).todo.map((item) => item.label)
+    expect(left.length).toBeGreaterThan(0)
     expect(specViewOf(reading).readiness.refused).toBe(
-      'ATL-7 is not ready yet: see what is left above.',
+      `ATL-7 is not ready yet. Still to do: ${left.join(', ')}.`,
     )
   })
 })
@@ -450,29 +393,18 @@ describe('An old revision is readable and not editable', () => {
   test('the picker lists the revisions newest first, the older ones read only', () => {
     expect(revisionsOf(second, revisions, [ready('2026-09-22T10:00:00.000Z', 'rev-1')])).toEqual([
       { number: 2, detail: 'Latest · draft' },
-      { number: 1, detail: 'Frozen 22 Sep · read only' },
+      { number: 1, detail: 'Marked ready 22 Sep · read only' },
     ])
   })
 
-  test('revision 1 shown is frozen: no editing, no conflict, and the day it froze', () => {
+  test('revision 1 shown is frozen: no editing, and the day it froze', () => {
     const old = { ...snapshot(), spec: second.spec }
-    const kept = {
-      specId: 'spec-7',
-      name: 'scope' as const,
-      body: 'Mine.',
-      baseVersion: 1,
-      updatedAt: 0,
-    }
     const view = specViewOf({
       snapshot: old,
       revisions,
-      buffers: [kept],
       journal: [ready('2026-09-22T10:00:00.000Z', 'rev-1')],
     })
     expect(view.status).toBe('ready')
-    expect(view.frozenOn).toBe('22 Sep')
-    expect(view.now).toBe('An earlier version · read only, as it was frozen')
-    expect(view.sections.some((one) => one.conflict !== undefined)).toBe(false)
     expect(view.readiness.todo).toEqual([])
     expect(view.replacedBy).toBe(2)
   })
@@ -482,34 +414,22 @@ describe('An old revision is readable and not editable', () => {
     const view = specViewOf({
       snapshot: { ...frozen, spec: { ...frozen.spec, status: 'ready' } },
       revisions: [frozen.revision],
-      buffers: [],
       journal: [],
     })
     expect(view.status).toBe('ready')
     expect(view.replacedBy).toBe(undefined)
   })
 
-  test('a ready Spec whose line the Journal page did not hold froze when it last changed', () => {
+  test('a ready Spec reads as the latest, ready, in its picker', () => {
     const frozen = snapshot()
     const view = specViewOf({
       snapshot: { ...frozen, spec: { ...frozen.spec, status: 'ready' } },
       revisions: [frozen.revision],
-      buffers: [],
       journal: [],
     })
-    expect(view.frozenOn).toBe(dayOf(Date.UTC(2026, 8, 23, 12)))
-    expect(view.revisions).toEqual([{ number: 1, detail: 'Latest · frozen' }])
+    expect(view.revisions).toEqual([{ number: 1, detail: 'Latest · ready' }])
   })
 })
-
-/** The credit-note story, `S2`, with its narrative and criteria edited in place. */
-const CREDIT_EDITED = {
-  id: 'credit',
-  key: 'S2',
-  title: 'Credit notes',
-  narrative: 'Kept with their invoice number.',
-  criteria: ['Negative rows.', 'Same number.'],
-}
 
 describe('Stories, tasks and questions are named the way the document reads them', () => {
   const decomposed = snapshot({
@@ -571,7 +491,6 @@ describe('Stories, tasks and questions are named the way the document reads them
     const view = specViewOf({
       snapshot: decomposed,
       revisions: [decomposed.revision],
-      buffers: [],
       journal: [],
     })
     expect(view.stories.map((one) => [one.key, one.criteria.length])).toEqual([
@@ -604,7 +523,6 @@ describe('Stories, tasks and questions are named the way the document reads them
     const view = specViewOf({
       snapshot: decomposed,
       revisions: [decomposed.revision],
-      buffers: [],
       journal: [],
     })
     expect(view.questions[0]).toEqual({
@@ -618,57 +536,6 @@ describe('Stories, tasks and questions are named the way the document reads them
       ],
       answer: { optionId: 'issue', text: undefined },
     })
-  })
-
-  test('a story edited in place is written back with every other story as it was', () => {
-    const edited = storiesWith(decomposed, CREDIT_EDITED)
-    expect(edited).toEqual([
-      {
-        id: 'export',
-        title: 'Export a month',
-        narrative: 'As an accountant…',
-        priority: null,
-        criteria: ['One row per line.', 'Empty month, header only.'],
-      },
-      {
-        id: 'credit',
-        title: 'Credit notes',
-        narrative: 'Kept with their invoice number.',
-        priority: 'high',
-        criteria: ['Negative rows.', 'Same number.'],
-      },
-    ])
-  })
-
-  test('a story edited while the list moved is written onto its own story', () => {
-    // `S2` was the credit notes when the edit began; a story put in front of them since has
-    // made the credit notes `S3`, and `S2` another story, which keeps its own text.
-    const moved = {
-      ...decomposed,
-      stories: [
-        decomposed.stories[0]!,
-        {
-          id: 'refund',
-          revisionId: 'rev-1',
-          title: 'Refunds',
-          narrative: '',
-          priority: null,
-          rank: 'ab',
-        },
-        decomposed.stories[1]!,
-      ],
-    }
-    const written = storiesWith(moved, CREDIT_EDITED)
-    expect(written?.map((one) => [one.id, one.narrative])).toEqual([
-      ['export', 'As an accountant…'],
-      ['refund', ''],
-      ['credit', 'Kept with their invoice number.'],
-    ])
-  })
-
-  test('a story taken away while it was edited is not written at all', () => {
-    const gone = { ...decomposed, stories: [decomposed.stories[0]!] }
-    expect(storiesWith(gone, CREDIT_EDITED)).toBe(null)
   })
 })
 
@@ -772,40 +639,86 @@ function panel(change: Partial<SpecLaunches> = {}): SpecLaunches {
   }
 }
 
+/** The Spec the panel is read on: ready, on the revision its launches were asked on. */
+const READY_ON = { status: 'ready', currentRevisionId: 'rev-1' } as const
+
 describe('The launch of a Spec as the panel draws it', () => {
   test('nothing is drawn while nothing was asked for', () => {
-    expect(launchOf(null)).toBeNull()
-    expect(launchOf(panel())).toBeNull()
+    expect(launchOf(null, READY_ON)).toBeNull()
+    expect(launchOf(panel(), READY_ON)).toBeNull()
   })
 
   test('a launch waiting says the step its Workspace is on, when one is running', () => {
-    expect(launchOf(panel({ launch: launched(), step: 'install' }))).toEqual({
+    expect(launchOf(panel({ launch: launched(), step: 'install' }), READY_ON)).toEqual({
       state: 'waiting',
       step: 'install',
     })
     // The step belongs to the Workspace, so a launch waiting on nothing waits on nothing.
-    expect(launchOf(panel({ launch: launched() }))).toEqual({ state: 'waiting' })
+    expect(launchOf(panel({ launch: launched() }), READY_ON)).toEqual({ state: 'waiting' })
   })
 
-  test('a build starting, started or taken back is said in one word', () => {
-    expect(launchOf(panel({ launch: launched({ state: 'starting' }) }))).toEqual({
+  test('a build starting or started is said in one word', () => {
+    expect(launchOf(panel({ launch: launched({ state: 'starting' }) }), READY_ON)).toEqual({
       state: 'starting',
     })
-    expect(launchOf(panel({ launch: launched({ state: 'started' }) }))).toEqual({
+    expect(launchOf(panel({ launch: launched({ state: 'started' }) }), READY_ON)).toEqual({
       state: 'started',
     })
-    expect(launchOf(panel({ launch: launched({ state: 'cancelled' }) }))).toEqual({
+  })
+
+  test('a launch a Rework cancelled says so, and offers nothing while the Spec is a draft', () => {
+    const cancelled = launched({ state: 'cancelled', detail: 'reworked' })
+    expect(
+      launchOf(panel({ launch: cancelled }), { status: 'draft', currentRevisionId: 'rev-2' }),
+    ).toEqual({ state: 'cancelled', reason: 'rework', again: false })
+  })
+
+  test('a launch a Rework cancelled is asked for again once the new revision is ready', () => {
+    const cancelled = launched({ state: 'cancelled', detail: 'reworked' })
+    expect(
+      launchOf(panel({ launch: cancelled }), { status: 'ready', currentRevisionId: 'rev-2' }),
+    ).toEqual({ state: 'cancelled', reason: 'rework', again: true })
+  })
+
+  test('a launch a cleanup cancelled says the Workspace was removed, and is asked for again', () => {
+    const cancelled = launched({ state: 'cancelled', detail: 'The Workspace was removed' })
+    expect(launchOf(panel({ launch: cancelled }), READY_ON)).toEqual({
       state: 'cancelled',
+      reason: 'removed',
+      again: true,
     })
   })
 
   test('a refused start keeps the words it was refused with', () => {
-    expect(
-      launchOf(panel({ launch: launched({ state: 'failed', detail: 'no such agent' }) })),
-    ).toEqual({ state: 'failed', cause: 'no such agent' })
-    expect(launchOf(panel({ launch: launched({ state: 'failed' }) }))).toEqual({
+    const refused = launched({ state: 'failed', sessionId: 's-1', detail: 'no such agent' })
+    expect(launchOf(panel({ launch: refused }), READY_ON)).toEqual({
       state: 'failed',
-      cause: 'the agent did not start',
+      stage: 'agent',
+      cause: 'no such agent',
+    })
+    expect(
+      launchOf(panel({ launch: launched({ state: 'failed', sessionId: 's-1' }) }), READY_ON),
+    ).toEqual({ state: 'failed', stage: 'agent', cause: 'the agent did not start' })
+  })
+
+  test('a launch failed by its preparation says the Workspace could not be prepared', () => {
+    const failed = launched({
+      state: 'failed',
+      detail: 'The Workspace could not be prepared: fatal: invalid reference: main',
+    })
+    expect(launchOf(panel({ launch: failed }), READY_ON)).toEqual({
+      state: 'failed',
+      stage: 'preparation',
+      cause: 'fatal: invalid reference: main',
+    })
+  })
+
+  test('a launch refused before any Session was made is asked for again, not retried', () => {
+    const refused = launched({ state: 'failed', detail: 'no agent has been chosen' })
+    expect(launchOf(panel({ launch: refused }), READY_ON)).toEqual({
+      state: 'failed',
+      stage: 'start',
+      cause: 'no agent has been chosen',
     })
   })
 })
@@ -817,7 +730,7 @@ describe('The Workspaces a build of a Spec may be started in', () => {
 
   test('the Workspace the Spec is set on comes beside the ones a build may use', () => {
     const read = panel({
-      workspace: { id: 'w-1', name: 'csv-invoice' },
+      workspace: { id: 'w-1', name: 'csv-invoice', state: 'failed' },
       workspaces: [
         { id: 'main', name: 'main' },
         { id: 'w-1', name: 'csv-invoice' },
@@ -825,6 +738,8 @@ describe('The Workspaces a build of a Spec may be started in', () => {
     })
 
     expect(specWorkspacesOf(read).workspace?.name).toBe('csv-invoice')
+    // Where it stands is what the panel offers from: a failed one is resumed, not started in.
+    expect(specWorkspacesOf(read).workspace?.state).toBe('failed')
     expect(specWorkspacesOf(read).workspaces.map((one) => one.id)).toEqual(['main', 'w-1'])
     // A Spec set on no Workspace has none to name: absent, and not a Workspace of no name.
     expect(specWorkspacesOf(panel()).workspace).toBeUndefined()

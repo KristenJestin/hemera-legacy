@@ -21,6 +21,8 @@ export function SettingsPage({
   classifier,
   archived,
   onRestore,
+  acpTrace,
+  onAcpTraceChange,
 }: {
   subtitle: string
   theme: ThemeChoice
@@ -33,6 +35,9 @@ export function SettingsPage({
   classifier: ClassifierSectionProps | undefined
   archived: ArchivedProject[]
   onRestore: (id: string) => void
+  /** Whether the ACP trace of each Session is written (#131), and the switch that says so. */
+  acpTrace: boolean
+  onAcpTraceChange: (on: boolean) => void
 }): ReactNode {
   return (
     <Settings
@@ -46,6 +51,8 @@ export function SettingsPage({
       classifier={classifier}
       archived={archived}
       onRestore={onRestore}
+      acpTrace={acpTrace}
+      onAcpTraceChange={onAcpTraceChange}
     />
   )
 }

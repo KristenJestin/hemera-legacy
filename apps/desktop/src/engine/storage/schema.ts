@@ -448,7 +448,8 @@ export type RunState = (typeof COMMAND_RUN_STATES)[number]
  * What a delivery of the context was: the base, the record of a native read, the file given at
  * the start to an agent that does not read it, or a change; and, for a `define` Session, the
  * mission brief, the human's answers and edits of the Spec, and a sub-agent's result (D7-09,
- * D7-14).
+ * D7-14); and Hemera's own words to the agent: a notice that the user declined its proposal, and
+ * the request a Session started with New Spec carries on its first turn.
  */
 export const CONTEXT_DELIVERY_KINDS = [
   'base',
@@ -459,6 +460,8 @@ export const CONTEXT_DELIVERY_KINDS = [
   'answer',
   'edit',
   'internal',
+  'notice',
+  'request',
 ] as const
 
 /** The kinds recorded once per Session and fingerprint: what a Session starts with. */
@@ -484,7 +487,8 @@ export type ContextDeliveryKind = (typeof CONTEXT_DELIVERY_KINDS)[number]
  * `line_windows` and `line_linux` are the machine's own line, null when it runs the default one;
  * `scope` says whether a `serve` runs once per Workspace or once for the Project; `portless`
  * whether its line runs through Portless (D8-10), and `portless_name` the name it runs under,
- * null for the Project's name as a slug (D8-10 as amended by recette 1).
+ * null for the Project's name as a slug (D8-10 as amended by recette 1). `run_at_open` says
+ * whether Hemera runs it in the Project's `main` each time it opens (#114).
  */
 export const projectCommands = sqliteTable(
   'project_commands',
@@ -505,6 +509,7 @@ export const projectCommands = sqliteTable(
     portless: integer('portless').notNull().default(0),
     folderBase: text('folder_base'),
     portlessName: text('portless_name'),
+    runAtOpen: integer('run_at_open').notNull().default(0),
   },
   (table) => [
     check('command_type_is_known', sql`${table.type} IN (${sql.raw(oneOf(COMMAND_TYPES))})`),
@@ -570,6 +575,13 @@ export const commandRuns = sqliteTable(
     portConflict: text('port_conflict'),
     folder: text('folder'),
     scope: text('scope').notNull().default('workspace'),
+    /**
+     * What the Session's agent was last told of the run (issue #238): `none`, `running` or
+     * `ended` — by the answer of its own tool, or by a delivery at the next prompt. A run is
+     * written `none` when it starts; the default is for the runs from before this column, which
+     * were never handed over and are not handed over all at once after an update.
+     */
+    told: text('told').notNull().default('ended'),
   },
   (table) => [
     check('run_state_is_known', sql`${table.state} IN (${sql.raw(oneOf(COMMAND_RUN_STATES))})`),
@@ -696,6 +708,27 @@ export const contextDeliveries = sqliteTable(
       .on(table.sessionId, table.kind, table.path, table.fingerprint)
       .where(sql`${table.kind} IN (${sql.raw(oneOf(STARTED_WITH))})`),
   ],
+)
+
+/**
+ * A sub-agent's result waiting for its Session's next safe point (D7-14, issue #72).
+ *
+ * Written when it is queued and deleted once the agent took it, in the same transaction as its
+ * `internal` row of `context_deliveries`: a quit before the safe point leaves it here, and the
+ * first safe point after the agent starts again hands it over, once. Oldest first by `queued_at`,
+ * then by insertion order.
+ */
+export const queuedResults = sqliteTable(
+  'queued_results',
+  {
+    id: text('id').primaryKey(),
+    sessionId: text('session_id')
+      .notNull()
+      .references(() => sessions.id, { onDelete: 'cascade' }),
+    text: text('text').notNull(),
+    queuedAt: text('queued_at').notNull(),
+  },
+  (table) => [index('queued_by_session').on(table.sessionId, table.queuedAt)],
 )
 
 /**

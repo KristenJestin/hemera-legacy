@@ -83,6 +83,7 @@ import { ModeList } from './mode-list.tsx'
  * panel is built out of.
  */
 export type {
+  AgentListing,
   AgentModelMenuProps,
   EffortChoice,
   ModeChoice,
@@ -128,6 +129,8 @@ export function AgentModelMenu({
   agents,
   agent,
   onAgentChange,
+  listing = 'listed',
+  onRetryAgents,
   models,
   model,
   onModelChange,
@@ -245,6 +248,8 @@ export function AgentModelMenu({
                   agents={agents}
                   agent={agent}
                   autoFocus={opened === 'agent'}
+                  listing={listing}
+                  onRetry={onRetryAgents}
                   onChoose={(one) => {
                     onAgentChange(one.id)
                     setStage('model')

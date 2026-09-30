@@ -93,7 +93,7 @@ async function aRunShowsWhatItRan({ canvasElement }: PlayContext) {
   await expect(canvas.getByRole('log', { name: 'Output of test' })).toHaveTextContent(
     'Tests 4 passed (4)',
   )
-  await expect(canvas.getByText('Exited 0')).toBeVisible()
+  await expect(canvas.getByText('exit 0')).toBeVisible()
 }
 
 // Scenario: "A command's folder resolves inside the Workspace"
@@ -122,8 +122,8 @@ export const Running: Story = {
   },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    await expect(canvas.getByText('Running')).toBeVisible()
-    await expect(canvas.queryByText(/^Exited/)).toBeNull()
+    await expect(canvas.getByRole('img', { name: 'Running' })).toBeVisible()
+    await expect(canvas.queryByText(/^exit /)).toBeNull()
   },
 }
 
@@ -136,7 +136,7 @@ export const Failed: Story = {
   },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    await expect(canvas.getByText('Exited 1')).toBeVisible()
+    await expect(canvas.getByText('exit 1')).toBeVisible()
   },
 }
 
@@ -180,6 +180,8 @@ export const Serving: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     await expect(canvas.getByText('http://localhost:3001/')).toBeVisible()
-    await expect(canvas.getByText('ready')).toBeVisible()
+    // An address that answers says nothing beside it: no word, no badge.
+    await expect(canvas.queryByText('starting')).toBeNull()
+    await expect(canvas.queryByText('ready')).toBeNull()
   },
 }

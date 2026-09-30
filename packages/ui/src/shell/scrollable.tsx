@@ -38,8 +38,12 @@ const PAGE = 0.8
 const STRIP =
   'scroll-quiet flex min-w-0 flex-1 items-stretch gap-1 overflow-x-auto overflow-y-hidden px-tab-join'
 
+/**
+ * The fades at the two ends, over the tabs and over what the tabs say: a tab's label is drawn
+ * above the strip's mark (issue #127), and the fade has to be above that label to fade it.
+ */
 const EDGE =
-  'pointer-events-none absolute inset-y-0 flex w-10 items-center from-background to-transparent'
+  'pointer-events-none absolute inset-y-0 z-2 flex w-10 items-center from-background to-transparent'
 
 const PLACE = {
   start: 'left-0 justify-start bg-linear-to-r',
@@ -100,7 +104,7 @@ export function Scrollable({ label, className, children }: ScrollableProps): Rea
   }
 
   return (
-    <div className={cn('relative flex min-w-0', className)}>
+    <div className={cn('relative isolate flex min-w-0', className)}>
       <nav ref={strip} onScroll={look} aria-label={label} className={STRIP}>
         {children}
       </nav>

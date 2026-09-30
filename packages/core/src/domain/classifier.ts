@@ -1,8 +1,12 @@
+import type { PlaceConcern } from './classifier-places.ts'
+
 /**
  * The version recorded beside every Hemera Auto decision (D59-03). Version 2 (#298): the judge
- * never refuses, and its thresholds follow the strictness the user chose.
+ * never refuses, and its thresholds follow the strictness the user chose. Version 3 (#306): the
+ * paths a call names decide inside or outside, and what points outside the Workspace or at a
+ * sensitive place always asks.
  */
-export const CLASSIFIER_POLICY_VERSION = '2'
+export const CLASSIFIER_POLICY_VERSION = '3'
 
 export type ClassifierVerdict = 'allow' | 'ask' | 'deny'
 /** What the judge may answer: only the local rules refuse (#298). */
@@ -33,6 +37,8 @@ export interface LocalAction {
   /** For a command: its folder and every path it names, resolved by the caller. */
   readonly target: 'inside' | 'outside' | 'unknown'
   readonly command?: ResolvedCommand
+  /** Why the call always asks, whatever the judge says: where it points (#306). */
+  readonly concerns?: readonly PlaceConcern[]
 }
 
 /** The tools that only read inside the Workspace, settled without the evaluator. */
@@ -111,6 +117,7 @@ export function localClassifierVerdict(action: LocalAction): LocalVerdict {
       (word, at) => DELETERS.has(programName(word)) && words.slice(at + 1).some(namesGit),
     )
     if (deletes) return 'deny'
+    if ((action.concerns?.length ?? 0) > 0) return 'defer'
     if (action.target !== 'inside' || command.shell || command.resolved === null) return 'defer'
     const name = programName(command.program)
     const written = command.program.replaceAll('\\', '/')
@@ -135,7 +142,7 @@ export function localClassifierVerdict(action: LocalAction): LocalVerdict {
     return 'defer'
   }
 
-  if (action.target !== 'inside') return 'defer'
+  if (action.target !== 'inside' || (action.concerns?.length ?? 0) > 0) return 'defer'
   return READ_ONLY_TOOLS.has(action.tool) ? 'allow' : 'defer'
 }
 

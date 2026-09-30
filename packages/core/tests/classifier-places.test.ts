@@ -19,7 +19,10 @@ const WINDOWS: PlaceContext = { home: 'C:\\Users\\me', user: 'me', platform: 'wi
 /** The paths a command names, with one separator, so a spelling is compared to a place. */
 const named = (words: readonly string[], context: PlaceContext) => {
   const read = placesNamed(words, context)
-  return { paths: read.paths.map((path) => path.replaceAll('\\', '/')), unreadable: read.unreadable }
+  return {
+    paths: read.paths.map((path) => path.replaceAll('\\', '/')),
+    unreadable: read.unreadable,
+  }
 }
 
 describe('Paths in a command decide inside or outside', () => {
@@ -35,10 +38,22 @@ describe('Paths in a command decide inside or outside', () => {
     [LINUX, ['cat', '~root/.ssh/id_ed25519'], '/root/.ssh/id_ed25519'],
     [LINUX, ['cat', '~alice/notes'], '/home/alice/notes'],
     [LINUX, ['cp', 'a', '--target-directory=~/bin'], '/home/me/bin'],
-    [LINUX, ['env', 'KUBECONFIG=~/.kube/config', 'kubectl', 'get', 'pods'], '/home/me/.kube/config'],
-    [MAC, ['cat', '~/Library/Keychains/login.keychain-db'], '/Users/me/Library/Keychains/login.keychain-db'],
+    [
+      LINUX,
+      ['env', 'KUBECONFIG=~/.kube/config', 'kubectl', 'get', 'pods'],
+      '/home/me/.kube/config',
+    ],
+    [
+      MAC,
+      ['cat', '~/Library/Keychains/login.keychain-db'],
+      '/Users/me/Library/Keychains/login.keychain-db',
+    ],
     [WINDOWS, ['type', '%USERPROFILE%\\.ssh\\config'], 'C:/Users/me/.ssh/config'],
-    [WINDOWS, ['Get-Content', '$env:USERPROFILE\\.aws\\credentials'], 'C:/Users/me/.aws/credentials'],
+    [
+      WINDOWS,
+      ['Get-Content', '$env:USERPROFILE\\.aws\\credentials'],
+      'C:/Users/me/.aws/credentials',
+    ],
     [WINDOWS, ['type', '~\\.ssh\\config'], 'C:/Users/me/.ssh/config'],
     // Absolute paths and a way up are handed on as written, for the caller to resolve.
     [LINUX, ['cat', '/etc/shadow'], '/etc/shadow'],
@@ -66,7 +81,11 @@ describe('Paths in a command decide inside or outside', () => {
       ['powershell', '-Command', 'Get-Content $env:USERPROFILE\\.ssh\\config'],
       'C:/Users/me/.ssh/config',
     ],
-    [WINDOWS, ['pwsh.exe', '-c', 'gc "$HOME\\.azure\\accessTokens.json"'], 'C:/Users/me/.azure/accessTokens.json'],
+    [
+      WINDOWS,
+      ['pwsh.exe', '-c', 'gc "$HOME\\.azure\\accessTokens.json"'],
+      'C:/Users/me/.azure/accessTokens.json',
+    ],
     [
       WINDOWS,
       ['powershell', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', 'gc ~\\.kube\\config'],

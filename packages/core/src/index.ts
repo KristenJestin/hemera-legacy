@@ -9,6 +9,15 @@ export {
   localClassifierVerdict,
 } from './domain/classifier.ts'
 export {
+  SENSITIVE_PLACES,
+  concernSaid,
+  placesNamed,
+  sensitivePlace,
+  shownFromHome,
+  verdictAtPlaces,
+} from './domain/classifier-places.ts'
+export type { NamedPlaces, PlaceConcern, PlaceContext } from './domain/classifier-places.ts'
+export {
   HEMERA_AUTO_MODE,
   autoGoverns,
   autoResets,

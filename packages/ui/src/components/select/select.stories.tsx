@@ -22,8 +22,8 @@ const GROUPED = [
   { label: 'Local', items: [{ value: 'llama', label: 'Llama' }] },
 ]
 
-/** How far the measured width of the anchor and of the control may differ, in pixels. */
-const ROUNDING = 2
+/** How far the width the list is laid out against may be rounded from the control's, in pixels. */
+const ROUNDING = 1
 
 const meta = {
   tags: ['autodocs'],
@@ -99,8 +99,11 @@ export const States: Story = {
     // As wide as the control, give or take the pixel the anchor is measured to. The list is
     // laid out against the wrapper the trigger hangs off — that wrapper is what keeps the list
     // still while the button gives under the press — and Base UI rounds the anchor's width
-    // where `getBoundingClientRect` does not.
-    expect(popup.width).toBeGreaterThanOrEqual(control.width - ROUNDING)
+    // where `getBoundingClientRect` does not. The control's own width is its layout's, which
+    // the trigger fills the wrapper with: the box on screen is the one the pointer resting on
+    // it lifts by a pixel each side, on a spring that overshoots, and read on the wrong frame it
+    // was a hair wider than any tolerance for rounding.
+    expect(popup.width).toBeGreaterThanOrEqual(trigger.offsetWidth - ROUNDING)
 
     // Closed before the story ends, and waited for: the accessibility pass runs on whatever is
     // on the page when the play is over, and a popup still on its way out has Base UI's focus

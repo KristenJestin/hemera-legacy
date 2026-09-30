@@ -4,11 +4,12 @@
  *
  * A build is driven by deliveries, never by a message of the user's: the `prepare` brief until the
  * approach note exists; in `execute`, every ready task not handed yet and the failures not told yet
- * — a task's red attempt, a story's or the end checks', a blocker the user dismissed —; the review
- * the user wrote in the chat while the build waited for it, handed once, before the others; the resume
- * brief after a Resume, a restart, or to an agent whose own session holds none; and at `verify`, the
- * `verify` brief then the failures of the end checks. The first delivery of a phase, and a resume, is
- * a brief folded in the thread; the others are a line of Hemera's, the review of the user's included.
+ * — a task's red attempt, a story's or the end checks', a blocker the user dismissed —; the resume
+ * brief after a Resume, a restart, or to an agent whose own session holds none; at `verify`, the
+ * `verify` brief then the failures of the end checks; in `review`, the `review` brief once per pass,
+ * and nothing while a round waits for the user; in `feedback`, the feedback of the round being fixed
+ * (issue #279). The first delivery of a phase, and a resume, is a brief folded in the thread; the
+ * others are a line of Hemera's.
  *
  * What a delivery hands is marked as it goes out (`handing`): the agent's first tool call inside
  * that very delivery starts the tasks it holds (D10-04). It counts as given once the agent took it
@@ -20,9 +21,13 @@ import {
   type ActiveBuildPhase,
   type BriefAttempt,
   type BriefFailure,
+  type BriefRound,
   type BriefTask,
+  FEEDBACK_KINDS,
+  ROUND_KINDS,
   composeBuildBrief,
   readySet,
+  roundName,
   type SpecSnapshot,
 } from '@hemera/core'
 import { and, eq, inArray, isNull } from 'drizzle-orm'
@@ -35,23 +40,26 @@ import { failed, now } from '../specs/snapshot.ts'
 import {
   type AttemptRow,
   type BuildRows,
+  type RoundRow,
   type TaskRow,
-  reviewBrief,
   asBuildTasks,
   attemptsOf,
   briefPath,
+  feedbackPath,
   openBlockerOf,
   pendingFailures,
   resultOf,
+  reviewPath,
   specTaskOf,
   stateOf,
+  unclosedRound,
   verdictOf,
 } from './tasks.ts'
 
 /** One delivery of a build, as the runtime hands it over and gives it back. */
 export interface BuildDelivery {
   readonly sessionId: string
-  readonly kind: 'prepare' | 'execute' | 'resume' | 'review' | 'verify'
+  readonly kind: 'prepare' | 'execute' | 'resume' | 'verify' | 'review' | 'feedback'
   /** The phase it was composed in. */
   readonly phase: ActiveBuildPhase
   /** What the agent is handed. */
@@ -63,10 +71,7 @@ export interface BuildDelivery {
    * wrote before the agent started (D8-13, D10-02). It is handed over and not written again.
    */
   readonly written: boolean
-  /**
-   * Where it is recorded once the agent took it: the phase's path, the review's own, or the verify
-   * a review asked for (issue #117).
-   */
+  /** Where it is recorded once the agent took it: the phase's path, or the pass's or round's own. */
   readonly path: string
   /** What the line says, in the user's words, when it is one. */
   readonly said: string
@@ -170,6 +175,24 @@ function listed(words: readonly string[]): string {
 }
 
 /**
+ * A round's feedback as the `feedback` brief tells it (issue #279): its name, and every feedback the
+ * user did not withdraw, with the title of the story it points at.
+ */
+function briefRound(rows: BuildRows, round: RoundRow): BriefRound {
+  const kind = ROUND_KINDS.find((one) => one === round.kind) ?? 'spec'
+  return {
+    round: roundName(kind, round.number),
+    feedback: rows.feedback
+      .filter((one) => one.roundId === round.id && one.withdrawnAt === null)
+      .map((one) => ({
+        kind: FEEDBACK_KINDS.find((known) => known === one.kind) ?? 'general',
+        body: one.body,
+        story: rows.snapshot.stories.find((story) => story.id === one.anchorStoryId)?.title ?? null,
+      })),
+  }
+}
+
+/**
  * The `prepare` brief of a build: the frozen Spec and its tasks' labels, which a launch writes in
  * the Session's thread before the agent starts, and which the first delivery hands over (D10-02).
  */
@@ -190,26 +213,6 @@ export function deliveryFor(rows: BuildRows, resumeDue: boolean): BuildDelivery 
   const stamp = now()
   const labels = new Map(rows.tasks.map((task) => [task.taskId, task.label]))
   const base = { sessionId, phase, stamp, written: false }
-
-  // A review the user wrote in the chat, which the build went back to work on (issue #117): the
-  // agent is told what it is, once, and the review itself is the user's own message.
-  if (
-    rows.session.buildReviewAt !== null &&
-    !rows.briefed.has(reviewBrief(rows.session.buildReviewAt))
-  ) {
-    return {
-      ...base,
-      kind: 'review',
-      path: reviewBrief(rows.session.buildReviewAt),
-      stamp: rows.session.buildReviewAt,
-      opens: true,
-      said: 'Hemera handed the agent the review of the user.',
-      text: composeBuildBrief({ kind: 'review' }),
-      handed: [],
-      told: [],
-      retold: [],
-    }
-  }
 
   if (phase === 'prepare') {
     // Until the note exists, the `prepare` brief is what an agent starting over is handed again:
@@ -238,6 +241,10 @@ export function deliveryFor(rows: BuildRows, resumeDue: boolean): BuildDelivery 
     return task === undefined ? [] : [task]
   })
 
+  // The round being fixed, whose feedback a `feedback` brief — or a resume in `feedback` — carries.
+  const round = unclosedRound(rows)
+  const fixing = phase === 'feedback' && round?.state === 'fixing' ? round : undefined
+
   if (resumeDue) {
     const red = ready.flatMap((task) => {
       const attempt = untoldRed(rows, task)
@@ -257,6 +264,7 @@ export function deliveryFor(rows: BuildRows, resumeDue: boolean): BuildDelivery 
         tasks: rows.tasks.map((task) => briefTask(rows, task)),
         ready: ready.map((task) => briefTask(rows, task)),
         failures: failures.map((attempt) => briefFailure(rows, attempt)),
+        feedback: fixing === undefined ? null : briefRound(rows, fixing),
       }),
       handed: ready.filter((task) => task.handedAt === null).map((task) => task.id),
       told: [...red, ...untold.map((attempt) => attempt.id)],
@@ -271,6 +279,42 @@ export function deliveryFor(rows: BuildRows, resumeDue: boolean): BuildDelivery 
       ? 'the failures of the end checks'
       : `the failures of the checks of “${story.title}”`
   })
+
+  if (phase === 'review') {
+    // A round that is not closed is the user's turn: nothing waits for the agent until it moves.
+    if (round !== undefined) return null
+    const path = reviewPath(rows.rounds.length + 1)
+    if (rows.briefed.has(path)) return null
+    return {
+      ...base,
+      kind: 'review',
+      path,
+      opens: true,
+      said: 'Hemera handed the agent the result to review.',
+      text: composeBuildBrief({ kind: 'review' }),
+      handed: [],
+      told: [],
+      retold: [],
+    }
+  }
+
+  if (phase === 'feedback') {
+    if (fixing === undefined) return null
+    const path = feedbackPath(fixing.number)
+    if (rows.briefed.has(path)) return null
+    const given = briefRound(rows, fixing)
+    return {
+      ...base,
+      kind: 'feedback',
+      path,
+      opens: true,
+      said: `Hemera handed the agent the feedback of ${given.round}.`,
+      text: composeBuildBrief({ kind: 'feedback', ...given }),
+      handed: [],
+      told: [],
+      retold: [],
+    }
+  }
 
   if (phase === 'verify') {
     const opens = !rows.briefed.has(briefPath('verify'))

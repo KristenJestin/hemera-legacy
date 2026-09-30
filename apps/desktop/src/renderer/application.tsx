@@ -388,6 +388,7 @@ export function Application() {
   const [classifier, setClassifier] = useState<{
     mode: ClassifierSectionProps['mode']
     credential: ClassifierSectionProps['credential']
+    storageMissing: string | null
     consent: boolean
     generation: number
   } | null>(null)
@@ -1260,7 +1261,7 @@ export function Application() {
                   engine: 'jev',
                   onEngineChange: () => undefined,
                   credential: classifier.credential,
-                  credentialMessage: classifierError,
+                  credentialMessage: classifierError ?? classifier.storageMissing ?? undefined,
                   evaluator: settingsEvaluator({
                     busy: classifierBusy,
                     failed: classifierUnread,

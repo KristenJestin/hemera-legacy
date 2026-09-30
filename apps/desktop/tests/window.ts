@@ -37,6 +37,7 @@ import { clockLayer, poolLayer } from '#engine/agents/pool.ts'
 import { runtimeLayer } from '#engine/agents/runtime.ts'
 import { Agents } from '#engine/agents/service.ts'
 import { BuildNotices, buildsLayer } from '#engine/build/build.ts'
+import { reviewRoundsLayer } from '#engine/review/round.ts'
 import type { BuildChecks } from '#engine/build/checks.ts'
 import { StderrSink, hostProcessesLayer } from '#engine/agents/supervisor.ts'
 import { proposalsLayer } from '#engine/commands/proposals.ts'
@@ -167,7 +168,9 @@ async function openOver(
 
   // The builds, on the checks the suite scripts, and the window hearing that one changed: one
   // service, the catalogue's and the runtime's, as the engine builds it.
+  // Its review rounds are watched every fifth of a second, so a suite sees a stale one marked.
   const builds = buildsLayer.pipe(
+    Layer.provideMerge(reviewRoundsLayer(200)),
     Layer.provide(gitLayer()),
     Layer.provide(checks),
     Layer.provide(

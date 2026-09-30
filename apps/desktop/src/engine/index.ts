@@ -37,6 +37,7 @@ import { discoveryLayer, machineEnvironmentLayer } from './agents/discovery.ts'
 import type { Discovery } from './agents/discovery.ts'
 import { StderrSink, hostProcessesLayer, processSupervisorLayer } from './agents/supervisor.ts'
 import { BuildNotices, type Builds, buildsLayer, recoveredBuilds } from './build/build.ts'
+import { type ReviewRounds, reviewRoundsLayer } from './review/round.ts'
 import { type Proposals, proposalsLayer } from './commands/proposals.ts'
 import { type Commands, commandsLayer } from './commands/service.ts'
 import { type SetupProposals, setupDeskLayer, setupProposalsLayer } from './setup/proposals.ts'
@@ -244,6 +245,7 @@ export type EngineServices =
   | ProjectChecks
   | BuildChecks
   | Builds
+  | ReviewRounds
   | DomainEvents
   | Database
   | SqliteClient
@@ -311,7 +313,10 @@ function servicesOf(
   )
   // The builds (D10-01): one service, which the catalogue asks before a call and the runtime
   // drives, over the machine's `git` for their snapshots and the Project's checks for verdicts.
+  // Its review rounds (issue #278), which a build view reads and an open one of holds the agent's
+  // writes, handed up so the window's requests reach the very same instance.
   const builds = buildsLayer.pipe(
+    Layer.provideMerge(reviewRoundsLayer()),
     Layer.provide(git),
     Layer.provide(checks),
     Layer.provide(buildNoticesTo(port, log)),

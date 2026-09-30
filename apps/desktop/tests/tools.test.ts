@@ -1117,6 +1117,52 @@ describe('Audit distinguishes a verdict from execution', () => {
   })
 })
 
+describe('A build does not wait on Jev more than it must', () => {
+  it('reuses a verdict for the same call within a turn, and asks Jev again after it', async () => {
+    let evaluated = 0
+    const transport: JevTransport = {
+      send: async () => {
+        evaluated += 1
+        return jevResponse(1)
+      },
+    }
+    const seen = await engine(
+      humanSaying(),
+      transport,
+    )(
+      Effect.gen(function* () {
+        const session = yield* opened
+        const settings = yield* ClassifierSettings
+        yield* settings.replaceKey('ciphertext', 'private-key')
+        yield* settings.setConsent(true)
+        yield* settings.select('hemera-auto')
+        const write = (key: string, content = 'same') =>
+          calling({
+            sessionId: session.sessionId,
+            tool: 'fs_write',
+            arguments: { path: 'same.md', content, key },
+          })
+        const first = yield* write('one')
+        const again = yield* write('two')
+        const other = yield* write('three', 'different')
+        const inTurn = evaluated
+        // The turn ends: what was judged in it is judged again in the next one.
+        yield* (yield* Sessions).write(session.sessionId, {
+          role: 'hemera',
+          kind: 'turn',
+          body: 'The agent finished its turn.',
+          state: 'end_turn',
+        })
+        const next = yield* write('four')
+        return { states: [first, again, other, next].map((one) => one.state), inTurn }
+      }),
+    )
+    expect(seen.states).toEqual(['completed', 'completed', 'completed', 'completed'])
+    expect(seen.inTurn).toBe(2)
+    expect(evaluated).toBe(3)
+  })
+})
+
 describe('Secrets are masked before any evaluation', () => {
   it('masks a Workspace credential in any tool, and keeps a plain variable readable', async () => {
     const sent: string[] = []

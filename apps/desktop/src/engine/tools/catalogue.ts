@@ -38,6 +38,7 @@ import {
   type LocalAction,
   type Mission,
 } from '@hemera/core'
+import { and, desc, eq } from 'drizzle-orm'
 import { Context, Deferred, Effect, Layer } from 'effect'
 import { mkdir, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises'
 import { basename, dirname, join, relative } from 'node:path'
@@ -46,7 +47,7 @@ import { HeldWords } from '../agents/held.ts'
 import { AgentNotices } from '../agents/notices.ts'
 import { Builds } from '../build/build.ts'
 import { ClassifierSettings } from '../classifier/settings.ts'
-import { evaluateJev, JEV_MODEL, JevTransportPort } from '../classifier/jev.ts'
+import { evaluateJev, JEV_MODEL, type JevResult, JevTransportPort } from '../classifier/jev.ts'
 import { knownSecretValues } from '../classifier/redaction.ts'
 import { type Invocation, wordsOf } from '../commands/line.ts'
 import { Commands, Platform, type RunRequest } from '../commands/service.ts'
@@ -55,6 +56,7 @@ import { Sessions, type ThreadWrite } from '../sessions.ts'
 import { Specs } from '../specs/specs.ts'
 import type { DescribedWorkspace } from '../workspaces/described.ts'
 import { Database } from '../storage/database.ts'
+import { sessionEntries } from '../storage/schema.ts'
 import { Variables } from '../workspaces/variables.ts'
 import { mutate } from '../transaction.ts'
 import { ToolAccess } from './access.ts'
@@ -158,6 +160,9 @@ interface Kept {
   readonly sent: string
   readonly outcome: ToolOutcome
 }
+
+/** A verdict Jev gave: what a repeated call of the same turn reuses. */
+type JevVerdict = Extract<JevResult, { readonly kind: 'evaluated' }>
 
 interface Classified {
   readonly verdict: 'allow' | 'ask' | 'deny'
@@ -699,6 +704,40 @@ export const toolCatalogueLayer: Layer.Layer<
       return entries === undefined ? { ...context, latestHumanSeq: -1 } : context
     }
 
+    /**
+     * Jev's verdicts of the turn each Session is in, by call: what an identical call of the same
+     * turn reuses (D59-14). A Session keeps the verdicts of one turn only, dropped when the next
+     * begins; nothing is kept across turns, and no human answer is ever kept.
+     */
+    const turnVerdicts = new Map<
+      string,
+      { readonly turn: string; readonly verdicts: Map<string, JevVerdict> }
+    >()
+    const verdictsIn = (sessionId: string, turn: string) => {
+      const kept = turnVerdicts.get(sessionId)
+      if (kept !== undefined && kept.turn === turn) return kept.verdicts
+      const verdicts = new Map<string, JevVerdict>()
+      turnVerdicts.set(sessionId, { turn, verdicts })
+      return verdicts
+    }
+
+    /**
+     * The turn a Session is in, named by the last turn that ended before it: every turn writes
+     * its end into the thread, so a call after that line belongs to the next one.
+     */
+    const turnOf = (sessionId: string) =>
+      database
+        .select({ id: sessionEntries.id })
+        .from(sessionEntries)
+        .where(and(eq(sessionEntries.sessionId, sessionId), eq(sessionEntries.kind, 'turn')))
+        .orderBy(desc(sessionEntries.seq))
+        .limit(1)
+        .pipe(
+          Effect.map((rows) => rows[0]?.id ?? ''),
+          // A turn that does not read is a turn nothing is reused in.
+          Effect.catch(() => Effect.succeed(crypto.randomUUID())),
+        )
+
     /** A decision is scoped to this exact call, Session context and settings generation. */
     const classify = (
       asked: ToolCall,
@@ -743,58 +782,85 @@ export const toolCatalogueLayer: Layer.Layer<
           source = 'local'
         } else if (snapshot.key !== null && snapshot.consent) {
           const key = snapshot.key
-          yield* inThread(asked.sessionId, {
-            role: 'hemera',
-            kind: 'classifier_decision',
-            body: `Hemera Auto evaluating ${action.tool}`,
-            payload: JSON.stringify({
-              call: action.tool,
-              target,
-              state: 'evaluating',
-              reason: 'Jev is evaluating this call.',
-              policyVersion: CLASSIFIER_POLICY_VERSION,
-              model: JEV_MODEL,
-            }),
-            correlationId,
-            state: 'evaluating',
-          }).pipe(Effect.catch(() => Effect.void))
-          const evaluated = yield* Effect.tryPromise({
-            try: (signal) =>
-              evaluateJev(
-                {
-                  action: JSON.stringify({ ...detail, tool: action.tool, target: action.target }),
-                  userContext: context.items.map((item) => `${item.source}: ${item.text}`),
-                },
-                key,
-                signal,
-                jevTransport,
-                knownSecrets,
-              ),
-            catch: () => 'unavailable',
-          }).pipe(
-            Effect.catch(() => Effect.succeed({ kind: 'unavailable' as const })),
-            Effect.onInterrupt(() =>
-              inThread(asked.sessionId, {
-                role: 'hemera',
-                kind: 'classifier_decision',
-                body: `Hemera Auto cancelled ${action.tool}`,
-                payload: JSON.stringify({
-                  call: action.tool,
-                  target,
-                  state: 'cancelled',
-                  reason: 'The call stopped before evaluation finished.',
-                  policyVersion: CLASSIFIER_POLICY_VERSION,
-                }),
-                correlationId,
-                state: 'cancelled',
-              }).pipe(Effect.catch(() => Effect.void)),
-            ),
-          )
-          if (evaluated.kind === 'evaluated') {
-            verdict = evaluated.verdict
+          // What the judge sees, without the key that only makes a retry harmless: two calls
+          // that differ by it alone are the same call.
+          const actionText = JSON.stringify({
+            ...detail,
+            arguments:
+              detail.arguments === undefined
+                ? undefined
+                : Object.fromEntries(
+                    Object.entries(detail.arguments).filter(([name]) => name !== 'key'),
+                  ),
+            tool: action.tool,
+            target: action.target,
+          })
+          // The same call judged earlier in this turn, with the same settings and the same word
+          // from the user, reuses Jev's verdict — never a human's answer (D59-14).
+          const verdicts = verdictsIn(asked.sessionId, yield* turnOf(asked.sessionId))
+          const judged = `${snapshot.generation}\u0000${context.latestHumanSeq}\u0000${actionText}`
+          const reused = verdicts.get(judged)
+          if (reused !== undefined) {
+            verdict = reused.verdict
             source = 'jev'
-            model = evaluated.model
-            scores = evaluated.scores
+            model = reused.model
+            scores = reused.scores
+          }
+          if (reused === undefined) {
+            yield* inThread(asked.sessionId, {
+              role: 'hemera',
+              kind: 'classifier_decision',
+              body: `Hemera Auto evaluating ${action.tool}`,
+              payload: JSON.stringify({
+                call: action.tool,
+                target,
+                state: 'evaluating',
+                reason: 'Jev is evaluating this call.',
+                policyVersion: CLASSIFIER_POLICY_VERSION,
+                model: JEV_MODEL,
+              }),
+              correlationId,
+              state: 'evaluating',
+            }).pipe(Effect.catch(() => Effect.void))
+            const evaluated = yield* Effect.tryPromise({
+              try: (signal) =>
+                evaluateJev(
+                  {
+                    action: actionText,
+                    userContext: context.items.map((item) => `${item.source}: ${item.text}`),
+                  },
+                  key,
+                  signal,
+                  jevTransport,
+                  knownSecrets,
+                ),
+              catch: () => 'unavailable',
+            }).pipe(
+              Effect.catch(() => Effect.succeed({ kind: 'unavailable' as const })),
+              Effect.onInterrupt(() =>
+                inThread(asked.sessionId, {
+                  role: 'hemera',
+                  kind: 'classifier_decision',
+                  body: `Hemera Auto cancelled ${action.tool}`,
+                  payload: JSON.stringify({
+                    call: action.tool,
+                    target,
+                    state: 'cancelled',
+                    reason: 'The call stopped before evaluation finished.',
+                    policyVersion: CLASSIFIER_POLICY_VERSION,
+                  }),
+                  correlationId,
+                  state: 'cancelled',
+                }).pipe(Effect.catch(() => Effect.void)),
+              ),
+            )
+            if (evaluated.kind === 'evaluated') {
+              verdict = evaluated.verdict
+              source = 'jev'
+              model = evaluated.model
+              scores = evaluated.scores
+              verdicts.set(judged, evaluated)
+            }
           }
         }
         const [currentSettings, currentMessages] = yield* Effect.all([

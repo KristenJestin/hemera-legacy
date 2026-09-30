@@ -10,6 +10,7 @@ import { IconShield } from '../icons.ts'
 import { AgentText } from '../message/agent-text.tsx'
 import { MessageScroller, type ScrollerEntry } from '../message/scroller/scroller.tsx'
 import { type NoticeGroup, SessionNotices } from '../session/session-notices.tsx'
+import { SessionDetails } from '../session/session-details.tsx'
 import { SessionHeader } from '../session/session.tsx'
 import { MissionBrief } from '../spec/mission-brief.tsx'
 import { READY } from '../spec/spec-fixtures.ts'
@@ -139,15 +140,24 @@ const PERMISSIONS: NoticeGroup = {
   ],
 }
 
-/** The chat of the Session: its head, its thread, its composer and the notices on its edge. */
+/**
+ * The chat of the Session: its head, whose details open the Session details, its thread, its
+ * composer and the notices on its edge.
+ */
 function Chat({ thread, notices }: { thread: ScrollerEntry[]; notices: ReactNode }): ReactNode {
   const [value, setValue] = useState('')
   const [files, setFiles] = useState<string[]>([])
+  const [details, setDetails] = useState(false)
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col">
       <div className="mx-auto w-full max-w-3xl px-6 pt-6 pb-4">
-        <SessionHeader title="Build CSV export" onRename={fn()} onOpenDetails={fn()} />
+        <SessionHeader
+          title="Build CSV export"
+          onRename={fn()}
+          onOpenDetails={() => setDetails(true)}
+        />
       </div>
+      <SessionDetails open={details} onOpenChange={setDetails} plan={[]} files={[]} />
       <MessageScroller className="flex-1" label="The thread of this Session" entries={thread} />
       <div className="mx-auto flex w-full max-w-3xl flex-col gap-2 px-6 pb-4">
         <Composer
@@ -564,6 +574,49 @@ export const ReviewAmongTheNotices: Story = {
     await expect(args.onOpenChat).toHaveBeenCalled()
     await userEvent.click(notice.getByRole('button', { name: 'Accept' }))
     await expect(args.onAccept).toHaveBeenCalled()
+  },
+}
+
+/** Whether two boxes of the page share any of their area. */
+function overlaps(one: DOMRect, other: DOMRect): boolean {
+  return (
+    one.left < other.right &&
+    other.left < one.right &&
+    one.top < other.bottom &&
+    other.top < one.bottom
+  )
+}
+
+/**
+ * The frozen Spec and the Session details are two things of their own (issue #203): the Spec opens
+ * inside the build's panel and over nothing of the chat, the details open and close without closing
+ * it, and closing the Spec leaves the details closed.
+ */
+export const SpecAndDetailsApart: Story = {
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const page = within(document.body)
+    await userEvent.click(canvas.getByRole('button', { name: 'Spec' }))
+    const spec = await canvas.findByRole('region', { name: 'Spec ATL-7' })
+    const panel = canvas.getByRole('region', { name: 'Build ATL-7' }).getBoundingClientRect()
+    const thread = canvas.getByLabelText('The thread of this Session').getBoundingClientRect()
+    const drawn = spec.getBoundingClientRect()
+    // Laid at the panel's own width and clipped by its slot: it starts in the panel, and nothing
+    // of it covers the chat.
+    await expect(drawn.left).toBeGreaterThanOrEqual(panel.left)
+    await expect(overlaps(drawn, thread)).toBe(false)
+
+    const opener = canvas.getByRole('button', { name: 'Session details' })
+    await userEvent.click(opener)
+    await waitFor(() => expect(page.getByRole('dialog')).toBeVisible())
+    await userEvent.keyboard('{Escape}')
+    await waitFor(() => expect(page.queryByRole('dialog')).toBeNull())
+    await waitFor(() => expect(opener).toHaveFocus())
+    await expect(canvas.getByRole('region', { name: 'Spec ATL-7' })).toBeVisible()
+
+    await userEvent.click(canvas.getByRole('button', { name: 'Close the Spec' }))
+    await waitFor(() => expect(canvas.queryByRole('region', { name: 'Spec ATL-7' })).toBeNull())
+    await expect(page.queryByRole('dialog')).toBeNull()
   },
 }
 

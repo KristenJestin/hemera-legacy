@@ -137,6 +137,12 @@ export type FakeStep =
        * nothing is sent to cancel it.
        */
       readonly givesUpAfter?: number
+      /**
+       * The same give-up, at the moment this settles rather than after a time: what a suite uses
+       * to give up on a call once the call is known to be waiting, which no fixed time can promise
+       * on a machine busy enough to deliver the request later than that.
+       */
+      readonly givesUpOn?: Promise<void>
     }
   | {
       /**
@@ -855,22 +861,28 @@ export function fakeAgent(script: Partial<FakeScript> = {}): FakeAgent {
             isError: true,
           }))
     const patience = step.givesUpAfter
+    const givenUp: Promise<void> | undefined =
+      step.givesUpOn ??
+      (patience === undefined
+        ? undefined
+        : new Promise((resolve) => {
+            setTimeout(resolve, patience)
+          }))
     const answer =
-      patience === undefined
+      givenUp === undefined
         ? await calling
         : await Promise.race([
             calling,
-            new Promise<FakeToolAnswer>((resolve) => {
-              setTimeout(() => {
-                resolve({
-                  tool: step.call,
-                  arguments: sent,
-                  status: 0,
-                  text: `no answer after ${String(patience)} ms: the agent stopped waiting`,
-                  isError: true,
-                })
-              }, patience)
-            }),
+            givenUp.then((): FakeToolAnswer => ({
+              tool: step.call,
+              arguments: sent,
+              status: 0,
+              text:
+                patience === undefined
+                  ? 'the agent stopped waiting'
+                  : `no answer after ${String(patience)} ms: the agent stopped waiting`,
+              isError: true,
+            })),
           ])
     answers.used.push(answer)
     if (dead) return

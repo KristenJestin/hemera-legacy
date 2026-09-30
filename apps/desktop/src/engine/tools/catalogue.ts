@@ -31,6 +31,7 @@ import {
   CLASSIFIER_POLICY_VERSION,
   classifierHumanContext,
   commandPlace,
+  judgedByClassifier,
   localClassifierVerdict,
   offeredTools,
   runsInMain,
@@ -1649,7 +1650,11 @@ export const toolCatalogueLayer: Layer.Layer<
                 refused: true,
               }
             }
-            if (settings.mode === 'hemera-auto' && parsed.call.tool !== 'commands_run') {
+            if (
+              settings.mode === 'hemera-auto' &&
+              parsed.call.tool !== 'commands_run' &&
+              judgedByClassifier(parsed.call.tool)
+            ) {
               const namedTarget = targetName(parsed.call)
               const place =
                 namedTarget === null

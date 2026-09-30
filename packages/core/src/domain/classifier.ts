@@ -34,17 +34,27 @@ export interface LocalAction {
 }
 
 /** The tools that only read inside the Workspace, settled without the evaluator. */
-const READ_ONLY_TOOLS = new Set([
+const READ_ONLY_TOOLS = new Set(['fs_read', 'fs_list', 'search'])
+
+/** The tools that read or change files, or start a process: the only ones Hemera Auto judges. */
+const JUDGED_TOOLS = new Set([
   'fs_read',
   'fs_list',
   'search',
-  'commands_list',
-  'commands_output',
-  'project_get',
-  'session_get',
-  'spec_read',
-  'build_read',
+  'fs_write',
+  'fs_edit',
+  'commands_run',
 ])
+
+/**
+ * Whether Hemera Auto judges a call of this tool. Hemera's own workflow — a task report, a
+ * proposal the human decides on, a Spec edit under its write right, a stop of the Session's own
+ * run, a read of its state — already has its interaction and its guards: judging it again would
+ * ask twice, or stall a build on every report.
+ */
+export function judgedByClassifier(tool: string): boolean {
+  return JUDGED_TOOLS.has(tool)
+}
 
 /** What deletes, on POSIX, in `cmd.exe` and in PowerShell, by its own name or an alias. */
 const DELETERS = new Set([

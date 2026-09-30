@@ -36,7 +36,7 @@ function Screen(props: SessionPageProps): ReactNode {
 const meta = {
   title: 'Explorations/Build like define/Screens',
   component: Screen,
-  tags: ['autodocs', 'new'],
+  tags: ['autodocs'],
   parameters: { layout: 'fullscreen' },
   args: { kind: 'build', head: 'page', opening: 'sheet' },
   argTypes: {

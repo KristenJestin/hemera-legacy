@@ -100,7 +100,7 @@ function Page(): ReactNode {
 const meta = {
   title: 'Explorations/Build like define/Playground',
   component: Page,
-  tags: ['autodocs', 'new'],
+  tags: ['autodocs'],
   parameters: { layout: 'fullscreen' },
 } satisfies Meta<typeof Page>
 

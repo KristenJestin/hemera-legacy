@@ -1,6 +1,7 @@
 import { motion } from 'motion/react'
 import type { ReactNode } from 'react'
 
+import { AppIcon } from '../components/app-icon/app-icon.ts'
 import { Button } from '../components/button/button.tsx'
 import { Face } from '../components/face/face.tsx'
 import { Frame, FrameHeader } from '../components/frame/frame.tsx'
@@ -10,7 +11,6 @@ import { Kbd } from '../components/kbd/kbd.tsx'
 import { IconActivity, IconFolderPlus, IconMessages, IconTimelineEvent } from '../icons.ts'
 import type { JournalLine } from '../journal/journal.tsx'
 import { LABEL_DELAY, MARK_TRAVEL, arrival, useTransition } from '../motion.ts'
-import { HemeraMark } from '../shell/mark.tsx'
 
 /**
  * The pieces the Home of a Project is made of, and the page a window with no Project shows
@@ -28,6 +28,9 @@ const GREETING = 'flex flex-col items-center gap-1 text-center'
 const EMPTY = 'flex flex-col items-center gap-2 py-10 text-center'
 
 const LAUNCH = 'mx-auto flex max-w-md flex-col items-center gap-4 py-16 text-center'
+
+/** The application's icon over the welcome, at the size a launcher's grid draws it. */
+const WELCOME_ICON = 64
 
 /** What a Project is greeted with: its name, and what writing here does. */
 export function Greeting({ projectName, note }: { projectName: string; note: string }): ReactNode {
@@ -241,7 +244,7 @@ export function FirstLaunch({ onCreateProject, commandShortcut }: FirstLaunchPro
       animate={{ opacity: 1, y: 0 }}
       transition={transition}
     >
-      <HemeraMark />
+      <AppIcon channel="prod" size={WELCOME_ICON} />
       <h1 className="text-3xl font-medium">Welcome to Hemera</h1>
       <p className="text-sm text-muted-foreground">
         A Project holds your Sessions, your Journal and, later, your Specs and Workspaces. Start

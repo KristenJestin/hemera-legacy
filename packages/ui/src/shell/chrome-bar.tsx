@@ -1,13 +1,13 @@
 import { cn } from 'cn'
 import type { ReactNode, RefObject } from 'react'
 
+import { AppIcon } from '../components/app-icon/app-icon.ts'
 import { Badge } from '../components/badge/badge.tsx'
 import { Button, IconButton } from '../components/button/button.tsx'
 import { OVER_MARK } from '../components/sliding-mark/sliding-mark.tsx'
 import { Tooltip } from '../components/tooltip/tooltip.tsx'
 import { IconLayoutSidebar, IconPlus } from '../icons.ts'
 import { NotificationBell } from '../notifications/notifications.tsx'
-import { HemeraMark } from './mark.tsx'
 import type { ProjectTone, ShellProject } from './model.ts'
 import { Scrollable } from './scrollable.tsx'
 import { TabMark } from './tab-mark.tsx'
@@ -43,6 +43,12 @@ const BAR = 'title-bar chrome-columns items-stretch bg-surface-page'
 
 /** The first column of the bar sits over the sidebar, and the two are one column. */
 const BRAND = 'flex min-w-0 items-center gap-2 overflow-hidden pr-2 pl-6'
+
+/**
+ * The application's own icon, at the size a launcher's smallest list draws it: the face, and so
+ * the one thing the bar keeps when the sidebar folds down to its rail.
+ */
+const BRAND_ICON = 20
 
 /**
  * A tab says what it is by how present it is, not by a second background.
@@ -110,7 +116,7 @@ export function ChromeBar({
   return (
     <header ref={ref} className={BAR}>
       <div className={BRAND}>
-        <HemeraMark />
+        <AppIcon channel="prod" size={BRAND_ICON} />
         {/* Taken out rather than faded: the column is only as wide as the rail once folded, and
             a word left in it at nought opacity is a word still half on screen — text the eye
             cannot read and the accessibility pass is right to refuse. The mark is what stays,

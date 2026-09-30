@@ -47,7 +47,7 @@ import { Builds } from '../build/build.ts'
 import { ClassifierSettings } from '../classifier/settings.ts'
 import { evaluateJev, JEV_MODEL, JevTransportPort } from '../classifier/jev.ts'
 import { knownSecretValues } from '../classifier/redaction.ts'
-import type { Invocation } from '../commands/line.ts'
+import { type Invocation, wordsOf } from '../commands/line.ts'
 import { Commands, Platform, type RunRequest } from '../commands/service.ts'
 import { Projects } from '../projects.ts'
 import { Sessions, type ThreadWrite } from '../sessions.ts'
@@ -1199,6 +1199,18 @@ export const toolCatalogueLayer: Layer.Layer<
                 refused: true,
               }
             }
+            // What the local rules read: the words of the line as the runner splits them, the file
+            // the runner starts, and whether the folder and every path the line names stay inside.
+            const [program = '', ...words] = wordsOf(commandLine)
+            const contained =
+              resolvedPlace.inside &&
+              (yield* Effect.forEach(
+                words.filter((word) => !word.startsWith('-')),
+                (word) => placeOf(resolvedPlace.path, word),
+              )).every((place) => place.inside === true)
+            // A program the Workspace itself holds is the Workspace's code, whatever it is named.
+            const programPlace =
+              prepared.resolved === null ? null : yield* placeOf(root, prepared.resolved)
             const auto =
               settings.mode === 'hemera-auto'
                 ? yield* classify(
@@ -1207,12 +1219,13 @@ export const toolCatalogueLayer: Layer.Layer<
                     (yield* answered(sessions.one(asked.sessionId)))?.session.mission ?? 'free',
                     {
                       tool: 'commands_run',
-                      target: resolvedPlace.inside ? 'inside' : 'outside',
+                      target: contained ? 'inside' : 'outside',
                       command: {
-                        program: invocation.command,
-                        args: invocation.args,
+                        program,
+                        args: words,
                         shell: invocation.verbatim,
                         platform,
+                        resolved: programPlace?.inside === false ? prepared.resolved : null,
                       },
                     },
                     {

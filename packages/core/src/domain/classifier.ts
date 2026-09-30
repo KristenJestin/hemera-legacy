@@ -14,17 +14,74 @@ export function nativePermissionMode(
 
 /** A command after the runner has selected its platform line and resolved its invocation. */
 export interface ResolvedCommand {
+  /** The first word of the line, as written. */
   readonly program: string
+  /** The words after it, as the runner splits them: no shell reads them. */
   readonly args: readonly string[]
+  /** True when the line goes through `cmd.exe` (a Windows shim): then nothing is allowed here. */
   readonly shell: boolean
   readonly platform: string
+  /** The file the runner starts for `program`, found along the `PATH`; null when none is. */
+  readonly resolved: string | null
 }
 
 /** Only a resolved, contained destination may earn a local allow. */
 export interface LocalAction {
   readonly tool: string
+  /** For a command: its folder and every path it names, resolved by the caller. */
   readonly target: 'inside' | 'outside' | 'unknown'
   readonly command?: ResolvedCommand
+}
+
+/** The tools that only read inside the Workspace, settled without the evaluator. */
+const READ_ONLY_TOOLS = new Set([
+  'fs_read',
+  'fs_list',
+  'search',
+  'commands_list',
+  'commands_output',
+  'project_get',
+  'session_get',
+  'spec_read',
+  'build_read',
+])
+
+/** What deletes, on POSIX, in `cmd.exe` and in PowerShell, by its own name or an alias. */
+const DELETERS = new Set([
+  'rm',
+  'unlink',
+  'rmdir',
+  'rd',
+  'del',
+  'erase',
+  'remove-item',
+  'ri',
+  'shred',
+])
+const LISTERS = new Set(['ls', 'dir'])
+/** `ls` flags that only change how a listing is shown. */
+const LISTING_FLAGS = /^-[aAlhR1tSrdFGinp]+$/
+/** A plain relative path: no expansion, no operator, no way up. */
+const PLAIN_PATH = /^[A-Za-z0-9._@+/\\-]+$/
+
+/** A program's name without its folder, its case on Windows, or an executable extension. */
+function programName(program: string): string {
+  const base = program.replaceAll('\\', '/').split('/').at(-1) ?? ''
+  return base.toLowerCase().replace(/\.(?:exe|cmd|bat|com)$/, '')
+}
+
+/** Whether a word names `.git` or anything under it, however it is spelled. */
+function namesGit(word: string): boolean {
+  return word.replaceAll('\\', '/').toLowerCase().split('/').includes('.git')
+}
+
+/**
+ * The words of a command, a word holding several (the string after `sh -c`, `cmd /c` or
+ * `-Command`) split again on spaces, quotes and operators. Only to find a deletion wherever it
+ * hides: this reads no shell grammar and allows nothing.
+ */
+function wordsWithin(words: readonly string[]): string[] {
+  return words.flatMap((word) => word.split(/[\s"'`;&|()]+/).filter((part) => part.length > 0))
 }
 
 /**
@@ -35,19 +92,31 @@ export function localClassifierVerdict(action: LocalAction): LocalVerdict {
   if (action.tool === 'commands_run') {
     const command = action.command
     if (command === undefined) return 'defer'
-    const program = command.program.replaceAll('\\', '/').split('/').at(-1)?.toLowerCase()
+    // A deletion of the repository is refused wherever it hides: behind a wrapper (`portless`,
+    // `sudo`), inside a shell's string, in any spelling of the path or of the program.
+    const words = wordsWithin([command.program, ...command.args])
+    const deletes = words.some(
+      (word, at) => DELETERS.has(programName(word)) && words.slice(at + 1).some(namesGit),
+    )
+    if (deletes) return 'deny'
+    if (action.target !== 'inside' || command.shell || command.resolved === null) return 'defer'
+    const name = programName(command.program)
+    const written = command.program.replaceAll('\\', '/')
     if (
-      program === 'rm' &&
-      command.args.includes('-rf') &&
-      command.args.some((arg) => arg === '.git' || arg === './.git')
-    ) {
-      return 'deny'
-    }
-    if (action.target !== 'inside' || command.shell) return 'defer'
-    if (
-      command.platform !== 'win32' &&
-      (command.program === '/usr/bin/ls' || command.program === '/bin/ls') &&
-      command.args.length === 0
+      LISTERS.has(name) &&
+      programName(command.resolved) === name &&
+      // A bare name found on the PATH, or the very file it resolved to: never `./ls`.
+      (!written.includes('/') || written === command.resolved.replaceAll('\\', '/')) &&
+      command.args.every(
+        (arg) =>
+          LISTING_FLAGS.test(arg) ||
+          (PLAIN_PATH.test(arg) &&
+            !arg.startsWith('-') &&
+            !arg.startsWith('/') &&
+            !arg.startsWith('\\') &&
+            !/^[A-Za-z]:/.test(arg) &&
+            !arg.replaceAll('\\', '/').split('/').includes('..')),
+      )
     ) {
       return 'allow'
     }
@@ -55,19 +124,7 @@ export function localClassifierVerdict(action: LocalAction): LocalVerdict {
   }
 
   if (action.target !== 'inside') return 'defer'
-  switch (action.tool) {
-    case 'fs_read':
-    case 'fs_list':
-    case 'commands_list':
-    case 'commands_output':
-    case 'project_get':
-    case 'session_get':
-    case 'spec_read':
-    case 'build_read':
-      return 'allow'
-    default:
-      return 'defer'
-  }
+  return READ_ONLY_TOOLS.has(action.tool) ? 'allow' : 'defer'
 }
 
 /** The pinned Jev thresholds; all structural validation happens before calling this (D59-03). */

@@ -75,7 +75,14 @@ import {
   workspaces,
 } from '../storage/schema.ts'
 import { mutate } from '../transaction.ts'
-import { type Invocation, type Lookup, findOnPath, hostLookup, invocationOf } from './line.ts'
+import {
+  type Invocation,
+  type Lookup,
+  findOnPath,
+  hostLookup,
+  invocationOf,
+  programAt,
+} from './line.ts'
 
 /** How many runs `recent` hands back: what a panel draws, oldest ones out of sight. */
 const RECENT_RUNS = 8
@@ -354,6 +361,8 @@ export interface RunRequest {
 export interface PlannedCommand {
   readonly line: string
   readonly invocation: Invocation | null
+  /** The file started for a line run without `cmd.exe`, null for a shim or a program not found. */
+  readonly resolved: string | null
   readonly missingPortless: boolean
 }
 
@@ -935,13 +944,19 @@ export const commandsLayer = Layer.effect(
         const named = wraps ? yield* portlessNameOf(asked) : ''
         const portless = wraps ? yield* portlessFound() : null
         const line = wraps ? `portless ${named} ${own}` : own
+        const lookup = lookupIn(asked.cwd)
+        const invocation = invocationOf(
+          portless === null ? own : `"${portless}" ${named} ${own}`,
+          platform,
+          lookup,
+        )
         return {
           line,
-          invocation: invocationOf(
-            portless === null ? own : `"${portless}" ${named} ${own}`,
-            platform,
-            lookupIn(asked.cwd),
-          ),
+          invocation,
+          resolved:
+            invocation === null || invocation.verbatim
+              ? null
+              : programAt(invocation.command, lookup, platform),
           missingPortless: wraps && portless === null,
         }
       })

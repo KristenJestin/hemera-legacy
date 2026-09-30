@@ -578,6 +578,58 @@ describe('Hemera Auto classifies one admitted tool call before execution', () =>
   })
 })
 
+describe('Local rules settle only understood calls', () => {
+  // `ls` is on the PATH of every POSIX machine; a Windows one has it only with Git's tools.
+  it.skipIf(process.platform === 'win32')(
+    'runs a contained listing and refuses a deletion of .git without Jev or a question',
+    async () => {
+      fileInRoot('src/index.ts', 'export {}')
+      const human = humanSaying('allowed')
+      let evaluated = 0
+      const transport: JevTransport = {
+        send: async () => {
+          evaluated += 1
+          return jevResponse(1)
+        },
+      }
+      const result = await engine(
+        human,
+        transport,
+      )(
+        Effect.gen(function* () {
+          const session = yield* opened
+          const settings = yield* ClassifierSettings
+          yield* settings.replaceKey('ciphertext', 'private-key')
+          yield* settings.setConsent(true)
+          yield* settings.select('hemera-auto')
+          const listing = yield* calling({
+            sessionId: session.sessionId,
+            tool: 'commands_run',
+            arguments: { line: 'ls -la src', key: 'listing' },
+          })
+          const deletion = yield* calling({
+            sessionId: session.sessionId,
+            tool: 'commands_run',
+            arguments: { line: 'rm -fr .git/', key: 'deletion' },
+          })
+          const outside = yield* calling({
+            sessionId: session.sessionId,
+            tool: 'commands_run',
+            arguments: { line: 'ls ..', key: 'outside' },
+          })
+          return { listing, deletion, outside }
+        }),
+      )
+      expect(result.listing.state).toBe('completed')
+      expect(result.deletion.state).toBe('refused')
+      expect(result.outside.state).toBe('completed')
+      // Only the listing that leaves the Workspace went to the judge; no question was asked.
+      expect(evaluated).toBe(1)
+      expect(human.asked).toHaveLength(0)
+    },
+  )
+})
+
 describe('Secrets are masked before any evaluation', () => {
   it('masks a Workspace credential in any tool, and keeps a plain variable readable', async () => {
     const sent: string[] = []

@@ -213,6 +213,8 @@ const meta = {
     acpTrace: false,
     onAcpTraceChange: fn(),
     onSectionChange: fn(),
+    decisions: [],
+    onOpenSession: fn(),
   },
   argTypes: {
     subtitle: { control: 'text', description: 'The product, its version and its channel.' },
@@ -235,7 +237,7 @@ const meta = {
     onAcpTraceChange: { action: 'trace turned on or off' },
     defaultSection: {
       control: 'select',
-      options: ['appearance', 'agents', 'hemera-auto', 'archive', 'profile'],
+      options: ['appearance', 'agents', 'hemera-auto', 'archive', 'profile', 'developer'],
       description: 'The section shown first.',
     },
     section: { control: false, description: 'The section shown, for a caller that keeps it.' },
@@ -258,7 +260,7 @@ export const Complete: Story = {
       within(nav)
         .getAllByRole('tab')
         .map((tab) => tab.textContent),
-    ).toEqual(['Appearance', 'Agents', 'Hemera Auto', 'Archive', 'Profile'])
+    ).toEqual(['Appearance', 'Agents', 'Hemera Auto', 'Archive', 'Profile', 'Developer'])
     await expect(canvas.getByRole('tab', { name: 'Appearance' })).toHaveAttribute(
       'aria-selected',
       'true',
@@ -300,15 +302,48 @@ export const HemeraAutoUnread: Story = {
   },
 }
 
-/** Profile: the data folder as the engine reported it, and the ACP trace beside diagnostic.log. */
+/** Profile: the data folder as the engine reported it; the diagnostics are the Developer's. */
 export const Profile: Story = {
   args: { defaultSection: 'profile' },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     await expect(canvas.getByText('hemera.sqlite · 1.2 MB')).toBeVisible()
+    await expect(canvas.queryByRole('checkbox', { name: /ACP trace/ })).toBeNull()
+    await expect(canvas.queryByRole('button', { name: 'Open diagnostic.log' })).toBeNull()
+  },
+}
+
+/**
+ * Developer, last: what Hemera does behind the scenes, one card per panel — Hemera Auto's latest
+ * decisions across every Session, and the diagnostics.
+ */
+export const Developer: Story = {
+  args: {
+    defaultSection: 'developer',
+    decisions: [
+      {
+        id: 'd1',
+        at: '14:31:40',
+        sessionId: 's-parser',
+        session: 'Fix the parser',
+        tool: 'commands_run',
+        call: 'pnpm test --filter parser',
+        by: 'judge',
+        verdict: 'allowed',
+        scores: { risk: 1, approval: 0.2, userRequested: 0.9 },
+        model: 'jev-1',
+        roundTripMs: 820,
+        record: '{ "answer": "allowed", "by": "judge" }',
+      },
+    ],
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await expect(canvas.getByRole('list', { name: 'Hemera Auto decisions' })).toBeVisible()
     await expect(
       canvas.getByRole('checkbox', { name: /Write an ACP trace of each Session/ }),
     ).toBeVisible()
+    await expect(canvas.getByRole('button', { name: 'Open diagnostic.log' })).toBeVisible()
   },
 }
 
@@ -396,7 +431,8 @@ export const OpeningTheFolder: Story = {
     await userEvent.click(canvas.getByRole('button', { name: 'Open the folder' }))
     expect(args.onOpenFolder).toHaveBeenCalled()
 
-    await userEvent.click(canvas.getByRole('button', { name: 'Open diagnostic.log' }))
+    await userEvent.click(canvas.getByRole('tab', { name: 'Developer' }))
+    await userEvent.click(await canvas.findByRole('button', { name: 'Open diagnostic.log' }))
     expect(args.onOpenDiagnostic).toHaveBeenCalled()
   },
 }
@@ -653,7 +689,7 @@ export const ClassifierKeyboard: Story = {
  * that says what it keeps and what it does not.
  */
 export const TurningTheTraceOn: Story = {
-  args: { defaultSection: 'profile' },
+  args: { defaultSection: 'developer' },
   play: async ({ canvasElement, args }) => {
     const canvas = within(canvasElement)
     const box = canvas.getByRole('checkbox', { name: /Write an ACP trace of each Session/ })
@@ -696,7 +732,7 @@ export const NavigationMarkCrossing: Story = {
     const navigation = canvas.getByRole('tablist', { name: 'Settings' })
     const watched = await watchThereAndBack(
       navigation,
-      () => userEvent.click(canvas.getByRole('tab', { name: 'Profile' })),
+      () => userEvent.click(canvas.getByRole('tab', { name: 'Developer' })),
       () => userEvent.click(canvas.getByRole('tab', { name: 'Appearance' })),
     )
     expect(canvas.getByRole('tab', { name: 'Appearance' })).toHaveAttribute('aria-selected', 'true')

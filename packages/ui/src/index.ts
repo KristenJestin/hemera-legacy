@@ -136,6 +136,17 @@ export {
   type SettingsSection,
 } from './settings/settings.tsx'
 export {
+  DecisionsPanel,
+  DeveloperSection,
+  DiagnosticsPanel,
+  type DecisionBy,
+  type DecisionLine,
+  type DecisionVerdict,
+  type DecisionsPanelProps,
+  type DeveloperSectionProps,
+  type DiagnosticsPanelProps,
+} from './settings/developer-section.tsx'
+export {
   ClassifierSection,
   CLASSIFIER_OPTIONS,
   EVALUATION_ENGINES,

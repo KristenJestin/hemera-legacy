@@ -3,13 +3,11 @@
 import { safeStorage } from 'electron'
 import { Effect } from 'effect'
 
+import { encryptedWith, storageReady } from './classifier-storage.ts'
 import type { EngineConversation } from './engine-conversation.ts'
 
 export function protectedStorageReady(): boolean {
-  return (
-    safeStorage.isEncryptionAvailable() &&
-    (process.platform !== 'linux' || safeStorage.getSelectedStorageBackend() !== 'basic_text')
-  )
+  return storageReady(safeStorage, process.platform)
 }
 
 /** Called before the window is loaded, so an existing key can serve the first call. */
@@ -26,10 +24,5 @@ export async function restoreClassifierKey(engine: EngineConversation): Promise<
 }
 
 export function encryptClassifierKey(key: string): string | null {
-  if (!protectedStorageReady()) return null
-  try {
-    return safeStorage.encryptString(key).toString('base64')
-  } catch {
-    return null
-  }
+  return encryptedWith(safeStorage, process.platform, key)
 }

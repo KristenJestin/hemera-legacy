@@ -13,12 +13,15 @@
     "package": "node tools/package-desktop.ts",
     "report": "node tools/environment-report.ts --write",
     "storybook": "pnpm --filter @hemera/ui storybook",
+    "face-lab": "pnpm --filter @hemera/face-lab lab",
     "check": "pnpm typecheck && pnpm lint && pnpm fmt:check && pnpm test"
   },
   "devDependencies": {
     "@electron/asar": "4.3.0",
     "@hemera/ipc": "workspace:*",
+    "@hemera/ui": "workspace:*",
     "@oxlint/plugins": "1.82.0",
+    "@resvg/resvg-js": "2.6.2",
     "@semantic-release/commit-analyzer": "13.0.1",
     "@semantic-release/github": "12.0.9",
     "@semantic-release/release-notes-generator": "14.1.1",

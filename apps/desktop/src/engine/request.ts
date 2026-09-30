@@ -24,9 +24,12 @@ import type {
   EmptyCommandNameError,
   EmptyMessageError,
   EmptyTitleError,
+  InvalidCommandFolderError,
+  InvalidPortlessNameError,
   InvalidProjectNameError,
   InvalidRepositoryPathError,
   InvalidSpecPrefixError,
+  InvalidVariableKeyError,
   NoAgentError,
 } from '@hemera/core'
 
@@ -35,25 +38,54 @@ import { AgentRuntime, type AgentRuntimeError } from './agents/runtime.ts'
 import { Agents, availabilityOf, type AgentUpdateRefusedError } from './agents/service.ts'
 import { type BareModeNotQualifiedError, refusedUnlessBare } from './agents/bare.ts'
 import { ADAPTERS, Discovery } from './agents/discovery.ts'
+import { runAtOpen } from './commands/at-open.ts'
 import {
   type NothingToRunError,
   type UnknownCommandFolderError,
   createCommand,
+  runAgain,
   runFromPanel,
   runsOf,
   updateCommand,
 } from './commands/panel.ts'
+import {
+  type ProposalDecidedError,
+  Proposals,
+  type UnknownProposalError,
+} from './commands/proposals.ts'
 import { Commands, type UnknownCommandError, type UnknownRunError } from './commands/service.ts'
+import { SetupProposals, type SetupRefusedError } from './setup/proposals.ts'
 import { type Context, type UnreadableInstructionsError } from './context/service.ts'
 import { contextOf } from './context/view.ts'
 import { type InvalidCursorError, Journal } from './journal.ts'
+import { type PathOutsideBaseError, entriesUnder } from './paths.ts'
 import { Preferences } from './preferences.ts'
-import { Projects, type UnknownProjectError } from './projects.ts'
-import { Sessions, type UnknownSessionError } from './sessions.ts'
-import { Specs, type SpecRefusal } from './specs/specs.ts'
+import {
+  type InvalidBranchPrefixError,
+  type InvalidWorkspacesRootError,
+  Projects,
+  type UnknownProjectError,
+} from './projects.ts'
+import {
+  Sessions,
+  type UnknownSessionError,
+  type WorkspaceFixedError,
+  type WorkspaceNotReadyError,
+} from './sessions.ts'
+import { Specs, type SpecRefusal, declinedNotice } from './specs/specs.ts'
 import { EngineStatus } from './status.ts'
 import type { DatabaseError } from './storage/database.ts'
 import type { StaleVersionError } from './transaction.ts'
+import type { UnknownWorkspaceError } from './workspaces/described.ts'
+import { Preparation, type PreparationRunningError } from './workspaces/preparation.ts'
+import { LaunchRefusedError, Launches, type LaunchRefusal } from './workspaces/launches.ts'
+import { Recipe, type RecipeRefusedError } from './workspaces/recipe.ts'
+import { Variables } from './workspaces/variables.ts'
+import {
+  type CleanupRefusedError,
+  type CreationRefusedError,
+  Workspaces,
+} from './workspaces/workspaces.ts'
 
 /**
  * The options an agent announced, in the page's words.
@@ -158,6 +190,13 @@ export function answer(
   | Agents
   | Commands
   | Context
+  | Variables
+  | Workspaces
+  | Preparation
+  | Launches
+  | Recipe
+  | Proposals
+  | SetupProposals
   | Specs
 > {
   return Effect.gen(function* () {
@@ -185,17 +224,21 @@ export function answer(
     if (decision.name === 'sessions.create') {
       // The agent the Session is made with crosses with the Project (D5-06): it is chosen once,
       // in the composer that starts it, and every turn of that Session runs it.
-      const { projectId, provider } = decision.argument
+      const { projectId, provider, workspaceId } = decision.argument
       // Bare, or no Session at all (D6-02): an agent whose means leaves a tool of its own behind
       // is refused here, with its adapter's reason, before anything is written.
       if (provider !== null) {
         yield* refusedUnlessBare(ADAPTERS[provider], globalThis.process.platform)
       }
-      return yield* sessions.create(projectId, provider)
+      return yield* sessions.create(projectId, provider, workspaceId ?? null)
     }
     if (decision.name === 'sessions.rename') {
       const { id, version, title } = decision.argument
       return yield* sessions.rename(id, version, title)
+    }
+    if (decision.name === 'sessions.chooseWorkspace') {
+      const { id, version, workspaceId } = decision.argument
+      return yield* sessions.chooseWorkspace(id, version, workspaceId)
     }
     if (decision.name === 'sessions.archive') {
       return yield* sessions.archive(decision.argument.id, decision.argument.version)
@@ -231,6 +274,21 @@ export function answer(
     if (decision.name === 'repositories.add') {
       const { id, version, relativePath } = decision.argument
       return yield* projects.addRepository(id, version, relativePath)
+    }
+    if (decision.name === 'projects.setWorkspacesRoot') {
+      const { id, version, path } = decision.argument
+      return yield* projects.setWorkspacesRoot(id, version, path)
+    }
+    if (decision.name === 'projects.setBranchPrefix') {
+      const { id, version, prefix } = decision.argument
+      return yield* projects.setBranchPrefix(id, version, prefix)
+    }
+    if (decision.name === 'repositories.update') {
+      return yield* projects.updateRepository(decision.argument)
+    }
+    if (decision.name === 'projects.setRepositoryIncluded') {
+      const { id, version, path, included } = decision.argument
+      return yield* projects.setRepositoryIncluded(id, version, path, included)
     }
     if (decision.name === 'agents.list') {
       const discovery = yield* Discovery
@@ -271,10 +329,12 @@ export function answer(
       return yield* runtime.setOption(sessionId, optionId, value)
     }
     if (decision.name === 'agents.prompt') {
-      const { sessionId, text } = decision.argument
+      // New Spec creates no Spec (#198): its request rides this turn, and the Spec is made from
+      // the agent's proposal once the user accepts it, or is the existing one they continue.
+      const { sessionId, text, intent } = decision.argument
       // What the page is waiting for is why the turn ended; everything else about it reached the
       // window as it happened, on the engine's own channel (design D5-12).
-      const report = yield* runtime.prompt(sessionId, text)
+      const report = yield* runtime.prompt(sessionId, text, intent)
       return { stopReason: report.stopReason }
     }
     if (decision.name === 'agents.stop') return yield* runtime.stop(decision.argument.sessionId)
@@ -286,6 +346,8 @@ export function answer(
       const report = yield* runtime.resume(decision.argument.sessionId)
       return { state: report.state, reason: report.reason }
     }
+    if (decision.name === 'agents.handOver')
+      return yield* runtime.handOver(decision.argument.sessionId)
 
     // What the Agents section asks about the three agents of this machine, and the one thing it
     // does about the answer (design D5-18). The check is the only use case of this process that
@@ -305,6 +367,8 @@ export function answer(
     // tools, and the window through these.
     const commands = yield* Commands
     if (decision.name === 'commands.list') return yield* commands.list(decision.argument.projectId)
+    // Whether `portless` is on this machine, looked up once per engine (D8-10 as amended).
+    if (decision.name === 'commands.portless') return yield* commands.portless()
     if (decision.name === 'commands.create') return yield* createCommand(decision.argument)
     if (decision.name === 'commands.update') return yield* updateCommand(decision.argument)
     if (decision.name === 'commands.remove') {
@@ -316,6 +380,10 @@ export function answer(
       const { sessionId, name, line } = decision.argument
       return yield* runFromPanel(sessionId, name, line)
     }
+    if (decision.name === 'commands.runAgain') {
+      const { sessionId, runId } = decision.argument
+      return yield* runAgain(sessionId, runId)
+    }
     if (decision.name === 'commands.stop') {
       const { sessionId, runId } = decision.argument
       return yield* commands.stop(sessionId, runId)
@@ -324,8 +392,126 @@ export function answer(
       const { sessionId, runId } = decision.argument
       return yield* commands.output(sessionId, runId)
     }
+    if (decision.name === 'commands.runOf') {
+      const { projectId, runId } = decision.argument
+      return yield* commands.runOf(projectId, runId)
+    }
+    if (decision.name === 'commands.services') {
+      const { projectId, workspaceId } = decision.argument
+      // D8-08, D8-09: a Workspace's services are its running `serve` runs, whoever started
+      // them, each with the conflicts it is the holder of, derived as they are read (Decided 12).
+      return yield* commands.services(projectId, workspaceId)
+    }
+    if (decision.name === 'commands.stopService') {
+      const { projectId, runId } = decision.argument
+      return yield* commands.stopIn(projectId, runId)
+    }
+    // Asked by the main process once the window is shown (#114): what is marked to run when
+    // Hemera opens runs in its Project's `main`, and what could not be started is answered.
+    if (decision.name === 'engine.atOpen') return yield* runAtOpen
+    // What a human decides of a command the agent proposed: the one way into the catalogue
+    // besides the settings (D8-11).
+    if (decision.name === 'commands.proposeAccept') {
+      const { sessionId, proposalId } = decision.argument
+      return yield* (yield* Proposals).accept(sessionId, proposalId)
+    }
+    if (decision.name === 'commands.proposeDecline') {
+      const { sessionId, proposalId } = decision.argument
+      return yield* (yield* Proposals).decline(sessionId, proposalId)
+    }
+    // What a human decides of a change to the Project's setup the agent proposed (#218): applied
+    // through the use case the settings call, one change or the whole batch at once.
+    if (decision.name === 'setup.accept') {
+      const { sessionId, proposalId } = decision.argument
+      return yield* (yield* SetupProposals).accept(sessionId, proposalId)
+    }
+    if (decision.name === 'setup.acceptAll') {
+      const { sessionId, batchId } = decision.argument
+      return yield* (yield* SetupProposals).acceptAll(sessionId, batchId)
+    }
+    if (decision.name === 'setup.decline') {
+      const { sessionId, proposalId } = decision.argument
+      return yield* (yield* SetupProposals).decline(sessionId, proposalId)
+    }
     // What a Session was provided, may consult, and keeps to its agent (D6-10).
     if (decision.name === 'context.read') return yield* contextOf(decision.argument.sessionId)
+
+    // The Workspaces of a Project, as its settings and the Spec's creation dialog ask for them
+    // (D8-01, D8-02, D8-04, D8-14, D8-15).
+    const workspaces = yield* Workspaces
+    if (decision.name === 'workspaces.list') {
+      return yield* workspaces.list(decision.argument.projectId)
+    }
+    if (decision.name === 'workspaces.plan') {
+      const { projectId, key, slug } = decision.argument
+      return yield* workspaces.plan(projectId, key, slug)
+    }
+    if (decision.name === 'workspaces.planRepository') {
+      const { projectId, key, slug, relativePath } = decision.argument
+      return yield* workspaces.planRepository(projectId, key, slug, relativePath)
+    }
+    if (decision.name === 'workspaces.create') {
+      const { projectId, ...draft } = decision.argument
+      return yield* workspaces.create(projectId, draft)
+    }
+    if (decision.name === 'workspaces.createOnFolder') {
+      const { projectId, path, name } = decision.argument
+      return yield* workspaces.createOnFolder(projectId, path, name)
+    }
+    if (decision.name === 'workspaces.status') return yield* workspaces.status(decision.argument.id)
+    if (decision.name === 'workspaces.cleanup') {
+      return yield* workspaces.cleanup(decision.argument.id)
+    }
+    // A preparation is begun and not awaited: it can take minutes, and the window follows it
+    // through the `workspace` event (D8-05).
+    const preparation = yield* Preparation
+    if (decision.name === 'preparation.steps') {
+      return yield* preparation.steps(decision.argument.workspaceId)
+    }
+    if (decision.name === 'preparation.prepare') {
+      return yield* preparation.begin(decision.argument.workspaceId, false)
+    }
+    if (decision.name === 'preparation.resume') {
+      return yield* preparation.begin(decision.argument.workspaceId, true)
+    }
+    // The Project's recipe (D8-05) and its variables, overridden per Workspace (D8-06).
+    const recipe = yield* Recipe
+    if (decision.name === 'recipe.list') return yield* recipe.list(decision.argument.projectId)
+    if (decision.name === 'recipe.add') {
+      const { projectId, ...edit } = decision.argument
+      return yield* recipe.add(projectId, edit)
+    }
+    if (decision.name === 'recipe.update') {
+      const { projectId, id, ...edit } = decision.argument
+      return yield* recipe.update(projectId, id, edit)
+    }
+    if (decision.name === 'recipe.remove') {
+      const { projectId, id } = decision.argument
+      return yield* recipe.remove(projectId, id)
+    }
+    if (decision.name === 'recipe.move') {
+      const { projectId, id, direction } = decision.argument
+      return yield* recipe.move(projectId, id, direction)
+    }
+    const variables = yield* Variables
+    if (decision.name === 'variables.list') {
+      const { projectId, workspaceId } = decision.argument
+      return yield* variables.list(projectId, workspaceId)
+    }
+    if (decision.name === 'variables.set') {
+      const { projectId, workspaceId, key, value } = decision.argument
+      return yield* variables.set(projectId, workspaceId, key, value)
+    }
+    if (decision.name === 'variables.remove') {
+      const { projectId, workspaceId, key } = decision.argument
+      return yield* variables.remove(projectId, workspaceId, key)
+    }
+
+    // The entries of a folder under a base, which a path field offers as it is typed (#109).
+    if (decision.name === 'paths.entries') {
+      const { base, relative, kinds } = decision.argument
+      return yield* entriesUnder(base, relative, kinds)
+    }
 
     // The Spec use cases (D7-03). The renderer is the human actor: whatever it writes carries
     // human provenance and the Session whose panel it came from (D7-04, D7-11).
@@ -338,10 +524,31 @@ export function answer(
     if (decision.name === 'specs.create') {
       const defining = yield* specs.create(decision.argument)
       // The Session's agent was granted the tools of a free Session: it is let go of — now, or
-      // once the turn it is running ends — and its next turn starts it again, its conversation
-      // resumed, with the tools of a define one (D7-14).
-      yield* runtime.releaseWhenIdle(defining.session.id)
+      // once the turn it is running ends — and started again, its conversation resumed, with the
+      // tools of a define one (D7-14). It is started at once and handed the mission brief in a
+      // turn of its own: the user accepted what it asked, and has nothing to type (issue #130).
+      yield* runtime.briefWhenIdle(defining.session.id)
       return defining
+    }
+    if (decision.name === 'specs.declineProposal') {
+      // Declined: the agent is told so in a turn of its own, instead of waiting for an answer the
+      // user already gave in the card (issue #130).
+      const { sessionId, proposalId } = decision.argument
+      const declined = yield* specs.declineProposal(sessionId, proposalId)
+      yield* runtime.tell(
+        sessionId,
+        declinedNotice(declined),
+        `Hemera told the agent you declined the ${declined.type} Spec “${declined.title}”.`,
+      )
+      return
+    }
+    if (decision.name === 'specs.acceptExisting') {
+      const { sessionId, proposalId } = decision.argument
+      const joined = yield* specs.acceptExisting(sessionId, proposalId)
+      // As a proposal accepted: the agent was granted the tools of a free Session, and is started
+      // again with those of a define one, and handed the mission brief in a turn of its own.
+      yield* runtime.briefWhenIdle(joined.session.id)
+      return joined
     }
     if (decision.name === 'specs.openSession') return yield* specs.openSession(decision.argument)
     if (decision.name === 'specs.writeSection') {
@@ -394,6 +601,37 @@ export function answer(
     if (decision.name === 'specs.buffers.discard') {
       return yield* specs.buffers.discard(decision.argument)
     }
+    if (decision.name === 'specs.useWorkspace') {
+      const { specId, workspaceId } = decision.argument
+      return yield* specs.useWorkspace(specId, workspaceId)
+    }
+
+    // The build of a ready Spec (D8-12, D8-13): the panel of a Spec reads the whole of it at
+    // once, asks for a build in a Workspace, starts the one the Spec is already set on, and
+    // starts a refused one again. `start` is what "Start the build" presses once a preparation
+    // made only: no Workspace named, the one D8-12 gave the Spec.
+    const launches = yield* Launches
+    if (decision.name === 'launches.forSpec') {
+      return yield* launches.forSpec(decision.argument.specId)
+    }
+    if (decision.name === 'launches.request') {
+      const { specId, workspaceId } = decision.argument
+      return yield* launches.request(specId, workspaceId)
+    }
+    if (decision.name === 'launches.start') {
+      const { specId } = decision.argument
+      const settled = yield* specs.read(specId)
+      const workspaceId = settled.spec.workspaceId
+      if (workspaceId === null) {
+        return yield* Effect.fail(
+          new LaunchRefusedError({ reason: 'this Spec has no Workspace yet: prepare one first.' }),
+        )
+      }
+      return yield* launches.request(specId, workspaceId)
+    }
+    if (decision.name === 'launches.retry') {
+      return yield* launches.retry(decision.argument.launchId)
+    }
 
     const { id, version, relativePath } = decision.argument
     return yield* projects.removeRepository(id, version, relativePath)
@@ -409,6 +647,7 @@ export function answer(
  */
 export type Refusal =
   | SpecRefusal
+  | LaunchRefusal
   | AgentRuntimeError
   | AgentUpdateRefusedError
   | DatabaseError
@@ -428,6 +667,22 @@ export type Refusal =
   | EmptyCommandLineError
   | UnknownCommandError
   | UnknownCommandFolderError
+  | InvalidCommandFolderError
+  | InvalidPortlessNameError
   | UnknownRunError
   | NothingToRunError
   | UnreadableInstructionsError
+  | UnknownWorkspaceError
+  | CreationRefusedError
+  | CleanupRefusedError
+  | PreparationRunningError
+  | RecipeRefusedError
+  | InvalidVariableKeyError
+  | InvalidWorkspacesRootError
+  | InvalidBranchPrefixError
+  | WorkspaceNotReadyError
+  | WorkspaceFixedError
+  | UnknownProposalError
+  | ProposalDecidedError
+  | SetupRefusedError
+  | PathOutsideBaseError

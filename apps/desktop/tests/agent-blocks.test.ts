@@ -15,14 +15,21 @@ import { hemeraToolNamed } from '@hemera/core'
 import type { SessionEntry } from '@hemera/ipc'
 
 import {
+  agentReportOf,
+  commandProposalOf,
   commandRunOf,
   contextDeliveryOf,
+  elsewhereOf,
+  failureNoteOf,
   foldedCallsOf,
   hemeraPermissionOf,
+  hemeraPlaceOf,
   hemeraToolCallOf,
   nativeSubjectOf,
   plainRefusal,
   questionOpen,
+  reportedFailureOf,
+  stoppedTurnOf,
   subjectOf,
 } from '#renderer/agent-tool-payloads.ts'
 
@@ -95,6 +102,55 @@ describe('A read inside the Workspace goes through on its own', () => {
     const entry = entryOf('hemera_tool_call', 'agent', 'Read a file', '{"tool":"fs_read"}')
     expect(hemeraToolCallOf(entry)).toBeNull()
   })
+
+  /** A `spec_propose` of a phase, answered by the engine with `reason`. */
+  function proposedPhase(reason: string, state = 'refused') {
+    return entryOf(
+      'hemera_tool_call',
+      'agent',
+      reason,
+      JSON.stringify({
+        tool: 'spec_propose',
+        state,
+        caller: 'a1b2c3d4e5f6',
+        paths: [],
+        arguments: JSON.stringify({ kind: 'phase', phase: 'shape' }),
+      }),
+    )
+  }
+
+  test('a phase proposed while a question is open is a quiet folded row', () => {
+    const drawn = hemeraToolCallOf(
+      proposedPhase(
+        'The shape phase cannot finish: a blocking question is open: Which date decides the month?.',
+      ),
+    )
+    expect(drawn?.status).toBe('deferred')
+    expect(drawn?.note).toBe('not yet: a question is open')
+    expect(drawn?.defaultOpen).toBe(false)
+    expect(drawn?.subject).toEqual({ text: 'shape' })
+    // The whole reason is still there, in the body the reader may unfold.
+    expect(drawn?.error).toMatch(/Which date decides the month/)
+  })
+
+  test('a phase proposed before its other checks pass is a quiet "not yet" as well', () => {
+    const drawn = hemeraToolCallOf(
+      proposedPhase('The plan phase cannot finish: the contract has no task.'),
+    )
+    expect(drawn?.status).toBe('deferred')
+    expect(drawn?.note).toBe('not yet')
+  })
+
+  test('any other refusal of a proposal stays a refusal, open on its reason', () => {
+    const drawn = hemeraToolCallOf(
+      proposedPhase(
+        'The shape phase is finished: only an open or stale phase is declared finished.',
+      ),
+    )
+    expect(drawn?.status).toBe('refused')
+    expect(drawn?.note).toBeUndefined()
+    expect(drawn?.defaultOpen).toBe(true)
+  })
 })
 
 describe('A one-off command shows and is not promoted', () => {
@@ -106,7 +162,7 @@ describe('A one-off command shows and is not promoted', () => {
       JSON.stringify({
         name: 'pnpm dev',
         line: 'pnpm dev',
-        kind: 'app',
+        type: 'serve',
         state: 'exited',
         cwd: '.',
         url: null,
@@ -120,6 +176,74 @@ describe('A one-off command shows and is not promoted', () => {
     expect(drawn?.oneOff).toBe(true)
     // `exited` is what the engine writes; `finished` is the word the block reads it as.
     expect(drawn?.state).toBe('finished')
+  })
+
+  test('the block names the repository it runs in, and a plain folder as a folder', () => {
+    const at = (cwd: string) =>
+      entryOf(
+        'command_run',
+        'hemera',
+        'sleep 120',
+        JSON.stringify({
+          name: 'sleep 120',
+          line: 'sleep 120',
+          type: 'script',
+          state: 'running',
+          cwd,
+          oneOff: true,
+        }),
+      )
+    const repositories = [{ path: 'v2', icon: null }]
+    expect(commandRunOf(at('/w/v2'), [], '/w', repositories)).toMatchObject({
+      repository: { path: 'v2', icon: null },
+      folder: '.',
+    })
+    expect(commandRunOf(at('/w/tools'), [], '/w', repositories)).toMatchObject({
+      repository: undefined,
+      folder: 'tools',
+    })
+    // A root not known yet leaves the folder as the run was started in it.
+    expect(commandRunOf(at('/w/v2'))).toMatchObject({ repository: undefined, folder: '/w/v2' })
+  })
+})
+
+describe('A proposal enters the catalogue only when accepted', () => {
+  /** A proposal entry as `commands_propose` writes it, and as a decision writes it again. */
+  const proposal = (state: string, folder: string | null) =>
+    entryOf(
+      'command_proposal',
+      'hemera',
+      'seed',
+      JSON.stringify({
+        proposalId: 'proposal-1',
+        name: 'seed',
+        line: 'node scripts/seed.js',
+        type: 'script',
+        folder,
+        why: 'the seed is run before every test',
+        state,
+      }),
+    )
+
+  test('a proposal entry is read with its outcome', () => {
+    expect(commandProposalOf(proposal('pending', null))).toEqual({
+      proposalId: 'proposal-1',
+      name: 'seed',
+      line: 'node scripts/seed.js',
+      type: 'script',
+      // The Workspace root, in the word the block reads it in.
+      folder: '.',
+      why: 'the seed is run before every test',
+      state: 'pending',
+    })
+    expect(commandProposalOf(proposal('accepted', './sources/api'))?.state).toBe('accepted')
+    expect(commandProposalOf(proposal('accepted', './sources/api'))?.folder).toBe('./sources/api')
+    expect(commandProposalOf(proposal('declined', null))?.state).toBe('declined')
+  })
+
+  test('an entry that does not parse is left out', () => {
+    expect(commandProposalOf(proposal('withdrawn', null))).toBeNull()
+    expect(commandProposalOf(entryOf('command_proposal', 'hemera', 'seed', '{'))).toBeNull()
   })
 })
 
@@ -139,6 +263,117 @@ describe('A delivery shows in the timeline', () => {
     const drawn = contextDeliveryOf(entry)
     expect(drawn?.body).toBe(`Hemera gave the agent AGENTS.md. (${'a'.repeat(12)})`)
   })
+
+  test('an answer handed over draws no Hemera line: it is the user’s message already', () => {
+    const handed = entryOf(
+      'context_delivery',
+      'hemera',
+      'Hemera handed the agent the answer to “Which date decides the month?”.',
+      JSON.stringify({
+        kind: 'answer',
+        fingerprint: 'b'.repeat(64),
+        deliveredAt: '2026-09-26T10:00:00.000Z',
+        reached: 'delivery_prompt',
+      }),
+    )
+    expect(contextDeliveryOf(handed)).toBe(null)
+    // One that could not be handed over yet is news, and is still said.
+    const waiting = { ...handed, state: 'failed' }
+    expect(contextDeliveryOf(waiting)?.waiting).toBe(true)
+  })
+})
+
+describe('A run handed to the agent draws nothing: the run has its own entry (#250)', () => {
+  test('neither the run handed over nor the one waiting to be is a line of the thread', () => {
+    const handed = entryOf(
+      'context_delivery',
+      'hemera',
+      'Hemera handed the agent the run of echo (exited, exit code 0).',
+      JSON.stringify({
+        kind: 'run',
+        fingerprint: 'dedc2f0504c2'.padEnd(64, '0'),
+        deliveredAt: null,
+      }),
+    )
+    expect(contextDeliveryOf(handed)).toBe(null)
+    expect(contextDeliveryOf({ ...handed, state: 'failed' })).toBe(null)
+  })
+})
+
+describe("Hemera's internal notes are said in words (#211)", () => {
+  const notHanded = (kind: string, body: string) => ({
+    ...entryOf(
+      'context_delivery',
+      'hemera',
+      body,
+      JSON.stringify({ kind, fingerprint: '29f890c77bc6'.padEnd(64, '0'), deliveredAt: null }),
+    ),
+    state: 'failed',
+  })
+
+  test('a delivery not handed over yet is a quiet row in words, with no id', () => {
+    const answer = contextDeliveryOf(
+      notHanded(
+        'answer',
+        'Not handed over, waiting for the next safe point: the answer to “Which format?”.',
+      ),
+    )
+    expect(answer).toEqual({
+      id: 'entry-1',
+      body: 'The answer will be handed over when the agent is ready.',
+      waiting: true,
+    })
+    const said = [
+      ['edit', 'Your edits will be handed over when the agent is ready.'],
+      ['internal', 'The result of a sub-agent will be handed over when the agent is ready.'],
+      [
+        'instructions',
+        'The new instructions of the Workspace will be handed over when the agent is ready.',
+      ],
+      ['notice', 'What Hemera had to tell the agent will be handed over when it is ready.'],
+    ]
+    for (const [kind, words] of said) {
+      const drawn = contextDeliveryOf(notHanded(kind ?? '', 'Not handed over, waiting: x.'))
+      expect(drawn?.body).toBe(words)
+      expect(drawn?.body).not.toContain('29f890c77bc6')
+    }
+    // One that was handed over is not waiting on anything.
+    const handed = { ...notHanded('edit', 'Your edits to scope went to the agent.'), state: null }
+    expect(contextDeliveryOf(handed)?.waiting).toBe(false)
+  })
+
+  test('an error of a delivery is an error row in words, with a Retry; the raw error is not its title', () => {
+    const failed = entryOf(
+      'note',
+      'hemera',
+      'no session has been opened',
+      JSON.stringify({ reason: 'delivery_failed' }),
+    )
+    expect(failureNoteOf(failed)).toEqual({
+      title: 'Hemera could not hand this over to the agent',
+      detail: 'no session has been opened',
+      retry: true,
+    })
+    const refused = entryOf(
+      'note',
+      'hemera',
+      'Internal error: rate limit reached',
+      JSON.stringify({ reason: 'prompt_failed' }),
+    )
+    expect(failureNoteOf(refused)).toEqual({
+      title: 'The agent answered with an error',
+      detail: 'Internal error: rate limit reached',
+      retry: false,
+    })
+    // A note of Hemera's own that is not an error is left to the line it always was.
+    const rebuilt = entryOf(
+      'note',
+      'hemera',
+      'The agent lost this Session, so what was said before was rebuilt for it.',
+      JSON.stringify({ reason: 'gone', context: '' }),
+    )
+    expect(failureNoteOf(rebuilt)).toBeNull()
+  })
 })
 
 describe('The agent starts the app and the user opens it', () => {
@@ -151,7 +386,7 @@ describe('The agent starts the app and the user opens it', () => {
         runId: 'run-1',
         name: 'dev',
         line: 'pnpm dev',
-        kind: 'app',
+        type: 'serve',
         state: 'running',
         cwd: '/home/ana/atlas',
         url: null,
@@ -166,12 +401,22 @@ describe('The agent starts the app and the user opens it', () => {
       commandId: 'command-1',
       name: 'dev',
       line: 'pnpm dev',
-      kind: 'app' as const,
+      type: 'serve' as const,
+      scope: 'workspace' as const,
       cwd: '/home/ana/atlas',
+      folder: null,
+      workspaceId: null,
+      workspaceName: 'main',
+      environment: {},
       state: 'running' as const,
       pid: 4242,
       url: 'http://localhost:5173',
+      readyAt: null,
+      readiness: 'starting' as const,
+      portConflict: null,
+      heldAgainst: [],
       exitCode: null,
+      startedBy: 'agent' as const,
       output: 'ready on http://localhost:5173\n',
       dropped: 0,
       startedAt: '2026-09-23T08:00:00.000Z',
@@ -190,6 +435,22 @@ describe('The agent starts the app and the user opens it', () => {
     })
     // And a run of another entry is not this one's.
     expect(commandRunOf(entry, [{ ...pushed, id: 'run-2' }])?.url).toBeUndefined()
+
+    // Its address stands where the run says (D8-09), and nothing is said before it was heard of.
+    expect(commandRunOf(entry, [pushed])?.readiness).toBe('starting')
+    expect(commandRunOf(entry)).toMatchObject({
+      readiness: undefined,
+      environment: {},
+      portConflict: undefined,
+      heldAgainst: [],
+    })
+
+    // A Project-scoped service runs in `main` whichever Session asked for it (D8-07): the block
+    // of a Session in another Workspace names `main`, and a Session in `main` names nothing.
+    expect(elsewhereOf(pushed, 'login-form')).toBe('main')
+    expect(elsewhereOf(pushed, 'main')).toBeUndefined()
+    // Nor while the Session's own Workspace is not known yet.
+    expect(elsewhereOf(pushed, undefined)).toBeUndefined()
   })
 })
 
@@ -318,6 +579,56 @@ describe('A Hemera tool call is drawn once', () => {
     expect(folded.inPlaceOf.get('n1')?.id).toBe('h1')
     expect(folded.inPlaceOf.has('n2')).toBe(false)
     expect(folded.inPlaceOf.get('n3')?.id).toBe('h3')
+  })
+})
+
+describe('A failed tool call says why', () => {
+  /** A call the agent reported failed, with what it attached and what it answered. */
+  const failed = (
+    status: string,
+    content: readonly string[],
+    rawOutput: string | null,
+  ): SessionEntry =>
+    entryOf(
+      'tool_call',
+      'agent',
+      'mcp__hemera__spec_write',
+      JSON.stringify({
+        call: {
+          title: 'mcp__hemera__spec_write',
+          kind: 'other',
+          status,
+          locations: [],
+          content: content.map((text) => ({
+            type: 'content',
+            text: { text, truncated: false, length: text.length },
+          })),
+          rawInput: null,
+          rawOutput: rawOutput === null ? null : { text: rawOutput, truncated: false, length: 9 },
+        },
+      }),
+    )
+
+  test('a failed call unfolded shows the error the agent returned, in words, not only its name', () => {
+    // The trial of #198: a Spec write Hemera never answered, reported failed by the agent.
+    const said = 'MCP error -32602: Tool spec_write not found'
+    expect(reportedFailureOf(failed('failed', [said], null))).toBe(said)
+    expect(reportedFailureOf(failed('failed', [], said))).toBe(said)
+    expect(reportedFailureOf(failed('failed', ['one', 'two'], null))).toBe('one\n\ntwo')
+  })
+
+  test('a failed call that came back with nothing says so, and a stopped one says it was stopped', () => {
+    expect(reportedFailureOf(failed('failed', [], null))).toBe(
+      'The agent reported this call failed and gave no reason.',
+    )
+    expect(reportedFailureOf(failed('cancelled', [], null))).toBe(
+      'The turn was stopped before this call answered.',
+    )
+  })
+
+  test('a call that did not fail has no reason to show', () => {
+    expect(reportedFailureOf(failed('completed', ['3 lines'], null))).toBeUndefined()
+    expect(reportedFailureOf(failed('in_progress', [], null))).toBeUndefined()
   })
 })
 
@@ -450,7 +761,94 @@ describe('Every tool shows its subject', () => {
         resolved: '/w/app',
         line: 'pnpm test',
       }),
-    ).toEqual({ label: 'Run command', subject: 'pnpm test', intent: 'asks to run in /w/app' })
+    ).toEqual({
+      label: 'Run command',
+      subject: 'pnpm test',
+      intent: 'asks to run a line the agent wrote',
+    })
+  })
+})
+
+describe('A one-off says truly where it runs', () => {
+  const repositories = [{ path: 'v2', icon: null }]
+
+  test('an inside one-off is said in its Workspace, never outside it', () => {
+    const asked = {
+      named: '.',
+      resolved: '/home/someone/media-library',
+      root: '/home/someone/media-library',
+      inside: true,
+      line: 'sleep 120',
+    }
+    // The card says in its head why it asks: the line is one the agent wrote.
+    expect(
+      hemeraPermissionOf(
+        'commands_run',
+        'commands_run asks to run sleep 120 in /home/someone/media-library',
+        asked,
+      ).intent,
+    ).toBe('asks to run a line the agent wrote')
+    // In the Workspace, and no path repeating its root; nothing says Outside.
+    expect(hemeraPlaceOf(asked, 'main', repositories)).toEqual([{ label: 'In', value: 'main' }])
+  })
+
+  test('an inside one-off in a repository names the repository and the path under it', () => {
+    expect(
+      hemeraPlaceOf(
+        {
+          resolved: '/home/someone/media-library/v2/scripts',
+          root: '/home/someone/media-library',
+          inside: true,
+          line: 'sleep 120',
+        },
+        'main',
+        repositories,
+      ),
+    ).toEqual([
+      { label: 'In', value: 'v2', repository: { path: 'v2', icon: null } },
+      { label: 'Path', value: 'scripts' },
+    ])
+  })
+
+  test('an outside one-off is said outside the Workspace, because the engine says so', () => {
+    const asked = {
+      resolved: '/home/someone/elsewhere',
+      root: '/home/someone/media-library',
+      inside: false,
+      line: 'sleep 120',
+    }
+    expect(
+      hemeraPermissionOf(
+        'commands_run',
+        'commands_run asks to run sleep 120 outside the Workspace, in /home/someone/elsewhere',
+        asked,
+      ).intent,
+    ).toBe('asks to run a line the agent wrote, outside the Workspace')
+    expect(hemeraPlaceOf(asked, 'main', repositories)).toEqual([
+      { label: 'Outside the Workspace', value: 'main' },
+      { label: 'Path', value: '/home/someone/elsewhere' },
+    ])
+  })
+
+  test('a file tool outside the root does not repeat the path its card already shows', () => {
+    expect(
+      hemeraPlaceOf(
+        { resolved: '/tmp/outside.txt', root: '/w', inside: false, line: null },
+        'main',
+        repositories,
+      ),
+    ).toEqual([{ label: 'Outside the Workspace', value: 'main' }])
+  })
+
+  test('a question written before the engine said where is read from its paths', () => {
+    // An inside one-off of an older thread: no `inside`, its place under the root.
+    expect(
+      hemeraPlaceOf({ resolved: '/w/v2', root: '/w', line: 'sleep 120' }, 'main', repositories),
+    ).toEqual([{ label: 'In', value: 'v2', repository: { path: 'v2', icon: null } }])
+    // A file tool is only ever asked outside.
+    expect(
+      hemeraPlaceOf({ resolved: '/w/notes.md', root: '/w', line: null }, 'main', repositories),
+    ).toEqual([{ label: 'Outside the Workspace', value: 'main' }])
   })
 })
 
@@ -533,5 +931,86 @@ describe('A Session read back draws a decided question as decided', () => {
     expect(questionOpen(asked('cancelled'))).toBe(false)
     // Only a question nobody has answered yet is waiting for the reader.
     expect(questionOpen(asked('pending'))).toBe(true)
+  })
+})
+
+describe('What the agent reported outside the conversation is drawn as a quiet row (#131)', () => {
+  test('a line of its standard error is drawn with the line, word for word', () => {
+    const note = entryOf(
+      'note',
+      'hemera',
+      'The agent reported an error',
+      JSON.stringify({ reason: 'agent_stderr', line: 'ERROR status=429 Too Many Requests' }),
+    )
+    expect(agentReportOf(note)).toEqual({
+      title: 'The agent reported an error',
+      detail: 'ERROR status=429 Too Many Requests',
+    })
+  })
+
+  test('a request nobody can see is drawn with its method', () => {
+    const note = entryOf(
+      'note',
+      'hemera',
+      'The agent is waiting for an answer Hemera cannot show',
+      JSON.stringify({ reason: 'unanswered_request', method: 'elicitation/create' }),
+    )
+    expect(agentReportOf(note)?.detail).toBe('elicitation/create')
+  })
+
+  test('a request answered since is drawn as answered, with its method (#170)', () => {
+    const note = entryOf(
+      'note',
+      'hemera',
+      'Hemera answered what the agent was waiting for',
+      JSON.stringify({ reason: 'answered_request', method: 'elicitation/create' }),
+    )
+    expect(agentReportOf(note)).toEqual({
+      title: 'Hemera answered what the agent was waiting for',
+      detail: 'elicitation/create',
+    })
+  })
+
+  test('a refused request is drawn with its method and what it was answered', () => {
+    const note = entryOf(
+      'note',
+      'hemera',
+      'The agent asked for something Hemera cannot answer',
+      JSON.stringify({ reason: 'refused_request', method: '_x/y', line: 'Method not found' }),
+    )
+    expect(agentReportOf(note)?.detail).toBe('_x/y: Method not found')
+  })
+
+  test("a note of Hemera's own is no report, and keeps the line it always had", () => {
+    const note = entryOf(
+      'note',
+      'hemera',
+      'The agent stopped running.',
+      JSON.stringify({ reason: 'stop_timeout' }),
+    )
+    expect(agentReportOf(note)).toBeNull()
+  })
+})
+
+describe('A turn that ended on its own says why in a sentence (#211)', () => {
+  const ended = (stopReason: string, body: string) =>
+    entryOf('turn', 'hemera', body, JSON.stringify({ stopReason }))
+
+  test('a failed turn reads "Stopped: the agent could not answer."', () => {
+    expect(stoppedTurnOf(ended('failed', 'The agent could not answer.'))).toEqual({
+      reason: 'the agent could not answer.',
+      byTheReader: false,
+    })
+    expect(stoppedTurnOf(ended('max_tokens', 'The agent reached its token limit.'))?.reason).toBe(
+      'the agent reached its token limit.',
+    )
+  })
+
+  test('a turn the reader stopped says so and nothing more; one that simply ended draws nothing', () => {
+    expect(stoppedTurnOf(ended('cancelled', 'The turn was stopped.'))).toEqual({
+      reason: undefined,
+      byTheReader: true,
+    })
+    expect(stoppedTurnOf(ended('end_turn', 'The agent finished its turn.'))).toBeNull()
   })
 })

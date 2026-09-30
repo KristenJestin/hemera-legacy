@@ -1,6 +1,6 @@
 import { cn } from 'cn'
-import { LayoutGroup, motion } from 'motion/react'
-import { type ReactNode, useCallback, useEffect, useRef, useState } from 'react'
+import { motion } from 'motion/react'
+import { type ReactNode, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 
 import { Button } from '../../components/button/button.tsx'
 import { Tooltip } from '../../components/tooltip/tooltip.tsx'
@@ -51,7 +51,7 @@ const WIDTH = { rest: 1, near: 1.5, active: 2 } as const
  * The whole of the room the page gives the thread, which the rail and the pill stand in.
  *
  * It is as wide as the content area and not as wide as the thread (trial of 22 September 2026,
- * evening): the rail stands at its right edge, in the gutter beside the thread's column, and the
+ * evening): the rail stands at its left edge, in the gutter beside the thread's column, and the
  * pill floats over its middle — which is the middle of the column, since the column is centred
  * in it. Neither takes anything of the column's width.
  */
@@ -108,13 +108,19 @@ const PILL_ROW = 'pointer-events-none absolute inset-x-0 bottom-4 flex justify-c
 const RAIL = 'flex shrink-0 flex-col items-center gap-1 pt-3'
 
 /**
- * Where the scroller stands its rail: at the right edge of the frame, not beside the column.
+ * Where the scroller stands its rail: at the left edge of the frame, not beside the column.
  *
  * Counted inside the column, the rail took its own width and a gap out of the thread's, and the
  * thread ended short of the composer under it (trial of 22 September 2026, evening). Out here it
  * is in the gutter the column leaves, and the column is the composer's.
+ *
+ * The left and not the right (recette of 26 September 2026, issue #149): the panel of the
+ * Session's mission opens on the right of the chat, and the rail — the reader's history of the
+ * thread, with the preview of the message each mark stands for — stood against it, its preview
+ * laid over the thread's own side of the column. At the left it stays by the chat whatever opens
+ * beside it, and its preview opens towards the thread.
  */
-const RAIL_PLACE = 'absolute top-0 right-1'
+const RAIL_PLACE = 'absolute top-0 left-1'
 
 /**
  * A mark is drawn as a line, and pressed as a square.
@@ -215,11 +221,16 @@ export function MessageScroller({ label, entries, className }: MessageScrollerPr
   // there to be measured — a scroll container's own box never changes when its content grows,
   // and the content's does.
   const list = useRef<HTMLDivElement>(null)
-  // Where each entry of the thread is, by index, and `null` for the ones the rail steps over.
-  // Read off the elements themselves, which is a place in a column already laid out and not a
-  // size taken off a string: `offsetTop` and a scroll position are the same axis, and the two
-  // are what tells the rail where the reader is.
-  const anchors = useRef<(HTMLElement | null)[]>([])
+  // Where each entry of the thread is, by its id. Read off the elements themselves, which is a
+  // place in a column already laid out and not a size taken off a string: `offsetTop` and a
+  // scroll position are the same axis, and the two are what tells the rail where the reader is.
+  //
+  // By id and not by index: a motion element hands its ref the element once, when it mounts, and
+  // never again. An index taken then is wrong as soon as an entry is written above it, and one
+  // written past entries that moved leaves holes in an array read as though it had none.
+  const anchors = useRef(new Map<string, HTMLElement>())
+  // The ids the rail draws a mark for, in the thread's order: what the walk below counts.
+  const marked = useRef<readonly string[]>([])
   const [active, setActive] = useState(-1)
   const [overflowing, setOverflowing] = useState(false)
   const [atEdge, setAtEdge] = useState(true)
@@ -249,10 +260,10 @@ export function MessageScroller({ label, entries, className }: MessageScrollerPr
     const middle = node.scrollTop + node.clientHeight / 2
     let mark = -1
     let seen = -1
-    for (const anchor of anchors.current) {
-      if (anchor === null) continue
+    for (const id of marked.current) {
       seen += 1
-      if (anchor.offsetTop < middle) mark = seen
+      const anchor = anchors.current.get(id)
+      if (anchor !== undefined && anchor.offsetTop < middle) mark = seen
     }
     const edge = node.scrollHeight - node.scrollTop - node.clientHeight <= LIVE_EDGE
     // At the live edge the reading position is the last thing written, whatever the middle of
@@ -284,8 +295,12 @@ export function MessageScroller({ label, entries, className }: MessageScrollerPr
     const node = box.current
     if (node !== null) {
       const moved = node.scrollTop - lastTop.current
-      if (moved < 0) pinned.current = false
-      const edge = node.scrollHeight - node.scrollTop - node.clientHeight <= LIVE_EDGE
+      const left = node.scrollHeight - node.scrollTop - node.clientHeight
+      // Going up and ending at the very bottom is not the reader: it is the browser putting the
+      // scroll back inside a thread that got shorter under it — a card taken out of the thread
+      // to be pinned above the composer (issue #149) — and a reader who was following still is.
+      if (moved < 0 && left > 1) pinned.current = false
+      const edge = left <= LIVE_EDGE
       if (moved > 0 && edge) pinned.current = true
       lastTop.current = node.scrollTop
     }
@@ -304,7 +319,22 @@ export function MessageScroller({ label, entries, className }: MessageScrollerPr
     node.scrollTop = node.scrollHeight
     lastTop.current = node.scrollTop
     look()
-    const sized = new ResizeObserver(look)
+    /**
+     * The reader who is following, taken to the end of what is written, then everything measured.
+     *
+     * Asked on either of the two changes that can take the end out of sight: the thread growing,
+     * and the room it is given shrinking. The second is a card pinned above the composer — a
+     * proposal, a question (issue #149) — which takes its height from the bottom of the thread:
+     * measured only, the thread stayed where it was and its last lines went under the card.
+     */
+    const follow = (): void => {
+      if (pinned.current && box.current !== null) {
+        box.current.scrollTop = box.current.scrollHeight
+        lastTop.current = box.current.scrollTop
+      }
+      look()
+    }
+    const sized = new ResizeObserver(follow)
     sized.observe(node)
     /**
      * The thread getting taller, which is not the same event as the thread getting an entry.
@@ -314,13 +344,7 @@ export function MessageScroller({ label, entries, className }: MessageScrollerPr
      * the first word of an answer and then stood still for the rest of it. What is watched is
      * the height of what is written, and a reader who is following is taken along with it.
      */
-    const grown = new ResizeObserver(() => {
-      if (pinned.current && box.current !== null) {
-        box.current.scrollTop = box.current.scrollHeight
-        lastTop.current = box.current.scrollTop
-      }
-      look()
-    })
+    const grown = new ResizeObserver(follow)
     grown.observe(written)
     return () => {
       sized.disconnect()
@@ -347,8 +371,8 @@ export function MessageScroller({ label, entries, className }: MessageScrollerPr
    */
   const goToMark = (id: string): void => {
     const node = box.current
-    const anchor = anchors.current[entries.findIndex((entry) => entry.id === id)]
-    if (node === null || anchor === null || anchor === undefined) return
+    const anchor = anchors.current.get(id)
+    if (node === null || anchor === undefined) return
     pinned.current = false
     requestAnimationFrame(() => {
       anchor.scrollIntoView({ block: 'center', behavior: still ? 'auto' : 'smooth' })
@@ -356,14 +380,18 @@ export function MessageScroller({ label, entries, className }: MessageScrollerPr
   }
 
   const marks = entries.filter(isMarked).map((entry) => ({ id: entry.id, label: entry.mark }))
+  // Handed to the walk once the thread is laid out, which is before anything can measure it.
+  useLayoutEffect(() => {
+    marked.current = marks.map((one) => one.id)
+  })
 
   return (
     <div className={cn(FRAME, className)}>
       {/*
-        `layoutScroll` because this is the thing that scrolls: motion measures a block against
-        the viewport, and a measurement taken in a column that has been scrolled by eight
-        hundred pixels is eight hundred pixels wrong. It is the one prop that tells it to read
-        the offset.
+        `layoutScroll` because this is the thing that scrolls: motion measures a control of the
+        thread whose width follows what it says against the viewport, and a measurement taken in
+        a column that has been scrolled by eight hundred pixels is eight hundred pixels wrong. It
+        is the one prop that tells it to read the offset.
       */}
       <motion.div
         ref={box}
@@ -376,38 +404,29 @@ export function MessageScroller({ label, entries, className }: MessageScrollerPr
       >
         <div ref={list} className={LIST}>
           {/*
-          A fold opening takes the thread below it with it, and takes it *smoothly* (trial of
-          22 September 2026). Every block is its own layout element and the group is what makes
-          them one movement: motion measures where each of them ended up and plays the
-          difference as a transform, so a tool card unfolding pushes the blocks under it
-          instead of the column being redrawn somewhere else between two frames.
-
-          `position` and not the whole box, which is what keeps a growing entry out of it: an
-          answer arriving word by word changes its own height on nearly every frame, and a
-          block whose *size* was animated would be a paragraph stretching under the eye that
-          is reading it. Where a block starts is what travels; what it holds never does.
-
-          And for a reader who asked for less movement it is not a layout element at all: a
-          journey given no time is still a journey the machinery sets up, and `false` is the
-          block simply being where it belongs.
+          No block of the thread is a layout element (issue #183). A fold opening takes the
+          thread below it with it by its own height, frame after frame — the room under its row
+          is what grows — so the blocks under it are pushed the way a page is, with nothing to
+          carry them. They used to be carried as well: every block measured where it had been and
+          played the difference as a transform whenever anything in the thread was drawn again,
+          so a call arriving in a run drew the block under it back where it had been and slid it
+          down to where it already was — at the live edge, where the thread scrolls by that same
+          height, a block that had not moved on the screen at all jumped and came back on every
+          call. A block is where it belongs, and only a change of its own size ever moves it.
           */}
-          <LayoutGroup>
-            {entries.map((entry, index) => (
-              <motion.div
-                key={entry.id}
-                layout={still ? false : 'position'}
-                transition={transition}
-                ref={(node) => {
-                  // A day registers as nothing, and so does an entry that asked for no mark: the
-                  // rail counts what it drew and only what it drew, so the walk above lands on
-                  // the same index the rail drew its marks with.
-                  anchors.current[index] = isMarked(entry) ? node : null
-                }}
-              >
-                {entry.content}
-              </motion.div>
-            ))}
-          </LayoutGroup>
+          {entries.map((entry) => (
+            <div
+              key={entry.id}
+              ref={(node) => {
+                // Every entry is registered; the walk above reads only the ones the rail drew a
+                // mark for, so it lands on the same index the rail drew its marks with.
+                if (node === null) anchors.current.delete(entry.id)
+                else anchors.current.set(entry.id, node)
+              }}
+            >
+              {entry.content}
+            </div>
+          ))}
         </div>
       </motion.div>
       {!atEdge && (
@@ -464,7 +483,9 @@ export interface NavigationRailProps {
  *
  * Every mark answers the pointer and the keyboard, and wears its preview in the design system's
  * tooltip: a mark is six pixels of line, and what it stands for is a sentence that has to be
- * read somewhere. The rail sits outside the thread's own column and never scrolls with it — a
+ * read somewhere. The preview is a quote and not a name, so it keeps a measure of its own and
+ * wraps over two lines at most, then ends on an ellipsis (issue #149): a whole message laid over
+ * the thread on one line was a line as wide as the thread. The rail sits outside the thread's own column and never scrolls with it — a
  * map that travelled with the territory would move under the hand at the exact moment the hand
  * is on it.
  *
@@ -478,7 +499,7 @@ export function NavigationRail({ label, marks, active, onSelect }: NavigationRai
   return (
     <nav aria-label={label} className={RAIL}>
       {marks.map((mark, index) => (
-        <Tooltip key={mark.id} label={mark.label} side="left">
+        <Tooltip key={mark.id} label={mark.label} side="right" quote>
           <button
             type="button"
             aria-label={mark.label}

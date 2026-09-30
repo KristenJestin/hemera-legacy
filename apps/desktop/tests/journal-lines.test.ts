@@ -62,3 +62,29 @@ describe('The Journal shows each step', () => {
     expect(lineOf(step('spec.created', {})).kind).toBe('spec')
   })
 })
+
+describe("The Journal says what the engine recorded of a Session's agent in plain words", () => {
+  const recorded = (type: string, payload: JournalEntry['payload']): JournalEntry => ({
+    ...step(type, payload),
+    entityKind: 'session',
+    source: 'system',
+    author: 'hemera',
+  })
+
+  test('an option the agent stands on, and how far its own session is attached', () => {
+    const labels = [
+      recorded('session.choice_recorded', { optionId: 'effort', value: 'low' }),
+      recorded('session.agent_recorded', { nativeState: 'attached', hasNativeSession: true }),
+      recorded('session.agent_recorded', { nativeState: 'lost', hasNativeSession: true }),
+      recorded('session.agent_recorded', { nativeState: 'fallback', hasNativeSession: true }),
+      recorded('session.agent_recorded', { nativeState: 'none', hasNativeSession: false }),
+    ].map((entry) => lineOf(entry).label)
+    expect(labels).toEqual([
+      'Agent effort set to low',
+      'Agent attached to its own session',
+      'Agent lost its own session',
+      'Agent given a context rebuilt from the thread',
+      'Agent not started yet',
+    ])
+  })
+})

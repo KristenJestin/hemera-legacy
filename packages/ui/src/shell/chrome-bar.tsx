@@ -1,12 +1,13 @@
 import { cn } from 'cn'
-import { type ReactNode, type RefObject, useRef } from 'react'
+import type { ReactNode, RefObject } from 'react'
 
+import { AppIcon } from '../components/app-icon/app-icon.ts'
 import { Badge } from '../components/badge/badge.tsx'
 import { Button, IconButton } from '../components/button/button.tsx'
+import { OVER_MARK } from '../components/sliding-mark/sliding-mark.tsx'
 import { Tooltip } from '../components/tooltip/tooltip.tsx'
 import { IconLayoutSidebar, IconPlus } from '../icons.ts'
 import { NotificationBell } from '../notifications/notifications.tsx'
-import { HemeraMark } from './mark.tsx'
 import type { ProjectTone, ShellProject } from './model.ts'
 import { Scrollable } from './scrollable.tsx'
 import { TabMark } from './tab-mark.tsx'
@@ -42,6 +43,12 @@ const BAR = 'title-bar chrome-columns items-stretch bg-surface-page'
 
 /** The first column of the bar sits over the sidebar, and the two are one column. */
 const BRAND = 'flex min-w-0 items-center gap-2 overflow-hidden pr-2 pl-6'
+
+/**
+ * The application's own icon, at the size a launcher's smallest list draws it: the face, and so
+ * the one thing the bar keeps when the sidebar folds down to its rail.
+ */
+const BRAND_ICON = 20
 
 /**
  * A tab says what it is by how present it is, not by a second background.
@@ -109,7 +116,7 @@ export function ChromeBar({
   return (
     <header ref={ref} className={BAR}>
       <div className={BRAND}>
-        <HemeraMark />
+        <AppIcon channel="prod" size={BRAND_ICON} />
         {/* Taken out rather than faded: the column is only as wide as the rail once folded, and
             a word left in it at nought opacity is a word still half on screen — text the eye
             cannot read and the accessibility pass is right to refuse. The mark is what stays,
@@ -166,18 +173,18 @@ function Tabs({
   onSelectProject: (id: string) => void
   onAddProject: () => void
 }): ReactNode {
-  const tabs = useRef<(HTMLElement | null)[]>([])
-  const active = projects.findIndex((project) => project.id === activeProjectId)
   return (
     <Scrollable label="Projects" className="tab-bleed flex-1 self-stretch">
-      <TabMark tabs={tabs} active={active} count={projects.length} />
-      {projects.map((project, rank) => (
+      {projects.map((project) => (
+        // The active tab is drawn over the mark, which is its sheet; the others are drawn under
+        // it and say what they say over it, so the mark crosses them and never goes under one.
         <span
           key={project.id}
-          ref={(node) => {
-            tabs.current[rank] = node
-          }}
-          className="relative flex shrink-0 items-center"
+          data-mark={project.id}
+          className={cn(
+            'relative flex shrink-0 items-center',
+            project.id === activeProjectId && OVER_MARK,
+          )}
         >
           <Button
             variant="ghost"
@@ -185,24 +192,29 @@ function Tabs({
             aria-current={project.id === activeProjectId ? 'page' : undefined}
             onClick={() => onSelectProject(project.id)}
           >
-            <span className={cn('size-2 shrink-0 rounded-full', TONE[project.tone])} />
-            {project.name}
-            {project.pending > 0 && <Badge tone="neutral">{project.pending}</Badge>}
+            <span className={cn(OVER_MARK, 'flex items-center gap-2')}>
+              <span className={cn('size-2 shrink-0 rounded-full', TONE[project.tone])} />
+              {project.name}
+              {project.pending > 0 && <Badge tone="neutral">{project.pending}</Badge>}
+            </span>
           </Button>
         </span>
       ))}
       {/* One press, one Project. It sits after the last tab, where the next one will be. */}
       <Tooltip label="Add a Project" side="bottom">
         {/* Centred on its own: the strip stretches its children now, and this one is a control
-            rather than a tab — it has no sheet under it to reach down to. */}
+            rather than a tab — it has no sheet under it to reach down to. Whole, like a tab: a
+            strip too narrow for its Projects scrolls on to it rather than squeezing it away. */}
         <IconButton
           variant="ghost"
-          className="no-drag self-center"
+          className="no-drag shrink-0 self-center"
           icon={<IconPlus size="md" />}
           aria-label="Add a Project"
           onClick={onAddProject}
         />
       </Tooltip>
+      {/* Last, so that it is drawn after every tab it can cross. */}
+      <TabMark active={activeProjectId} />
     </Scrollable>
   )
 }

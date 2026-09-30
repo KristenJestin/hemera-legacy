@@ -29,6 +29,7 @@ import { z } from 'zod'
 
 import {
   AGENTS_FILE,
+  type CommandType,
   DELIVERY_MARKER,
   READ_PAGE_BYTES,
   SEARCH_MATCH_LIMIT,
@@ -71,8 +72,9 @@ beforeEach(() => {
 })
 
 afterEach(() => {
-  rmSync(dataFolder, { recursive: true, force: true })
-  rmSync(workspace, { recursive: true, force: true })
+  // A run stopped by tree may still be closing when the test ends: Windows keeps its folder until then.
+  rmSync(dataFolder, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 })
+  rmSync(workspace, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 })
 })
 
 /** What the runtime keeps of a tool call the agent streamed: its input and its output, as text. */
@@ -126,12 +128,28 @@ const inCatalogue = (
   projectId: string,
   name: string,
   line: string,
-  kind: 'app' | 'check' | 'utility',
-  folder: string | null = null,
+  type: CommandType,
+  folderBase: string | null = null,
 ) =>
   Effect.gen(function* () {
     const commands = yield* Commands
-    return yield* commands.save({ projectId, name, line, kind, folder }, false)
+    return yield* commands.save(
+      {
+        projectId,
+        name,
+        line,
+        lineWindows: null,
+        lineLinux: null,
+        type,
+        folderBase,
+        folder: null,
+        scope: 'workspace',
+        portless: false,
+        portlessName: null,
+        runAtOpen: false,
+      },
+      false,
+    )
   })
 
 /** The requests the human was asked in a thread by Hemera's tools, pending or answered. */
@@ -223,7 +241,7 @@ describe('The agent starts the app and the user opens it', () => {
         const runtime = yield* AgentRuntime
         const commands = yield* Commands
         const session = yield* aSessionOn(workspace, 'claude')
-        yield* inCatalogue(session.projectId, 'dev', PUBLISHES_AN_ADDRESS, 'app')
+        yield* inCatalogue(session.projectId, 'dev', PUBLISHES_AN_ADDRESS, 'serve')
         yield* runtime.prompt(session.id, 'start the app')
         // The panel shows it running, with its address once the output has named one.
         const panel = yield* until(panelOf(session.id), (read) => read.running[0]?.url != null)
@@ -260,7 +278,7 @@ describe('A running app is not started twice', () => {
         const runtime = yield* AgentRuntime
         const commands = yield* Commands
         const session = yield* aSessionOn(workspace, 'claude')
-        const dev = yield* inCatalogue(session.projectId, 'dev', PUBLISHES_AN_ADDRESS, 'app')
+        const dev = yield* inCatalogue(session.projectId, 'dev', PUBLISHES_AN_ADDRESS, 'serve')
         yield* runtime.prompt(session.id, 'start the app')
         yield* runtime.prompt(session.id, 'start it again')
         // The user presses Run in the panel, on the same command.
@@ -270,8 +288,17 @@ describe('A running app is not started twice', () => {
           commandId: dev.id,
           name: dev.name,
           line: dev.line,
-          kind: dev.kind,
+          lineWindows: null,
+          lineLinux: null,
+          type: dev.type,
+          scope: 'workspace',
+          portless: false,
+          portlessName: null,
+          folder: null,
           cwd: workspace,
+          workspaceId: null,
+          workspaceName: 'main',
+          environment: {},
           startedBy: 'user',
         })
         return { fromPanel, panel: yield* panelOf(session.id) }
@@ -318,6 +345,10 @@ describe('A one-off command shows and is not promoted', () => {
     const runs = seen.entries.filter((entry) => entry.kind === 'command_run')
     expect(runs).toHaveLength(1)
     expect(JSON.parse(runs[0]?.payload ?? '{}')).toMatchObject({ exitCode: 2, oneOff: true })
+    // Asked about in the Workspace, and said to be inside it: nothing about it is outside.
+    const asked = questionsIn(seen.entries)
+    expect(asked).toHaveLength(1)
+    expect(JSON.parse(asked[0]?.payload ?? '{}')).toMatchObject({ inside: true, line: ONE_OFF })
     // And the catalogue is the user's: nothing was promoted into it.
     expect(seen.catalogue).toHaveLength(0)
   })
@@ -334,7 +365,7 @@ describe('Nothing is left running', () => {
         const runtime = yield* AgentRuntime
         const commands = yield* Commands
         const session = yield* aSessionOn(workspace, 'claude')
-        yield* inCatalogue(session.projectId, 'tree', STARTS_A_TREE, 'app')
+        yield* inCatalogue(session.projectId, 'tree', STARTS_A_TREE, 'serve')
         yield* runtime.prompt(session.id, 'start it')
         const panel = yield* until(panelOf(session.id), (read) => read.running[0]?.url != null)
         const run = panel.running[0]
@@ -362,7 +393,7 @@ describe('Nothing is left running', () => {
       Effect.gen(function* () {
         const runtime = yield* AgentRuntime
         const session = yield* aSessionOn(workspace, 'claude')
-        yield* inCatalogue(session.projectId, 'tree', STARTS_A_TREE, 'app')
+        yield* inCatalogue(session.projectId, 'tree', STARTS_A_TREE, 'serve')
         yield* runtime.prompt(session.id, 'start it')
         const panel = yield* until(panelOf(session.id), (read) => read.running[0]?.url != null)
         const run = panel.running[0]
@@ -461,6 +492,7 @@ describe('A write outside the root asks the human', () => {
       expect(asked).toHaveLength(1)
       const where = z.object({ resolved: z.string() }).parse(JSON.parse(asked[0]?.payload ?? '{}'))
       expect(where.resolved.startsWith(realpathSync.native(outside))).toBe(true)
+      expect(JSON.parse(asked[0]?.payload ?? '{}')).toMatchObject({ inside: false })
       expect(existsSync(join(outside, 'notes.md'))).toBe(false)
     } finally {
       rmSync(join(workspace, 'elsewhere'), { recursive: true, force: true })
@@ -883,7 +915,7 @@ describe('The same write twice has one effect', () => {
       Effect.gen(function* () {
         const runtime = yield* AgentRuntime
         const session = yield* aSessionOn(workspace, 'claude')
-        yield* inCatalogue(session.projectId, 'count', counts, 'check')
+        yield* inCatalogue(session.projectId, 'count', counts, 'test')
         yield* runtime.prompt(session.id, 'write, edit and run')
         return yield* panelOf(session.id)
       }),
@@ -949,7 +981,7 @@ describe('A search is bounded and says so', () => {
 })
 
 describe('The catalogue is edited and read', () => {
-  test('a command in a repository of the Project is listed to the agent with its kind and folder', async () => {
+  test('a command in a repository of the Project is listed to the agent with its type and folder', async () => {
     mkdirSync(join(workspace, 'api'))
     const agent = fakeAgent({ steps: [{ does: 'uses', call: 'commands_list', arguments: {} }] })
 
@@ -961,18 +993,18 @@ describe('The catalogue is edited and read', () => {
         const session = yield* aSessionOn(workspace, 'claude')
         const project = (yield* projects.list()).find((one) => one.id === session.projectId)
         yield* projects.addRepository(session.projectId, project?.version ?? 0, 'api')
-        yield* inCatalogue(session.projectId, 'test-api', 'pnpm test', 'check', 'api')
+        yield* inCatalogue(session.projectId, 'test-api', 'pnpm test', 'test', 'api')
         yield* runtime.prompt(session.id, 'what can I run?')
         return yield* commands.list(session.projectId)
       }),
     )
 
     // What the panel offers is the catalogue the user edited.
-    expect(seen.map((one) => [one.name, one.kind, one.folder])).toEqual([
-      ['test-api', 'check', 'api'],
+    expect(seen.map((one) => [one.name, one.type, one.folderBase, one.folder])).toEqual([
+      ['test-api', 'test', 'api', null],
     ])
-    // And the agent reads the same command, with its kind and the folder it runs in.
-    expect(agent.answers.used[0]?.text).toContain('test-api  check  in api  pnpm test')
+    // And the agent reads the same command, with its type and the folder it runs in.
+    expect(agent.answers.used[0]?.text).toContain('test-api  test  in ./api  pnpm test')
   })
 })
 
@@ -989,8 +1021,15 @@ describe('A command saved in the settings is listed to the agent at once', () =>
           projectId: session.projectId,
           name: 'check',
           line: 'bun run check',
-          kind: 'check',
+          lineWindows: null,
+          lineLinux: null,
+          type: 'test',
+          folderBase: null,
           folder: null,
+          scope: 'workspace',
+          portless: false,
+          portlessName: null,
+          runAtOpen: false,
         })
         yield* runtime.prompt(session.id, 'what can I run?')
       }),
@@ -998,7 +1037,7 @@ describe('A command saved in the settings is listed to the agent at once', () =>
 
     expect(agent.answers.used[0]?.isError).toBe(false)
     expect(agent.answers.used[0]?.text).toContain(
-      'check  check  in the Workspace root  bun run check',
+      'check  test  in the Workspace root  bun run check',
     )
   })
 })
@@ -1496,5 +1535,97 @@ describe('A Session torn down with the application writes into an open database'
 
     expect(rejected).toEqual([])
     expect(written.filter((line) => line.startsWith('sessions: write after release'))).toEqual([])
+  })
+})
+
+/** An agent with Claude Code's modes: it opens on `default`, and moves when told or by itself. */
+const withClaudeModes = (steps: Parameters<typeof fakeAgent>[0] = {}) => {
+  let mode = 'default'
+  const now = () => [
+    {
+      id: 'mode',
+      type: 'select' as const,
+      name: 'Mode',
+      category: 'mode' as const,
+      currentValue: mode,
+      options: [
+        { value: 'default', name: 'Manual' },
+        { value: 'auto', name: 'Auto' },
+      ],
+    },
+  ]
+  return fakeAgent({
+    ...steps,
+    configOptions: now(),
+    onChoice: (choice) => {
+      if (choice.id === 'mode') mode = choice.value
+      return now()
+    },
+  })
+}
+
+describe("A one-off follows the Session's mode", () => {
+  test('in Auto chosen in the composer, it runs without a question and says so', async () => {
+    const agent = withClaudeModes({
+      steps: [{ does: 'uses', call: 'commands_run', arguments: { line: ONE_OFF, key: 'auto' } }],
+    })
+
+    const seen = await toolApplication(dataFolder)(agent)(
+      Effect.gen(function* () {
+        const runtime = yield* AgentRuntime
+        const session = yield* aSessionOn(workspace, 'claude')
+        yield* runtime.setOption(session.id, 'mode', 'auto')
+        yield* runtime.prompt(session.id, 'run the check')
+        return yield* until(threadOf(session.id), (read) =>
+          read.some((entry) => entry.kind === 'command_run' && entry.state === 'failed'),
+        )
+      }),
+    )
+
+    expect(questionsIn(seen)).toHaveLength(0)
+    expect(agent.answers.used[0]?.text).toContain('exit code 2')
+    const record = seen.find(
+      (entry) => entry.kind === 'permission_decision' && entry.role === 'hemera',
+    )
+    expect(record?.body).toBe('ran without asking, Auto mode')
+  })
+
+  test('in Auto the agent moved to by itself, the next call runs without a question', async () => {
+    const agent = withClaudeModes({
+      steps: [
+        { does: 'switches', option: 'mode', value: 'auto', as: 'mode' },
+        { does: 'uses', call: 'commands_run', arguments: { line: ONE_OFF, key: 'moved' } },
+      ],
+    })
+
+    const seen = await toolApplication(dataFolder)(agent)(
+      Effect.gen(function* () {
+        const runtime = yield* AgentRuntime
+        const session = yield* aSessionOn(workspace, 'claude')
+        yield* runtime.prompt(session.id, 'run the check')
+        return yield* until(threadOf(session.id), (read) =>
+          read.some((entry) => entry.kind === 'command_run' && entry.state === 'failed'),
+        )
+      }),
+    )
+
+    expect(questionsIn(seen)).toHaveLength(0)
+    expect(agent.answers.used[0]?.text).toContain('exit code 2')
+  })
+
+  test('in Manual, it asks', async () => {
+    const agent = withClaudeModes({
+      steps: [{ does: 'uses', call: 'commands_run', arguments: { line: ONE_OFF, key: 'manual' } }],
+    })
+
+    const seen = await toolApplication(dataFolder)(agent)(
+      Effect.gen(function* () {
+        const session = yield* aSessionOn(workspace, 'claude')
+        yield* answeredTurn(session.id, 'run the check', 'refused')
+        return yield* threadOf(session.id)
+      }),
+    )
+
+    expect(questionsIn(seen)).toHaveLength(1)
   })
 })

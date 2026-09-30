@@ -2579,6 +2579,37 @@ describe('Hemera Auto: paths outside the Workspace and sensitive places always a
     expect(questions[0]?.body).toMatch(/sensitive place: .*\.env$/)
   })
 
+  it('does not take a Workspace Hemera assembled in its own data folder for a sensitive place', async () => {
+    // Hemera assembles Workspaces under its data folder, `~/.hemera/workspaces`: what is inside
+    // one is the Workspace's, and only what sits below the root is looked at.
+    root = join(folder, '.hemera', 'workspaces', 'atlas')
+    mkdirSync(join(root, 'src'), { recursive: true })
+    const human = humanSaying()
+    const seen = await engine(
+      human,
+      harmless([]),
+    )(
+      Effect.gen(function* () {
+        const session = yield* opened
+        yield* autoAt('careful')
+        const listing = yield* calling({
+          sessionId: session.sessionId,
+          tool: 'commands_run',
+          arguments: { line: 'ls src', key: 'assembled-ls' },
+        })
+        const listed = yield* calling({
+          sessionId: session.sessionId,
+          tool: 'fs_list',
+          arguments: { path: 'src' },
+        })
+        return { listing, listed }
+      }),
+    )
+    expect(seen.listing.ok).toBe(true)
+    expect(seen.listed.ok).toBe(true)
+    expect(human.asked).toHaveLength(0)
+  })
+
   it('still lets ls src run inside the Workspace, without a question or a call to Jev', async () => {
     mkdirSync(join(root, 'src'))
     const sent: string[] = []

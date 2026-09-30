@@ -28,6 +28,7 @@ export function buildViewDataOf(view: BuildView): BuildViewData {
     specId: view.specId,
     specKey: view.specKey,
     specTitle: view.specTitle,
+    specType: view.specType,
     phase: view.phase,
     pausedAt: view.pausedAt,
     detail: view.detail,

@@ -8,7 +8,7 @@ import { describe, expect, test } from 'vite-plus/test'
 import { TOOL_LABELS, TOOL_NAMES, offeredTools } from '#index.ts'
 
 /** The build's own tools (D10-13). */
-const BUILD_TOOLS = ['build_read', 'task_finished', 'task_blocked']
+const BUILD_TOOLS = ['build_read', 'task_finished', 'task_blocked', 'reproduction_replayed']
 
 describe('Every tool has a label and a mark', () => {
   test('one of each per tool, and no two tools share either', () => {

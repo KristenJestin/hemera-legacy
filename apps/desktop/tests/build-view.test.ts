@@ -330,3 +330,111 @@ describe('A review sends the build back to work', () => {
     ).toEqual(['{}'])
   })
 })
+
+/** The agent replaying the reproduction of a bug, and saying what it saw (issue #203). */
+const replayed = (gone: boolean, observed: string): FakeStep => ({
+  does: 'uses',
+  call: 'reproduction_replayed',
+  arguments: { gone, observed },
+})
+
+const OBSERVED = 'The September export totals 12 490.00, as the ledger does.'
+
+describe("A bug's reproduction is replayed before Accept", () => {
+  test('the replay the agent reports in verify is kept with the end checks, and Accept is offered', async () => {
+    const { agent, handed } = buildAgent({
+      verify: () => [replayed(true, OBSERVED), { does: 'says', text: 'The bug is gone.' }],
+    })
+    opened = await openWindowChecked(dataFolder, green, agent)
+    const seen = await opened.running(
+      Effect.gen(function* () {
+        const spec = yield* aReadySpec(dataFolder, THREE, [], ['sources/api'], 'bug')
+        const sessionId = yield* launched(spec.specId, spec.workspaceId)
+        const ready = yield* eventually(buildOf(sessionId), (view) => view.canAccept)
+        const accepted = yield* (yield* Builds).accept(sessionId)
+        return { ready, accepted, handed, lines: yield* journalOf(sessionId) }
+      }),
+    )
+    expect(seen.ready.specType).toBe('bug')
+    expect(seen.ready.endAttempts.map((attempt) => attempt.reproduction)).toEqual([
+      { observed: OBSERVED, gone: true },
+    ])
+    expect(seen.accepted.phase).toBe('accepted')
+    // The verify brief asked for it by the tool's name.
+    expect(seen.handed.find((text) => text.includes('# Phase: verify'))).toContain(
+      'reproduction_replayed',
+    )
+    expect(
+      seen.lines
+        .filter((line) => line.type === 'build.reproduction_replayed')
+        .map((line) => JSON.parse(line.payload)),
+    ).toEqual([{ gone: true }])
+  })
+
+  test('without a replay, green end checks do not offer Accept; a review that replays it does', async () => {
+    let reviewing = false
+    const { agent } = buildAgent({
+      execute: (labels, text): readonly FakeStep[] => {
+        if (!text.includes("# The user's review")) return labels.map(finished)
+        reviewing = true
+        return [replayed(true, OBSERVED), { does: 'says', text: 'Replayed: the bug is gone.' }]
+      },
+    })
+    opened = await openWindowChecked(dataFolder, green, agent)
+    const seen = await opened.running(
+      Effect.gen(function* () {
+        const spec = yield* aReadySpec(dataFolder, THREE, [], ['sources/api'], 'bug')
+        const sessionId = yield* launched(spec.specId, spec.workspaceId)
+        const builds = yield* Builds
+        const checked = yield* eventually(
+          buildOf(sessionId),
+          (view) => view.endAttempts.at(-1)?.result === 'green',
+        )
+        const refused = yield* Effect.flip(builds.accept(sessionId))
+        yield* (yield* AgentRuntime).prompt(sessionId, 'Replay the reproduction, please.')
+        const back = yield* eventually(buildOf(sessionId), (view) => view.canAccept)
+        return { checked, refused, back }
+      }),
+    )
+    expect(seen.checked.canAccept).toBe(false)
+    expect(seen.checked.endAttempts.map((attempt) => attempt.reproduction)).toEqual([null])
+    expect(seen.refused.message).toBe('The bug’s reproduction was not replayed.')
+    expect(reviewing).toBe(true)
+    expect(seen.back.endAttempts.map((attempt) => attempt.reproduction)).toEqual([
+      null,
+      { observed: OBSERVED, gone: true },
+    ])
+  })
+
+  /** The answer to a replay reported in `execute`, on a build of a Spec of this type. */
+  const replayedIn = (type: 'bug' | 'feature') =>
+    Effect.gen(function* () {
+      // A feature holds a story at least; a bug may hold none.
+      const stories = type === 'bug' ? [] : ['Export']
+      const spec = yield* aReadySpec(dataFolder, THREE, stories, ['sources/api'], type)
+      const sessionId = yield* launched(spec.specId, spec.workspaceId)
+      yield* eventually(buildOf(sessionId), (view) => view.phase === 'execute')
+      return yield* (yield* Builds).tool(sessionId, {
+        tool: 'reproduction_replayed',
+        arguments: { gone: true, observed: OBSERVED },
+      })
+    })
+
+  test('a replay reported before the final checks is refused', async () => {
+    opened = await openWindowChecked(dataFolder, green, buildAgent({ execute: () => [] }).agent)
+    expect(await opened.running(replayedIn('bug'))).toMatchObject({
+      ok: false,
+      refused: true,
+      summary: 'the reproduction is replayed in the final checks, once every task is settled',
+    })
+  })
+
+  test('a Spec that is no bug has no reproduction to replay', async () => {
+    opened = await openWindowChecked(dataFolder, green, buildAgent({ execute: () => [] }).agent)
+    expect(await opened.running(replayedIn('feature'))).toMatchObject({
+      ok: false,
+      refused: true,
+      summary: 'this Spec is a feature: it has no reproduction to replay',
+    })
+  })
+})

@@ -1261,6 +1261,7 @@ export const toolCatalogueLayer: Layer.Layer<
           case 'build_read':
           case 'task_finished':
           case 'task_blocked':
+          case 'reproduction_replayed':
             return yield* builds.tool(asked.sessionId, call)
         }
       })

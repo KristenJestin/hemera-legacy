@@ -2754,12 +2754,14 @@ export const runtimeLayer = Layer.effect(
 
     /**
      * Hands over what waits, if anything does, right before the prompt of a turn the user
-     * started: it goes out inside that turn, and whatever the agent answers it lands there.
+     * started: it goes out inside that turn, and whatever the agent answers it lands there. What
+     * it handed is answered with, so the end of that turn is the end of theirs: the review of a
+     * build handed with the user's message is over when the turn is (issue #117).
      */
     const handOver = (sessionId: string, held: Live) =>
       Effect.gen(function* () {
         const parcels = yield* waitingOf(sessionId, held, true, true)
-        if (parcels.length === 0) return
+        if (parcels.length === 0) return parcels
         const sent = yield* sendDelivery(sessionId, held, parcels, null)
         if (Result.isFailure(sent)) {
           return yield* Effect.fail(
@@ -2769,6 +2771,7 @@ export const runtimeLayer = Layer.effect(
             }),
           )
         }
+        return parcels
       })
 
     /**
@@ -3124,7 +3127,7 @@ export const runtimeLayer = Layer.effect(
         // this one has not started. What the watcher or the Spec has not handed over yet — it
         // was made while the agent was not running — goes now, the mission brief of a `define`
         // Session's first turn with it (D7-09), and never as a message of the user's.
-        yield* handOver(sessionId, held)
+        const handed = yield* handOver(sessionId, held)
         // One Stop covers the whole turn: pressed while the delivery was out, it cancelled the
         // delivery, and the user's prompt is not sent after it.
         if (turn.closed !== null) return yield* stoppedBefore(turn.closed)
@@ -3182,10 +3185,15 @@ export const runtimeLayer = Layer.effect(
             })
           }
           yield* closeTurn(sessionId, turn, turn.closed ?? answered.stopReason)
-          // The end of this turn is the next safe point: what it made wait — the brief of a
-          // phase its agent finished, a human edit made while it ran — goes once it is over. A
-          // turn the user stopped is left stopped.
-          if (turn.closed === null) deliverSoon(sessionId, false)
+          // What was handed over in front of the message ends with this turn, as a delivery of
+          // its own ends with its own: the review of a build is over once the turn that carried
+          // it is (issue #117). The end of this turn is the next safe point: what it made wait —
+          // the brief of a phase its agent finished, a human edit made while it ran — goes once
+          // it is over. A turn the user stopped is left stopped.
+          if (turn.closed === null) {
+            for (const parcel of handed) yield* parcel.ended?.(turn.id) ?? Effect.void
+            deliverSoon(sessionId, false)
+          }
           return {
             stopReason: turn.closed ?? answered.stopReason,
             usage: answered.usage,

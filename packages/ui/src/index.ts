@@ -582,6 +582,7 @@ export type {
   BuildAttemptResult,
   BuildAttemptScope,
   BuildAttemptView,
+  BuildReproductionView,
   BuildBlockerView,
   BuildCheckVerdict,
   BuildCheckView,

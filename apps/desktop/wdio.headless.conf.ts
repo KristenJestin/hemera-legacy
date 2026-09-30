@@ -7,8 +7,8 @@
  * than on the command line, because `VAR=1 command` is not something every shell understands.
  *
  * On Linux, outside CI, an off-screen position means nothing to a Wayland compositor, which
- * places windows itself: the run starts a headless weston before the first worker and stops it
- * after the last, and the workers inherit its socket the way they inherit the variable
+ * places windows itself: the run starts a headless weston before each worker and stops it
+ * after, and the workers inherit its socket the way they inherit the variable
  * (`e2e/compositor.ts`). It also starts and ends on a temporary directory with nothing of a
  * suite left in it. Elsewhere the run is the one it always was.
  *
@@ -42,32 +42,39 @@ function removeLeftovers(): void {
   }
 }
 
-/** Starts the compositor, and ends the run where it cannot: nothing may open on the desktop. */
-async function openCompositor(command: readonly string[]): Promise<void> {
+/**
+ * Points the run at the compositor, before any of them is started: a window opened while none
+ * listens finds no display at all, and never the desktop's.
+ */
+function useCompositor(): void {
   removeLeftovers()
-  // Pointed at the compositor before it is started, so a window can never reach the desktop.
   delete process.env.DISPLAY
   Object.assign(process.env, inCompositor(process.env))
-  try {
-    stopCompositor = await startCompositor(command)
-  } catch (error) {
-    console.error(error)
-    // A hook's error is only logged by the launcher, which would go on with no display at all.
-    process.exit(1)
-  }
+}
+
+/**
+ * A compositor of its own for every spec file, as every spec file has a data folder of its own:
+ * one weston serving a whole run carries what each window left in it over to the next.
+ */
+async function openCompositor(command: readonly string[]): Promise<void> {
+  stopCompositor = await startCompositor(command)
 }
 
 async function closeCompositor(): Promise<void> {
   await stopCompositor?.()
+  stopCompositor = null
+}
+
+async function endRun(): Promise<void> {
+  await closeCompositor()
   removeLeftovers()
 }
 
 // The launcher runs every hook of a list, the suite's own and these; workers never run them.
 export const config: WebdriverIO.Config = {
   ...suite,
-  onPrepare: [
-    ...[suite.onPrepare ?? []].flat(),
-    ...(compositor ? [async () => await openCompositor(compositor)] : []),
-  ],
-  onComplete: [...[suite.onComplete ?? []].flat(), ...(compositor ? [closeCompositor] : [])],
+  onPrepare: [...[suite.onPrepare ?? []].flat(), ...(compositor ? [useCompositor] : [])],
+  onWorkerStart: compositor ? [async () => await openCompositor(compositor)] : [],
+  onWorkerEnd: compositor ? [closeCompositor] : [],
+  onComplete: [...[suite.onComplete ?? []].flat(), ...(compositor ? [endRun] : [])],
 }

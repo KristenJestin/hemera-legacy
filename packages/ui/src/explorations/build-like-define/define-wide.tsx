@@ -25,8 +25,12 @@ import {
 
 const COLUMNS = 'flex min-h-0 flex-1'
 
+/**
+ * The sidebar on the Spec's own surface, parted from the text by a rule: no fill of its own, so
+ * the phases' glyphs and the marker of the section being read are what carry it.
+ */
 const NAV =
-  'flex w-sidebar shrink-0 flex-col gap-5 overflow-y-auto border-r border-border bg-surface-rim px-3 py-4'
+  'flex w-sidebar shrink-0 flex-col gap-5 overflow-y-auto border-r border-border px-3 py-4'
 
 const PHASE =
   'flex w-full items-center gap-2.5 rounded-md px-1.5 py-1 text-left outline-none hover:bg-accent focus-ring'
@@ -39,7 +43,7 @@ const PHASE_WORDS = 'text-xs text-muted-foreground'
 const SECTIONS = 'ml-4 flex flex-col border-l border-border pl-2'
 
 const SECTION =
-  'relative -ml-2.5 rounded-r-md border-l-2 border-transparent py-1 pr-2 pl-4 text-left text-sm text-muted-foreground outline-none hover:text-foreground focus-ring data-current:border-primary data-current:font-medium data-current:text-foreground'
+  'relative -ml-2.5 rounded-r-md border-l-2 border-transparent py-1 pr-2 pl-4 text-left text-sm text-muted-foreground outline-none hover:bg-accent hover:text-foreground focus-ring data-current:border-primary data-current:bg-accent data-current:font-medium data-current:text-foreground'
 
 const READER = 'relative min-h-0 min-w-0 flex-1 overflow-y-auto outline-none focus-ring'
 

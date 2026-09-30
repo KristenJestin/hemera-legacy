@@ -388,6 +388,16 @@ describe('Hemera Auto classifies one admitted tool call before execution', () =>
         .filter((entry) => entry.kind === 'permission_decision')
         .map((entry) => entry.state),
     ).toEqual(['completed'])
+    // The human's answer is one of Hemera Auto's decisions too: it says who decided, what the
+    // classifier had settled before asking, and the decision it answers (#294).
+    const answered = result.entries.find((entry) => entry.kind === 'permission_decision')
+    expect(JSON.parse(answered?.payload ?? '{}')).toMatchObject({
+      tool: 'fs_write',
+      answer: 'allowed',
+      by: 'human',
+      judged: 'nobody',
+      classifier: userDecisions[0]?.payload.classifier,
+    })
   })
 
   it('refuses a destructive one-off before asking or starting it', async () => {

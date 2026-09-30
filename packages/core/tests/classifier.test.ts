@@ -1,18 +1,6 @@
 import { describe, expect, test } from 'vite-plus/test'
 
-import {
-  classifierVerdictFromScores,
-  judgedByClassifier,
-  localClassifierVerdict,
-  nativePermissionMode,
-} from '#index.ts'
-
-test('Hemera Auto reserves native permission modes but preserves independent planning', () => {
-  const mode = { id: 'session-mode', category: 'mode' }
-  expect(nativePermissionMode(mode, 'acceptEdits')).toBe(true)
-  expect(nativePermissionMode(mode, 'plan')).toBe(false)
-  expect(nativePermissionMode({ id: 'model', category: 'model' }, 'plan')).toBe(false)
-})
+import { classifierVerdictFromScores, judgedByClassifier, localClassifierVerdict } from '#index.ts'
 
 describe('Local rules settle only understood calls', () => {
   const run = (

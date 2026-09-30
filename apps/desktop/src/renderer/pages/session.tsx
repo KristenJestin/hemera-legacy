@@ -920,7 +920,7 @@ export function SessionPage({
   // draws what it was told and never a value it remembers (D5-13).
   const model = modelStage(options)
   const effort = effortStage(options)
-  const mode = modeStage(options)
+  const mode = modeStage(options, session.provider)
 
   // What the Session details hold: the plan the agent last published and the files the turn has
   // touched. Both are states rather than events, and they are read here because the meter above

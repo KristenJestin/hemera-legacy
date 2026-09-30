@@ -5,8 +5,17 @@ export {
   classifierVerdictFromScores,
   judgedByClassifier,
   localClassifierVerdict,
-  nativePermissionMode,
 } from './domain/classifier.ts'
+export {
+  HEMERA_AUTO_MODE,
+  autoGoverns,
+  autoResets,
+  modeBehaviour,
+  neutralMode,
+  permissionMode,
+  permissiveMode,
+  type ModeBehaviour,
+} from './domain/permission-modes.ts'
 
 export {
   CLASSIFIER_CONTEXT_CHARACTERS,

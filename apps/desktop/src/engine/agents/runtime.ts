@@ -43,7 +43,8 @@ import {
   contextUri,
   hemeraToolNamed,
   internalText,
-  nativePermissionMode,
+  autoGoverns,
+  autoResets,
   type Mission,
   type Session,
   type SessionEntryOrigin,
@@ -1596,7 +1597,7 @@ export const runtimeLayer = Layer.effect(
         for (const [optionId, value] of chosen.get(key) ?? []) {
           if (yield* hemeraAuto) {
             const option = probe.connection.options().find((one) => one.id === optionId)
-            if (option !== undefined && nativePermissionMode(option, value)) continue
+            if (option !== undefined && autoGoverns(provider, option, value)) continue
           }
           yield* attempt('choosing an option', probe.connection.setOption(optionId, value)).pipe(
             // A choice this agent will not take again is not an offer that failed: the composer
@@ -1673,7 +1674,7 @@ export const runtimeLayer = Layer.effect(
 
         if (yield* hemeraAuto) {
           const option = answered.connection.options().find((one) => one.id === optionId)
-          if (option !== undefined && nativePermissionMode(option, value)) {
+          if (option !== undefined && autoGoverns(provider, option, value)) {
             return offerRefused(
               'failed',
               'Permission modes are managed by Hemera Auto in App Settings.',
@@ -1998,7 +1999,7 @@ export const runtimeLayer = Layer.effect(
         for (const choice of ranked) {
           if (yield* hemeraAuto) {
             const option = connection.options().find((one) => one.id === choice.optionId)
-            if (option !== undefined && nativePermissionMode(option, choice.value)) continue
+            if (option !== undefined && autoGoverns(provider, option, choice.value)) continue
           }
           // A choice the agent will not take is not a Session that cannot start: it opens on
           // what the agent is on, and the composer shows what that is.
@@ -2049,28 +2050,31 @@ export const runtimeLayer = Layer.effect(
             if (yield* hemeraAuto) {
               // A resumed native Session may restore its own permission mode even when Hemera
               // skipped the remembered choice. Neutralize it before handing out a new prompt.
+              // Only the permission modes the adapter declares are governed (the table in
+              // `@hemera/core`): Claude's plan and OpenCode's agents stay as they are.
               const neutralized = yield* Effect.result(
                 Effect.gen(function* () {
-                  for (const option of held.connection.options()) {
-                    if (!nativePermissionMode(option, option.value) || option.value === 'default')
-                      continue
-                    if (!option.values.some((value) => value.id === 'default')) {
-                      return yield* Effect.fail(
-                        new AgentRuntimeError({
-                          what: 'starting the agent',
-                          cause: 'its native permission mode cannot be reset for Hemera Auto',
-                        }),
-                      )
-                    }
+                  const needed = autoResets(held.provider, held.connection.options())
+                  if (needed.kind === 'refused') {
+                    return yield* Effect.fail(
+                      new AgentRuntimeError({
+                        what: 'starting the agent',
+                        cause: 'its native permission mode cannot be reset for Hemera Auto',
+                      }),
+                    )
+                  }
+                  for (const reset of needed.resets) {
                     const changed = yield* attempt(
                       'resetting native permissions for Hemera Auto',
-                      held.connection.setOption(option.id, 'default'),
+                      held.connection.setOption(reset.optionId, reset.value),
                     )
-                    if (changed.find((value) => value.id === option.id)?.value !== 'default') {
+                    if (
+                      changed.find((value) => value.id === reset.optionId)?.value !== reset.value
+                    ) {
                       return yield* Effect.fail(
                         new AgentRuntimeError({
                           what: 'starting the agent',
-                          cause: 'the agent did not accept its default permission mode',
+                          cause: 'the agent did not accept its neutral permission mode',
                         }),
                       )
                     }
@@ -3077,7 +3081,7 @@ export const runtimeLayer = Layer.effect(
         const held = yield* opened(sessionId)
         if (yield* hemeraAuto) {
           const option = held.connection.options().find((one) => one.id === optionId)
-          if (option !== undefined && nativePermissionMode(option, value)) {
+          if (option !== undefined && autoGoverns(held.provider, option, value)) {
             return yield* Effect.fail(
               new AgentRuntimeError({
                 what: 'choosing an option',

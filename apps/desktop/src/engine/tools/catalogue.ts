@@ -30,6 +30,8 @@ import {
   admitTool,
   CLASSIFIER_POLICY_VERSION,
   classifierHumanContext,
+  classifierVerdictFromScores,
+  DEFAULT_CLASSIFIER_STRICTNESS,
   commandPlace,
   judgedByClassifier,
   localClassifierVerdict,
@@ -857,6 +859,12 @@ export const toolCatalogueLayer: Layer.Layer<
         let scores:
           | { readonly risk: number; readonly approval: number; readonly userRequested: number }
           | undefined
+        // The judge never refuses: what its scores find risky asks the human (#298).
+        const verdictOf = (judgedScores: NonNullable<typeof scores>) =>
+          classifierVerdictFromScores(
+            { ...judgedScores, hasHumanContext: context.items.length > 0 },
+            DEFAULT_CLASSIFIER_STRICTNESS,
+          )
         const correlationId = `classifier:${crypto.randomUUID()}`
         const local = localClassifierVerdict(action)
         if (local !== 'defer') {
@@ -883,7 +891,7 @@ export const toolCatalogueLayer: Layer.Layer<
           const judged = `${snapshot.generation}\u0000${context.latestHumanSeq}\u0000${actionText}`
           const reused = verdicts.get(judged)
           if (reused !== undefined) {
-            verdict = reused.verdict
+            verdict = verdictOf(reused.scores)
             source = 'jev'
             model = reused.model
             scores = reused.scores
@@ -905,7 +913,7 @@ export const toolCatalogueLayer: Layer.Layer<
             }).pipe(Effect.catch(() => Effect.succeed({ kind: 'unavailable' as const })))
             jevMs = 'ms' in evaluated ? evaluated.ms : undefined
             if (evaluated.kind === 'evaluated') {
-              verdict = evaluated.verdict
+              verdict = verdictOf(evaluated.scores)
               source = 'jev'
               model = evaluated.model
               scores = evaluated.scores

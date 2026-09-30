@@ -276,7 +276,7 @@ const fileInRoot = (name: string, content: string) => {
   return path
 }
 
-function jevResponse(risk: number): Response {
+function jevResponse(risk: number, approval = 0.2, userRequested = 0.9): Response {
   return Response.json({
     model: JEV_MODEL,
     answers: {
@@ -287,8 +287,8 @@ function jevResponse(risk: number): Response {
         legend: { '0': 'read', '1': 'limited', '2': 'significant', '3': 'destructive' },
         probabilities: { '0': 0.1, '1': 0.9, '2': 0, '3': 0 },
       },
-      approval: { type: 'noul', noul: 0.2 },
-      user_requested: { type: 'noul', noul: 0.9 },
+      approval: { type: 'noul', noul: approval },
+      user_requested: { type: 'noul', noul: userRequested },
     },
   })
 }
@@ -473,13 +473,16 @@ describe('Hemera Auto classifies one admitted tool call before execution', () =>
     })
   })
 
-  it('does not dispatch a valid Jev deny or treat an invalid reply as approval', async () => {
-    const human = humanSaying('allowed')
+  it('asks the human for a risky Jev score, and never treats an invalid reply as approval', async () => {
+    // The first call is scored as the `rm -rf` judged live was: Jev refuses nothing on its own.
+    const human = humanSaying('refused', 'allowed')
     let calls = 0
     const transport: JevTransport = {
       send: async () => {
         calls += 1
-        return calls === 1 ? jevResponse(2.5) : Response.json({ model: JEV_MODEL, answers: {} })
+        return calls === 1
+          ? jevResponse(2.96, 0.88, 0.18)
+          : Response.json({ model: JEV_MODEL, answers: {} })
       },
     }
     const result = await engine(
@@ -508,7 +511,7 @@ describe('Hemera Auto classifies one admitted tool call before execution', () =>
     expect(result.denied.state).toBe('refused')
     expect(existsSync(join(root, 'denied.md'))).toBe(false)
     expect(result.invalid.state).toBe('completed')
-    expect(human.asked).toHaveLength(1)
+    expect(human.asked).toHaveLength(2)
     expect(calls).toBe(2)
   })
 
@@ -917,13 +920,14 @@ describe('Concurrent calls keep independent decisions', () => {
           ],
           { concurrency: 'unbounded' },
         ).pipe(Effect.timeout('5 seconds'))
-        return { allowed, refused }
+        return { allowed, refused, otherId: other.id }
       }),
     )
     expect(seen.allowed.state).toBe('completed')
     expect(seen.refused.state).toBe('refused')
     expect(existsSync(join(root, 'refused.md'))).toBe(false)
-    expect(human.asked).toHaveLength(0)
+    // The risky one asked its own Session's human, who refused it: Jev refuses nothing (#298).
+    expect(human.asked.map((question) => question.sessionId)).toEqual([seen.otherId])
     // Context from another Session is never included.
     const other = bodies.find((body) => body.includes('refused.md'))
     expect(other).not.toContain('first Session only')
@@ -1140,7 +1144,7 @@ describe('Audit distinguishes a verdict from execution', () => {
     expect(seen.lines.find((line) => line.type === 'classifier.decision')?.payload).toMatchObject({
       verdict: 'allow',
       source: 'jev',
-      policy: '1',
+      policy: '2',
       model: JEV_MODEL,
     })
     expect(types).toContain('tool.failed')
@@ -1210,7 +1214,7 @@ describe("Hemera Auto's decisions are quiet records, and what it cannot decide w
       send: async (body) =>
         body.includes('asked.md')
           ? Response.json({ model: JEV_MODEL, answers: {} })
-          : jevResponse(body.includes('refused.md') ? 2.5 : 1),
+          : jevResponse(1),
     }
     const seen = await engine(
       human,
@@ -1229,7 +1233,12 @@ describe("Hemera Auto's decisions are quiet records, and what it cannot decide w
             arguments: { path, content: 'x', key: path },
           })
         const allowed = yield* write('allowed.md')
-        const refused = yield* write('refused.md')
+        // Only the local rules refuse (#298).
+        const refused = yield* calling({
+          sessionId: session.sessionId,
+          tool: 'commands_run',
+          arguments: { line: 'rm -rf .git', key: 'refused' },
+        })
         yield* Effect.forkScoped(write('asked.md'))
         yield* Effect.promise(async () => {
           for (let tries = 0; tries < 100 && human.asked.length === 0; tries += 1) {
@@ -1306,7 +1315,7 @@ describe('Every Hemera Auto decision leaves one line in the diagnostic log', () 
     // The judged write: its path, the judge, its verdict, policy, model, scores and time.
     expect(lines[0]).toMatch(/fs_write .*judged\.md/)
     expect(lines[0]).toContain('by=judge verdict=allow')
-    expect(lines[0]).toContain('policy=1')
+    expect(lines[0]).toContain('policy=2')
     expect(lines[0]).toContain(`model=${JEV_MODEL}`)
     expect(lines[0]).toContain('risk=1 approval=0.2 userRequested=0.9')
     expect(lines[0]).toMatch(/jev=\d+ms/)

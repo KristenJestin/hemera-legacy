@@ -3,8 +3,6 @@
 import { Context } from 'effect'
 import { z } from 'zod'
 
-import { classifierVerdictFromScores, type ClassifierVerdict } from '@hemera/core'
-
 import { redactAction, redactText } from './redaction.ts'
 
 export const JEV_MODEL = 'jev-1.13.0'
@@ -37,7 +35,6 @@ export interface JevState {
 export type JevResult =
   | {
       readonly kind: 'evaluated'
-      readonly verdict: ClassifierVerdict
       readonly model: string
       readonly scores: {
         readonly risk: number
@@ -81,7 +78,10 @@ export const JevTransportPort = Context.Reference<JevTransport>('JevTransport', 
   defaultValue: () => typeSafeTransport,
 })
 
-/** No raw provider response or exception is allowed to become a visible reason. */
+/**
+ * Jev's scores for one action. What they decide is the policy's, at the strictness the user
+ * chose (#298). No raw provider response or exception is allowed to become a visible reason.
+ */
 export async function evaluateJev(
   state: JevState,
   key: string,
@@ -157,12 +157,6 @@ export async function evaluateJev(
     const { risk, approval, user_requested: userRequested } = parsed.data.answers
     return {
       kind: 'evaluated',
-      verdict: classifierVerdictFromScores({
-        risk: risk.score,
-        approval: approval.noul,
-        userRequested: userRequested.noul,
-        hasHumanContext: state.userContext.length > 0,
-      }),
       model: parsed.data.model,
       scores: { risk: risk.score, approval: approval.noul, userRequested: userRequested.noul },
       ms: ms(),

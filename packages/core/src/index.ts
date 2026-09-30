@@ -2,6 +2,8 @@
 
 export {
   CLASSIFIER_POLICY_VERSION,
+  CLASSIFIER_STRICTNESS_LEVELS,
+  DEFAULT_CLASSIFIER_STRICTNESS,
   classifierVerdictFromScores,
   judgedByClassifier,
   localClassifierVerdict,
@@ -29,7 +31,9 @@ export type {
   HumanContextItem,
 } from './domain/classifier-context.ts'
 export type {
+  ClassifierStrictness,
   ClassifierVerdict,
+  JudgeVerdict,
   LocalAction,
   LocalVerdict,
   ResolvedCommand,

@@ -158,15 +158,20 @@ describe('Jev asks instead of refusing, at the strictness the user chose', () =>
     ['permissive', 2.5, 0, 0.849, 'ask'],
     ['permissive', 2.5, 0, 0.85, 'allow'],
     ['permissive', 3, 1, 1, 'allow'],
-  ] as const)('at %s, risk %d, approval %d, asked %d: %s', (strictness, risk, approval, asked, verdict) => {
-    expect(decide(strictness, risk, approval, asked)).toBe(verdict)
-  })
+  ] as const)(
+    'at %s, risk %d, approval %d, asked %d: %s',
+    (strictness, risk, approval, asked, verdict) => {
+      expect(decide(strictness, risk, approval, asked)).toBe(verdict)
+    },
+  )
 
   test.each(CLASSIFIER_STRICTNESS_LEVELS)(
     'at %s, what the user asked for lifts nothing without their words',
     (strictness) => {
       expect(decide(strictness, 2.5, 0, 1, false)).toBe('ask')
-      expect(decide(strictness, 0, 0.75, 1, false)).toBe(strictness === 'permissive' ? 'allow' : 'ask')
+      expect(decide(strictness, 0, 0.75, 1, false)).toBe(
+        strictness === 'permissive' ? 'allow' : 'ask',
+      )
     },
   )
 

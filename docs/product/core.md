@@ -768,7 +768,8 @@ a redacted action and relevant human context to TypeSafe AI; the same call judge
 same turn reuses its verdict, never a human's answer. What Hemera Auto settles leaves the quiet
 line a mode leaves, "ran without asking, Hemera Auto mode", or a refusal; what it cannot settle
 — no key, no answer, an unusable one — is the permission block the Session's notices list. A
-destructive local denial cannot be overridden by Jev or by an approval. A change of classifier or
+destructive local denial cannot be overridden by Jev or by an approval. Only the local rules
+refuse: a call Jev scores as risky asks the human. A change of classifier or
 credential invalidates pending decisions. The thread and Journal distinguish the classifier's
 decision from the tool's outcome.
 

@@ -99,6 +99,10 @@ export type ParsedCall =
       readonly tool: 'task_blocked'
       readonly arguments: z.infer<(typeof TOOL_ARGUMENTS)['task_blocked']>
     }
+  | {
+      readonly tool: 'reproduction_replayed'
+      readonly arguments: z.infer<(typeof TOOL_ARGUMENTS)['reproduction_replayed']>
+    }
 
 /**
  * The key an idempotency key may be, so that a key is a name and not a document.
@@ -587,6 +591,18 @@ export const TOOL_ARGUMENTS = {
       .max(SPEC_PAGE_CHARACTERS)
       .describe('what in the Spec it contradicts, for the user who decides'),
   }),
+  // What the replay of a bug's reproduction showed (issue #203), which its final checks wait for.
+  reproduction_replayed: z.object({
+    gone: z
+      .boolean()
+      .describe('whether the incorrect behaviour is gone once the scenario is replayed'),
+    observed: z
+      .string()
+      .trim()
+      .min(1)
+      .max(SPEC_PAGE_CHARACTERS)
+      .describe('what you did to replay it and what you observed, for the user who accepts'),
+  }),
 } as const
 
 /** What each tool is, in the words the agent reads before it asks. */
@@ -621,6 +637,8 @@ export const TOOL_DESCRIPTIONS: Record<ToolName, string> = {
     "Say you finished a task, by its label. This is not a verdict: Hemera runs the Project's checks on it and decides whether it is done; a red check comes back to you with its failures.",
   task_blocked:
     'Say a task contradicts the frozen Spec, by its label, with the reason. The task and the tasks that depend on it are suspended until the user decides; the others go on. Never for a task that is merely hard.',
+  reproduction_replayed:
+    "Report the replay of a bug's reproduction scenario, in the final checks of a bug Spec: whether the incorrect behaviour is gone, and what you did and observed. Hemera keeps the last one with the end checks that run once your turn is over, and the user cannot accept the build without it. Replay it and report it again after any fix.",
 }
 
 /**
@@ -651,6 +669,7 @@ export const TOOL_BOUNDS: Record<ToolName, string> = {
   build_read: `this Session's build, ${SPEC_PAGE_CHARACTERS / 1024} K characters a page`,
   task_finished: "a signal Hemera answers with the Project's checks; never a task's state",
   task_blocked: 'a blocker the user decides; never a change to the Spec',
+  reproduction_replayed: "a bug's final checks only; kept with the end checks that follow",
 }
 
 /** What one reading of the arguments answered. */
@@ -735,6 +754,8 @@ export function parseCall(tool: ToolName, raw: ToolArguments): ArgumentsDecision
       return decide(tool, read(TOOL_ARGUMENTS['task_finished'], raw))
     case 'task_blocked':
       return decide(tool, read(TOOL_ARGUMENTS['task_blocked'], raw))
+    case 'reproduction_replayed':
+      return decide(tool, read(TOOL_ARGUMENTS['reproduction_replayed'], raw))
   }
 }
 

@@ -10,6 +10,8 @@
 
 import { z } from 'zod'
 
+import { specTypeSchema } from './specs.ts'
+
 /** Where a build stands (D10-01): its three phases, then accepted or stopped. */
 export const buildPhaseSchema = z.enum(['prepare', 'execute', 'verify', 'accepted', 'stopped'])
 
@@ -87,6 +89,11 @@ export const attemptViewSchema = z.object({
   result: attemptResultSchema.nullable(),
   checks: z.readonly(z.array(checkResultViewSchema)),
   files: z.readonly(z.array(attemptFileSchema)),
+  /**
+   * The end checks of a `bug`: the replay of its reproduction the agent reported before them, and
+   * whether the incorrect behaviour is gone; null when it reported none (issue #203).
+   */
+  reproduction: z.object({ observed: z.string(), gone: z.boolean() }).nullable(),
 })
 
 export type AttemptView = z.infer<typeof attemptViewSchema>
@@ -148,13 +155,15 @@ export type StoryView = z.infer<typeof storyViewSchema>
  * A `build` Session's build, as `build.read` answers it and every build action answers the build
  * it leaves (D10-12). `revision` is the number of the revision the build was started on, which
  * "Spec" opens read only; `detail` says why it stopped; `note` is the agent's approach (D10-02);
- * `canAccept` is true once `verify` is green and nothing waits for the user (D10-11).
+ * `canAccept` is true once `verify` is green and nothing waits for the user (D10-11), and for a
+ * `bug` once the replay of its reproduction was reported (issue #203).
  */
 export const buildViewSchema = z.object({
   sessionId: z.string(),
   specId: z.string(),
   specKey: z.string(),
   specTitle: z.string(),
+  specType: specTypeSchema,
   revision: z.number(),
   phase: buildPhaseSchema,
   pausedAt: z.string().nullable(),

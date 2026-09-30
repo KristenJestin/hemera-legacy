@@ -5,6 +5,8 @@ import { STORIES as SPEC_STORIES } from '../spec/spec-fixtures.ts'
 import {
   ACCEPTED,
   BLOCKED,
+  BUG_NOT_REPLAYED,
+  BUG_REPLAYED,
   BUILDING,
   FINAL_CHECKS,
   FINAL_CHECKS_RED,
@@ -268,6 +270,33 @@ export const ReadyToAccept: Story = {
     await expect(canvas.queryByRole('button', { name: 'Pause' })).toBeNull()
     await userEvent.click(canvas.getByRole('button', { name: 'Accept' }))
     await expect(args.onAccept).toHaveBeenCalled()
+  },
+}
+
+/**
+ * A `bug` in its final checks (issue #203): the replay of its reproduction the agent reported
+ * stands under "Final checks", its dot saying the bug is gone, and Accept is offered.
+ */
+export const BugReplayed: Story = {
+  args: { build: BUG_REPLAYED },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const replay = within(canvas.getByRole('region', { name: 'Reproduction' }))
+    await expect(replay.getByRole('img', { name: 'Gone' })).toBeVisible()
+    await expect(replay.getByText(/the file totals 12 490.00/)).toBeVisible()
+    await expect(canvas.getByRole('button', { name: 'Accept' })).toBeVisible()
+  },
+}
+
+/** A `bug` whose final checks are green but whose reproduction was not replayed: no Accept. */
+export const BugNotReplayed: Story = {
+  args: { build: BUG_NOT_REPLAYED },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await expect(canvas.getByText('final checks green')).toBeVisible()
+    const replay = within(canvas.getByRole('region', { name: 'Reproduction' }))
+    await expect(replay.getByRole('img', { name: 'Not replayed' })).toBeVisible()
+    await expect(canvas.queryByRole('button', { name: 'Accept' })).toBeNull()
   },
 }
 

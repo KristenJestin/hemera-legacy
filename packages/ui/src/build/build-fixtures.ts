@@ -548,6 +548,33 @@ export const READY_TO_ACCEPT: BuildViewData = {
   canAccept: true,
 }
 
+/**
+ * A `bug` in its final checks, green (issue #203): the agent replayed the reproduction before them
+ * and the incorrect behaviour is gone, so Accept is offered.
+ */
+export const BUG_REPLAYED: BuildViewData = {
+  ...READY_TO_ACCEPT,
+  specType: 'bug',
+  endAttempts: [
+    {
+      ...END_GREEN,
+      reproduction: {
+        observed:
+          'Exported September again with the credit note CN-0912 in it: the file totals 12 490.00, as the billing page does.',
+        gone: true,
+      },
+    },
+  ],
+}
+
+/** A `bug` whose final checks are green, but whose reproduction nobody replayed: no Accept. */
+export const BUG_NOT_REPLAYED: BuildViewData = {
+  ...READY_TO_ACCEPT,
+  specType: 'bug',
+  endAttempts: [{ ...END_GREEN, reproduction: null }],
+  canAccept: false,
+}
+
 /** Accepted: over, readable, nothing runs. */
 export const ACCEPTED: BuildViewData = {
   ...READY_TO_ACCEPT,

@@ -94,6 +94,7 @@ export const CHANNELS = {
   'specs.revisions': ENGINE_REQUESTS['specs.revisions'],
   'specs.create': ENGINE_REQUESTS['specs.create'],
   'specs.declineProposal': ENGINE_REQUESTS['specs.declineProposal'],
+  'specs.acceptExisting': ENGINE_REQUESTS['specs.acceptExisting'],
   'specs.openSession': ENGINE_REQUESTS['specs.openSession'],
   'specs.writeSection': ENGINE_REQUESTS['specs.writeSection'],
   'specs.writeStories': ENGINE_REQUESTS['specs.writeStories'],
@@ -124,6 +125,7 @@ export const CHANNELS = {
   'agents.stop': ENGINE_REQUESTS['agents.stop'],
   'agents.decide': ENGINE_REQUESTS['agents.decide'],
   'agents.resume': ENGINE_REQUESTS['agents.resume'],
+  'agents.handOver': ENGINE_REQUESTS['agents.handOver'],
   // The two the Agents section is drawn from: what this machine has, and the one thing that
   // changes it, which happens because somebody pressed a button and not on its own (D5-18).
   'agents.check': ENGINE_REQUESTS['agents.check'],
@@ -139,12 +141,17 @@ export const CHANNELS = {
   'commands.runs': ENGINE_REQUESTS['commands.runs'],
   'commands.run': ENGINE_REQUESTS['commands.run'],
   'commands.stop': ENGINE_REQUESTS['commands.stop'],
+  'commands.runAgain': ENGINE_REQUESTS['commands.runAgain'],
   'commands.output': ENGINE_REQUESTS['commands.output'],
   'commands.runOf': ENGINE_REQUESTS['commands.runOf'],
   'commands.services': ENGINE_REQUESTS['commands.services'],
   'commands.stopService': ENGINE_REQUESTS['commands.stopService'],
   'commands.proposeAccept': ENGINE_REQUESTS['commands.proposeAccept'],
   'commands.proposeDecline': ENGINE_REQUESTS['commands.proposeDecline'],
+  // What a human decides of the setup changes the agent proposed (#218).
+  'setup.accept': ENGINE_REQUESTS['setup.accept'],
+  'setup.acceptAll': ENGINE_REQUESTS['setup.acceptAll'],
+  'setup.decline': ENGINE_REQUESTS['setup.decline'],
   'context.read': ENGINE_REQUESTS['context.read'],
 
   // The Workspaces of a Project, their preparation, the Project's recipe and its variables,
@@ -167,6 +174,7 @@ export const CHANNELS = {
   'variables.list': ENGINE_REQUESTS['variables.list'],
   'variables.set': ENGINE_REQUESTS['variables.set'],
   'variables.remove': ENGINE_REQUESTS['variables.remove'],
+  'paths.entries': ENGINE_REQUESTS['paths.entries'],
 
   // The build of a `build` Session and the checks of a Project, relayed the same way: a task's
   // state, an attempt and a check are the engine's, and the window only says what the user did
@@ -221,6 +229,22 @@ export const CHANNELS = {
    */
   'shell.open': {
     arguments: z.object({ what: z.enum(['folder', 'diagnostic']) }),
+    response: z.void(),
+  },
+  /**
+   * Whether a Session has an ACP trace beside the diagnostic, and opening it with the desktop
+   * (issue #131).
+   *
+   * The Session and never a path, for the reason `shell.open` takes a choice: the main process
+   * resolves the file from the data folder it was started on, and refuses an identifier that
+   * could name anything else.
+   */
+  'trace.exists': {
+    arguments: z.object({ sessionId: z.string() }),
+    response: z.boolean(),
+  },
+  'trace.open': {
+    arguments: z.object({ sessionId: z.string() }),
     response: z.void(),
   },
   'repositories.status': {

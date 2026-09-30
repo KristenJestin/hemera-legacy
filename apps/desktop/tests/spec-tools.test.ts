@@ -31,6 +31,7 @@ import { Journal } from '#engine/journal.ts'
 import { Sessions } from '#engine/sessions.ts'
 import { SpecNotices } from '#engine/specs/notices.ts'
 import { Specs } from '#engine/specs/specs.ts'
+import { TOOL_DESCRIPTIONS } from '#engine/tools/arguments.ts'
 import { aSessionOn, gated, pause, threadOf, toolApplication } from './application.ts'
 import { agentOf, contracted, frozen, shaped, write } from './specs-harness.ts'
 import { type OpenWindow, openWindow } from './window.ts'
@@ -426,6 +427,44 @@ describe('ready attests and does not freeze', () => {
   })
 })
 
+describe('The agent is told to ask the user through the question tool', () => {
+  test('the define brief and the description of spec_write both say every question goes through the tool, never in the reply', () => {
+    const through = 'Every question you put to the user goes through `spec_write` with `question`'
+    const never = 'never as text in your reply'
+    const labels = 'always adds an "Other" answer'
+    for (const told of [DEFINE_MISSION_BRIEF, TOOL_DESCRIPTIONS.spec_write]) {
+      expect(told).toContain(through)
+      expect(told).toContain(never)
+      expect(told).toContain(labels)
+    }
+    expect(TOOL_DESCRIPTIONS.spec_write).not.toContain('asked in the chat')
+  })
+})
+
+describe('ready is refused on a feature Spec without a story', () => {
+  test('the proposal is refused with what is missing, and nothing is attested', async () => {
+    const agent = fakeAgent({ steps: [uses('spec_propose', { kind: 'ready', key: 'propose-6' })] })
+    const seen = await toolApplication(dataFolder)(agent)(
+      Effect.gen(function* () {
+        const specs = yield* Specs
+        const { sessionId, specId } = yield* defining
+        yield* contracted(specId, sessionId)
+        yield* specs.writeStories(agentOf(sessionId), { specId, stories: [] })
+        const entries = yield* turn(sessionId)
+        return { after: yield* specs.read(specId), gate: yield* specs.gate(specId), entries }
+      }),
+    )
+    const missing =
+      'a feature Spec needs at least one user story with an acceptance criterion, and it has no story'
+    expect(agent.answers.used[0]).toMatchObject({ isError: true })
+    expect(agent.answers.used[0]?.text).toContain(`cannot be proposed ready: ${missing}`)
+    expect(callsIn(seen.entries)).toMatchObject([{ tool: 'spec_propose', state: 'refused' }])
+    expect(seen.after.revision.attestedContentVersion).toBeNull()
+    expect(seen.after.spec.status).toBe('draft')
+    expect(seen.gate.failures.map((failure) => failure.message)).toContain(missing)
+  })
+})
+
 describe('An older revision is read and never written', () => {
   test('spec_read names revision 1 read-only, and a write naming it is refused', async () => {
     const agent = fakeAgent({
@@ -538,6 +577,32 @@ describe('Stories, tasks and a question are written through the tool', () => {
     ])
     const asked = seen.entries.find((entry) => entry.kind === 'spec_question')
     expect(asked).toMatchObject({ role: 'hemera', body: 'Which format first?' })
+  })
+})
+
+describe('The title and the type the user settled are written through the tool', () => {
+  test('a bug takes its reproduction section, the slug follows the title, and both at once are refused', async () => {
+    const agent = fakeAgent({
+      steps: [
+        uses('spec_write', { type: 'bug', key: 'type-1' }),
+        uses('spec_write', { title: 'Invoices lose their VAT', key: 'title-1' }),
+        uses('spec_write', { title: 'Two things', type: 'feature', key: 'both-1' }),
+      ],
+    })
+    const seen = await toolApplication(dataFolder)(agent)(
+      Effect.gen(function* () {
+        const { sessionId, specId, projectId } = yield* defining
+        yield* turn(sessionId)
+        const journal = yield* (yield* Journal).read({ projectId, specId })
+        return { after: yield* (yield* Specs).read(specId), journal: journal.entries }
+      }),
+    )
+    expect(agent.answers.used.map((answer) => answer.isError)).toEqual([false, false, true])
+    expect(agent.answers.used[2]?.text).toContain('send exactly one of')
+    expect(seen.after.revision).toMatchObject({ title: 'Invoices lose their VAT', type: 'bug' })
+    expect(seen.after.spec.slug).toBe('invoices-lose-their-vat')
+    expect(seen.after.sections.map((section) => section.name)).toContain('reproduction')
+    expect(seen.journal.filter((line) => line.type === 'spec.heading_written')).toHaveLength(2)
   })
 })
 
@@ -825,6 +890,11 @@ describe('Declining a proposal tells the agent', () => {
       'Export the Journal.',
     ])
     expect(entries.some((entry) => entry.kind === 'context_delivery')).toBe(true)
+    // And the Context tab lists it, as something Hemera handed the agent.
+    const context = await bridge.invoke('context.read', { sessionId: session.id })
+    expect(context.provided.filter((one) => one.kind === 'notice')).toEqual([
+      expect.objectContaining({ path: '', reached: 'delivery_prompt' }),
+    ])
     const listed = await bridge.invoke('sessions.list', { projectId: project.id })
     expect(listed.find((one) => one.id === session.id)).toMatchObject({
       mission: 'free',

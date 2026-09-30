@@ -78,6 +78,7 @@ async function atlas(commands: readonly [string, CommandType][]) {
       scope: 'workspace',
       portless: false,
       portlessName: null,
+      runAtOpen: false,
     })
   }
   return made.id

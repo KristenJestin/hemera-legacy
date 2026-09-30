@@ -15,6 +15,7 @@ import { Effect, Layer } from 'effect'
 import type { Scope } from 'effect'
 
 import { heldWordsLayer } from '#engine/agents/held.ts'
+import { sessionModesLayer } from '#engine/agents/modes.ts'
 import { type AgentNotices, NoNotices } from '#engine/agents/notices.ts'
 import {
   StderrSink,
@@ -104,6 +105,7 @@ export function workspaceEngine(
     Layer.provide(sink),
     Layer.provide(launches),
     Layer.provide(heldWordsLayer),
+    Layer.provide(sessionModesLayer),
     Layer.provide(notices),
   )
   return <A, E>(program: Effect.Effect<A, E, WorkspaceEngine | Scope.Scope>): Promise<A> =>
@@ -184,6 +186,7 @@ export const saved = (projectId: string, name: string, line: string, type: 'serv
         scope: 'workspace',
         portless: false,
         portlessName: null,
+        runAtOpen: false,
       },
       false,
     )

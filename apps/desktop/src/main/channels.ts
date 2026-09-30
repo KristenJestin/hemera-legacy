@@ -5,13 +5,14 @@ import { ENGINE_EVENT_CHANNEL } from '@hemera/ipc'
 import { type BrowserWindow, dialog } from 'electron/main'
 import type { OpenDialogOptions } from 'electron'
 import { shell } from 'electron/common'
+import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { Effect } from 'effect'
 
 import type { ApplicationIdentity } from './channel.ts'
 import { readSidecar, writeSidecar } from './display-sidecar.ts'
-import { DIAGNOSTIC_FILE } from './diagnostic.ts'
+import { DIAGNOSTIC_FILE, traceFileOf } from './diagnostic.ts'
 import { collectReport } from './environment.ts'
 import { handle } from './handle.ts'
 import type { EngineConversation } from './engine-conversation.ts'
@@ -161,6 +162,25 @@ export function registerChannels(
     }),
   )
 
+  /**
+   * The ACP trace of one Session, which the engine writes when the settings ask it to (#131):
+   * whether there is one, and the file itself opened with the desktop. Resolved here, from the
+   * Session's identifier, as the diagnostic is.
+   */
+  handle('trace.exists', ({ sessionId }) =>
+    Effect.sync(() => {
+      const file = traceFileOf(directory, sessionId)
+      return file !== null && existsSync(file)
+    }),
+  )
+
+  handle('trace.open', ({ sessionId }) =>
+    Effect.promise(async () => {
+      const file = traceFileOf(directory, sessionId)
+      if (file !== null && existsSync(file)) await shell.openPath(file)
+    }),
+  )
+
   handle('repositories.status', ({ root, paths }) =>
     Effect.promise(() => repositoryStatus(root, paths)),
   )
@@ -211,6 +231,7 @@ const RELAYED = [
   'agents.stop',
   'agents.decide',
   'agents.resume',
+  'agents.handOver',
   'agents.check',
   'agents.update',
   // What Hemera lends the agent: the commands of a Project and the runs they became, and what a
@@ -223,12 +244,16 @@ const RELAYED = [
   'commands.runs',
   'commands.run',
   'commands.stop',
+  'commands.runAgain',
   'commands.output',
   'commands.runOf',
   'commands.services',
   'commands.stopService',
   'commands.proposeAccept',
   'commands.proposeDecline',
+  'setup.accept',
+  'setup.acceptAll',
+  'setup.decline',
   'context.read',
   // The Workspaces of a Project, their preparation, the recipe and the variables: rows, worktrees
   // and steps the engine holds and runs (D8-01 to D8-06).
@@ -252,12 +277,15 @@ const RELAYED = [
   'variables.remove',
   // A build asked for on a ready Spec (D8-13).
   'launches.request',
+  // The entries of a folder under a base, which a path field offers as it is typed (#109).
+  'paths.entries',
   // The Specs, all of them the engine's to answer (D7-01).
   'specs.list',
   'specs.read',
   'specs.revisions',
   'specs.create',
   'specs.declineProposal',
+  'specs.acceptExisting',
   'specs.openSession',
   'specs.writeSection',
   'specs.writeStories',

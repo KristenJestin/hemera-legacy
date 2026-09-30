@@ -92,9 +92,17 @@ function continued(): boolean {
  */
 const RUN = randomUUID().slice(0, 8)
 
-/** One write of the Spec through Hemera's `spec_write`, under a key of its own. */
+/**
+ * One write of the Spec through Hemera's `spec_write`, under a key of its own: of this process and
+ * of this turn, so a Spec reworked and completed again in the same Session is written again rather
+ * than answered with the first turn's result.
+ */
 function writes(sent: Readonly<Record<string, string | number>>, key: string): FakeStep {
-  return { does: 'uses', call: 'spec_write', arguments: { ...sent, key: `${key}-${RUN}` } }
+  return {
+    does: 'uses',
+    call: 'spec_write',
+    arguments: { ...sent, key: `${key}-${RUN}-${String(turn)}` },
+  }
 }
 
 /** A section of the type's contract, written over the empty one the Spec was created with. */
@@ -102,9 +110,13 @@ function contract(section: string, body: string): FakeStep {
   return writes({ section, body, baseVersion: CONTRACT_VERSION }, section)
 }
 
-/** One declaration through Hemera's `spec_propose`, under a key of its own. */
+/** One declaration through Hemera's `spec_propose`, under a key of its own, as a write is. */
 function proposes(sent: Readonly<Record<string, string>>, key: string): FakeStep {
-  return { does: 'uses', call: 'spec_propose', arguments: { ...sent, key: `${key}-${RUN}` } }
+  return {
+    does: 'uses',
+    call: 'spec_propose',
+    arguments: { ...sent, key: `${key}-${RUN}-${String(turn)}` },
+  }
 }
 
 /**
@@ -113,7 +125,7 @@ function proposes(sent: Readonly<Record<string, string>>, key: string): FakeStep
  * and the contract attested last, on the content it now has. A section written after the phase
  * owning it was declared would make that phase stale again.
  */
-const completing: readonly FakeStep[] = [
+const completing = (): readonly FakeStep[] => [
   contract('expected_outcome', WRITTEN.expected_outcome),
   contract('verification', WRITTEN.verification),
   contract('behaviour', WRITTEN.behaviour),
@@ -225,7 +237,7 @@ const script: FakeScript = {
       return [...buildable, { does: 'says', text: BUILDABLE_DONE, messageId: `buildable-${RUN}` }]
     }
     if (asked.includes(COMPLETE)) {
-      return [...completing, { does: 'says', text: COMPLETED, messageId: `spec-${RUN}` }]
+      return [...completing(), { does: 'says', text: COMPLETED, messageId: `spec-${RUN}` }]
     }
     if (asked.includes(REWRITE)) {
       return [

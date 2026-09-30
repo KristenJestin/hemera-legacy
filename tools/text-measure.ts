@@ -34,12 +34,14 @@ const COMPUTED_SIZE = /getComputedStyle\([\s\S]*?\)\s*\.\s*(width|height)/g
  * The separator follows the pointer, and the pointer is not text: reading where a hand is has
  * none of the costs above.
  *
- * The tab mark reads where the tabs are. It decides nothing about their size — the theme and
- * the Project's own name already did that — it only has to put a shape over one of them and
- * then over the next. Anything that follows a moving target measures it; what is unusual here
- * is only that the measuring is written down rather than done for us by `layoutId`. It is named
- * here rather than left to a comment so that the day it starts measuring something else, this
- * list is where the argument happens.
+ * The sliding mark reads where the chosen item of its list is (issue #127). It decides nothing
+ * about the item's size — the theme and what the item says already did that — it only has to put
+ * a shape over one of them and then over the next, and every travelling mark of the design system
+ * is that one component: the tabs, the chrome bar's Projects, the sidebar, the settings. Anything
+ * that follows a moving target measures it; what is unusual here is only that the measuring is
+ * written down rather than done for us by `layoutId`. It is named here rather than left to a
+ * comment so that the day it starts measuring something else, this list is where the argument
+ * happens.
  *
  * The effort's slider is the separator's case again: a thumb that is dragged has to know where
  * the hand is along its own track, and the track is the only thing a pointer's position can be
@@ -54,13 +56,17 @@ const COMPUTED_SIZE = /getComputedStyle\([\s\S]*?\)\s*\.\s*(width|height)/g
  *
  * The room of a Workspace row is the same case, a height at a time: the details of a row arrive by
  * pieces, so the height of the room is one it follows rather than one it decided (issue #108).
+ * The body of a dialog is that case again (issue #183): it grows and folds to what it holds, and
+ * what it holds was laid out by the theme; the height it reads is one it follows, never one it
+ * decides.
  */
 export const MEASURE_EXCEPTIONS = [
   'packages/ui/src/shell/gutter.tsx',
-  'packages/ui/src/shell/tab-mark.tsx',
+  'packages/ui/src/components/sliding-mark/sliding-mark.tsx',
   'packages/ui/src/composer/effort-slider.tsx',
   'packages/ui/src/motion.ts',
   'packages/ui/src/workspace/workspace-list.tsx',
+  'packages/ui/src/components/dialog/dialog.tsx',
 ]
 
 export interface Refusal {
@@ -124,6 +130,7 @@ if (import.meta.main) {
   const refusals = [
     join(repository, 'packages', 'ui', 'src'),
     join(repository, 'apps', 'desktop', 'src', 'renderer'),
+    join(repository, 'apps', 'face-lab', 'src'),
   ].flatMap((root) => analyze(root, repository))
   for (const refusal of refusals) {
     console.error(`${refusal.file}: "${refusal.measure}" ${refusal.problem}`)

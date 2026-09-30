@@ -74,6 +74,7 @@ const command = (
         scope: 'workspace',
         portless: false,
         portlessName: null,
+        runAtOpen: false,
       },
       false,
     )

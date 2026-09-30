@@ -3,6 +3,8 @@ import { MotionConfig } from 'motion/react'
 import { type ReactNode, useState } from 'react'
 import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
 
+import { journeyOf } from '../../.storybook/journey.ts'
+
 import { Button } from '../components/button/button.tsx'
 import { TooltipProvider } from '../components/tooltip/tooltip.tsx'
 import { swap } from '../motion.ts'
@@ -660,19 +662,75 @@ async function pressedAt(button: HTMLElement): Promise<number> {
 const BEAT = swap.beat * 1000
 
 /**
+ * How long the frame and the panel are both there during a swap, at the least, in milliseconds:
+ * the one leaving takes most of a `lead` spring's 300 ms to go, and the one arriving comes on the
+ * beat, 80 ms in. A frame late by that much after the one before it can step over the whole of it.
+ */
+const OVERLAP = 200
+
+/** Whether some frame saw the small frame and the panel there together. */
+function overlaps(frames: readonly Frame[]): boolean {
+  return frames.some((frame) => frame.frame > 0 && frame.panel > 0)
+}
+
+/**
+ * Whether the frames were too far apart to see what a swap has to be seen doing: the two there
+ * together, and the chat on a width between its two. On a machine busy with the rest of the run
+ * a frame can come late enough to step over either, and then nothing was seen either way — not a
+ * swap that cut, and not one that overlapped. A cut, or a jump of the chat, seen between frames
+ * close together is judged, and fails.
+ */
+function unseen(frames: readonly Frame[]): boolean {
+  const late = (limit: number, changed: (before: Frame, after: Frame) => boolean): boolean =>
+    frames.slice(1).some((after, index) => {
+      const before = frames[index]!
+      return changed(before, after) && after.at - before.at >= limit
+    })
+  // The one frame the swap went from one of the two to the other, with neither seen together.
+  const cut =
+    !overlaps(frames) && late(OVERLAP, (before, after) => before.frame > 0 !== after.frame > 0)
+  const chat = journeyOf(
+    frames.map(({ at, chat: value }) => ({ at, value })),
+    frames[0]!.chat,
+    frames.at(-1)!.chat,
+  )
+  return cut || chat === 'unseen'
+}
+
+/**
  * The swap, both ways (issue #164). Opening, the small frame starts leaving first and the panel
  * waits a beat for it, then comes in while the frame is still there; folding, the panel leaves and the
  * frame is back while the panel is still going. On no frame is neither there. The chat is pushed
  * on every frame, never a jump, down one way and up the other, and the panel never stands over it.
+ *
+ * Each way is played again, up to five times, when its frames came too far apart to see it.
  */
 export const SwapReplayed: Story = {
   args: { defaultFolded: true },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    let pressed = Number.NaN
-    const opening = await framesOf(canvasElement, async () => {
-      pressed = await pressedAt(canvas.getByRole('button', { name: 'Unfold the Spec' }))
-    })
+    const unfold = async (): Promise<{ frames: Frame[]; pressed: number }> => {
+      let pressed = Number.NaN
+      const frames = await framesOf(canvasElement, async () => {
+        pressed = await pressedAt(canvas.getByRole('button', { name: 'Unfold the Spec' }))
+      })
+      return { frames, pressed }
+    }
+    const fold = (): Promise<Frame[]> =>
+      framesOf(canvasElement, () =>
+        userEvent.click(canvas.getByRole('button', { name: 'Fold the Spec' })),
+      )
+
+    let opened = await unfold()
+    for (let tries = 4; tries > 0 && unseen(opened.frames); tries -= 1) {
+      // oxlint-disable-next-line no-await-in-loop -- one swap at a time: the replay is the point
+      await fold()
+      // oxlint-disable-next-line no-await-in-loop -- one swap at a time: the replay is the point
+      await waitFor(() => expect(isStowed(canvasElement)).toBe(true))
+      // oxlint-disable-next-line no-await-in-loop -- one swap at a time: the replay is the point
+      opened = await unfold()
+    }
+    const { frames: opening, pressed } = opened
     // Never neither: on every frame, some of the frame or some of the panel is there.
     await expect(opening.filter((frame) => frame.frame === 0 && frame.panel === 0)).toEqual([])
     // The frame goes first: the panel shows no sooner than a beat after the press. Measured on
@@ -681,7 +739,7 @@ export const SwapReplayed: Story = {
     const coming = opening.find((frame) => frame.panel > 0)!
     await expect(coming.at - pressed).toBeGreaterThanOrEqual(BEAT)
     // And the two overlap: the panel is coming in while the frame is still there.
-    await expect(opening.some((frame) => frame.frame > 0 && frame.panel > 0)).toBe(true)
+    await expect(overlaps(opening)).toBe(true)
     const narrowing = moved(opening)
     const [full, first] = narrowing
     const narrowest = narrowing.at(-1)!
@@ -692,25 +750,14 @@ export const SwapReplayed: Story = {
     await expect(opening.filter((frame) => frame.panelLeft < frame.chatRight - 0.5)).toEqual([])
     await expect(opening.at(-1)!.frame).toBe(0)
 
-    // Folding, the frame is back on the beat while the panel still has most of its way to go: a
-    // window of a couple of hundred milliseconds, which a machine busy with the rest of the run can
-    // step over between two frames. When no frame saw both, the Spec is unfolded and folded again,
-    // up to five times: a fold that never overlaps is never seen to.
-    const fold = (): Promise<Frame[]> =>
-      framesOf(canvasElement, () =>
-        userEvent.click(canvas.getByRole('button', { name: 'Fold the Spec' })),
-      )
-    const overlaps = (frames: Frame[]): boolean =>
-      frames.some((frame) => frame.frame > 0 && frame.panel > 0)
+    // Folding, the frame is back on the beat while the panel still has most of its way to go.
     let closing = await fold()
-    for (let tries = 4; tries > 0 && !overlaps(closing); tries -= 1) {
-      // oxlint-disable-next-line no-await-in-loop -- one fold at a time: the retry is the point
+    for (let tries = 4; tries > 0 && unseen(closing); tries -= 1) {
+      // oxlint-disable-next-line no-await-in-loop -- one swap at a time: the replay is the point
       await waitFor(() => expect(isStowed(canvasElement)).toBe(true))
-      // oxlint-disable-next-line no-await-in-loop -- one fold at a time: the retry is the point
-      await framesOf(canvasElement, () =>
-        userEvent.click(canvas.getByRole('button', { name: 'Unfold the Spec' })),
-      )
-      // oxlint-disable-next-line no-await-in-loop -- one fold at a time: the retry is the point
+      // oxlint-disable-next-line no-await-in-loop -- one swap at a time: the replay is the point
+      await unfold()
+      // oxlint-disable-next-line no-await-in-loop -- one swap at a time: the replay is the point
       closing = await fold()
     }
     await expect(closing.filter((frame) => frame.frame === 0 && frame.panel === 0)).toEqual([])

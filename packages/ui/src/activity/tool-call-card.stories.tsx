@@ -2,6 +2,7 @@ import type { Meta, StoryObj } from '@storybook/react-vite'
 import { type ReactNode, useState } from 'react'
 import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
 
+import { atRest } from '../../.storybook/at-rest.ts'
 import { AT_ONCE, movesLess, withinFrames } from '../../.storybook/reduced-motion.ts'
 import { Button } from '../components/button/button.tsx'
 import { DiffBlock } from './diff-block.tsx'
@@ -116,14 +117,26 @@ export const AFoldOpening: Story = {
     await waitFor(() => {
       expect(path.getBoundingClientRect().width).toBeCloseTo(path.offsetWidth, 0)
     })
+    // And in its own face, and still. This is the first story of the file, so the page's fonts
+    // may still be loading when it gets here on a runner busy with the rest of the run: the line
+    // read in the fallback face moved once its own arrived, while the fold was being watched,
+    // and a line that moved for the font was taken for one the fold moved.
+    await document.fonts.ready
+    await atRest(path)
     const closed = path.getBoundingClientRect().top
     row.focus()
     await userEvent.keyboard('{Enter}')
     await expect(row).toHaveAttribute('aria-expanded', 'true')
-    const moved = () => Math.abs(path.getBoundingClientRect().top - closed) > 0.5
-    await expect(await withinFrames(moved, A_FOLD), 'the file slid while the card opened').toBe(
-      false,
-    )
+    // Every top read is kept, so that a slide says where the line went and when.
+    const tops: number[] = []
+    const moved = () => {
+      tops.push(path.getBoundingClientRect().top)
+      return Math.abs(tops.at(-1)! - closed) > 0.5
+    }
+    await expect(
+      await withinFrames(moved, A_FOLD),
+      `the file slid while the card opened: from ${String(closed)} to ${tops.join(' ')}`,
+    ).toBe(false)
     await expect(canvas.getByText('Input')).toBeVisible()
   },
 }

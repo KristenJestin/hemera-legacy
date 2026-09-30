@@ -640,6 +640,12 @@ export const General: Story = {
     const name = panel.getByRole('textbox', { name: 'Name' })
     await userEvent.clear(name)
     await userEvent.type(name, 'Atlas II')
+    // The name emptied on the way said it was needed, and that line fades out once the name is
+    // back. Gone before anything else is read: the check of the page's contrast would otherwise
+    // read it halfway through fading out.
+    await waitFor(() => {
+      expect(panel.queryByText('A Project needs a name.')).toBeNull()
+    })
     await userEvent.type(prefix, 'kris')
     await waitFor(() => {
       expect(panel.getByRole('button', { name: 'Save' })).toBeEnabled()

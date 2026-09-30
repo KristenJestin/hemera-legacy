@@ -602,8 +602,12 @@ describe('An agent that gives up on a call withdraws the question it asked', () 
   test('the question closes as withdrawn while the turn goes on, and a later decision acts on nothing', async () => {
     const outside = realpathSync.native(mkdtempSync(join(tmpdir(), 'hemera-outside-')))
     const target = join(outside, 'notes.md')
-    // Claude Code's idle timeout, made short: the agent reports the call failed and goes on, and
-    // the request it made is left open with nothing sent to cancel it.
+    // Claude Code's idle timeout, run out once the question is waiting: the agent reports the call
+    // failed and goes on, and the request it made is left open with nothing sent to cancel it.
+    // Given up on a signal rather than after a time: a fixed 200 ms was a race the request had to
+    // win, and on a busy machine it reached the server after the agent had already given up — no
+    // question was ever asked, so there was none to withdraw.
+    const patience = held()
     const agent = fakeAgent({
       steps: [
         {
@@ -611,7 +615,7 @@ describe('An agent that gives up on a call withdraws the question it asked', () 
           call: 'fs_write',
           arguments: { path: target, content: 'written for nobody', key: 'w1' },
           id: 'toolu_01',
-          givesUpAfter: 200,
+          givesUpOn: patience.promise,
         },
         { does: 'says', text: 'I went on without it.' },
       ],
@@ -622,7 +626,14 @@ describe('An agent that gives up on a call withdraws the question it asked', () 
         Effect.gen(function* () {
           const runtime = yield* AgentRuntime
           const session = yield* aSessionOn(workspace, 'claude')
-          const report = yield* runtime.prompt(session.id, 'write it')
+          const turn = yield* Effect.forkScoped(runtime.prompt(session.id, 'write it'))
+          yield* until(threadOf(session.id), (thread) =>
+            thread.some(
+              (entry) => entry.kind === 'permission_request' && entry.state === 'pending',
+            ),
+          )
+          patience.carryOn()
+          const report = yield* Fiber.join(turn)
           const entries = yield* until(threadOf(session.id), (thread) =>
             thread.some((entry) => entry.kind === 'hemera_tool_call'),
           )

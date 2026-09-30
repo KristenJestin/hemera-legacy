@@ -2,8 +2,8 @@
 /**
  * The AUR packages of Hemera, moved to a release once it is published (packaging/aur/).
  *
- * `hemera-bin` follows the tags semantic-release puts on `main`, `hemera-beta-bin` the beta
- * pre-release every push to `dev` publishes. Both install as `hemera` and conflict with each
+ * `hemera-bin` follows the `vX.Y.Z` tags semantic-release puts on `main`, `hemera-beta-bin` the
+ * `vX.Y.Z-beta.N` pre-releases it puts on `dev`. Both install as `hemera` and conflict with each
  * other, so installing one replaces the other. Both are the PKGBUILD in this repository with its
  * version, its pkgrel and its checksum changed, and the .SRCINFO changed the same way: nothing
  * here needs makepkg, so it runs the same on a runner and on any machine with Node and git.
@@ -41,9 +41,9 @@ export interface AurVersion {
 }
 
 /**
- * The version a tag gives a package. A beta is `git describe` of `dev` (`0.4.0-3-gabc1234`),
- * which pacman cannot take with its dashes: `0.4.0.r3.gabc1234` keeps the order, since the
- * commits since the tag come before the hash and the next tag's version comes before both.
+ * The version a tag gives a package. A beta is `vX.Y.Z-beta.N`, which pacman cannot take with
+ * its dash: `X.Y.ZbetaN` keeps the order, since pacman puts a version with letters after its
+ * numbers before the same numbers alone, so `0.5.0beta1` < `0.5.0beta2` < `0.5.0`.
  */
 export function versionOf(name: AurPackage, tag: string): AurVersion {
   if (name === 'hemera-bin') {
@@ -51,12 +51,11 @@ export function versionOf(name: AurPackage, tag: string): AurVersion {
     if (release?.[1] === undefined) throw new Error(`${tag} is not a release tag (vX.Y.Z)`)
     return { version: release[1], pkgver: release[1] }
   }
-  const beta = /^beta-((\d+\.\d+\.\d+)(?:-(\d+)-g([0-9a-f]+))?)$/.exec(tag)
-  if (beta?.[1] === undefined || beta[2] === undefined) {
-    throw new Error(`${tag} is not a beta tag (beta-X.Y.Z-N-gHASH)`)
+  const beta = /^v((\d+\.\d+\.\d+)-beta\.(\d+))$/.exec(tag)
+  if (beta?.[1] === undefined || beta[2] === undefined || beta[3] === undefined) {
+    throw new Error(`${tag} is not a beta tag (vX.Y.Z-beta.N)`)
   }
-  const pkgver = beta[3] === undefined ? beta[2] : `${beta[2]}.r${beta[3]}.g${beta[4] ?? ''}`
-  return { version: beta[1], pkgver }
+  return { version: beta[1], pkgver: `${beta[2]}beta${beta[3]}` }
 }
 
 /** The PKGBUILD of that version: pkgrel back to 1, and the checksum of what it downloads. */
@@ -113,7 +112,7 @@ export function expandedSource(pkgbuild: string): string {
 }
 
 function sha256sumOf(pkgbuild: string): string {
-  const sum = /^sha256sums=\('([0-9a-f]{64})'\)$/m.exec(pkgbuild)?.[1]
+  const sum = /^sha256sums=\('([0-9a-f]{64}|SKIP)'\)$/m.exec(pkgbuild)?.[1]
   if (sum === undefined) throw new Error('the PKGBUILD has no one sha256sum')
   return sum
 }

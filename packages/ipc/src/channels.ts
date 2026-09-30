@@ -191,6 +191,10 @@ export const CHANNELS = {
   'checks.save': ENGINE_REQUESTS['checks.save'],
   'checks.remove': ENGINE_REQUESTS['checks.remove'],
   'checks.acceptProposed': ENGINE_REQUESTS['checks.acceptProposed'],
+  // The review rounds of a build: read, and the feedback the user adds and withdraws (#278).
+  'review.read': ENGINE_REQUESTS['review.read'],
+  'review.addFeedback': ENGINE_REQUESTS['review.addFeedback'],
+  'review.withdrawFeedback': ENGINE_REQUESTS['review.withdrawFeedback'],
 
   /**
    * The four the main process answers itself, because each of them is something only it can do.

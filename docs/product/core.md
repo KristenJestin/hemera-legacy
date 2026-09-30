@@ -769,7 +769,9 @@ same turn reuses its verdict, never a human's answer. What Hemera Auto settles l
 line a mode leaves, "ran without asking, Hemera Auto mode", or a refusal; what it cannot settle
 — no key, no answer, an unusable one — is the permission block the Session's notices list. A
 destructive local denial cannot be overridden by Jev or by an approval. Only the local rules
-refuse: a call Jev scores as risky asks the human. A change of classifier or
+refuse: a call Jev scores as risky asks the human. How often it asks is the strictness chosen in
+Hemera Auto's settings — Careful, Normal (the default) or Permissive — read at every call, in
+every Session, and recorded with each decision beside the policy version. A change of classifier or
 credential invalidates pending decisions. The thread and Journal distinguish the classifier's
 decision from the tool's outcome.
 

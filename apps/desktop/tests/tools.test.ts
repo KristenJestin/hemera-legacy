@@ -1382,7 +1382,10 @@ describe('Changing the strictness applies to the next call, in every Session', (
       policyVersion: '2',
       strictness: 'permissive',
     })
-    const lines = diagnostics.filter((line) => line.startsWith('hemera-auto: fs_write'))
+    const lines = diagnostics.filter(
+      (line) => line.startsWith('hemera-auto: fs_write') && line.includes('by=judge'),
+    )
+    expect(lines).toHaveLength(3)
     expect(lines[0]).toContain('policy=2 strictness=normal')
     expect(lines[1]).toContain('policy=2 strictness=permissive')
     expect(lines[2]).toContain('policy=2 strictness=permissive')

@@ -3,7 +3,8 @@
 import { eq, sql } from 'drizzle-orm'
 import { Context, Effect, Layer } from 'effect'
 
-import type { ClassifierMode } from '@hemera/ipc'
+import { type ClassifierStrictness, DEFAULT_CLASSIFIER_STRICTNESS } from '@hemera/core'
+import { type ClassifierMode, classifierStrictnessSchema } from '@hemera/ipc'
 
 import { Database, DatabaseError } from '../storage/database.ts'
 import { appPreferences } from '../storage/schema.ts'
@@ -12,9 +13,17 @@ import { mutate } from '../transaction.ts'
 const MODE_KEY = 'classifier.mode'
 const CIPHERTEXT_KEY = 'classifier.jev.ciphertext'
 const CONSENT_KEY = 'classifier.jev.consent'
+const STRICTNESS_KEY = 'classifier.strictness'
+
+/** The level a stored value names, or the default for none or one no longer known (#298). */
+function strictnessOf(stored: string | undefined): ClassifierStrictness {
+  const parsed = classifierStrictnessSchema.safeParse(stored)
+  return parsed.success ? parsed.data : DEFAULT_CLASSIFIER_STRICTNESS
+}
 
 export interface ClassifierSnapshot {
   readonly mode: ClassifierMode
+  readonly strictness: ClassifierStrictness
   readonly key: string | null
   readonly consent: boolean
   readonly generation: number
@@ -25,6 +34,13 @@ export class ClassifierSettings extends Context.Service<
   {
     readonly current: Effect.Effect<ClassifierSnapshot, DatabaseError>
     readonly select: (mode: ClassifierMode) => Effect.Effect<void, DatabaseError>
+    /**
+     * The level of the next call, in every Session. Not a new generation: a decision already
+     * taken stays valid, as it was taken at the level it records (#298).
+     */
+    readonly selectStrictness: (
+      strictness: ClassifierStrictness,
+    ) => Effect.Effect<void, DatabaseError>
     readonly setConsent: (consent: boolean) => Effect.Effect<void, DatabaseError>
     readonly ciphertext: Effect.Effect<string | null, DatabaseError>
     readonly replaceKey: (
@@ -64,9 +80,19 @@ export const classifierSettingsLayer = Layer.effect(
         )
     return {
       current: Effect.gen(function* () {
-        const [rows, consentRows] = yield* Effect.all([value(MODE_KEY), value(CONSENT_KEY)])
+        const [rows, consentRows, strictnessRows] = yield* Effect.all([
+          value(MODE_KEY),
+          value(CONSENT_KEY),
+          value(STRICTNESS_KEY),
+        ])
         const mode = rows[0]?.value === 'hemera-auto' ? 'hemera-auto' : 'agent-default'
-        return { mode, key, consent: consentRows[0]?.value === 'true', generation }
+        return {
+          mode,
+          strictness: strictnessOf(strictnessRows[0]?.value),
+          key,
+          consent: consentRows[0]?.value === 'true',
+          generation,
+        }
       }),
       select: (mode) =>
         mutate('selecting classifier mode', (transaction) =>
@@ -110,6 +136,45 @@ export const classifierSettingsLayer = Layer.effect(
               if (changed) generation += 1
             }),
           ),
+          Effect.asVoid,
+        ),
+      selectStrictness: (strictness) =>
+        mutate('selecting classifier strictness', (transaction) =>
+          Effect.gen(function* () {
+            const rows = yield* transaction
+              .select()
+              .from(appPreferences)
+              .where(eq(appPreferences.key, STRICTNESS_KEY))
+            const previous = strictnessOf(rows[0]?.value)
+            if (previous === strictness) return { result: undefined, events: [] }
+            yield* transaction
+              .insert(appPreferences)
+              .values({ key: STRICTNESS_KEY, value: strictness })
+              .onConflictDoUpdate({
+                target: appPreferences.key,
+                set: { value: sql`excluded.value` },
+              })
+            return {
+              result: undefined,
+              events: [
+                {
+                  type: 'classifier.strictness_changed',
+                  entityKind: 'profile' as const,
+                  entityId: 'profile',
+                  source: 'ui' as const,
+                  author: 'human' as const,
+                  payload: { from: previous, to: strictness },
+                },
+              ],
+            }
+          }),
+        ).pipe(
+          Effect.mapError((cause) =>
+            cause instanceof DatabaseError
+              ? cause
+              : new DatabaseError({ doing: 'selecting classifier strictness', cause }),
+          ),
+          Effect.provideService(Database, database),
           Effect.asVoid,
         ),
       setConsent: (consent) =>

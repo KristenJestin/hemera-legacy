@@ -31,7 +31,7 @@ import {
   CLASSIFIER_POLICY_VERSION,
   classifierHumanContext,
   classifierVerdictFromScores,
-  DEFAULT_CLASSIFIER_STRICTNESS,
+  type ClassifierStrictness,
   commandPlace,
   judgedByClassifier,
   localClassifierVerdict,
@@ -179,6 +179,8 @@ interface Classified {
   readonly correlationId?: string
   /** Who settled it: the rules, the judge, nobody (unavailable), or its expiry (cancelled). */
   readonly source?: 'local' | 'jev' | 'unavailable' | 'cancelled'
+  /** The level the policy stood at when the call was judged (#298). */
+  readonly strictness?: ClassifierStrictness
   readonly model?: string
   /** The call as the diagnostic log says it: its line or its path, masked, never its content. */
   readonly said?: string
@@ -863,7 +865,7 @@ export const toolCatalogueLayer: Layer.Layer<
         const verdictOf = (judgedScores: NonNullable<typeof scores>) =>
           classifierVerdictFromScores(
             { ...judgedScores, hasHumanContext: context.items.length > 0 },
-            DEFAULT_CLASSIFIER_STRICTNESS,
+            snapshot.strictness,
           )
         const correlationId = `classifier:${crypto.randomUUID()}`
         const local = localClassifierVerdict(action)
@@ -945,6 +947,7 @@ export const toolCatalogueLayer: Layer.Layer<
           source,
           model,
           policy: CLASSIFIER_POLICY_VERSION,
+          strictness: snapshot.strictness,
           generation: snapshot.generation,
           correlationId,
         }
@@ -962,7 +965,8 @@ export const toolCatalogueLayer: Layer.Layer<
           [
             `hemera-auto: ${action.tool} ${said}`,
             `by=${BY[source]} verdict=${verdict}`,
-            `policy=${CLASSIFIER_POLICY_VERSION} model=${model === '' ? '-' : model}`,
+            `policy=${CLASSIFIER_POLICY_VERSION} strictness=${snapshot.strictness}`,
+            `model=${model === '' ? '-' : model}`,
             ...(scores === undefined
               ? []
               : [
@@ -980,6 +984,7 @@ export const toolCatalogueLayer: Layer.Layer<
           latestHumanSeq: context.latestHumanSeq,
           correlationId,
           source,
+          strictness: snapshot.strictness,
           model,
           scores,
         }
@@ -1025,6 +1030,7 @@ export const toolCatalogueLayer: Layer.Layer<
           answer: ran ? 'allowed' : 'refused',
           by: BY[decision.source ?? 'cancelled'],
           policyVersion: CLASSIFIER_POLICY_VERSION,
+          strictness: decision.strictness,
           model: decision.model === '' ? undefined : decision.model,
           scores: decision.scores,
           classifier: decision.correlationId,

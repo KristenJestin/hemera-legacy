@@ -947,7 +947,7 @@ describe('Hemera Auto decisions across Sessions', () => {
       }),
     )
     expect(read.all.map((one) => one.session.id)).toEqual([read.second.id, read.first.id])
-    expect(read.all[1]?.session.title).toBe('Parser')
+    expect(read.all[1]?.session).toMatchObject({ title: 'Parser', projectId: read.first.projectId })
     expect(JSON.parse(read.all[0]?.entry.payload ?? '{}')).toMatchObject({
       by: 'judge',
       line: 'curl -H "Authorization: [REDACTED]" x',

@@ -5,6 +5,7 @@ import {
   type AgentsSectionProps,
   type ArchivedProject,
   type ClassifierSectionProps,
+  type DecisionLine,
   type ProfileFacts,
   type SettingsSection,
 } from '@hemera/ui'
@@ -26,6 +27,8 @@ export function SettingsPage({
   onRestore,
   acpTrace,
   onAcpTraceChange,
+  decisions,
+  onOpenSession,
 }: {
   /** The section on screen, kept by the application so that a link to a setting opens it. */
   section: SettingsSection
@@ -44,6 +47,9 @@ export function SettingsPage({
   /** Whether the ACP trace of each Session is written (#131), and the switch that says so. */
   acpTrace: boolean
   onAcpTraceChange: (on: boolean) => void
+  /** Hemera Auto's latest decisions, newest first; null while not read (#294). */
+  decisions: readonly DecisionLine[] | null
+  onOpenSession: (sessionId: string) => void
 }): ReactNode {
   return (
     <Settings
@@ -61,6 +67,8 @@ export function SettingsPage({
       onRestore={onRestore}
       acpTrace={acpTrace}
       onAcpTraceChange={onAcpTraceChange}
+      decisions={decisions}
+      onOpenSession={onOpenSession}
     />
   )
 }

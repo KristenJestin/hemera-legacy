@@ -32,7 +32,7 @@ const decisionSchema = z.object({
 /** What the engine answers for each decision: the entry, and the Session it was taken in. */
 export interface StoredDecision {
   entry: SessionEntry
-  session: { id: string; title: string }
+  session: { id: string; title: string; projectId: string }
 }
 
 function read(payload: string): z.infer<typeof decisionSchema> | null {

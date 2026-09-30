@@ -452,7 +452,7 @@ export const ENGINE_REQUESTS = {
     response: z.array(
       z.object({
         entry: sessionEntrySchema,
-        session: z.object({ id: z.string(), title: z.string() }),
+        session: z.object({ id: z.string(), title: z.string(), projectId: z.string() }),
       }),
     ),
   },

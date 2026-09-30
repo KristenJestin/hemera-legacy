@@ -12,7 +12,7 @@
  * question is asked.
  */
 
-import type { AgentProvider } from '@hemera/core'
+import { HEMERA_AUTO_MODE, modeBehaviour } from '@hemera/core'
 import { Context, Effect, Layer } from 'effect'
 
 /** The mode a Session's agent stands on now: whose it is, its identifier and its name. */
@@ -45,45 +45,25 @@ export const sessionModesLayer = Layer.sync(SessionModes, () => {
 })
 
 /**
- * Every mode each agent reports, and whether a one-off inside the Workspace is asked about in it.
- *
- * `runs` is a mode in which the agent's own tools run a command without asking; every other mode
- * asks. The identifiers are the agents' own, as their adapters announce them:
- *
- * - Claude (`claude-agent-acp`): Manual (`default`), Accept edits and Plan ask, and so does
- *   `dontAsk`, which refuses what was not approved beforehand rather than running it. Accept edits
- *   lets the agent's own file edits through, not its commands. Auto and Bypass permissions run.
- * - Codex (`codex-acp`): Ask for approval (`read-only`) asks; Approve for me (`agent`) and Full
- *   access run.
- * - OpenCode: offers no mode of its own under Hemera (issue #128), so there is nothing to follow
- *   and it asks; its `build`, `plan` and `hemera` are listed so that saying so is a decision.
- *
- * A mode missing from this table — a new one, or an agent this table does not know — asks.
+ * Hemera Auto as a Session stands on it: the application's rule-based mode, one more row of the
+ * table in `@hemera/core` (#59). Selected in App Settings, it is every Session's mode for
+ * Hemera's tools, whatever the agent reports.
  */
-const MODES: Readonly<Record<AgentProvider, ReadonlyMap<string, 'asks' | 'runs'>>> = {
-  claude: new Map([
-    ['default', 'asks'],
-    ['acceptEdits', 'asks'],
-    ['plan', 'asks'],
-    ['dontAsk', 'asks'],
-    ['auto', 'runs'],
-    ['bypassPermissions', 'runs'],
-  ]),
-  codex: new Map([
-    ['read-only', 'asks'],
-    ['agent', 'runs'],
-    ['agent-full-access', 'runs'],
-  ]),
-  opencode: new Map([
-    ['build', 'asks'],
-    ['plan', 'asks'],
-    ['hemera', 'asks'],
-  ]),
+export const HEMERA_AUTO: StandingMode = {
+  agent: 'hemera',
+  mode: HEMERA_AUTO_MODE,
+  name: 'Hemera Auto',
 }
 
-/** Whether a one-off inside the Workspace is asked about in this mode: yes, unless it is known. */
+/** The mode Hemera's tools follow for a Session: Hemera Auto when selected, else the agent's. */
+export function effectiveMode(
+  standing: StandingMode | null,
+  classifier: 'agent-default' | 'hemera-auto',
+): StandingMode | null {
+  return classifier === 'hemera-auto' ? HEMERA_AUTO : standing
+}
+
+/** Whether a one-off inside the Workspace is asked about in this mode: yes, unless it runs. */
 export function modeAsks(standing: StandingMode | null): boolean {
-  if (standing === null) return true
-  const known = Object.entries(MODES).find(([agent]) => agent === standing.agent)?.[1]
-  return known?.get(standing.mode) !== 'runs'
+  return modeBehaviour(standing) !== 'runs'
 }

@@ -752,6 +752,26 @@ permission modes — and, beside them, what the turn used: the reading the agent
 window, with "not provided" for whatever it did not announce. Hemera divides by no window an agent
 never named.
 
+App Settings selects one permission classifier for the application: Agent default or Hemera
+Auto. Agent default retains each agent's permission modes, which Hemera's tools follow, and
+Hemera's existing guards. Hemera Auto is one more mode of that same table, a rule-based one that
+every Session stands on while it is selected: it replaces the permission modes each adapter
+declares in the composer (Claude's plan and OpenCode's agents are not permission modes and stay
+the user's), puts a Session standing on another permission mode back on the agent's neutral one
+before a new prompt, and applies one policy to calls that read or change files or start a process
+through Hemera's tools, regardless of the Session's agent. Hemera's own workflow — task reports,
+proposals, Spec edits, stops — keeps its own interaction. It does not claim control over actions
+an agent performs outside those tools. Local rules settle only understood calls: a listing that
+stays inside is allowed, a deletion of `.git` is refused in any spelling, on every platform. Jev
+evaluates the remaining calls when the user has supplied a protected key and consented to sending
+a redacted action and relevant human context to TypeSafe AI; the same call judged again in the
+same turn reuses its verdict, never a human's answer. What Hemera Auto settles leaves the quiet
+line a mode leaves, "ran without asking, Hemera Auto mode", or a refusal; what it cannot settle
+— no key, no answer, an unusable one — is the permission block the Session's notices list. A
+destructive local denial cannot be overridden by Jev or by an approval. A change of classifier or
+credential invalidates pending decisions. The thread and Journal distinguish the classifier's
+decision from the tool's outcome.
+
 The effort scale marks the level the agent recommends for the current model, and nothing where it
 recommends none. While the user has chosen no effort in the Session, a model change puts the
 agent on the level the new model recommends, so the scale stands on its recommended mark instead

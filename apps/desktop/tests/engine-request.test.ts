@@ -10,7 +10,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
-import { Duration, Effect, Fiber, Layer, Option } from 'effect'
+import { Duration, Effect, Fiber, Layer, Option, Result } from 'effect'
 
 import { DEFINE_MISSION_BRIEF, DELIVERY_MARKER, contextUri, readerLine } from '@hemera/core'
 import type { EngineArguments, EngineRequestName, EngineResponse } from '@hemera/ipc'
@@ -36,6 +36,7 @@ import { type Context, contextLayer } from '#engine/context/service.ts'
 import { carriedMigrations, openProfile } from '#engine/migrate.ts'
 import { type Journal, journalLayer } from '#engine/journal.ts'
 import { type Preferences, preferencesLayer } from '#engine/preferences.ts'
+import { ClassifierSettings, classifierSettingsLayer } from '#engine/classifier/settings.ts'
 import { Projects, projectsLayer } from '#engine/projects.ts'
 import { answer, decideRequest } from '#engine/request.ts'
 import { PATIENCE } from '#main/engine-conversation.ts'
@@ -92,6 +93,7 @@ function running<A, E>(
     A,
     E,
     | Preferences
+    | ClassifierSettings
     | EngineStatus
     | Projects
     | Journal
@@ -177,6 +179,7 @@ function running<A, E>(
     Layer.provide(sessionModesLayer),
   )
   const runtime = runtimeLayer.pipe(
+    Layer.provideMerge(classifierSettingsLayer),
     Layer.provideMerge(discoveryLayer),
     Layer.provide(rows),
     Layer.provide(preferencesLayer),
@@ -216,6 +219,7 @@ function running<A, E>(
 
   const services: Layer.Layer<
     | Preferences
+    | ClassifierSettings
     | EngineStatus
     | Projects
     | Journal
@@ -239,6 +243,7 @@ function running<A, E>(
     | SqliteClient
   > = Layer.mergeAll(
     preferencesLayer,
+    classifierSettingsLayer,
     engineStatusLayer({ directory: dataFolder, channel: 'dev', version: '0.3.0' }),
     journalLayer,
     rows,
@@ -1015,6 +1020,374 @@ describe('A Session that takes the write right is briefed as the writer at the n
     // Taken over, it is briefed again at once, as the writer: no reader line any more.
     expect(agent.answers.prompts).toEqual([DELIVERY_MARKER])
     expect(handedAt(agent, 0, contextUri('brief'))?.startsWith(DEFINE_MISSION_BRIEF)).toBe(true)
+  })
+})
+
+describe('A key can be saved replaced and removed safely', () => {
+  test('the mode and encrypted row persist separately while the plaintext is never read back', async () => {
+    const first = await running(
+      Effect.gen(function* () {
+        const settings = yield* ClassifierSettings
+        yield* settings.replaceKey('encrypted-one', 'private-one')
+        const before = yield* settings.current
+        yield* settings.select('hemera-auto')
+        return { before, after: yield* settings.current }
+      }),
+    )
+    expect(first.before).toEqual({
+      mode: 'agent-default',
+      key: 'private-one',
+      consent: false,
+      generation: 1,
+    })
+    expect(first.after).toEqual({
+      mode: 'hemera-auto',
+      key: 'private-one',
+      consent: false,
+      generation: 2,
+    })
+    expect(await send('classifier.ciphertext.read', {})).toBe('encrypted-one')
+    expect(await send('classifier.state', {})).toMatchObject({ mode: 'hemera-auto', hasKey: false })
+    await send('classifier.consent.write', { consent: true })
+    expect(await send('classifier.state', {})).toMatchObject({ consent: true })
+    expect(JSON.stringify(await send('preferences.read', {}))).not.toContain('private-one')
+    const restored = await running(
+      Effect.gen(function* () {
+        const settings = yield* ClassifierSettings
+        yield* settings.restoreKey('private-one')
+        return yield* settings.current
+      }),
+    )
+    expect(restored).toMatchObject({ mode: 'hemera-auto', key: 'private-one' })
+    await send('classifier.key.remove', {})
+    expect(await send('classifier.ciphertext.read', {})).toBeNull()
+    expect(await send('classifier.state', {})).toMatchObject({ mode: 'hemera-auto', hasKey: false })
+  })
+})
+
+describe('Hemera Auto owns native permission selection across existing Sessions', () => {
+  test('switching mode cancels a running agent before its next tool call', async () => {
+    let signalPrompt: (() => void) | undefined
+    const prompted = new Promise<void>((resolve) => {
+      signalPrompt = resolve
+    })
+    let release: (() => void) | undefined
+    const held = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const agent = fakeAgent({
+      configOptions: [
+        {
+          id: 'session-mode',
+          type: 'select',
+          name: 'Mode',
+          category: 'mode',
+          currentValue: 'default',
+          options: [
+            { value: 'default', name: 'Default' },
+            { value: 'acceptEdits', name: 'Accept edits' },
+          ],
+        },
+      ],
+      steps: [{ does: 'says', text: 'still working' }],
+      between: () => held,
+      onPrompt: () => signalPrompt?.(),
+    })
+    const result = await running(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const project = yield* (yield* Projects).create({
+            name: 'Atlas',
+            tone: 'primary',
+            mainPath: dataFolder,
+          })
+          const session = yield* (yield* Sessions).create(project.id, 'claude')
+          const runtime = yield* AgentRuntime
+          yield* runtime.setOption(session.id, 'session-mode', 'acceptEdits')
+          const turn = yield* Effect.forkScoped(runtime.prompt(session.id, 'work'))
+          yield* Effect.promise(() => prompted)
+          const decision = decideRequest('classifier.mode.write', { mode: 'hemera-auto' })
+          if (!decision.accepted) throw new Error(decision.reason)
+          yield* answer(decision)
+          release?.()
+          const report = yield* Fiber.join(turn)
+          return { report, alive: yield* runtime.alive }
+        }),
+      ),
+      agent,
+    )
+    expect(agent.answers.cancels).toBe(1)
+    expect(result.report.stopReason).toBe('cancelled')
+    expect(result.alive).toEqual([])
+  })
+
+  test('a resumed native permission mode is reset before the Session is handed out', async () => {
+    let nativeMode = 'acceptEdits'
+    const options = () => [
+      {
+        id: 'session-mode',
+        type: 'select' as const,
+        name: 'Mode',
+        category: 'mode' as const,
+        currentValue: nativeMode,
+        options: [
+          { value: 'default', name: 'Default' },
+          { value: 'acceptEdits', name: 'Accept edits' },
+        ],
+      },
+    ]
+    const agent = fakeAgent({
+      configOptions: options(),
+      onChoice: (choice) => {
+        nativeMode = choice.value
+        return options()
+      },
+    })
+    const mode = await running(
+      Effect.gen(function* () {
+        const project = yield* (yield* Projects).create({
+          name: 'Atlas',
+          tone: 'primary',
+          mainPath: dataFolder,
+        })
+        const session = yield* (yield* Sessions).create(project.id, 'claude')
+        yield* (yield* ClassifierSettings).select('hemera-auto')
+        const runtime = yield* AgentRuntime
+        yield* runtime.start(session.id)
+        return (yield* runtime.options(session.id)).find((option) => option.id === 'session-mode')
+          ?.value
+      }),
+      agent,
+    )
+    expect(mode).toBe('default')
+    expect(agent.answers.choices).toContain('session-mode=default')
+  })
+
+  test('an agent without a neutral native mode cannot receive a new Auto prompt', async () => {
+    const agent = fakeAgent({
+      configOptions: [
+        {
+          id: 'session-mode',
+          type: 'select',
+          name: 'Mode',
+          category: 'mode',
+          currentValue: 'acceptEdits',
+          options: [{ value: 'acceptEdits', name: 'Accept edits' }],
+        },
+      ],
+    })
+    const outcome = await running(
+      Effect.gen(function* () {
+        const project = yield* (yield* Projects).create({
+          name: 'Atlas',
+          tone: 'primary',
+          mainPath: dataFolder,
+        })
+        const session = yield* (yield* Sessions).create(project.id, 'claude')
+        yield* (yield* ClassifierSettings).select('hemera-auto')
+        const runtime = yield* AgentRuntime
+        const attempted = yield* Effect.result(runtime.prompt(session.id, 'work'))
+        return { attempted, alive: yield* runtime.alive }
+      }),
+      agent,
+    )
+    expect(Result.isFailure(outcome.attempted)).toBe(true)
+    expect(outcome.alive).toEqual([])
+    expect(agent.answers.prompts).toEqual([])
+  })
+
+  test('changing the application classifier releases an idle agent with a native mode', async () => {
+    const agent = fakeAgent({
+      configOptions: [
+        {
+          id: 'session-mode',
+          type: 'select',
+          name: 'Mode',
+          category: 'mode',
+          currentValue: 'default',
+          options: [
+            { value: 'default', name: 'Default' },
+            { value: 'acceptEdits', name: 'Accept edits' },
+          ],
+        },
+      ],
+    })
+    const state = await running(
+      Effect.gen(function* () {
+        const project = yield* (yield* Projects).create({
+          name: 'Atlas',
+          tone: 'primary',
+          mainPath: dataFolder,
+        })
+        const session = yield* (yield* Sessions).create(project.id, 'claude')
+        const runtime = yield* AgentRuntime
+        yield* runtime.setOption(session.id, 'session-mode', 'acceptEdits')
+        const before = yield* runtime.alive
+        const decision = decideRequest('classifier.mode.write', { mode: 'hemera-auto' })
+        if (!decision.accepted) throw new Error(decision.reason)
+        yield* answer(decision)
+        return { before, after: yield* runtime.alive }
+      }),
+      agent,
+    )
+    expect(state.before).toHaveLength(1)
+    expect(state.after).toEqual([])
+    expect(agent.answers.choices).toContain('session-mode=acceptEdits')
+  })
+
+  test('a stale native permission request is refused before reaching the agent', async () => {
+    const agent = fakeAgent({
+      configOptions: [
+        {
+          id: 'session-mode',
+          type: 'select',
+          name: 'Mode',
+          category: 'mode',
+          currentValue: 'default',
+          options: [
+            { value: 'default', name: 'Default' },
+            { value: 'acceptEdits', name: 'Accept edits' },
+            { value: 'plan', name: 'Plan' },
+          ],
+        },
+      ],
+    })
+    const outcome = await running(
+      Effect.gen(function* () {
+        const project = yield* (yield* Projects).create({
+          name: 'Atlas',
+          tone: 'primary',
+          mainPath: dataFolder,
+        })
+        const session = yield* (yield* Sessions).create(project.id, 'claude')
+        yield* (yield* AgentRuntime).start(session.id)
+        yield* (yield* ClassifierSettings).select('hemera-auto')
+        const decision = decideRequest('agents.setOption', {
+          sessionId: session.id,
+          optionId: 'session-mode',
+          value: 'acceptEdits',
+        })
+        if (!decision.accepted) return false
+        const result = yield* Effect.result(answer(decision))
+        return Result.isFailure(result)
+      }),
+      agent,
+    )
+    expect(outcome).toBe(true)
+    expect(agent.answers.choices).toEqual([])
+  })
+
+  test('a native permission remembered in Agent default is not replayed after switching to Hemera Auto', async () => {
+    const mode = {
+      id: 'session-mode',
+      type: 'select' as const,
+      name: 'Mode',
+      category: 'mode' as const,
+      currentValue: 'default',
+      options: [
+        { value: 'default', name: 'Default' },
+        { value: 'acceptEdits', name: 'Accept edits' },
+      ],
+    }
+    const first = fakeAgent({ configOptions: [mode] })
+    const projectId = await running(
+      Effect.gen(function* () {
+        const project = yield* (yield* Projects).create({
+          name: 'Atlas',
+          tone: 'primary',
+          mainPath: dataFolder,
+        })
+        const runtime = yield* AgentRuntime
+        yield* runtime.offer(project.id, 'claude')
+        yield* runtime.offerSet(project.id, 'claude', 'session-mode', 'acceptEdits')
+        yield* (yield* ClassifierSettings).select('hemera-auto')
+        return project.id
+      }),
+      first,
+    )
+    expect(first.answers.choices).toContain('session-mode=acceptEdits')
+    const second = fakeAgent({ configOptions: [mode] })
+    await running(
+      Effect.gen(function* () {
+        yield* (yield* AgentRuntime).offer(projectId, 'claude')
+      }),
+      second,
+    )
+    expect(second.answers.choices).toEqual([])
+  })
+})
+
+describe('One permission interaction across the three agents', () => {
+  const modeOption = (currentValue: string, values: readonly string[]) => ({
+    id: 'mode',
+    type: 'select' as const,
+    name: 'Mode',
+    category: 'mode' as const,
+    currentValue,
+    options: values.map((value) => ({ value, name: value })),
+  })
+
+  test('a Codex Session on a mode that runs is put back on Ask for approval, and prompted', async () => {
+    let current = 'agent'
+    const values = ['read-only', 'agent', 'agent-full-access']
+    const agent = fakeAgent({
+      configOptions: [modeOption(current, values)],
+      onChoice: (choice) => {
+        current = choice.value
+        return [modeOption(current, values)]
+      },
+    })
+    const outcome = await running(
+      Effect.gen(function* () {
+        const project = yield* (yield* Projects).create({
+          name: 'Atlas',
+          tone: 'primary',
+          mainPath: dataFolder,
+        })
+        const session = yield* (yield* Sessions).create(project.id, 'codex')
+        yield* (yield* ClassifierSettings).select('hemera-auto')
+        const runtime = yield* AgentRuntime
+        const report = yield* runtime.prompt(session.id, 'work')
+        return { report, alive: yield* runtime.alive }
+      }),
+      agent,
+    )
+    expect(agent.answers.choices).toContain('mode=read-only')
+    expect(agent.answers.prompts).toHaveLength(1)
+    expect(outcome.alive).toHaveLength(1)
+  })
+
+  test("Claude's plan stays the user's choice under Hemera Auto", async () => {
+    const agent = fakeAgent({
+      configOptions: [modeOption('default', ['default', 'acceptEdits', 'plan', 'auto'])],
+    })
+    const outcome = await running(
+      Effect.gen(function* () {
+        const project = yield* (yield* Projects).create({
+          name: 'Atlas',
+          tone: 'primary',
+          mainPath: dataFolder,
+        })
+        const session = yield* (yield* Sessions).create(project.id, 'claude')
+        yield* (yield* AgentRuntime).start(session.id)
+        yield* (yield* ClassifierSettings).select('hemera-auto')
+        const choose = (value: string) => {
+          const decision = decideRequest('agents.setOption', {
+            sessionId: session.id,
+            optionId: 'mode',
+            value,
+          })
+          if (!decision.accepted) throw new Error(decision.reason)
+          return Effect.result(answer(decision))
+        }
+        const plan = yield* choose('plan')
+        const auto = yield* choose('auto')
+        return { plan: Result.isSuccess(plan), auto: Result.isSuccess(auto) }
+      }),
+      agent,
+    )
+    expect(outcome).toEqual({ plan: true, auto: false })
+    expect(agent.answers.choices).toEqual(['mode=plan'])
   })
 })
 

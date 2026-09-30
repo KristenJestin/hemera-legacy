@@ -1,6 +1,41 @@
 /** Public surface of the Hemera domain and use cases. */
 
 export {
+  CLASSIFIER_POLICY_VERSION,
+  classifierVerdictFromScores,
+  judgedByClassifier,
+  localClassifierVerdict,
+} from './domain/classifier.ts'
+export {
+  HEMERA_AUTO_MODE,
+  autoGoverns,
+  autoResets,
+  modeBehaviour,
+  neutralMode,
+  permissionMode,
+  permissiveMode,
+  type ModeBehaviour,
+} from './domain/permission-modes.ts'
+
+export {
+  CLASSIFIER_CONTEXT_CHARACTERS,
+  CLASSIFIER_ITEM_CHARACTERS,
+  CLASSIFIER_MESSAGE_LIMIT,
+  classifierHumanContext,
+} from './domain/classifier-context.ts'
+export type {
+  FrozenSpecSection,
+  HumanContext,
+  HumanContextItem,
+} from './domain/classifier-context.ts'
+export type {
+  ClassifierVerdict,
+  LocalAction,
+  LocalVerdict,
+  ResolvedCommand,
+} from './domain/classifier.ts'
+
+export {
   FIRST_RANK,
   InvalidRankError,
   RankOrderError,

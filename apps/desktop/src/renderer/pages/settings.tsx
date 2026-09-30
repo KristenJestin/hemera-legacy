@@ -4,6 +4,7 @@ import {
   Settings,
   type AgentsSectionProps,
   type ArchivedProject,
+  type ClassifierSectionProps,
   type ProfileFacts,
 } from '@hemera/ui'
 import type { ThemeChoice } from '@hemera/ui/window'
@@ -17,6 +18,7 @@ export function SettingsPage({
   onOpenFolder,
   onOpenDiagnostic,
   agents,
+  classifier,
   archived,
   onRestore,
   acpTrace,
@@ -30,6 +32,7 @@ export function SettingsPage({
   onOpenDiagnostic: () => void
   /** What this machine has, and the one thing the reader can do about it. */
   agents: AgentsSectionProps
+  classifier: ClassifierSectionProps | undefined
   archived: ArchivedProject[]
   onRestore: (id: string) => void
   /** Whether the ACP trace of each Session is written (#131), and the switch that says so. */
@@ -45,6 +48,7 @@ export function SettingsPage({
       onOpenFolder={onOpenFolder}
       onOpenDiagnostic={onOpenDiagnostic}
       agents={agents}
+      classifier={classifier}
       archived={archived}
       onRestore={onRestore}
       acpTrace={acpTrace}

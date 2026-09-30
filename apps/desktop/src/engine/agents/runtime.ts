@@ -43,6 +43,8 @@ import {
   contextUri,
   hemeraToolNamed,
   internalText,
+  autoGoverns,
+  autoResets,
   type Mission,
   type Session,
   type SessionEntryOrigin,
@@ -77,6 +79,7 @@ import { AcpTraces, type Heard, type RequestBook, requestBook, traceLine } from 
 import { type BuildDelivery, Builds } from '../build/build.ts'
 import { Commands, type RunView } from '../commands/service.ts'
 import { runSaid, runText } from '../commands/told.ts'
+import { ClassifierSettings } from '../classifier/settings.ts'
 import { Context as AgentContext, type QueuedResult, fingerprintOf } from '../context/service.ts'
 import { Preferences } from '../preferences.ts'
 import { Projects } from '../projects.ts'
@@ -376,6 +379,8 @@ export interface AgentRuntimeService {
    * starts it again, its conversation resumed, with the tools of the Session's mission (D7-14).
    */
   readonly releaseWhenIdle: (sessionId: string) => Effect.Effect<void>
+  /** Revokes old tool grants and restarts live agents after an application classifier change. */
+  readonly classifierChanged: Effect.Effect<void>
   /**
    * The agent's proposal accepted (issue #130): lets go of the agent as `releaseWhenIdle` does,
    * then starts it again at once, its conversation resumed with the tools of a `define` Session,
@@ -717,6 +722,12 @@ export const runtimeLayer = Layer.effect(
     const server = yield* ToolServer
     const context = yield* AgentContext
     const commands = yield* Commands
+    const classifier = yield* ClassifierSettings
+    const hemeraAuto = classifier.current.pipe(
+      Effect.map((current) => current.mode === 'hemera-auto'),
+      // A failed Profile read must not replay a remembered permissive native mode.
+      Effect.catch(() => Effect.succeed(true)),
+    )
     const permissions = yield* ToolPermissions
     const heldWords = yield* HeldWords
     const sessionModes = yield* SessionModes
@@ -1584,6 +1595,10 @@ export const runtimeLayer = Layer.effect(
         // of the model picked before it would announce the options of an agent on its defaults,
         // and the effort that model publishes would not be among them (D5-13, D5-17).
         for (const [optionId, value] of chosen.get(key) ?? []) {
+          if (yield* hemeraAuto) {
+            const option = probe.connection.options().find((one) => one.id === optionId)
+            if (option !== undefined && autoGoverns(provider, option, value)) continue
+          }
           yield* attempt('choosing an option', probe.connection.setOption(optionId, value)).pipe(
             // A choice this agent will not take again is not an offer that failed: the composer
             // is drawn from what the agent announces, which is what it is on.
@@ -1629,6 +1644,7 @@ export const runtimeLayer = Layer.effect(
 
         const answered = yield* probeOf(projectId, provider)
         if (!isProbe(answered)) return answered
+
         const announced = answered.connection.options()
         offered.set(key, announced)
         // The agent this Project's composer is on, kept for the next start: a Home opens on the
@@ -1655,6 +1671,16 @@ export const runtimeLayer = Layer.effect(
         const key = `${projectId}:${provider}`
         const answered = yield* probeOf(projectId, provider)
         if (!isProbe(answered)) return answered
+
+        if (yield* hemeraAuto) {
+          const option = answered.connection.options().find((one) => one.id === optionId)
+          if (option !== undefined && autoGoverns(provider, option, value)) {
+            return offerRefused(
+              'failed',
+              'Permission modes are managed by Hemera Auto in App Settings.',
+            )
+          }
+        }
 
         const set = yield* Effect.result(
           attempt('choosing an option', answered.connection.setOption(optionId, value)),
@@ -1971,6 +1997,10 @@ export const runtimeLayer = Layer.effect(
             rankOf(categories.get(other.optionId) ?? null),
         )
         for (const choice of ranked) {
+          if (yield* hemeraAuto) {
+            const option = connection.options().find((one) => one.id === choice.optionId)
+            if (option !== undefined && autoGoverns(provider, option, choice.value)) continue
+          }
           // A choice the agent will not take is not a Session that cannot start: it opens on
           // what the agent is on, and the composer shows what that is.
           yield* attempt(
@@ -2014,7 +2044,55 @@ export const runtimeLayer = Layer.effect(
      */
     const opened = (sessionId: string): Effect.Effect<Live, AgentRuntimeError, Scope.Scope> =>
       gateOf(`session:${sessionId}`)
-        .withPermits(1)(openAgent(sessionId))
+        .withPermits(1)(
+          Effect.gen(function* () {
+            const held = yield* openAgent(sessionId)
+            if (yield* hemeraAuto) {
+              // A resumed native Session may restore its own permission mode even when Hemera
+              // skipped the remembered choice. Neutralize it before handing out a new prompt.
+              // Only the permission modes the adapter declares are governed (the table in
+              // `@hemera/core`): Claude's plan and OpenCode's agents stay as they are.
+              const neutralized = yield* Effect.result(
+                Effect.gen(function* () {
+                  const needed = autoResets(held.provider, held.connection.options())
+                  if (needed.kind === 'refused') {
+                    return yield* Effect.fail(
+                      new AgentRuntimeError({
+                        what: 'starting the agent',
+                        cause: 'its native permission mode cannot be reset for Hemera Auto',
+                      }),
+                    )
+                  }
+                  for (const reset of needed.resets) {
+                    const changed = yield* attempt(
+                      'resetting native permissions for Hemera Auto',
+                      held.connection.setOption(reset.optionId, reset.value),
+                    )
+                    if (
+                      changed.find((value) => value.id === reset.optionId)?.value !== reset.value
+                    ) {
+                      return yield* Effect.fail(
+                        new AgentRuntimeError({
+                          what: 'starting the agent',
+                          cause: 'the agent did not accept its neutral permission mode',
+                        }),
+                      )
+                    }
+                  }
+                }),
+              )
+              if (Result.isFailure(neutralized)) {
+                yield* access.revoked(sessionId)
+                if (live.get(sessionId) === held) live.delete(sessionId)
+                yield* Queue.shutdown(held.queue).pipe(Effect.ignore)
+                yield* attempt('stopping the agent', held.process.stop).pipe(Effect.ignore)
+                yield* letGo(sessionId)
+                return yield* Effect.fail(neutralized.failure)
+              }
+            }
+            return held
+          }),
+        )
         .pipe(Effect.tap(() => kept(sessionId)))
 
     /** Says the Session goes on with the agent it already had, and remembers where it runs. */
@@ -3004,6 +3082,17 @@ export const runtimeLayer = Layer.effect(
     const setOption = (sessionId: string, optionId: string, value: string) =>
       Effect.gen(function* () {
         const held = yield* opened(sessionId)
+        if (yield* hemeraAuto) {
+          const option = held.connection.options().find((one) => one.id === optionId)
+          if (option !== undefined && autoGoverns(held.provider, option, value)) {
+            return yield* Effect.fail(
+              new AgentRuntimeError({
+                what: 'choosing an option',
+                cause: 'permission modes are managed by Hemera Auto in App Settings',
+              }),
+            )
+          }
+        }
         yield* attempt('choosing an option', held.connection.setOption(optionId, value))
         // Written down once the agent took it, with every other option as it answered them: a
         // model chosen may have moved the effort. The next start of this Session's agent is put
@@ -3503,6 +3592,18 @@ export const runtimeLayer = Layer.effect(
       resume: (sessionId) => owned(resume(sessionId)),
       release: (sessionId) => owned(release(sessionId)),
       releaseWhenIdle: (sessionId) => owned(releaseWhenIdle(sessionId)),
+      classifierChanged: owned(
+        Effect.gen(function* () {
+          const activeSessionIds = [...live.keys()]
+          // No process from the previous mode may submit another Hemera tool call while its
+          // turn is being cancelled or its native session is still held.
+          for (const sessionId of activeSessionIds) yield* access.revoked(sessionId)
+          for (const sessionId of activeSessionIds) {
+            yield* stop(sessionId)
+            yield* releaseWhenIdle(sessionId)
+          }
+        }),
+      ),
       briefWhenIdle: (sessionId) => owned(briefWhenIdle(sessionId)),
       tell,
       alive: Effect.sync(() => [...live.keys()]),

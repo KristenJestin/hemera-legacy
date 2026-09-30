@@ -4,6 +4,7 @@ import { cn } from 'cn'
 import type { ReactNode } from 'react'
 
 import { AgentsSection, type AgentsSectionProps } from './agents-section.tsx'
+import { ClassifierSection, type ClassifierSectionProps } from './classifier-section.tsx'
 import { Button } from '../components/button/button.tsx'
 import { Card } from '../components/card/card.tsx'
 import { Checkbox } from '../components/checkbox/checkbox.tsx'
@@ -242,6 +243,8 @@ export interface SettingsProps {
   subtitle: string
   /** What this machine has, and the one thing the reader can do about it (design D5-18). */
   agents: AgentsSectionProps
+  /** Phase-0 stories supply controlled classifier fixtures; application wiring follows the UI gate. */
+  classifier?: ClassifierSectionProps | undefined
   theme: ThemeChoice
   onThemeChange: (theme: ThemeChoice) => void
   facts: ProfileFacts
@@ -263,6 +266,7 @@ export function Settings({
   onOpenFolder,
   onOpenDiagnostic,
   agents,
+  classifier,
   archived,
   onRestore,
   acpTrace = false,
@@ -284,6 +288,7 @@ export function Settings({
         <DiagnosticsSection acpTrace={acpTrace} onAcpTraceChange={onAcpTraceChange} />
       )}
       <AgentsSection {...agents} />
+      {classifier !== undefined && <ClassifierSection {...classifier} />}
       <ArchivedProjects projects={archived} onRestore={onRestore} />
     </div>
   )

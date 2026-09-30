@@ -13,6 +13,7 @@ import {
   type HomeSession,
   type JournalLine,
   type OfferedAgent,
+  type MenuClassifier,
 } from '@hemera/ui'
 
 import {
@@ -60,6 +61,7 @@ export function HomePage({
   sessions,
   entries,
   agents,
+  classifier,
   agentsListing,
   onRetryAgents,
   choice,
@@ -82,6 +84,7 @@ export function HomePage({
   entries: JournalLine[]
   /** The agents this machine has, as the registry named them. */
   agents: OfferedAgent[]
+  classifier?: MenuClassifier | undefined
   /** Where that list stands: looked for, listed, or not read (`AgentListing`). */
   agentsListing: AgentListing
   /** Asks for the list again, which the menu offers when it could not be read. */
@@ -138,7 +141,7 @@ export function HomePage({
   const options = offering?.options ?? []
   const model = modelStage(options)
   const effort = effortStage(options)
-  const mode = modeStage(options)
+  const mode = modeStage(options, agent)
 
   /**
    * Picks the agent the Session will run.
@@ -194,6 +197,7 @@ export function HomePage({
         onWorkspaceChange={setNamed}
         agentMenu={
           <AgentModelMenu
+            classifier={classifier}
             agents={agents}
             listing={agentsListing}
             onRetryAgents={onRetryAgents}

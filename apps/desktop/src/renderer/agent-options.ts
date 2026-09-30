@@ -1,4 +1,5 @@
 import type { ComposerChoice, ConfigOption } from '@hemera/ipc'
+import { permissionMode } from '@hemera/core'
 import type { EffortChoice, ModeChoice, ModelChoice } from '@hemera/ui'
 
 /**
@@ -103,12 +104,24 @@ export function effortStage(options: readonly ConfigOption[]): Stage<EffortChoic
   }
 }
 
-export function modeStage(options: readonly ConfigOption[]): Stage<ModeChoice> | null {
+/**
+ * The mode row, each choice marked when it is a permission mode of that agent — which Hemera Auto
+ * takes the place of — as the table in `@hemera/core` declares it: Claude's plan and OpenCode's
+ * agents are not (D59-11).
+ */
+export function modeStage(
+  options: readonly ConfigOption[],
+  provider: string | null,
+): Stage<ModeChoice> | null {
   const option = optionOf(options, MODE)
   if (option === null) return null
   return {
     optionId: option.id,
-    choices: option.values.map((value) => ({ id: value.value, label: value.name })),
+    choices: option.values.map((value) => ({
+      id: value.value,
+      label: value.name,
+      permission: provider !== null && permissionMode(provider, value.value),
+    })),
     current: currentOf(option),
   }
 }

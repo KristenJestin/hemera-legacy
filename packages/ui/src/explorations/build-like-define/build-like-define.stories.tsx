@@ -99,7 +99,7 @@ export const OverAndBack: Story = {
     await userEvent.click(canvas.getByRole('button', { name: 'Over the chat' }))
     await waitFor(() => expect(panel.getBoundingClientRect().width).toBeGreaterThan(beside * 1.5))
     await expect(chat.getBoundingClientRect().width).toBe(chatWidth)
-    await userEvent.click(canvas.getByRole('button', { name: 'Beside the chat' }))
+    await userEvent.click(canvas.getByRole('button', { name: 'Over the chat' }))
     await waitFor(() => expect(panel.getBoundingClientRect().width).toBe(beside))
   },
 }
@@ -203,15 +203,14 @@ export const HelperInFree: Story = {
   },
 }
 
-/** Over the chat, the build shows more: stories, who is at work, the tasks and one task whole. */
+/** Over the chat, the build is a master and its detail: the tasks, and one task whole. */
 export const BuildWideView: Story = {
   args: { defaultOver: true },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    const side = within(canvas.getByRole('complementary', { name: 'The build at work' }))
-    await expect(side.getByText('Pick the month')).toBeVisible()
-    await expect(side.getByRole('button', { name: 'Open Credit notes, silent' })).toBeVisible()
-    await expect(canvas.getByRole('region', { name: 'T5 in detail' })).toBeVisible()
+    const build = within(canvas.getByRole('region', { name: 'The build of ATL-7' }))
+    await expect(build.getByRole('button', { name: /T5/ })).toHaveAttribute('aria-pressed', 'true')
+    await expect(build.getByRole('region', { name: 'T5 in detail' })).toBeVisible()
   },
 }
 
@@ -238,13 +237,21 @@ export const FrozenSpec: Story = {
   },
 }
 
-/** Over the chat, the Spec shows more: its outline, the Spec, its open questions. */
+/** Over the chat, the Spec's phases and sections are a sidebar, the rest of the width its text. */
 export const DefineWideView: Story = {
   args: { kind: 'define', defaultOver: true },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    await expect(canvas.getByRole('navigation', { name: 'Outline of ATL-7' })).toBeVisible()
-    await expect(canvas.getByRole('complementary', { name: 'Open questions' })).toBeVisible()
+    const outline = within(canvas.getByRole('navigation', { name: 'Outline of ATL-7' }))
+    await expect(outline.getByRole('button', { name: /^Plan \d/ })).toBeVisible()
+    await userEvent.click(outline.getByRole('button', { name: 'Questions' }))
+    await waitFor(() =>
+      expect(outline.getByRole('button', { name: 'Questions' })).toHaveAttribute(
+        'aria-current',
+        'location',
+      ),
+    )
+    await expect(canvas.queryByRole('complementary', { name: 'Open questions' })).toBeNull()
   },
 }
 

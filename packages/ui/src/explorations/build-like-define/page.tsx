@@ -249,17 +249,7 @@ export function SessionPage({
             frame={<BuildFrame onUnfold={() => fold(false)} />}
             body={
               <Swapped showing={over ? 'wide' : 'beside'}>
-                {over ? (
-                  <BuildWide
-                    {...tasks}
-                    helpers={helpers}
-                    runs={RUNS.flatMap((item) => (item.kind === 'run' ? [item] : []))}
-                    onHelper={setOpen}
-                    frozen={READY}
-                  />
-                ) : (
-                  <BuildTasks {...tasks} />
-                )}
+                {over ? <BuildWide {...tasks} frozen={READY} /> : <BuildTasks {...tasks} />}
               </Swapped>
             }
           />
@@ -308,7 +298,7 @@ function DefineDock(props: DockProps): ReactNode {
       body={
         <Swapped showing={props.over ? 'wide' : 'beside'}>
           {props.over ? (
-            <DefineWide spec={spec} groups={groups} column={column} still={still} />
+            <DefineWide spec={spec} groups={groups} still={still} />
           ) : (
             <SpecColumn spec={spec} groups={groups} column={column} still={still} />
           )}

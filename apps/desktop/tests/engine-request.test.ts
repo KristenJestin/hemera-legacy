@@ -1317,6 +1317,80 @@ describe('Hemera Auto owns native permission selection across existing Sessions'
   })
 })
 
+describe('One permission interaction across the three agents', () => {
+  const modeOption = (currentValue: string, values: readonly string[]) => ({
+    id: 'mode',
+    type: 'select' as const,
+    name: 'Mode',
+    category: 'mode' as const,
+    currentValue,
+    options: values.map((value) => ({ value, name: value })),
+  })
+
+  test('a Codex Session on a mode that runs is put back on Ask for approval, and prompted', async () => {
+    let current = 'agent'
+    const values = ['read-only', 'agent', 'agent-full-access']
+    const agent = fakeAgent({
+      configOptions: [modeOption(current, values)],
+      onChoice: (choice) => {
+        current = choice.value
+        return [modeOption(current, values)]
+      },
+    })
+    const outcome = await running(
+      Effect.gen(function* () {
+        const project = yield* (yield* Projects).create({
+          name: 'Atlas',
+          tone: 'primary',
+          mainPath: dataFolder,
+        })
+        const session = yield* (yield* Sessions).create(project.id, 'codex')
+        yield* (yield* ClassifierSettings).select('hemera-auto')
+        const runtime = yield* AgentRuntime
+        const report = yield* runtime.prompt(session.id, 'work')
+        return { report, alive: yield* runtime.alive }
+      }),
+      agent,
+    )
+    expect(agent.answers.choices).toContain('mode=read-only')
+    expect(agent.answers.prompts).toHaveLength(1)
+    expect(outcome.alive).toHaveLength(1)
+  })
+
+  test("Claude's plan stays the user's choice under Hemera Auto", async () => {
+    const agent = fakeAgent({
+      configOptions: [modeOption('default', ['default', 'acceptEdits', 'plan', 'auto'])],
+    })
+    const outcome = await running(
+      Effect.gen(function* () {
+        const project = yield* (yield* Projects).create({
+          name: 'Atlas',
+          tone: 'primary',
+          mainPath: dataFolder,
+        })
+        const session = yield* (yield* Sessions).create(project.id, 'claude')
+        yield* (yield* AgentRuntime).start(session.id)
+        yield* (yield* ClassifierSettings).select('hemera-auto')
+        const choose = (value: string) => {
+          const decision = decideRequest('agents.setOption', {
+            sessionId: session.id,
+            optionId: 'mode',
+            value,
+          })
+          if (!decision.accepted) throw new Error(decision.reason)
+          return Effect.result(answer(decision))
+        }
+        const plan = yield* choose('plan')
+        const auto = yield* choose('auto')
+        return { plan: Result.isSuccess(plan), auto: Result.isSuccess(auto) }
+      }),
+      agent,
+    )
+    expect(outcome).toEqual({ plan: true, auto: false })
+    expect(agent.answers.choices).toEqual(['mode=plan'])
+  })
+})
+
 describe('The main process asks for the commands to run at open', () => {
   test('engine.atOpen asked with no argument answers what could not start: nothing, here', async () => {
     expect(await send('engine.atOpen', {})).toEqual([])

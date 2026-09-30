@@ -141,7 +141,7 @@ export function HomePage({
   const options = offering?.options ?? []
   const model = modelStage(options)
   const effort = effortStage(options)
-  const mode = modeStage(options)
+  const mode = modeStage(options, agent)
 
   /**
    * Picks the agent the Session will run.

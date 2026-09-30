@@ -53,7 +53,8 @@ import { runPlaceOf } from './run-place.ts'
  */
 const hemeraToolCallPayloadSchema = z.object({
   tool: z.string(),
-  state: z.enum(['completed', 'failed', 'refused']),
+  // `pending`: the agent went on while the human has not answered yet (#304).
+  state: z.enum(['pending', 'completed', 'failed', 'refused']),
   caller: z.string(),
   paths: z.array(z.string()),
   arguments: z.string(),
@@ -490,7 +491,8 @@ export function hemeraToolCallOf(
   const read = readPayload(hemeraToolCallPayloadSchema, entry.payload)
   if (read === null) return null
   const { tool, state, arguments: bounded, ms } = read
-  const said = state === 'completed' ? entry.body : plainRefusal(entry.body)
+  const settled = state === 'completed' || state === 'pending'
+  const said = settled ? entry.body : plainRefusal(entry.body)
   const notYet = notYetOf(tool, state, entry.body)
   return {
     tool,
@@ -500,9 +502,9 @@ export function hemeraToolCallOf(
     summary: said,
     arguments: argumentsOf(bounded),
     ms,
-    error: state !== 'completed' ? said : undefined,
+    error: settled ? undefined : said,
     note: notYet ?? undefined,
-    defaultOpen: state !== 'completed' && notYet === null,
+    defaultOpen: !settled && notYet === null,
   }
 }
 

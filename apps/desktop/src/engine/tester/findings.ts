@@ -18,6 +18,7 @@
  */
 
 import { mkdir, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises'
+import { release, type as systemType } from 'node:os'
 import { join } from 'node:path'
 import {
   FINDING_KINDS,
@@ -66,6 +67,8 @@ export interface ReportAnswer {
 export interface TesterFindingsService {
   /** The folder, `<data folder>/tester`. */
   readonly folder: string
+  /** What this Hemera is, as every occurrence records it. */
+  readonly hemera: FindingContext['hemera']
   /**
    * Records a report, masked with the Workspace's secrets, against the findings as they stand;
    * then writes the index again.
@@ -216,6 +219,21 @@ export function maskedReport(
   }
 }
 
+/** What the engine that writes the findings is: its data folder, its version and its channel. */
+export interface TesterIdentity {
+  readonly directory: string
+  readonly version: string
+  readonly channel: string
+}
+
+/**
+ * The commit a version was described from, when it was: a development run is `git describe`'s
+ * `0.5.0-dev.3-g1a2b3c4`; a packaged one carries no commit.
+ */
+export function commitOf(version: string): string | null {
+  return /-g([0-9a-f]{7,40})$/.exec(version)?.[1] ?? null
+}
+
 /** Where a finding's number is read from its file's name, whatever its front matter says. */
 const NUMBERED = /^(\d+)-.*\.md$/
 
@@ -226,11 +244,11 @@ const NUMBERED = /^(\d+)-.*\.md$/
  * the folder again.
  */
 export function testerFindingsLayer(
-  directory: string,
+  identity: TesterIdentity,
   changed: () => void = () => undefined,
 ): Layer.Layer<TesterFindings> {
   return Layer.sync(TesterFindings, () => {
-    const folder = testerFolderOf(directory)
+    const folder = testerFolderOf(identity.directory)
     const findings = join(folder, FINDINGS_FOLDER)
     const writing = Semaphore.makeUnsafe(1)
 
@@ -326,6 +344,13 @@ export function testerFindingsLayer(
 
     return {
       folder,
+      hemera: {
+        version: identity.version,
+        channel: identity.channel,
+        commit: commitOf(identity.version),
+        os: `${systemType()} ${release()}`,
+        platform: `${process.platform}-${process.arch}`,
+      },
       report,
       list: names.pipe(
         Effect.flatMap(readAll),

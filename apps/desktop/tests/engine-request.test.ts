@@ -113,6 +113,7 @@ function running<A, E>(
     | Proposals
     | ProjectChecks
     | Builds
+    | TesterFindings
     | SetupProposals
     | Launches
   >,

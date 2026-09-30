@@ -183,7 +183,9 @@ async function openOver(
   )
   const tools = toolServerLayer.pipe(
     Layer.provideMerge(toolCatalogueLayer),
-    Layer.provide(testerFindingsLayer({ directory: dataFolder, version: VERSION, channel: 'dev' })),
+    Layer.provideMerge(
+      testerFindingsLayer({ directory: dataFolder, version: VERSION, channel: 'dev' }),
+    ),
     Layer.provideMerge(classifierSettingsLayer),
     Layer.provideMerge(builds),
     Layer.provideMerge(toolAccessLayer),

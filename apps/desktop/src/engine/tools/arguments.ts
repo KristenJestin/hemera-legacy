@@ -13,6 +13,8 @@
 import {
   COMMAND_SCOPES,
   COMMAND_TYPES,
+  FINDING_KINDS,
+  FINDING_SEVERITIES,
   PHASE_IDS,
   RECIPE_KINDS,
   QUESTION_RULE,
@@ -102,6 +104,14 @@ export type ParsedCall =
   | {
       readonly tool: 'reproduction_replayed'
       readonly arguments: z.infer<(typeof TOOL_ARGUMENTS)['reproduction_replayed']>
+    }
+  | {
+      readonly tool: 'hemera_report'
+      readonly arguments: z.infer<(typeof TOOL_ARGUMENTS)['hemera_report']>
+    }
+  | {
+      readonly tool: 'hemera_reports'
+      readonly arguments: z.infer<(typeof TOOL_ARGUMENTS)['hemera_reports']>
     }
 
 /**
@@ -235,6 +245,18 @@ const SPEC_WRITES = ['section', 'stories', 'tasks', 'question', 'title', 'type']
 
 /** What `spec_propose` hands over. */
 export const PROPOSALS = ['phase_done', 'ready', 'spec', 'existing'] as const
+
+/** How long the one-line parts of a finding may be. */
+const TITLE_CHARACTERS = 200
+
+/** How long a text of a finding may be: a report, not a file pasted whole. */
+const FINDING_CHARACTERS = 4000
+
+/** One of the texts the agent tells a finding with. */
+const FINDING_TEXT = z.string().trim().min(1).max(FINDING_CHARACTERS)
+
+/** How many findings `hemera_reports` lists in one call. */
+export const FINDINGS_PAGE = 50
 
 /**
  * The arguments of every tool, as the agent is told them and as they are read back.
@@ -603,6 +625,55 @@ export const TOOL_ARGUMENTS = {
       .max(SPEC_PAGE_CHARACTERS)
       .describe('what you did to replay it and what you observed, for the user who accepts'),
   }),
+  // The app tester's two (#300): the human part of a finding, flat, and nothing Hemera knows.
+  hemera_report: z.object({
+    title: z.string().trim().min(1).max(TITLE_CHARACTERS).describe('the problem, in one line'),
+    kind: z.enum(FINDING_KINDS).describe('what it is about'),
+    where: z
+      .string()
+      .trim()
+      .min(1)
+      .max(TITLE_CHARACTERS)
+      .describe('the tool, the screen or the feature of Hemera it happened in: commands_run'),
+    severity: z
+      .enum(FINDING_SEVERITIES)
+      .describe('whether it blocks the work, hurts it, or is cosmetic'),
+    trying: FINDING_TEXT.describe('what you were trying to do'),
+    happened: FINDING_TEXT.describe('what happened'),
+    expected: FINDING_TEXT.describe('what you expected instead'),
+    steps: FINDING_TEXT.describe('the steps to reproduce it, as you understand them'),
+    files: z
+      .string()
+      .max(FINDING_CHARACTERS)
+      .optional()
+      .describe('the files concerned, relative to the Workspace, separated by commas: paths only'),
+    call_id: z
+      .string()
+      .min(1)
+      .max(TITLE_CHARACTERS)
+      .optional()
+      .describe('the id of the tool call it is about, as you know it'),
+    error: z
+      .string()
+      .max(FINDING_CHARACTERS)
+      .optional()
+      .describe('the error text, as it was answered'),
+    code: z
+      .union([z.string().max(TITLE_CHARACTERS), z.number()])
+      .optional()
+      .describe('an exit code or an HTTP status'),
+    key: KEY.describe('an idempotency key, so a retry does not report twice').optional(),
+  }),
+  hemera_reports: z.object({
+    kind: z.enum(FINDING_KINDS).optional().describe('only the findings of this kind'),
+    where: z.string().min(1).optional().describe('only the findings in this place'),
+    offset: z
+      .number()
+      .int()
+      .min(0)
+      .optional()
+      .describe('the finding to start at, in the list; 0 without it'),
+  }),
 } as const
 
 /** What each tool is, in the words the agent reads before it asks. */
@@ -637,6 +708,9 @@ export const TOOL_DESCRIPTIONS: Record<ToolName, string> = {
     "Say you finished a task, by its label. This is not a verdict: Hemera runs the Project's checks on it and decides whether it is done; a red check comes back to you with its failures.",
   task_blocked:
     'Say a task contradicts the frozen Spec, by its label, with the reason. The task and the tasks that depend on it are suspended until the user decides; the others go on. Never for a task that is merely hard.',
+  hemera_report:
+    "Report a problem with Hemera itself, never with the user's project: a Hemera tool that fails or answers badly, a capability you need and do not have, an MCP problem, a confusing answer, a Hemera Auto decision that looks wrong, a notice that never came, a context that was missing. Say what you were trying to do, what happened, what you expected and the steps to reproduce it, and give the id of the call it is about: Hemera adds the environment, the Session, the Project and the call itself. Paths only, never the content of a file. The same kind, the same place and a similar title add an occurrence to an existing finding rather than a new one: the answer says new #N or added to #N.",
+  hemera_reports: `The problems already reported to Hemera, the latest seen first: number, kind, severity, where, title and how many times each was seen. Read it before reporting. At most ${FINDINGS_PAGE} a call, from offset.`,
   reproduction_replayed:
     "Report the replay of a bug's reproduction scenario, in the final checks of a bug Spec: whether the incorrect behaviour is gone, and what you did and observed. Hemera keeps the last one with the end checks that run once your turn is over, and the user cannot accept the build without it. Replay it and report it again after any fix.",
 }
@@ -670,6 +744,8 @@ export const TOOL_BOUNDS: Record<ToolName, string> = {
   task_finished: "a signal Hemera answers with the Project's checks; never a task's state",
   task_blocked: 'a blocker the user decides; never a change to the Spec',
   reproduction_replayed: "a bug's final checks only; kept with the end checks that follow",
+  hemera_report: "a finding in the data folder's tester folder; masked, paths only",
+  hemera_reports: `the findings reported so far, ${FINDINGS_PAGE} a call`,
 }
 
 /** What one reading of the arguments answered. */
@@ -756,6 +832,10 @@ export function parseCall(tool: ToolName, raw: ToolArguments): ArgumentsDecision
       return decide(tool, read(TOOL_ARGUMENTS['task_blocked'], raw))
     case 'reproduction_replayed':
       return decide(tool, read(TOOL_ARGUMENTS['reproduction_replayed'], raw))
+    case 'hemera_report':
+      return decide(tool, read(TOOL_ARGUMENTS['hemera_report'], raw))
+    case 'hemera_reports':
+      return decide(tool, read(TOOL_ARGUMENTS['hemera_reports'], raw))
   }
 }
 

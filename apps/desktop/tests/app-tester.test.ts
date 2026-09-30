@@ -48,7 +48,9 @@ const twoTurns = (agent: ReturnType<typeof answering>, tester: boolean) =>
     const session = yield* aSessionOn(workingDirectory, 'claude')
     yield* runtime.prompt(session.id, 'start on the reader')
     yield* runtime.prompt(session.id, 'carry on')
-    const bearer = agent.answers.mcpServers[0]?.[0]?.headers[0]?.value ?? ''
+    const server = agent.answers.mcpServers[0]?.[0]
+    const bearer =
+      server !== undefined && 'headers' in server ? (server.headers[0]?.value ?? '') : ''
     const grant = yield* (yield* ToolAccess).byToken(bearer.replace(/^Bearer /, ''))
     return {
       provided: yield* (yield* AgentContext).provided(session.id),

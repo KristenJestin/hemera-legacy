@@ -23,11 +23,24 @@ export interface StandingMode {
   readonly name: string
 }
 
+/**
+ * What a Session's running agent says it is and stands on, as the app tester records it (#300):
+ * its version as it gave it at `initialize`, and the value of each option by its category.
+ */
+export interface StandingAgent {
+  readonly version: string | null
+  readonly options: readonly { readonly category: string | null; readonly value: string }[]
+}
+
 export interface SessionModesService {
   /** The mode this Session's agent stands on now, or null when no agent reports one. */
   readonly standing: (sessionId: string) => Effect.Effect<StandingMode | null>
   /** Hands over what reads it: the runtime's own, called once it is built. */
   readonly heldBy: (read: (sessionId: string) => StandingMode | null) => void
+  /** What this Session's running agent is and stands on, or null when none runs. */
+  readonly agent: (sessionId: string) => Effect.Effect<StandingAgent | null>
+  /** Hands over what reads it, as `heldBy` does. */
+  readonly agentHeldBy: (read: (sessionId: string) => StandingAgent | null) => void
 }
 
 export class SessionModes extends Context.Service<SessionModes, SessionModesService>()(
@@ -36,10 +49,15 @@ export class SessionModes extends Context.Service<SessionModes, SessionModesServ
 
 export const sessionModesLayer = Layer.sync(SessionModes, () => {
   let read: ((sessionId: string) => StandingMode | null) | null = null
+  let agent: ((sessionId: string) => StandingAgent | null) | null = null
   return {
     standing: (sessionId) => Effect.sync(() => (read === null ? null : read(sessionId))),
     heldBy: (next) => {
       read = next
+    },
+    agent: (sessionId) => Effect.sync(() => (agent === null ? null : agent(sessionId))),
+    agentHeldBy: (next) => {
+      agent = next
     },
   } satisfies SessionModesService
 })

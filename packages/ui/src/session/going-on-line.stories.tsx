@@ -28,7 +28,7 @@ function Line(props: GoingOnLineProps): ReactNode {
 const meta = {
   title: 'Blocks/Session/GoingOnLine',
   component: Line,
-  tags: ['autodocs', 'updated'],
+  tags: ['autodocs'],
   parameters: {
     layout: 'fullscreen',
     docs: { story: { inline: false, height: '32rem' } },

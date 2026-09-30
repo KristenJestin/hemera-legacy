@@ -18,7 +18,7 @@ const LINES = Array.from(
 ).join('\n')
 
 const meta = {
-  tags: ['autodocs', 'updated'],
+  tags: ['autodocs'],
   title: 'Blocks/Activity/TerminalOutput',
   component: TerminalOutput,
   parameters: { layout: 'padded' },

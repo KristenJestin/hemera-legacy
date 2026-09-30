@@ -22,7 +22,7 @@ import { EXPRESSIONS, FACE_STATES, type FaceState } from './states.ts'
  * and a seeded life.
  */
 const meta = {
-  tags: ['autodocs', 'new'],
+  tags: ['autodocs'],
   title: 'Components/Face',
   component: Face,
   parameters: { layout: 'centered' },

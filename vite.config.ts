@@ -96,6 +96,7 @@ export default defineConfig({
           include: [
             'apps/*/tests/**/*.test.ts',
             'packages/*/tests/**/*.test.ts',
+            'tools/app-icons.test.ts',
             'tools/aur-publish.test.ts',
             'tools/boundaries.test.ts',
             'tools/environment-report.test.ts',

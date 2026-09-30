@@ -297,6 +297,9 @@ export const FirstLaunchPage: Story = {
     )
 
     expect(canvas.getByRole('heading', { name: 'Welcome to Hemera' })).toBeInTheDocument()
+    // Over the welcome, the application's own icon: the face, as the launcher shows it.
+    const icon = canvasElement.querySelector('[data-app-icon="prod"]')
+    expect(icon?.nextElementSibling).toBe(canvas.getByRole('heading', { level: 1 }))
     // One action, and the palette said to be there too.
     expect(canvas.getAllByRole('button')).toHaveLength(1)
     expect(canvas.getByText(/opens the command palette/)).toBeInTheDocument()

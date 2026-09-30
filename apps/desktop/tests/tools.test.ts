@@ -2610,6 +2610,50 @@ describe('Hemera Auto: paths outside the Workspace and sensitive places always a
     expect(human.asked).toHaveLength(0)
   })
 
+  it("reads a catalogue line's variables as the user's, and the same one-off as unreadable", async () => {
+    const human = humanSaying()
+    const seen = await engine(
+      human,
+      harmless([]),
+    )(
+      Effect.gen(function* () {
+        const session = yield* opened
+        yield* autoAt('normal')
+        yield* (yield* Commands).save(
+          {
+            projectId: session.projectId,
+            name: 'port',
+            line: `sh -c 'echo $PORT'`,
+            type: 'script',
+            lineWindows: null,
+            lineLinux: null,
+            scope: 'workspace',
+            portless: false,
+            portlessName: null,
+            folderBase: null,
+            folder: null,
+            runAtOpen: false,
+          },
+          false,
+        )
+        const saved = yield* calling({
+          sessionId: session.sessionId,
+          tool: 'commands_run',
+          arguments: { name: 'port', key: 'catalogue-port' },
+        })
+        const oneOff = yield* calling({
+          sessionId: session.sessionId,
+          tool: 'commands_run',
+          arguments: { line: `sh -c 'echo $PORT'`, key: 'one-off-port' },
+        })
+        return { saved, oneOff }
+      }),
+    )
+    expect(seen.saved.ok).toBe(true)
+    expect(seen.oneOff.ok).toBe(false)
+    expect(human.asked).toHaveLength(1)
+  })
+
   it('still lets ls src run inside the Workspace, without a question or a call to Jev', async () => {
     mkdirSync(join(root, 'src'))
     const sent: string[] = []

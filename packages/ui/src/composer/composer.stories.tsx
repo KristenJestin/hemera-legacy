@@ -2,6 +2,7 @@ import type { Meta, StoryObj } from '@storybook/react-vite'
 import { expect, fn, screen, userEvent, waitFor, within } from 'storybook/test'
 import { type ReactNode, useState } from 'react'
 
+import { atRest } from '../../.storybook/at-rest.ts'
 import { onOneLine } from '../../.storybook/one-line.ts'
 import { emulateReducedMotion } from '../../.storybook/reduced-motion.ts'
 import { Button } from '../components/button/button.tsx'
@@ -462,6 +463,11 @@ export const SendAndStopSwap: Story = {
     const canvas = within(canvasElement)
     const menu = canvas.getByRole('button', { name: /DeepSeek V4\.1 Flash/ })
     const send = canvas.getByRole('button', { name: 'Send' })
+    // Where the row rests, once its words are drawn in their own face: read at once, on a runner
+    // busy with the rest of the run, it was read before the font had arrived, and the whole row
+    // then moved by the width the words took once it had, under a send that never moved.
+    await document.fonts.ready
+    await atRest(send)
     const place = send.getBoundingClientRect()
     const beside = menu.getBoundingClientRect()
     const frame = frameOf(canvas.getByRole('textbox')).getBoundingClientRect()

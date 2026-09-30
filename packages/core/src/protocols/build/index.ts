@@ -15,22 +15,35 @@ import type {
   CheckVerdict,
   TaskState,
 } from '../../domain/build.ts'
+import type { FeedbackKind } from '../../domain/review.ts'
 import type { MissionProtocol, SpecSnapshot, TaskExecutor } from '../../domain/spec.ts'
 import { renderSpecMarkdown } from '../define/index.ts'
-import { BUILD_MISSION_BRIEF, BUILD_PHASE_BRIEFS, BUILD_REVIEW_BRIEF } from './briefs.ts'
+import { BUILD_MISSION_BRIEF, BUILD_PHASE_BRIEFS } from './briefs.ts'
 
-export { BUILD_MISSION_BRIEF, BUILD_PHASE_BRIEFS, BUILD_REVIEW_BRIEF } from './briefs.ts'
+export { BUILD_MISSION_BRIEF, BUILD_PHASE_BRIEFS } from './briefs.ts'
 
 /**
- * The `build` protocol, v1 (D10-01): `prepare`, then `execute`, then `verify`, each waiting for
- * the one before; `accepted` and `stopped` close the build and are no phase of it.
+ * The `build` protocol, v2 (D10-01, issue #279), in the order settled on 13 September:
+ * `prepare → execute → (documentation) → verify → review → human review`, each waiting for the one
+ * before, and `feedback` as the phase a build resumes from once the user asked for a fix.
+ *
+ * - The documentation is a step where `verify` begins, not a phase of its own.
+ * - `review` is the helpers' review of the result, skipped where the Workspace has no Git
+ *   repository, then the human review: a review round of the build (`spec` today; a `code` round
+ *   is another kind of the same round, and the same phase).
+ * - `feedback` works on the feedback of a round, then hands the focus back to `execute`, then
+ *   `verify` and `review` again, which open the next round.
+ *
+ * `accepted` and `stopped` close the build and are no phase of it.
  */
 export const BUILD_PROTOCOL: MissionProtocol<ActiveBuildPhase> = {
-  version: 1,
+  version: 2,
   phases: [
     { id: 'prepare', dependsOn: [], available: true },
     { id: 'execute', dependsOn: ['prepare'], available: true },
     { id: 'verify', dependsOn: ['execute'], available: true },
+    { id: 'review', dependsOn: ['verify'], available: true },
+    { id: 'feedback', dependsOn: ['review'], available: true },
   ],
 }
 
@@ -108,6 +121,20 @@ export interface BriefBlocker {
   readonly note: string | null
 }
 
+/** One feedback of the user's on a round, as the `feedback` brief tells it. */
+export interface BriefFeedback {
+  readonly kind: FeedbackKind
+  readonly body: string
+  /** The title of the story it points at, or null when it points at none. */
+  readonly story: string | null
+}
+
+/** The feedback of one round: its name — `Spec review · round 2` — and what the user wrote. */
+export interface BriefRound {
+  readonly round: string
+  readonly feedback: readonly BriefFeedback[]
+}
+
 /**
  * What a brief of a build is composed from, by kind:
  *
@@ -117,7 +144,9 @@ export interface BriefBlocker {
  * - `resume`: the phase the build stands in, the Spec, every task with its state, attempts and
  *   snapshots, the ready set and the failures still to address;
  * - `verify`: the red attempt on the end checks, if any;
- * - `review`: nothing — the review is the user's own message, which the brief answers.
+ * - `review`: nothing — the result is what the helpers review;
+ * - `feedback`: the round and the feedback the user asked a fix of. A `resume` in `feedback`
+ *   carries them too.
  */
 export type BuildBriefInput =
   | {
@@ -139,10 +168,14 @@ export type BuildBriefInput =
       readonly tasks: readonly BriefTask[]
       readonly ready: readonly BriefTask[]
       readonly failures: readonly BriefFailure[]
+      readonly feedback?: BriefRound
     }
   | {
       readonly kind: 'review'
     }
+  | ({
+      readonly kind: 'feedback'
+    } & BriefRound)
   | {
       readonly kind: 'verify'
       readonly failures: readonly BriefFailure[]
@@ -246,6 +279,14 @@ function dismissedText(dismissed: readonly BriefBlocker[]): string {
   return ['# Blockers the user dismissed', ...lines].join('\n')
 }
 
+function feedbackText({ round, feedback }: BriefRound): string {
+  const lines = feedback.map(
+    (one) =>
+      `- ${one.kind}${one.story === null ? '' : `, on the story "${one.story}"`}: ${one.body}`,
+  )
+  return [`# The feedback of ${round}`, ...lines].join('\n')
+}
+
 /** Where every task stands, for an agent that starts over: evidence, attempts, and the rest. */
 function standingText(tasks: readonly BriefTask[]): string {
   const parts = ['# Where the build stands']
@@ -327,7 +368,8 @@ Your previous work may have been interrupted — by a pause, a restart or a cras
  *   task stands with its evidence, the instruction to inspect the real state first, then the
  *   ready set and the failures still to address;
  * - `verify`: the `verify` brief and the failures of the end checks;
- * - `review`: the `review` brief alone: the user's review is the message it answers.
+ * - `review`: the `review` brief alone;
+ * - `feedback`: the `feedback` brief and the feedback of the round.
  */
 export function composeBuildBrief(input: BuildBriefInput): string {
   switch (input.kind) {
@@ -353,10 +395,13 @@ export function composeBuildBrief(input: BuildBriefInput): string {
       ]
       if (input.phase === 'execute') parts.push(readyText(input.ready))
       if (input.failures.length > 0) parts.push(failuresText(input.failures))
+      if (input.feedback !== undefined) parts.push(feedbackText(input.feedback))
       return parts.join('\n\n')
     }
     case 'review':
-      return BUILD_REVIEW_BRIEF
+      return BUILD_PHASE_BRIEFS.review
+    case 'feedback':
+      return [BUILD_PHASE_BRIEFS.feedback, feedbackText(input)].join('\n\n')
     case 'verify': {
       const parts = [BUILD_PHASE_BRIEFS.verify]
       if (input.failures.length > 0) parts.push(failuresText(input.failures))

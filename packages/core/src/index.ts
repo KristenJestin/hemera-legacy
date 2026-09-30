@@ -212,13 +212,17 @@ export {
   ROUND_STATES,
   anchorRefusal,
   feedbackRefusal,
+  roundAcceptRefusal,
   roundMoveRefusal,
+  roundName,
   roundToolRefusal,
+  waitsForFix,
 } from './domain/review.ts'
 export type {
   DiffSide,
   FeedbackAnchor,
   FeedbackKind,
+  FeedbackStanding,
   RoundKind,
   RoundState,
 } from './domain/review.ts'
@@ -310,7 +314,9 @@ export type {
   BriefBlocker,
   BriefCheck,
   BriefFailure,
+  BriefFeedback,
   BriefFile,
+  BriefRound,
   BriefSnapshot,
   BriefTask,
   BuildBriefInput,

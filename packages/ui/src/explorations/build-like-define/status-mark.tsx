@@ -10,8 +10,9 @@ import { check, instant, morph, ping, pinging, useTransition } from '../../motio
  * One ring and what it holds, 20 px, every state a pose of the same strokes:
  *
  * - `todo` · a dashed ring, quiet: nothing has started;
- * - `progress` · the ring as an arc: turning while how far is unknown, standing at its share when
- *   it is known;
+ * - `progress` · the ring as an arc: turning while how far is unknown; when it is known, the arc
+ *   stands at its share on a faint track, and a new share is reached on the `morph` spring from
+ *   wherever the arc stands — no jump, no overshoot, a change half-way turned round smoothly;
  * - `done` · the ring closes and a tick draws itself in it;
  * - `failed` · the ring closes and a cross draws itself;
  * - `yours` · the ring closes around a dot that waits, a ring leaving it on the running dot's beat;
@@ -24,19 +25,28 @@ import { check, instant, morph, ping, pinging, useTransition } from '../../motio
 export type MarkState = 'todo' | 'progress' | 'done' | 'failed' | 'yours' | 'blocked' | 'skipped'
 
 const TONES: Record<MarkState, string> = {
-  todo: 'relative inline-flex size-5 shrink-0 text-muted-foreground',
-  progress: 'relative inline-flex size-5 shrink-0 text-warning',
-  done: 'relative inline-flex size-5 shrink-0 text-success',
-  failed: 'relative inline-flex size-5 shrink-0 text-destructive',
-  yours: 'relative inline-flex size-5 shrink-0 text-warning',
-  blocked: 'relative inline-flex size-5 shrink-0 text-destructive',
-  skipped: 'relative inline-flex size-5 shrink-0 text-muted-foreground',
+  todo: 'relative inline-flex shrink-0 text-muted-foreground',
+  progress: 'relative inline-flex shrink-0 text-warning',
+  done: 'relative inline-flex shrink-0 text-success',
+  failed: 'relative inline-flex shrink-0 text-destructive',
+  yours: 'relative inline-flex shrink-0 text-warning',
+  blocked: 'relative inline-flex shrink-0 text-destructive',
+  skipped: 'relative inline-flex shrink-0 text-muted-foreground',
 }
 
-const SVG = 'size-5 stroke-current'
+/** 20 px in a list, 16 px on a chip. */
+export type MarkSize = 'md' | 'sm'
+
+const SVG: Record<MarkSize, string> = {
+  md: 'size-5 stroke-current',
+  sm: 'size-icon-sm stroke-current',
+}
 
 /** The arc turns while how far is not known: the loading indicator's own turn. */
-const TURNING = 'size-5 stroke-current motion-safe:animate-turn'
+const TURNING: Record<MarkSize, string> = {
+  md: 'size-5 stroke-current motion-safe:animate-turn',
+  sm: 'size-icon-sm stroke-current motion-safe:animate-turn',
+}
 
 /** How much of the ring the arc covers while it turns. */
 const ARC = 0.28
@@ -54,15 +64,26 @@ export interface StatusMarkProps {
   progress?: number | undefined
   /** What a screen reader says: the state in words. */
   label: string
+  size?: MarkSize | undefined
+  /** Whether it draws itself in as it is mounted, rather than standing there already. */
+  arrives?: boolean | undefined
 }
 
-export function StatusMark({ state, progress, label }: StatusMarkProps): ReactNode {
+export function StatusMark({
+  state,
+  progress,
+  label,
+  size = 'md',
+  arrives = false,
+}: StatusMarkProps): ReactNode {
   const ringing = useTransition(morph)
   const drawing = useTransition(check.draw)
   const pulse = useTransition(pinging)
   const turning = state === 'progress' && progress === undefined
   const dashed = state === 'todo' || state === 'skipped'
   const drawn = (on: boolean) => ({ pathLength: on ? 1 : 0, opacity: on ? 1 : 0 })
+  // Arriving, every stroke starts undrawn; otherwise each stands where it is.
+  const from = arrives ? drawn(false) : false
   return (
     <span role="img" aria-label={label} className={TONES[state]} data-mark={state}>
       {state === 'yours' && pulse !== instant && (
@@ -80,8 +101,13 @@ export function StatusMark({ state, progress, label }: StatusMarkProps): ReactNo
         strokeWidth="1.75"
         strokeLinecap="round"
         strokeLinejoin="round"
-        className={turning ? TURNING : SVG}
+        className={turning ? TURNING[size] : SVG[size]}
       >
+        {state === 'progress' &&
+          progress !== undefined && (
+            // The ring the arc travels on, while how far is known.
+            <circle cx="10" cy="10" r="7.25" className="stroke-border" />
+          )}
         <motion.circle
           cx="10"
           cy="10"
@@ -96,32 +122,35 @@ export function StatusMark({ state, progress, label }: StatusMarkProps): ReactNo
             cx="10"
             cy="10"
             r="7.25"
-            initial={false}
-            animate={{ pathLength: ringOf(state, progress), opacity: dashed ? 0 : 1 }}
+            initial={from}
+            animate={{
+              pathLength: ringOf(state, progress),
+              opacity: dashed || ringOf(state, progress) === 0 ? 0 : 1,
+            }}
             transition={ringing}
           />
         </g>
         <motion.path
           d="M6.6 10.3l2.3 2.3l4.5 -4.7"
-          initial={false}
+          initial={from}
           animate={drawn(state === 'done')}
           transition={drawing}
         />
         <motion.path
           d="M7.6 7.6l4.8 4.8M12.4 7.6l-4.8 4.8"
-          initial={false}
+          initial={from}
           animate={drawn(state === 'failed')}
           transition={drawing}
         />
         <motion.path
           d="M7 10h6"
-          initial={false}
+          initial={from}
           animate={drawn(state === 'blocked')}
           transition={drawing}
         />
         <motion.path
           d="M6.5 13.5l7 -7"
-          initial={false}
+          initial={from}
           animate={drawn(state === 'skipped')}
           transition={drawing}
         />

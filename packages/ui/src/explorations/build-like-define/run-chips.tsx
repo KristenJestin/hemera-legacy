@@ -7,26 +7,30 @@ import { Popover } from '../../components/popover/popover.tsx'
 import { StatusDot } from '../../components/status-dot/status-dot.tsx'
 import { Tooltip } from '../../components/tooltip/tooltip.tsx'
 import { IconInfoCircle, IconPlayerStop, IconRefresh } from '../../icons.ts'
-import { CROSSFADE, crossfade, fold, instant, pinging, pop, useTransition } from '../../motion.ts'
+import { fold, instant, morph, pinging, pop, useTransition } from '../../motion.ts'
 import {
   GOING_ON_TONES,
   GOING_ON_WORDS,
   GoingOnDetails,
   GoingOnOutput,
 } from '../../session/going-on-details.tsx'
-import { type GoingOnRun, goingOnStateOf } from '../../session/going-on.ts'
+import { type GoingOnRun, type GoingOnState, goingOnStateOf } from '../../session/going-on.ts'
+import { StatusMark } from './status-mark.tsx'
 
 /**
- * The runs of the head line as chips that say what they are doing (maintainer's request of 30
+ * The runs of the head line as chips that say what they are doing (maintainer's requests of 30
  * September on issue #77, after React Bits' "call chip", written again on the design system's own
- * kinds). The chip is the run's, and its glance and ⓘ are what they were; what it adds:
+ * kinds). The chip is the run's — its icon, its name, how long — with no dot: the chip itself says
+ * how the run stands. Its glance and ⓘ are what they were.
  *
- * - running · a tint wipes across the chip on the running dot's beat, and its duration ticks;
- * - done · one short wash of the success tint, and the duration stands;
- * - failed · the chip takes the failure's tint and gives one short shake — nothing else on the
- *   line moves — and a retry glyph opens beside it, which runs it again.
+ * - running · a tint wipes across the chip on the running dot's beat, and the duration ticks, in
+ *   seconds as a person says them (`42 s`, `1 min 12 s`);
+ * - done · one last wipe, in the success tint, which is the chip's once it has crossed, and a
+ *   tick draws itself at the end;
+ * - failed · the same last wipe in the failure's tint, with no border, a cross drawn at the end,
+ *   one short shake, and a retry glyph beside it that runs it again.
  *
- * Asked for less movement, no wipe, no wash and no shake: the tint and the glyph are there at once.
+ * Asked for less movement, no wipe and no shake: the end is there at once.
  */
 
 /** A run and the moments its duration is read from. */
@@ -39,20 +43,30 @@ export interface LiveRun {
 const CHIP =
   'relative isolate inline-flex h-control-sm max-w-menu-side min-w-0 items-center gap-1.5 overflow-hidden rounded-md border border-border bg-card px-2 text-xs outline-none hover:bg-accent focus-ring data-popup-open:bg-accent'
 
+/** A run done: the success tint, no border, what the wipe ended in. */
+const DONE =
+  'relative isolate inline-flex h-control-sm max-w-menu-side min-w-0 items-center gap-1.5 overflow-hidden rounded-md border border-transparent bg-success-muted px-2 text-xs text-success-muted-foreground outline-none focus-ring data-popup-open:border-success'
+
+/** A run that failed: the failure's tint, no border. */
 const FAILED =
-  'relative isolate inline-flex h-control-sm max-w-menu-side min-w-0 items-center gap-1.5 overflow-hidden rounded-md border border-destructive bg-destructive-muted px-2 text-xs text-destructive-muted-foreground outline-none focus-ring'
+  'relative isolate inline-flex h-control-sm max-w-menu-side min-w-0 items-center gap-1.5 overflow-hidden rounded-md border border-transparent bg-destructive-muted px-2 text-xs text-destructive-muted-foreground outline-none focus-ring data-popup-open:border-destructive'
+
+/** The chip as it shows: running (and while its last wipe crosses), done, or failed. */
+const CHIPS: Record<GoingOnState, string> = { running: CHIP, finished: DONE, failed: FAILED }
 
 /** What wipes across a running chip, under its words. */
 const WIPE = 'pointer-events-none absolute inset-0 -z-10 bg-warning-muted'
 
-/** What washes a chip once as it is done. */
-const WASH = 'pointer-events-none absolute inset-0 -z-10 bg-success-muted'
+/** The last wipe, in the tint the run ends on, which is the chip's own once it has crossed. */
+const WIPE_DONE = 'pointer-events-none absolute inset-0 -z-10 bg-success-muted'
 
-const ICON = 'flex shrink-0 text-muted-foreground'
+const WIPE_FAILED = 'pointer-events-none absolute inset-0 -z-10 bg-destructive-muted'
+
+const ICON = 'flex shrink-0'
 
 const LABEL = 'min-w-0 truncate font-medium'
 
-const TIME = 'shrink-0 font-mono text-muted-foreground tabular-nums'
+const TIME = 'shrink-0 font-mono tabular-nums'
 
 const SLOT = 'flex shrink-0 items-center pr-1.5'
 
@@ -66,6 +80,9 @@ const GLANCE = 'flex w-menu-panel flex-col gap-2'
 
 const GLANCE_TIME = 'min-w-0 flex-1 font-mono text-xs text-muted-foreground tabular-nums'
 
+/** The mark a run ends on, opening beside its duration. */
+const END_MARK = 'flex shrink-0 overflow-hidden'
+
 const GLANCE_HEAD = 'flex min-w-0 items-center gap-1.5 text-sm'
 
 /**
@@ -74,10 +91,16 @@ const GLANCE_HEAD = 'flex min-w-0 items-center gap-1.5 text-sm'
  */
 const SHAKE = { x: [0, -3, 2, 0] }
 
-/** A duration as a clock says it: minutes and seconds. */
-function clockOf(ms: number): string {
+/**
+ * A duration in seconds, as a person says it: `42 s`, `1 min 12 s` past a minute, `1 h 3 min`
+ * past an hour, where the seconds no longer matter.
+ */
+function durationOf(ms: number): string {
   const seconds = Math.max(0, Math.floor(ms / 1000))
-  return `${String(Math.floor(seconds / 60))}:${String(seconds % 60).padStart(2, '0')}`
+  if (seconds < 60) return `${String(seconds)} s`
+  const minutes = Math.floor(seconds / 60)
+  if (minutes < 60) return `${String(minutes)} min ${String(seconds % 60)} s`
+  return `${String(Math.floor(minutes / 60))} h ${String(minutes % 60)} min`
 }
 
 /** The time now, read again each second while something runs. */
@@ -142,25 +165,31 @@ function RunChip({
   const [glance, setGlance] = useState(false)
   const [chip, animate] = useAnimate<HTMLSpanElement>()
   const shaking = useTransition(pop)
-  const wiping = useTransition(pinging)
-  const washing = useTransition(crossfade)
-  // The wash comes as the run is done, and goes as soon as it has come.
-  const [washed, setWashed] = useState(false)
-  const folding = useTransition(fold)
+  const looping = useTransition(pinging)
+  const ending = useTransition(morph)
+  const opening = useTransition(fold)
   const before = useRef(state)
+  // Ended while it was watched, the run wipes across once more before its end shows.
+  const [wiping, setWiping] = useState(false)
+  const shows: GoingOnState = running || wiping ? 'running' : state
   const Icon = COMMAND_TYPE_ICONS[item.type]
   const name = `${item.name}, ${GOING_ON_WORDS[state]}`
-  const time = clockOf((run.endedAt ?? now) - run.startedAt)
+  const time = durationOf((run.endedAt ?? now) - run.startedAt)
 
-  // One short shake as the run fails, one wash as it is done; never for a run that already was.
   useEffect(() => {
     const was = before.current
     before.current = state
-    if (was === state) return
-    if (state === 'finished' && washing !== instant) setWashed(true)
+    if (was !== 'running' || state === 'running') return
+    if (ending === instant) return
+    setWiping(true)
+  }, [state])
+
+  /** The last wipe done: the end shows, and a failure gives its one short shake. */
+  function ended(): void {
+    setWiping(false)
     if (state !== 'failed' || shaking === instant || chip.current === null) return
     void animate(chip.current, SHAKE, shaking)
-  }, [state])
+  }
 
   return (
     <span className={SLOT}>
@@ -174,40 +203,55 @@ function RunChip({
           trigger={
             <button
               type="button"
-              className={state === 'failed' ? FAILED : CHIP}
+              className={CHIPS[shows]}
               aria-label={name}
               data-run={item.id}
               data-state={state}
             >
-              {running && wiping !== instant && (
+              {running && looping !== instant && (
                 <motion.span
                   aria-hidden="true"
                   className={WIPE}
                   initial={{ x: '-100%' }}
                   animate={{ x: '100%' }}
-                  transition={wiping}
+                  transition={looping}
                 />
               )}
-              <AnimatePresence initial={false}>
-                {washed && (
-                  <motion.span
-                    key="wash"
-                    aria-hidden="true"
-                    className={WASH}
-                    initial={CROSSFADE.from}
-                    animate={CROSSFADE.to}
-                    exit={CROSSFADE.from}
-                    transition={washing}
-                    onAnimationComplete={() => setWashed(false)}
-                  />
-                )}
-              </AnimatePresence>
+              {wiping && (
+                <motion.span
+                  key="last"
+                  aria-hidden="true"
+                  className={state === 'failed' ? WIPE_FAILED : WIPE_DONE}
+                  initial={{ x: '-100%' }}
+                  animate={{ x: '0%' }}
+                  transition={ending}
+                  onAnimationComplete={ended}
+                />
+              )}
               <span className={ICON}>
                 <Icon size="sm" aria-hidden="true" />
               </span>
-              <StatusDot status={GOING_ON_TONES[state]} size="sm" />
               <span className={LABEL}>{item.name}</span>
               <span className={TIME}>{time}</span>
+              <AnimatePresence initial={false}>
+                {shows !== 'running' && (
+                  <motion.span
+                    key="end"
+                    className={END_MARK}
+                    initial={HIDDEN}
+                    animate={SHOWN}
+                    exit={HIDDEN}
+                    transition={opening}
+                  >
+                    <StatusMark
+                      size="sm"
+                      state={shows === 'failed' ? 'failed' : 'done'}
+                      label={GOING_ON_WORDS[state]}
+                      arrives
+                    />
+                  </motion.span>
+                )}
+              </AnimatePresence>
             </button>
           }
         >
@@ -260,7 +304,7 @@ function RunChip({
             initial={HIDDEN}
             animate={SHOWN}
             exit={HIDDEN}
-            transition={folding}
+            transition={opening}
           >
             <Act label={`Run ${item.name} again`} tip="Run again" onPress={onRetry}>
               <IconRefresh size="sm" />

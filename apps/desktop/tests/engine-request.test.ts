@@ -301,6 +301,7 @@ describe('Un argument refusé par son cas d’usage', () => {
     ['projects.create', { name: 'Atlas', tone: 'fuchsia', mainPath: '/tmp' }, 'tone'],
     ['projects.archive', { id: 'atlas' }, 'version'],
     ['repositories.add', { id: 'atlas', version: 1 }, 'relativePath'],
+    ['classifier.decisions', { limit: 500 }, 'limit'],
   ])('%s refuses %o, naming the field', (name, argument, field) => {
     const decision = decideRequest(name, argument)
 
@@ -310,6 +311,11 @@ describe('Un argument refusé par son cas d’usage', () => {
       expect(decision.reason).toContain(name)
       expect(decision.reason).toContain(field)
     }
+  })
+
+  test('Hemera Auto decisions are read with or without a limit', () => {
+    expect(decideRequest('classifier.decisions', {}).accepted).toBe(true)
+    expect(decideRequest('classifier.decisions', { limit: 50 }).accepted).toBe(true)
   })
 
   test('a cursor that is a whole number is accepted', () => {

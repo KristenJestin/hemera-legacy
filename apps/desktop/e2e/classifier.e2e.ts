@@ -2,7 +2,7 @@
 
 import { $$, browser, expect } from '@wdio/globals'
 
-import { openSettings } from './hand.ts'
+import { openSettings, pressTab } from './hand.ts'
 
 async function classifierChoice(label: string) {
   const choices = await $$('[role="radiogroup"][aria-label="Permission classifier"] [role="radio"]')
@@ -16,6 +16,7 @@ async function classifierChoice(label: string) {
 describe('One classifier choice belongs to the application', () => {
   it('keeps Hemera Auto after a reload and exposes Jev settings', async () => {
     await openSettings()
+    await pressTab('Hemera Auto')
     const auto = await classifierChoice('Hemera Auto')
     await auto.click()
     await browser.waitUntil(async () => (await auto.getAttribute('aria-checked')) === 'true')
@@ -24,6 +25,7 @@ describe('One classifier choice belongs to the application', () => {
 
     await browser.refresh()
     await openSettings()
+    await pressTab('Hemera Auto')
     const restored = await classifierChoice('Hemera Auto')
     expect(await restored.getAttribute('aria-checked')).toBe('true')
     expect(await browser.$('input[name="jev-api-key"]').isDisplayed()).toBe(true)

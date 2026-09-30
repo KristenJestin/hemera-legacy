@@ -5,12 +5,16 @@ import {
   type AgentsSectionProps,
   type ArchivedProject,
   type ClassifierSectionProps,
+  type DecisionLine,
   type ProfileFacts,
+  type SettingsSection,
 } from '@hemera/ui'
 import type { ThemeChoice } from '@hemera/ui/window'
 
 /** The settings of the application (design D4-07): composed, and bound to its callbacks. */
 export function SettingsPage({
+  section,
+  onSectionChange,
   subtitle,
   theme,
   onThemeChange,
@@ -23,7 +27,12 @@ export function SettingsPage({
   onRestore,
   acpTrace,
   onAcpTraceChange,
+  decisions,
+  onOpenSession,
 }: {
+  /** The section on screen, kept by the application so that a link to a setting opens it. */
+  section: SettingsSection
+  onSectionChange: (section: SettingsSection) => void
   subtitle: string
   theme: ThemeChoice
   onThemeChange: (theme: ThemeChoice) => void
@@ -38,9 +47,14 @@ export function SettingsPage({
   /** Whether the ACP trace of each Session is written (#131), and the switch that says so. */
   acpTrace: boolean
   onAcpTraceChange: (on: boolean) => void
+  /** Hemera Auto's latest decisions, newest first; null while not read (#294). */
+  decisions: readonly DecisionLine[] | null
+  onOpenSession: (sessionId: string) => void
 }): ReactNode {
   return (
     <Settings
+      section={section}
+      onSectionChange={onSectionChange}
       subtitle={subtitle}
       theme={theme}
       onThemeChange={onThemeChange}
@@ -53,6 +67,8 @@ export function SettingsPage({
       onRestore={onRestore}
       acpTrace={acpTrace}
       onAcpTraceChange={onAcpTraceChange}
+      decisions={decisions}
+      onOpenSession={onOpenSession}
     />
   )
 }

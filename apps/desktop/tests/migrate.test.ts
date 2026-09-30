@@ -126,6 +126,12 @@ const RUN_TOLD_MIGRATION = '20260928202306_run_told'
  */
 const SETUP_MIGRATION = '20260929153321_setup_proposals'
 
+/**
+ * The migration that keeps the replay of a bug's reproduction with the end checks it came before
+ * (issue #203): the one a profile that ran the setup proposals' has never heard of.
+ */
+const REPRODUCTION_MIGRATION = '20260930124109_bug_reproduction'
+
 /** A folder carrying the shipped migrations up to one of them, as an older version did. */
 function shippedUpTo(last: string): string {
   const folder = join(workspace, `shipped-${last}`)
@@ -562,6 +568,7 @@ describe('A profile of lot 6 is migrated to lot 19 (specs)', () => {
       CONTEXT_WORDS_MIGRATION,
       RUN_TOLD_MIGRATION,
       SETUP_MIGRATION,
+      REPRODUCTION_MIGRATION,
     ])
     expect(readdirSync(join(dataFolder, BACKUPS_FOLDER))).toEqual([`${SPECS_MIGRATION}.sqlite`])
 
@@ -940,6 +947,7 @@ describe('Un profil du lot 5 est migré vers le lot 6', () => {
       CONTEXT_WORDS_MIGRATION,
       RUN_TOLD_MIGRATION,
       SETUP_MIGRATION,
+      REPRODUCTION_MIGRATION,
     ])
     expect(readdirSync(join(dataFolder, BACKUPS_FOLDER))).toEqual([`${TOOLS_MIGRATION}.sqlite`])
 
@@ -1088,6 +1096,7 @@ describe('A profile of lot 19 is migrated to lot 20', () => {
       CONTEXT_WORDS_MIGRATION,
       RUN_TOLD_MIGRATION,
       SETUP_MIGRATION,
+      REPRODUCTION_MIGRATION,
     ])
     expect(readdirSync(join(dataFolder, BACKUPS_FOLDER))).toEqual([
       `${WORKSPACES_MIGRATION}.sqlite`,
@@ -1209,7 +1218,7 @@ describe('A profile of lot 19 is migrated to lot 20', () => {
       'profile.backed_up',
       'profile.migrated',
     ])
-    expect(JSON.parse(kept.events.at(-1)!.payload)).toEqual({ migration: SETUP_MIGRATION })
+    expect(JSON.parse(kept.events.at(-1)!.payload)).toEqual({ migration: REPRODUCTION_MIGRATION })
   })
 
   test('a command of a word of lot 18, or a step of an unknown state, is refused', async () => {
@@ -1419,6 +1428,7 @@ describe('A profile that ran the Workspaces gains the choices of its Sessions', 
       CONTEXT_WORDS_MIGRATION,
       RUN_TOLD_MIGRATION,
       SETUP_MIGRATION,
+      REPRODUCTION_MIGRATION,
     ])
     expect(readdirSync(join(dataFolder, BACKUPS_FOLDER))).toEqual([`${CHOICES_MIGRATION}.sqlite`])
 
@@ -1451,13 +1461,14 @@ describe('A profile that ran the Workspaces gains the choices of its Sessions', 
 })
 
 /**
- * What 0.4 shipped: every migration of the folder but the build's two, which were written before
- * the ones 0.4 carries and reached `dev` after them.
+ * What 0.4 shipped: every migration of the folder but the build's, the two that were written before
+ * the ones 0.4 carries and reached `dev` after them, and the one written after them all.
  */
 function shippedWithoutTheBuild(): string {
   const folder = join(workspace, 'shipped-0.4')
+  const build = [BUILD_MIGRATION, REVIEW_MIGRATION, REPRODUCTION_MIGRATION]
   for (const migration of readdirSync(SHIPPED)) {
-    if (migration === BUILD_MIGRATION || migration === REVIEW_MIGRATION) continue
+    if (build.includes(migration)) continue
     cpSync(join(SHIPPED, migration), join(folder, migration), { recursive: true })
   }
   return folder
@@ -1488,7 +1499,7 @@ describe('A profile of 0.4 is migrated to the build lot', () => {
     )
 
     const standing = await on(dataFolder, openProfile(dataFolder, SHIPPED, '0.5.0'))
-    expect(standing.behind).toEqual([BUILD_MIGRATION, REVIEW_MIGRATION])
+    expect(standing.behind).toEqual([BUILD_MIGRATION, REVIEW_MIGRATION, REPRODUCTION_MIGRATION])
     expect(readdirSync(join(dataFolder, BACKUPS_FOLDER))).toEqual([`${BUILD_MIGRATION}.sqlite`])
 
     const schema = (await on(dataFolder, schemaOf)).join('\n')
@@ -1566,6 +1577,7 @@ describe('A profile of lot 20 is migrated to lot 22', () => {
       CONTEXT_WORDS_MIGRATION,
       RUN_TOLD_MIGRATION,
       SETUP_MIGRATION,
+      REPRODUCTION_MIGRATION,
     ])
     expect(readdirSync(join(dataFolder, BACKUPS_FOLDER))).toEqual([`${BUILD_MIGRATION}.sqlite`])
 
@@ -1892,6 +1904,7 @@ describe('A profile that ran the choices keeps a queued result across a quit', (
       CONTEXT_WORDS_MIGRATION,
       RUN_TOLD_MIGRATION,
       SETUP_MIGRATION,
+      REPRODUCTION_MIGRATION,
     ])
     expect(readdirSync(join(dataFolder, BACKUPS_FOLDER))).toEqual([`${BUILD_MIGRATION}.sqlite`])
 
@@ -1941,6 +1954,7 @@ describe('A profile that ran the queued results keeps its commands, none run at 
       CONTEXT_WORDS_MIGRATION,
       RUN_TOLD_MIGRATION,
       SETUP_MIGRATION,
+      REPRODUCTION_MIGRATION,
     ])
     expect(readdirSync(join(dataFolder, BACKUPS_FOLDER))).toEqual([
       `${RUN_AT_OPEN_MIGRATION}.sqlite`,
@@ -1980,7 +1994,12 @@ describe('A profile that ran the commands at open keeps what its Sessions were p
     )
 
     const standing = await on(dataFolder, openProfile(dataFolder, SHIPPED, '0.4.0'))
-    expect(standing.behind).toEqual([CONTEXT_WORDS_MIGRATION, RUN_TOLD_MIGRATION, SETUP_MIGRATION])
+    expect(standing.behind).toEqual([
+      CONTEXT_WORDS_MIGRATION,
+      RUN_TOLD_MIGRATION,
+      SETUP_MIGRATION,
+      REPRODUCTION_MIGRATION,
+    ])
     expect(readdirSync(join(dataFolder, BACKUPS_FOLDER))).toEqual([
       `${CONTEXT_WORDS_MIGRATION}.sqlite`,
     ])
@@ -2026,7 +2045,7 @@ describe('A profile that ran the context notices keeps its runs, none owed to an
     )
 
     const standing = await on(dataFolder, openProfile(dataFolder, SHIPPED, '0.4.0'))
-    expect(standing.behind).toEqual([RUN_TOLD_MIGRATION, SETUP_MIGRATION])
+    expect(standing.behind).toEqual([RUN_TOLD_MIGRATION, SETUP_MIGRATION, REPRODUCTION_MIGRATION])
     expect(readdirSync(join(dataFolder, BACKUPS_FOLDER))).toEqual([`${RUN_TOLD_MIGRATION}.sqlite`])
 
     const runs = await on(
@@ -2069,7 +2088,7 @@ describe('A profile that ran the run told keeps its threads, and holds a setup p
     )
 
     const standing = await on(dataFolder, openProfile(dataFolder, SHIPPED, '0.4.0'))
-    expect(standing.behind).toEqual([SETUP_MIGRATION])
+    expect(standing.behind).toEqual([SETUP_MIGRATION, REPRODUCTION_MIGRATION])
     expect(readdirSync(join(dataFolder, BACKUPS_FOLDER))).toEqual([`${SETUP_MIGRATION}.sqlite`])
 
     const entries = await on(
@@ -2089,5 +2108,59 @@ describe('A profile that ran the run told keeps its threads, and holds a setup p
       { id: 'entry-1', kind: 'command_proposal', correlation_id: 'proposal:p1' },
       { id: 'entry-2', kind: 'setup_proposal', correlation_id: 'setup:s1' },
     ])
+  })
+})
+
+describe('A profile that ran the setup proposals keeps its builds, and holds a replay', () => {
+  test('a build and its end checks are kept whole, and a replay of a reproduction can be kept', async () => {
+    const dataFolder = join(workspace, 'from-setup-proposals')
+    await on(dataFolder, openProfile(dataFolder, shippedUpTo(SETUP_MIGRATION), '0.4.0'))
+    await on(
+      dataFolder,
+      Effect.gen(function* () {
+        const sql = yield* SqliteClient
+        const at = '2026-09-29T10:00:00.000Z'
+        yield* sql`INSERT INTO projects (id, name, tone, created_at, updated_at, version)
+          VALUES ('atlas', 'Atlas', 'primary', ${at}, ${at}, 1)`
+        yield* sql`INSERT INTO sessions (id, project_id, title, title_source, provider, mission, build_phase, created_at, last_written_at, version)
+          VALUES ('build-1', 'atlas', 'Build ATL-9', 'derived', 'claude', 'build', 'verify', ${at}, ${at}, 1)`
+        yield* sql`INSERT INTO build_attempts (id, session_id, scope, number, started_at, ended_at, result)
+          VALUES ('end-1', 'build-1', 'build', 1, ${at}, ${at}, 'green')`
+      }),
+    )
+
+    const standing = await on(dataFolder, openProfile(dataFolder, SHIPPED, '0.5.0'))
+    expect(standing.behind).toEqual([REPRODUCTION_MIGRATION])
+    expect(readdirSync(join(dataFolder, BACKUPS_FOLDER))).toEqual([
+      `${REPRODUCTION_MIGRATION}.sqlite`,
+    ])
+
+    const kept = await on(
+      dataFolder,
+      Effect.gen(function* () {
+        const sql = yield* SqliteClient
+        const before = yield* sql<{
+          id: string
+          result: string
+          reproduction: string | null
+          reproduction_gone: number | null
+        }>`SELECT id, result, reproduction, reproduction_gone FROM build_attempts`
+        const held = yield* sql<{
+          build_reproduction: string | null
+        }>`SELECT build_reproduction FROM sessions`
+        yield* sql`INSERT INTO build_attempts (id, session_id, scope, number, started_at, reproduction, reproduction_gone)
+          VALUES ('end-2', 'build-1', 'build', 2, '2026-09-30T10:00:00.000Z', 'The total matches.', 1)`
+        const after = yield* sql<{
+          reproduction: string | null
+          reproduction_gone: number | null
+        }>`SELECT reproduction, reproduction_gone FROM build_attempts WHERE id = 'end-2'`
+        return { before, held, after }
+      }),
+    )
+    expect(kept).toEqual({
+      before: [{ id: 'end-1', result: 'green', reproduction: null, reproduction_gone: null }],
+      held: [{ build_reproduction: null }],
+      after: [{ reproduction: 'The total matches.', reproduction_gone: 1 }],
+    })
   })
 })

@@ -3,11 +3,11 @@ import { RadioGroup } from '@base-ui/react/radio-group'
 import { AnimatePresence, LayoutGroup, motion } from 'motion/react'
 import { type FormEvent, type ReactNode, useEffect, useId, useRef, useState } from 'react'
 
-import { Badge } from '../components/badge/badge.tsx'
 import { Button } from '../components/button/button.tsx'
 import { Card } from '../components/card/card.tsx'
 import { Checkbox } from '../components/checkbox/checkbox.tsx'
 import { Input } from '../components/field/field.tsx'
+import { StatusDot, type StatusTone } from '../components/status-dot/status-dot.tsx'
 import { IconBrandHemeraAuto, IconBrandTypeSafe, IconRobot } from '../icons.ts'
 import { arrival, collapse, expand, fold, useTransition } from '../motion.ts'
 import { StrictnessChoice, type StrictnessLevel } from './auto-strictness.tsx'
@@ -82,19 +82,34 @@ const SLOT = 'relative flex rounded-md border border-border bg-muted'
 const SELECTED = 'absolute inset-0 rounded-md border border-primary bg-primary-muted'
 const NOTE = 'text-sm text-muted-foreground'
 
-function statusOf(
+/** A state, and the word the dot that says it is named by. */
+interface Standing {
+  tone: StatusTone
+  word: string
+}
+
+/**
+ * Where Hemera Auto stands, as a dot (the rule of #138: states are dots, not words). The word is
+ * the dot's name, which a screen reader says, and its hover.
+ */
+function standingOf(
   credential: CredentialStatus,
   evaluator: EvaluatorStatus,
   consent: boolean,
-): ReactNode {
-  if (evaluator === 'transitioning') return <Badge tone="info">Changing across Sessions…</Badge>
-  if (evaluator === 'unavailable') return <Badge tone="warning">Evaluator unavailable</Badge>
+): Standing {
+  if (evaluator === 'transitioning') return { tone: 'running', word: 'Changing across Sessions…' }
+  if (evaluator === 'unavailable') return { tone: 'failure', word: 'Evaluator unavailable' }
   if (credential === 'storage-unavailable')
-    return <Badge tone="destructive">Protected storage unavailable</Badge>
-  if (credential === 'invalid') return <Badge tone="warning">Key rejected</Badge>
-  if (credential === 'missing') return <Badge tone="warning">Key required</Badge>
-  if (!consent) return <Badge tone="warning">Consent required</Badge>
-  return <Badge tone="success">Ready</Badge>
+    return { tone: 'failure', word: 'Protected storage unavailable' }
+  if (credential === 'invalid') return { tone: 'failure', word: 'Key rejected' }
+  if (credential === 'missing') return { tone: 'pending', word: 'Key required' }
+  if (!consent) return { tone: 'pending', word: 'Consent required' }
+  return { tone: 'success', word: 'Ready' }
+}
+
+/** A dot that says its state by its name and on hover, and by nothing on screen. */
+function StandingDot({ tone, word }: Standing): ReactNode {
+  return <StatusDot status={tone} label={word} title={word} />
 }
 
 /** The application's one permission choice, followed by the selected engine's local settings. */
@@ -122,6 +137,7 @@ export function ClassifierSection({
   const folding = useTransition(fold)
   const classifierGroup = useId()
   const engineGroup = useId()
+  const standing = standingOf(credential, evaluator, consent)
 
   useEffect(() => {
     if (credential === 'missing' && restoreKeyFocus.current) {
@@ -177,7 +193,7 @@ export function ClassifierSection({
                     <span className="font-medium">{option.label}</span>
                     <span className={NOTE}>{option.description}</span>
                   </span>
-                  {!option.available && <Badge tone="neutral">Unavailable</Badge>}
+                  {!option.available && <StandingDot tone="cancelled" word="Unavailable" />}
                 </Radio.Root>
               </span>
             ))}
@@ -198,7 +214,7 @@ export function ClassifierSection({
                   <div role="status" className="flex flex-wrap items-center gap-2">
                     <IconBrandHemeraAuto size="sm" aria-hidden="true" />
                     <p className="min-w-0 flex-1 text-sm font-medium">Hemera Auto</p>
-                    {statusOf(credential, evaluator, consent)}
+                    <StandingDot tone={standing.tone} word={standing.word} />
                   </div>
                   <p className={NOTE}>
                     Local rules settle clear cases. Other calls are evaluated by the engine below.
@@ -242,7 +258,9 @@ export function ClassifierSection({
                                 </span>
                                 <span className={NOTE}>{option.description}</span>
                               </span>
-                              {!option.available && <Badge tone="neutral">Unavailable</Badge>}
+                              {!option.available && (
+                                <StandingDot tone="cancelled" word="Unavailable" />
+                              )}
                             </Radio.Root>
                           </span>
                         ))}
@@ -257,7 +275,9 @@ export function ClassifierSection({
                           className="min-w-0 flex-1"
                           label="Jev API key"
                           labelTrailing={
-                            credential === 'saved' ? <Badge tone="success">Saved</Badge> : undefined
+                            credential === 'saved' ? (
+                              <StandingDot tone="success" word="Saved" />
+                            ) : undefined
                           }
                           inputRef={keyField}
                           type="password"

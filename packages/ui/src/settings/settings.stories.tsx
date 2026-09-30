@@ -16,6 +16,7 @@ import {
   type ArchivedProject,
   type ProfileFacts,
   type SettingsProps,
+  type SettingsSection,
 } from './settings.tsx'
 
 /**
@@ -45,9 +46,13 @@ function Controlled({
   onRestore,
   acpTrace,
   onAcpTraceChange,
+  section,
+  onSectionChange,
   ...rest
 }: SettingsProps) {
   const [chosen, setChosen] = useState<ThemeChoice>(theme)
+  // Kept here as the application keeps it, so that a link to a setting can open its section.
+  const [shown, setShown] = useState<SettingsSection | undefined>(section)
   const [kept, setKept] = useState(archived)
   const [mode, setMode] = useState<ClassifierMode>(classifier?.mode ?? 'agent-default')
   const [engine, setEngine] = useState(classifier?.engine ?? 'jev')
@@ -60,6 +65,11 @@ function Controlled({
   return (
     <Settings
       {...rest}
+      section={shown}
+      onSectionChange={(next) => {
+        setShown(next)
+        onSectionChange?.(next)
+      }}
       acpTrace={tracing}
       onAcpTraceChange={(on) => {
         setTracing(on)
@@ -211,6 +221,9 @@ const meta = {
     onRestore: fn(),
     acpTrace: false,
     onAcpTraceChange: fn(),
+    onSectionChange: fn(),
+    decisions: [],
+    onOpenSession: fn(),
   },
   argTypes: {
     subtitle: { control: 'text', description: 'The product, its version and its channel.' },
@@ -231,14 +244,139 @@ const meta = {
       description: 'Whether the ACP trace of each Session is written.',
     },
     onAcpTraceChange: { action: 'trace turned on or off' },
+    defaultSection: {
+      control: 'select',
+      options: ['appearance', 'agents', 'hemera-auto', 'archive', 'profile', 'developer'],
+      description: 'The section shown first.',
+    },
+    section: { control: false, description: 'The section shown, for a caller that keeps it.' },
+    onSectionChange: { action: 'section chosen' },
   },
 } satisfies Meta<typeof Settings>
 
 export default meta
 type Story = StoryObj<typeof meta>
 
-/** The assembled App Settings surface, with the application-wide choice visible. */
-export const Complete: Story = {}
+/**
+ * Everything in place, on Appearance: the navigation of five sections on the left, and one
+ * section on screen at a time, as in Project settings.
+ */
+export const Complete: Story = {
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const nav = canvas.getByRole('tablist', { name: 'Settings' })
+    await expect(
+      within(nav)
+        .getAllByRole('tab')
+        .map((tab) => tab.textContent),
+    ).toEqual(['Appearance', 'Agents', 'Hemera Auto', 'Archive', 'Profile', 'Developer'])
+    await expect(canvas.getByRole('tab', { name: 'Appearance' })).toHaveAttribute(
+      'aria-selected',
+      'true',
+    )
+    await expect(canvas.getAllByRole('tabpanel')).toHaveLength(1)
+    await expect(canvas.getByRole('radiogroup', { name: 'Theme' })).toBeVisible()
+    await expect(canvas.queryByText('Open the folder')).toBeNull()
+  },
+}
+
+/** Agents: what this machine has, alone in its section. */
+export const Agents: Story = {
+  args: { defaultSection: 'agents' },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await expect(canvas.getByRole('tab', { name: 'Agents' })).toHaveAttribute(
+      'aria-selected',
+      'true',
+    )
+    await expect(canvas.getByText('Claude Code')).toBeVisible()
+  },
+}
+
+/** Hemera Auto: the permission classifier and its engine, alone in their section. */
+export const HemeraAuto: Story = {
+  args: {
+    defaultSection: 'hemera-auto',
+    classifier: { ...CLASSIFIER, mode: 'hemera-auto', credential: 'saved', consent: true },
+  },
+}
+
+/** Hemera Auto before the engine has answered: the section says so rather than hiding. */
+export const HemeraAutoUnread: Story = {
+  args: { defaultSection: 'hemera-auto', classifier: undefined },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await expect(canvas.getByRole('tab', { name: 'Hemera Auto' })).toBeVisible()
+    await expect(canvas.getByText('Hemera Auto cannot be read yet.')).toBeVisible()
+  },
+}
+
+/** Profile: the data folder as the engine reported it; the diagnostics are the Developer's. */
+export const Profile: Story = {
+  args: { defaultSection: 'profile' },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await expect(canvas.getByText('hemera.sqlite · 1.2 MB')).toBeVisible()
+    await expect(canvas.queryByRole('checkbox', { name: /ACP trace/ })).toBeNull()
+    await expect(canvas.queryByRole('button', { name: 'Open diagnostic.log' })).toBeNull()
+  },
+}
+
+/**
+ * Developer, last: what Hemera does behind the scenes, one card per panel — Hemera Auto's latest
+ * decisions across every Session, and the diagnostics.
+ */
+export const Developer: Story = {
+  args: {
+    defaultSection: 'developer',
+    decisions: [
+      {
+        id: 'd1',
+        at: '14:31:40',
+        sessionId: 's-parser',
+        session: 'Fix the parser',
+        tool: 'commands_run',
+        call: 'pnpm test --filter parser',
+        by: 'judge',
+        verdict: 'allowed',
+        scores: { risk: 1, approval: 0.2, userRequested: 0.9 },
+        model: 'jev-1',
+        roundTripMs: 820,
+        record: '{ "answer": "allowed", "by": "judge" }',
+      },
+    ],
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await expect(canvas.getByRole('list', { name: 'Hemera Auto decisions' })).toBeVisible()
+    await expect(
+      canvas.getByRole('checkbox', { name: /Write an ACP trace of each Session/ }),
+    ).toBeVisible()
+    await expect(canvas.getByRole('button', { name: 'Open diagnostic.log' })).toBeVisible()
+  },
+}
+
+/**
+ * A link to a setting opens its section: the page is handed the section it is asked for, whatever
+ * section was shown before, and it can still be left from there.
+ */
+export const ASettingPointedTo: Story = {
+  args: { section: 'hemera-auto' },
+  play: async ({ canvasElement, args }) => {
+    args.onSectionChange?.mockClear()
+    const canvas = within(canvasElement)
+    await expect(canvas.getByRole('tab', { name: 'Hemera Auto' })).toHaveAttribute(
+      'aria-selected',
+      'true',
+    )
+    await expect(canvas.getByRole('radiogroup', { name: 'Permission classifier' })).toBeVisible()
+    await userEvent.click(canvas.getByRole('tab', { name: 'Agents' }))
+    await expect(args.onSectionChange).toHaveBeenCalledWith('agents')
+    await waitFor(() => {
+      expect(canvas.getByRole('tab', { name: 'Agents' })).toHaveAttribute('aria-selected', 'true')
+    })
+  },
+}
 
 export const Playground: Story = {}
 
@@ -246,10 +384,8 @@ export const Playground: Story = {}
 export const Variants: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    expect(canvas.getAllByRole('radio')).toHaveLength(5)
+    expect(canvas.getAllByRole('radio')).toHaveLength(3)
     expect(canvas.getByRole('radio', { name: 'Dark' })).toBeChecked()
-    expect(canvas.getByText('hemera.sqlite · 1.2 MB')).toBeInTheDocument()
-    expect(canvas.getByText('20260916_projects_and_journal')).toBeInTheDocument()
   },
 }
 
@@ -279,18 +415,23 @@ export const NothingWrittenYet: Story = {
       backups: null,
     },
     archived: [],
+    defaultSection: 'profile',
   },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     expect(canvas.getByText('none yet')).toBeInTheDocument()
     expect(canvas.getByText('nobody yet')).toBeInTheDocument()
     expect(canvas.getByText('none taken yet')).toBeInTheDocument()
-    expect(canvas.getByText(/No Project has been archived/)).toBeInTheDocument()
+    await userEvent.click(canvas.getByRole('tab', { name: 'Archive' }))
+    await waitFor(() => {
+      expect(canvas.getByText(/No Project has been archived/)).toBeInTheDocument()
+    })
   },
 }
 
 /** Scenario « Ouvrir le dossier » of `specs/shell-navigation/spec.md`, as far as a page goes. */
 export const OpeningTheFolder: Story = {
+  args: { defaultSection: 'profile' },
   play: async ({ canvasElement, args }) => {
     args.onOpenFolder.mockClear()
     args.onOpenDiagnostic.mockClear()
@@ -299,13 +440,15 @@ export const OpeningTheFolder: Story = {
     await userEvent.click(canvas.getByRole('button', { name: 'Open the folder' }))
     expect(args.onOpenFolder).toHaveBeenCalled()
 
-    await userEvent.click(canvas.getByRole('button', { name: 'Open diagnostic.log' }))
+    await userEvent.click(canvas.getByRole('tab', { name: 'Developer' }))
+    await userEvent.click(await canvas.findByRole('button', { name: 'Open diagnostic.log' }))
     expect(args.onOpenDiagnostic).toHaveBeenCalled()
   },
 }
 
 /** Scenario « Restaurer un Projet » of `specs/shell-navigation/spec.md`. */
 export const RestoringAProject: Story = {
+  args: { defaultSection: 'archive' },
   play: async ({ canvasElement, args }) => {
     args.onRestore.mockClear()
     const canvas = within(canvasElement)
@@ -328,22 +471,46 @@ export const RestoringAProject: Story = {
   },
 }
 
-/** The segment is one stop of the tab order, and the arrows move inside it. */
+/**
+ * The navigation with the keyboard, as in Project settings: one stop, the arrows walk it and
+ * show each section, Tab goes on into the section. The theme's segment is one stop too, and the
+ * arrows move inside it.
+ */
 export const Keyboard: Story = {
-  play: async ({ canvasElement }) => {
+  play: async ({ canvasElement, args }) => {
+    args.onSectionChange?.mockClear()
     const canvas = within(canvasElement)
     await userEvent.tab()
-    expect(canvas.getByRole('radio', { name: 'Dark' })).toHaveFocus()
+    const appearance = canvas.getByRole('tab', { name: 'Appearance' })
+    await expect(appearance).toHaveFocus()
 
+    await userEvent.tab()
+    expect(canvas.getByRole('radio', { name: 'Dark' })).toHaveFocus()
     await userEvent.keyboard('{ArrowRight}')
     await waitFor(() => {
       expect(canvas.getByRole('radio', { name: 'System' })).toBeChecked()
     })
+
+    appearance.focus()
+    await userEvent.keyboard('{ArrowDown}{ArrowDown}')
+    const auto = canvas.getByRole('tab', { name: 'Hemera Auto' })
+    await expect(auto).toHaveFocus()
+    await expect(auto).toHaveAttribute('aria-selected', 'true')
+    await expect(args.onSectionChange).toHaveBeenCalledWith('hemera-auto')
+    // A section left stays in the page, inert, until its leaving is over; the test's Tab does not
+    // pass over an inert control the way the browser's does.
+    await waitFor(() => {
+      expect(canvas.getAllByRole('tabpanel')).toHaveLength(1)
+    })
+    await userEvent.tab()
+    await expect(canvas.getByRole('radio', { name: /Agent default/ })).toHaveFocus()
+    await expect(auto).toHaveAttribute('aria-selected', 'true')
   },
 }
 
 /** Agent default remains selected when a key is saved, and the mode is global. */
 export const ClassifierSelection: Story = {
+  args: { defaultSection: 'hemera-auto' },
   play: async ({ canvasElement, args }) => {
     const canvas = within(canvasElement)
     const defaultMode = canvas.getByRole('radio', { name: /Agent default/ })
@@ -362,31 +529,43 @@ export const ClassifierSelection: Story = {
 
 /** The full key journey uses mock state and never holds a real credential. */
 export const CredentialJourney: Story = {
-  args: { classifier: { ...CLASSIFIER, mode: 'hemera-auto', consent: true } },
+  args: {
+    defaultSection: 'hemera-auto',
+    classifier: { ...CLASSIFIER, mode: 'hemera-auto', consent: true },
+  },
   play: async ({ canvasElement, args }) => {
     const canvas = within(canvasElement)
     const field = canvas.getByLabelText('Jev API key')
     await userEvent.type(field, 'storybook-demo-key')
     await userEvent.click(canvas.getByRole('button', { name: 'Save key' }))
     expect(args.classifier?.onSaveKey).toHaveBeenCalledWith('storybook-demo-key')
-    await waitFor(() => expect(canvas.getByText('Saved')).toBeInTheDocument())
+    await waitFor(() => expect(canvas.getByRole('img', { name: 'Saved' })).toBeInTheDocument())
+    expect(canvas.queryByText('Saved')).toBeNull()
     expect(canvas.getByRole('radio', { name: /Hemera Auto/ })).toBeChecked()
     await userEvent.type(field, 'replacement-demo-key')
     await userEvent.click(canvas.getByRole('button', { name: 'Replace key' }))
     expect(args.classifier?.onSaveKey).toHaveBeenCalledWith('replacement-demo-key')
     await userEvent.click(canvas.getByRole('button', { name: 'Remove key' }))
-    await waitFor(() => expect(canvas.getByText('Key required')).toBeVisible())
+    await waitFor(() => expect(canvas.getByRole('img', { name: 'Key required' })).toBeVisible())
     await expect(field).toHaveFocus()
     expect(args.classifier?.onRemoveKey).toHaveBeenCalled()
   },
 }
 
+/** Each state of Hemera Auto is a dot; its word is the dot's name and its hover, never a badge. */
 export const MissingKey: Story = {
-  args: { classifier: { ...CLASSIFIER, mode: 'hemera-auto' } },
+  args: { defaultSection: 'hemera-auto', classifier: { ...CLASSIFIER, mode: 'hemera-auto' } },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const dot = canvas.getByRole('img', { name: 'Key required' })
+    expect(dot).toHaveAttribute('title', 'Key required')
+    expect(canvas.queryByText('Key required')).toBeNull()
+  },
 }
 
 export const InvalidKey: Story = {
   args: {
+    defaultSection: 'hemera-auto',
     classifier: {
       ...CLASSIFIER,
       mode: 'hemera-auto',
@@ -396,13 +575,15 @@ export const InvalidKey: Story = {
   },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    expect(canvas.getByText('Key rejected')).toBeVisible()
+    expect(canvas.getByRole('img', { name: 'Key rejected' })).toBeVisible()
+    expect(canvas.queryByText('Key rejected')).toBeNull()
     expect(canvas.getByRole('alert')).toHaveTextContent('The key was rejected')
   },
 }
 
 export const StorageUnavailable: Story = {
   args: {
+    defaultSection: 'hemera-auto',
     classifier: {
       ...CLASSIFIER,
       mode: 'hemera-auto',
@@ -412,7 +593,8 @@ export const StorageUnavailable: Story = {
   },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    expect(canvas.getByText('Protected storage unavailable')).toBeVisible()
+    expect(canvas.getByRole('img', { name: 'Protected storage unavailable' })).toBeVisible()
+    expect(canvas.queryByText('Protected storage unavailable')).toBeNull()
     expect(canvas.getByLabelText('Jev API key')).toBeDisabled()
     expect(canvas.getByRole('button', { name: 'Save key' })).toBeDisabled()
   },
@@ -420,6 +602,7 @@ export const StorageUnavailable: Story = {
 
 export const EvaluatorUnavailable: Story = {
   args: {
+    defaultSection: 'hemera-auto',
     classifier: {
       ...CLASSIFIER,
       mode: 'hemera-auto',
@@ -427,22 +610,30 @@ export const EvaluatorUnavailable: Story = {
       evaluator: 'unavailable',
     },
   },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    expect(canvas.getByRole('img', { name: 'Evaluator unavailable' })).toBeVisible()
+    expect(canvas.queryByText('Evaluator unavailable')).toBeNull()
+  },
 }
 
 export const ConsentRequired: Story = {
   args: {
+    defaultSection: 'hemera-auto',
     classifier: { ...CLASSIFIER, mode: 'hemera-auto', credential: 'saved', consent: false },
   },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    expect(canvas.getByText('Consent required')).toBeVisible()
+    expect(canvas.getByRole('img', { name: 'Consent required' })).toBeVisible()
     await userEvent.click(canvas.getByRole('checkbox', { name: /Allow this evaluation data/ }))
-    await waitFor(() => expect(canvas.getByText('Ready')).toBeVisible())
+    await waitFor(() => expect(canvas.getByRole('img', { name: 'Ready' })).toBeVisible())
+    expect(canvas.queryByText('Ready')).toBeNull()
   },
 }
 
 export const TransitionPending: Story = {
   args: {
+    defaultSection: 'hemera-auto',
     classifier: {
       ...CLASSIFIER,
       mode: 'hemera-auto',
@@ -452,7 +643,8 @@ export const TransitionPending: Story = {
   },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    expect(canvas.getByText('Changing across Sessions…')).toBeVisible()
+    expect(canvas.getByRole('img', { name: 'Changing across Sessions…' })).toBeVisible()
+    expect(canvas.queryByText('Changing across Sessions…')).toBeNull()
     expect(canvas.getByRole('radio', { name: /Agent default/ })).toBeDisabled()
     expect(canvas.getByRole('radio', { name: /Hemera Auto/ })).toBeDisabled()
   },
@@ -462,6 +654,7 @@ export const TransitionPending: Story = {
 export const ExtensibleEngine: Story = {
   name: 'The application classifier selector is accessible and extensible',
   args: {
+    defaultSection: 'hemera-auto',
     classifier: {
       ...CLASSIFIER,
       mode: 'hemera-auto',
@@ -488,6 +681,7 @@ export const ExtensibleEngine: Story = {
 
 /** The main choice is one keyboard group; engine selection stays below the selected mode. */
 export const ClassifierKeyboard: Story = {
+  args: { defaultSection: 'hemera-auto' },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     const defaultMode = canvas.getByRole('radio', { name: /Agent default/ })
@@ -570,6 +764,7 @@ export const StrictnessMarkCrossing: Story = {
  * that says what it keeps and what it does not.
  */
 export const TurningTheTraceOn: Story = {
+  args: { defaultSection: 'developer' },
   play: async ({ canvasElement, args }) => {
     const canvas = within(canvasElement)
     const box = canvas.getByRole('checkbox', { name: /Write an ACP trace of each Session/ })
@@ -598,6 +793,24 @@ export const MarkCrossing: Story = {
       () => userEvent.click(canvas.getByRole('radio', { name: 'Dark' })),
     )
     expect(canvas.getByRole('radio', { name: 'Dark' })).toBeChecked()
+    expectNeverBuried(watched)
+  },
+}
+
+/**
+ * The fill of the navigation crossing it, down to the last section and back up to the first: on
+ * every frame of the way it is drawn over the sections it crosses and never under one (#127).
+ */
+export const NavigationMarkCrossing: Story = {
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const navigation = canvas.getByRole('tablist', { name: 'Settings' })
+    const watched = await watchThereAndBack(
+      navigation,
+      () => userEvent.click(canvas.getByRole('tab', { name: 'Developer' })),
+      () => userEvent.click(canvas.getByRole('tab', { name: 'Appearance' })),
+    )
+    expect(canvas.getByRole('tab', { name: 'Appearance' })).toHaveAttribute('aria-selected', 'true')
     expectNeverBuried(watched)
   },
 }

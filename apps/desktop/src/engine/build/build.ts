@@ -30,6 +30,7 @@ import {
   type CheckWhen,
   SPEC_PAGE_CHARACTERS,
   type SpecSnapshot,
+  type SpecType,
   type TaskExecutor,
   type TaskState,
   type ToolName,
@@ -139,6 +140,17 @@ export interface AttemptView {
   readonly result: AttemptResult | null
   readonly checks: readonly CheckResultView[]
   readonly files: readonly ChangedFileView[]
+  /**
+   * The end checks of a `bug`: the replay of its reproduction the agent reported before them, what
+   * it observed and whether the incorrect behaviour is gone; null when it reported none (#203).
+   */
+  readonly reproduction: ReproductionView | null
+}
+
+/** A replay of a bug's reproduction, as the agent reported it (issue #203). */
+export interface ReproductionView {
+  readonly observed: string
+  readonly gone: boolean
 }
 
 /** One contractual task of the build, its definition beside where it stands (D10-04). */
@@ -203,6 +215,8 @@ export interface BuildView {
   readonly specId: string
   readonly specKey: string
   readonly specTitle: string
+  /** What the Spec proves: a `bug`'s final checks wait for the replay of its reproduction. */
+  readonly specType: SpecType
   /** The number of the revision the build was started on, which "Spec" opens read only. */
   readonly revision: number
   readonly phase: BuildPhase
@@ -264,10 +278,10 @@ export class UnknownBuildError extends Data.TaggedError('UnknownBuildError')<{
 /** Everything a user's action on a build can be answered with. */
 export type BuildRefusal = DatabaseError | BuildRefusedError | UnknownBuildError
 
-/** A call to one of the three build tools, as `parseCall` read it. */
+/** A call to one of the build's own tools, as `parseCall` read it. */
 export type BuildCall = Extract<
   ParsedCall,
-  { tool: 'build_read' | 'task_finished' | 'task_blocked' }
+  { tool: 'build_read' | 'task_finished' | 'task_blocked' | 'reproduction_replayed' }
 >
 
 /** What a build tool answers: the catalogue's `Answer`, which it writes down like any other. */
@@ -285,7 +299,12 @@ export const PAUSED = 'the build is paused: nothing new starts until the user re
 /** Why the user stopped a build, as its view says. */
 const STOPPED = 'Stopped by the user.'
 
-const BUILD_TOOLS: readonly ToolName[] = ['build_read', 'task_finished', 'task_blocked']
+const BUILD_TOOLS: readonly ToolName[] = [
+  'build_read',
+  'task_finished',
+  'task_blocked',
+  'reproduction_replayed',
+]
 
 /** Which of the Project's checks judge an attempt, by what it is about (D10-06). */
 const WHEN: Readonly<Record<AttemptScope, CheckWhen>> = {
@@ -381,7 +400,7 @@ export interface BuildsService {
     run: Effect.Effect<A>,
     refuse: (reason: string) => Effect.Effect<A>,
   ) => Effect.Effect<A>
-  /** `build_read`, `task_finished`, `task_blocked` (D10-04, D10-13). */
+  /** `build_read`, `task_finished`, `task_blocked` (D10-04, D10-13), `reproduction_replayed` (#203). */
   readonly tool: (sessionId: string, call: BuildCall) => Effect.Effect<BuildAnswer>
   readonly view: (sessionId: string) => Effect.Effect<BuildView, BuildRefusal>
   /** D10-09: nothing new starts; the running Hemera call ends, then the turn stops. */
@@ -464,6 +483,19 @@ function refusedAnswer(reason: string): BuildAnswer {
   }
 }
 
+/** Why Accept waits on a bug whose final checks are green and nothing else (issue #203). */
+const NOT_REPLAYED = 'The bug’s reproduction was not replayed.'
+
+/**
+ * Whether the user's message is the review of a build: it waits for the user's review, or for the
+ * replay of its bug's reproduction alone — which the user asks the agent for in the chat, and which
+ * the end checks that follow the review's turn take with them (issue #203).
+ */
+function awaitsReview(rows: BuildRows): boolean {
+  const refusal = acceptRefusal(rows)
+  return refusal === null || refusal === NOT_REPLAYED
+}
+
 /** Why Accept is not offered, or null when it is (D10-11). */
 function acceptRefusal(rows: BuildRows): string | null {
   // A review sent the build back to work (issue #117): Accept waits for the checks it runs again,
@@ -487,6 +519,9 @@ function acceptRefusal(rows: BuildRows): string | null {
   if ([...lasts.values()].some((attempt) => resultOf(attempt) === 'red')) {
     return 'The final checks are not green.'
   }
+  // A bug is accepted on what its reproduction showed once replayed, and on nothing less: the
+  // last end checks carry the replay reported before them, or Accept waits (issue #203).
+  if (rows.snapshot.revision.type === 'bug' && end.reproduction === null) return NOT_REPLAYED
   return null
 }
 
@@ -524,6 +559,10 @@ function attemptView(rows: BuildRows, attempt: AttemptRow): AttemptView {
         added: one.added,
         removed: one.removed,
       })),
+    reproduction:
+      attempt.reproduction === null || attempt.reproductionGone === null
+        ? null
+        : { observed: attempt.reproduction, gone: attempt.reproductionGone },
   }
 }
 
@@ -544,6 +583,7 @@ export function viewOf(rows: BuildRows): BuildView {
     specId: rows.specId,
     specKey: rows.snapshot.spec.key,
     specTitle: rows.snapshot.revision.title,
+    specType: rows.snapshot.revision.type,
     revision: rows.snapshot.revision.number,
     phase: rows.phase ?? 'prepare',
     pausedAt: rows.session.buildPausedAt,
@@ -1333,6 +1373,57 @@ export const buildsLayer = Layer.effect(
         )
       })
 
+    /**
+     * `reproduction_replayed` (issue #203): what the replay of a bug's reproduction showed, held on
+     * the Session until the end checks that follow the turn take it with them. Only a `bug` has a
+     * reproduction, and only its final checks — or a review, which runs them again — ask for it.
+     */
+    const replay = (
+      sessionId: string,
+      call: Extract<BuildCall, { tool: 'reproduction_replayed' }>,
+    ) =>
+      Effect.gen(function* () {
+        const { gone, observed } = call.arguments
+        const refusal = yield* withDatabase(
+          mutate('keeping the replay of the reproduction', (transaction) =>
+            Effect.gen(function* () {
+              const rows = yield* readBuild(transaction, sessionId)
+              if (rows === null) return { result: 'this Session runs no build', events: [] }
+              const type = rows.snapshot.revision.type
+              if (type !== 'bug') {
+                return {
+                  result: `this Spec is a ${type}: it has no reproduction to replay`,
+                  events: [],
+                }
+              }
+              if (rows.phase !== 'verify' && rows.session.buildReviewAt === null) {
+                return {
+                  result:
+                    'the reproduction is replayed in the final checks, once every task is settled',
+                  events: [],
+                }
+              }
+              yield* transaction
+                .update(sessions)
+                .set({ buildReproduction: observed, buildReproductionGone: gone })
+                .where(eq(sessions.id, sessionId))
+                .pipe(Effect.mapError(failed('keeping the replay of the reproduction')))
+              return {
+                result: null,
+                events: [buildEvent(rows, 'build.reproduction_replayed', 'agent', { gone })],
+              }
+            }),
+          ),
+        )
+        if (refusal !== null) return refusedAnswer(refusal)
+        yield* told(sessionId)
+        const seen = gone ? 'the bug is gone' : 'the bug is still there'
+        return completed(
+          `Reproduction replayed: ${seen}`,
+          `Kept: ${seen}. Hemera shows it with the end checks that run once this turn is over.`,
+        )
+      })
+
     /** The use case of one build tool. */
     const used = (sessionId: string, call: BuildCall) => {
       switch (call.tool) {
@@ -1342,6 +1433,8 @@ export const buildsLayer = Layer.effect(
           return finish(sessionId, call)
         case 'task_blocked':
           return block(sessionId, call)
+        case 'reproduction_replayed':
+          return replay(sessionId, call)
       }
     }
 
@@ -1988,7 +2081,7 @@ export const buildsLayer = Layer.effect(
           Effect.flatMap((rows) =>
             // A build that waits for the review and nothing else: any other message is the user
             // talking to the agent, and moves no phase.
-            rows === null || acceptRefusal(rows) !== null
+            rows === null || !awaitsReview(rows)
               ? Effect.void
               : acted(sessionId, "taking the user's review", (transaction, fresh, at) =>
                   Effect.gen(function* () {

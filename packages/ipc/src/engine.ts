@@ -454,6 +454,17 @@ export const ENGINE_REQUESTS = {
     response: z.void(),
   },
   'classifier.key.remove': { arguments: nothingSchema, response: z.void() },
+  // Hemera Auto's latest decisions across every Session, newest first, with the Session each was
+  // taken in (#294): read only, the stored entries masked, for the Developer section.
+  'classifier.decisions': {
+    arguments: z.object({ limit: limitSchema.optional() }),
+    response: z.array(
+      z.object({
+        entry: sessionEntrySchema,
+        session: z.object({ id: z.string(), title: z.string(), projectId: z.string() }),
+      }),
+    ),
+  },
   'preferences.read': {
     arguments: nothingSchema,
     response: displayPreferencesSchema,

@@ -12,7 +12,7 @@ import { ReviewCard } from './review-card.tsx'
 const meta = {
   title: 'Blocks/Build/ReviewCard',
   component: ReviewCard,
-  tags: ['autodocs', 'new'],
+  tags: ['autodocs'],
   parameters: { layout: 'padded' },
   args: { onOpenChat: fn() },
   argTypes: {

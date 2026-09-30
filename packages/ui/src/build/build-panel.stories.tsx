@@ -3,13 +3,14 @@ import { type ReactNode, useState } from 'react'
 import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
 
 import { HemeraToolCall } from '../activity/hemera-tool-call.tsx'
-import { PermissionRequest } from '../approval/permission-request.tsx'
-import { BlockedBanner } from '../composer/blocked-banner.tsx'
+import { PermissionRecord, PermissionRequest } from '../approval/permission-request.tsx'
 import { Composer } from '../composer/composer.tsx'
 import { TooltipProvider } from '../components/tooltip/tooltip.tsx'
+import { IconShield } from '../icons.ts'
 import { AgentText } from '../message/agent-text.tsx'
 import { MessageScroller, type ScrollerEntry } from '../message/scroller/scroller.tsx'
-import { SessionNotices } from '../session/session-notices.tsx'
+import { type NoticeGroup, SessionNotices } from '../session/session-notices.tsx'
+import { SessionDetails } from '../session/session-details.tsx'
 import { SessionHeader } from '../session/session.tsx'
 import { MissionBrief } from '../spec/mission-brief.tsx'
 import { READY } from '../spec/spec-fixtures.ts'
@@ -37,8 +38,9 @@ import { type BuildViewData } from './model.ts'
  * band beside the chat, which it pushes as it moves.
  *
  * What waits for the user in the build — a task that is theirs, a blocker the agent raised, the
- * review — stands in the view and among the Session's notices, on the composer's edge. A permission the agent asks stands in the thread,
- * the composer saying the turn waits.
+ * review — stands in the view and among the Session's notices, on the composer's edge. A permission
+ * the agent asks stands there too, in its own kind beside the build's, and the thread keeps its
+ * record where it was asked: one never hides the other (issue #203).
  *
  * Every screen is the build of `ATL-7` at one moment, left as it opens: its play asserts and
  * changes nothing. The paths through it — the Spec opening in the view's place, the fold, a
@@ -92,41 +94,70 @@ const THREAD: ScrollerEntry[] = [
   },
 ]
 
-/** A permission the agent asks, in the thread, which the composer says it waits on. */
+/** The line a permission of the agent asks to run. */
+const ASKED = 'pnpm vitest run src/billing/export-csv.test.ts'
+
+/** The record of a permission the agent asks, which the thread keeps where it was asked. */
 const PERMISSION: ScrollerEntry = {
   id: 'permission',
   content: (
-    <PermissionRequest
+    <PermissionRecord
       toolName="commands_run"
       label="Run command"
-      subject="pnpm vitest run src/billing/export-csv.test.ts"
-      intent="asks to run the test it wrote for the header order"
-      options={[
-        { optionId: 'allow-once', kind: 'allow_once', name: 'Allow once' },
-        { optionId: 'reject-once', kind: 'reject_once', name: 'Reject once' },
-      ]}
-      onDecide={fn()}
+      subject={ASKED}
+      command={ASKED}
+      standing="pending"
     />
   ),
 }
 
-/** The chat of the Session: its head, its thread, its composer and the notices on its edge. */
-function Chat({
-  thread,
-  blocked,
-  notices,
-}: {
-  thread: ScrollerEntry[]
-  blocked: ReactNode
-  notices: ReactNode
-}): ReactNode {
+/** The permission among the Session's notices, where it is answered: a kind of its own. */
+const PERMISSIONS: NoticeGroup = {
+  kind: 'permission',
+  label: 'Permissions',
+  title: 'Run once',
+  icon: <IconShield size="md" aria-hidden="true" />,
+  urgent: true,
+  tone: 'warning',
+  items: [
+    {
+      id: 'permission',
+      content: (
+        <PermissionRequest
+          toolName="commands_run"
+          label="Run command"
+          subject={ASKED}
+          command={ASKED}
+          intent="asks to run the test it wrote for the header order"
+          options={[
+            { optionId: 'reject-once', kind: 'reject_once', name: 'Reject once' },
+            { optionId: 'allow-once', kind: 'allow_once', name: 'Allow once' },
+          ]}
+          onDecide={fn()}
+        />
+      ),
+    },
+  ],
+}
+
+/**
+ * The chat of the Session: its head, whose details open the Session details, its thread, its
+ * composer and the notices on its edge.
+ */
+function Chat({ thread, notices }: { thread: ScrollerEntry[]; notices: ReactNode }): ReactNode {
   const [value, setValue] = useState('')
   const [files, setFiles] = useState<string[]>([])
+  const [details, setDetails] = useState(false)
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col">
       <div className="mx-auto w-full max-w-3xl px-6 pt-6 pb-4">
-        <SessionHeader title="Build CSV export" onRename={fn()} onOpenDetails={fn()} />
+        <SessionHeader
+          title="Build CSV export"
+          onRename={fn()}
+          onOpenDetails={() => setDetails(true)}
+        />
       </div>
+      <SessionDetails open={details} onOpenChange={setDetails} plan={[]} files={[]} />
       <MessageScroller className="flex-1" label="The thread of this Session" entries={thread} />
       <div className="mx-auto flex w-full max-w-3xl flex-col gap-2 px-6 pb-4">
         <Composer
@@ -141,7 +172,6 @@ function Chat({
           onSend={() => Promise.resolve(null)}
           running
           onStop={fn()}
-          blocked={blocked}
           notices={notices}
         />
       </div>
@@ -176,7 +206,7 @@ function Screen({
   onOpenChat,
 }: {
   screen: keyof typeof SCREENS
-  /** Whether a permission of the agent waits in the thread. */
+  /** Whether a permission of the agent waits, among the notices and in the thread. */
   asking?: boolean
   /** Whether the panel opens folded to its band. */
   folded?: boolean
@@ -212,12 +242,11 @@ function Screen({
       <div className="@container flex h-screen min-h-0 bg-background text-foreground">
         <Chat
           thread={thread}
-          blocked={
-            asking ? (
-              <BlockedBanner waiting="The agent is asking to go on." onStop={fn()} />
-            ) : undefined
+          notices={
+            <SessionNotices
+              groups={[...(asking ? [PERMISSIONS] : []), buildNotices(view, setSelected)]}
+            />
           }
-          notices={<SessionNotices groups={[buildNotices(view, setSelected)]} />}
         />
         <BuildPanel
           {...view}
@@ -257,7 +286,7 @@ const meta = {
       options: Object.keys(SCREENS),
       description: 'Which moment of the build.',
     },
-    asking: { control: 'boolean', description: 'Whether a permission waits in the thread.' },
+    asking: { control: 'boolean', description: 'Whether a permission of the agent waits.' },
     folded: { control: 'boolean', description: 'Whether the panel opens folded to its band.' },
     specOpen: {
       control: 'boolean',
@@ -285,8 +314,8 @@ function widthOf(canvasElement: HTMLElement, name: string): number {
 
 /**
  * Everything in place: the Session's head, the thread — the agent's calls to the build's tools and
- * a permission it asks, which the composer says it waits on — and the build in the panel on its
- * right, a share of the row, T2 on its second try on the view's stage.
+ * the record of a permission it asks, which waits among the notices — and the build in the panel
+ * on its right, a share of the row, T2 on its second try on the view's stage.
  */
 export const Complete: Story = {
   args: { asking: true },
@@ -302,7 +331,9 @@ export const Complete: Story = {
     )
     const thread = within(canvas.getByRole('log', { name: 'The thread of this Session' }))
     await expect(thread.getByRole('button', { name: /Task finished T3/ })).toBeVisible()
-    await expect(thread.getByRole('button', { name: 'Allow once' })).toBeVisible()
+    await expect(
+      await canvas.findByRole('button', { name: 'Waiting for your answer: Permissions 1' }),
+    ).toBeVisible()
   },
 }
 
@@ -341,6 +372,34 @@ export const Yours: Story = {
     await expect(
       await canvas.findByRole('button', { name: 'Waiting for your answer: Build 1' }),
     ).toBeVisible()
+  },
+}
+
+/**
+ * A task of the build is the user's while the agent asks a permission (issue #203): both wait in the
+ * notices, each in its kind, and answering one leaves the other there.
+ */
+export const PermissionBesideTheBuild: Story = {
+  args: { screen: 'yours', asking: true },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement)
+    await userEvent.click(
+      await canvas.findByRole('button', {
+        name: 'Waiting for your answer: Permissions 1, Build 1',
+      }),
+    )
+    const page = within(document.body)
+    const permissions = within(await page.findByRole('region', { name: 'Permissions' }))
+    await waitFor(() =>
+      expect(permissions.getByRole('button', { name: 'Allow once' })).toBeVisible(),
+    )
+    const build = within(page.getByRole('region', { name: 'Build' }))
+    const yours = within(build.getByRole('group', { name: 'T4 is yours' }))
+    await userEvent.click(yours.getByRole('button', { name: 'Done' }))
+    await expect(args.onTaskDone).toHaveBeenCalledWith(T4_YOURS.id)
+    await waitFor(() =>
+      expect(permissions.getByRole('button', { name: 'Allow once' })).toBeVisible(),
+    )
   },
 }
 
@@ -515,6 +574,49 @@ export const ReviewAmongTheNotices: Story = {
     await expect(args.onOpenChat).toHaveBeenCalled()
     await userEvent.click(notice.getByRole('button', { name: 'Accept' }))
     await expect(args.onAccept).toHaveBeenCalled()
+  },
+}
+
+/** Whether two boxes of the page share any of their area. */
+function overlaps(one: DOMRect, other: DOMRect): boolean {
+  return (
+    one.left < other.right &&
+    other.left < one.right &&
+    one.top < other.bottom &&
+    other.top < one.bottom
+  )
+}
+
+/**
+ * The frozen Spec and the Session details are two things of their own (issue #203): the Spec opens
+ * inside the build's panel and over nothing of the chat, the details open and close without closing
+ * it, and closing the Spec leaves the details closed.
+ */
+export const SpecAndDetailsApart: Story = {
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const page = within(document.body)
+    await userEvent.click(canvas.getByRole('button', { name: 'Spec' }))
+    const spec = await canvas.findByRole('region', { name: 'Spec ATL-7' })
+    const panel = canvas.getByRole('region', { name: 'Build ATL-7' }).getBoundingClientRect()
+    const thread = canvas.getByLabelText('The thread of this Session').getBoundingClientRect()
+    const drawn = spec.getBoundingClientRect()
+    // Laid at the panel's own width and clipped by its slot: it starts in the panel, and nothing
+    // of it covers the chat.
+    await expect(drawn.left).toBeGreaterThanOrEqual(panel.left)
+    await expect(overlaps(drawn, thread)).toBe(false)
+
+    const opener = canvas.getByRole('button', { name: 'Session details' })
+    await userEvent.click(opener)
+    await waitFor(() => expect(page.getByRole('dialog')).toBeVisible())
+    await userEvent.keyboard('{Escape}')
+    await waitFor(() => expect(page.queryByRole('dialog')).toBeNull())
+    await waitFor(() => expect(opener).toHaveFocus())
+    await expect(canvas.getByRole('region', { name: 'Spec ATL-7' })).toBeVisible()
+
+    await userEvent.click(canvas.getByRole('button', { name: 'Close the Spec' }))
+    await waitFor(() => expect(canvas.queryByRole('region', { name: 'Spec ATL-7' })).toBeNull())
+    await expect(page.queryByRole('dialog')).toBeNull()
   },
 }
 

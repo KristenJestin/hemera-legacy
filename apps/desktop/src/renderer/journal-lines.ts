@@ -173,6 +173,10 @@ function labelOf(entry: JournalEntry): string {
       return 'Build resumed'
     case 'build.reviewed':
       return 'Build back to work on the review of the user'
+    case 'build.reproduction_replayed':
+      return payload.gone === true
+        ? 'Reproduction replayed: the bug is gone'
+        : 'Reproduction replayed: the bug is still there'
     case 'build.accepted':
       return 'Build accepted'
     case 'build.stopped':

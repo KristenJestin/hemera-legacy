@@ -723,6 +723,15 @@ export const toolCatalogueLayer: Layer.Layer<
             named,
             resolved: where,
             answer,
+            // Asked by Hemera Auto, the answer is one of its decisions (#294): who decided, what
+            // the classifier had settled before asking, and on what. Left out otherwise.
+            by: classified === undefined ? undefined : 'human',
+            judged: classified === undefined ? undefined : BY[classified.source ?? 'cancelled'],
+            line: classified === undefined ? undefined : (line ?? undefined),
+            policyVersion: classified === undefined ? undefined : CLASSIFIER_POLICY_VERSION,
+            model: classified?.model === '' ? undefined : classified?.model,
+            scores: classified?.scores,
+            classifier: classified?.correlationId,
           }),
           correlationId: `decision:${id}`,
           state: answer === 'allowed' ? 'completed' : answer,
@@ -1860,6 +1869,7 @@ export const toolCatalogueLayer: Layer.Layer<
           case 'build_read':
           case 'task_finished':
           case 'task_blocked':
+          case 'reproduction_replayed':
             return yield* builds.tool(asked.sessionId, call)
         }
       })

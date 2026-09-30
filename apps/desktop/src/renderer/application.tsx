@@ -20,6 +20,7 @@ import type {
   AgentAvailability,
   AgentProvider,
   ComposerChoice,
+  EngineEvent,
   EngineStatus,
   MotionMeasure,
   PathEntryKind,
@@ -39,6 +40,7 @@ import {
   type ArchivedProject,
   type CommandGroup,
   type ClassifierSectionProps,
+  type DecisionLine,
   type HomeSession,
   type JournalFilter,
   type MenuClassifier,
@@ -46,6 +48,7 @@ import {
   type ProfileFacts,
   type ProjectSettingsDraft,
   type RepositoryLine,
+  type SettingsSection,
   type ShellProject,
   type ShellSession,
 } from '@hemera/ui'
@@ -224,6 +227,7 @@ import {
   themePreference,
 } from './theme.ts'
 import { measureFrames } from './witness.ts'
+import { decisionLineOf, isDecision, type StoredDecision } from './decision-lines.ts'
 
 /** How many of the most recent entries the Home shows, which is a glance and not a page. */
 const ACTIVITY = 4
@@ -382,6 +386,13 @@ export function Application() {
     agents.agents.find((one) => one.id === id)?.id ?? null
 
   const [place, setPlace] = useState<Place>('entry')
+  /** The section of the settings on screen, which a link to a setting opens (#294). */
+  const [settingsSection, setSettingsSection] = useState<SettingsSection>('appearance')
+  /** Opens the settings of the application: on Appearance, or on the section a link points to. */
+  const openSettings = (section: SettingsSection = 'appearance') => {
+    setSettingsSection(section)
+    setPlace('settings')
+  }
   const [commanding, setCommanding] = useState(false)
   const [creating, setCreating] = useState(false)
   const [facts, setFacts] = useState<ProfileFacts | null>(null)
@@ -399,6 +410,8 @@ export function Application() {
   // Kept as the engine answered them and not as the page draws them: restoring one is a change
   // like any other and carries the version it was read at, which a name and a date do not have.
   const [archived, setArchived] = useState<Project[]>([])
+  /** Hemera Auto's latest decisions, read while the Developer section is open (#294). */
+  const [decisions, setDecisions] = useState<StoredDecision[] | null>(null)
   const [repositories, setRepositories] = useState<RepositoryLine[]>([])
   const [folders, setFolders] = useState<RepositoryLine[]>([])
   /** Which Session of which Project was open last, as the preferences remembered it. */
@@ -820,7 +833,8 @@ export function Application() {
             credential: classifier.credential,
             consent: classifier.consent,
           }),
-          onOpenSettings: () => setPlace('settings'),
+          // The menu points at Hemera Auto, so the settings open on its section.
+          onOpenSettings: () => openSettings('hemera-auto'),
         }
 
   // Remembered for the next start, which is one Session per Project and not one in all. What
@@ -916,6 +930,37 @@ export function Application() {
     selectEntry(entryId)
   }, [])
 
+  // Hemera Auto's latest decisions, read when the Developer section is opened and again whenever
+  // a Session writes one, for as long as it stays open: the stored entries, as the engine masks
+  // them, and never diagnostic.log (#294).
+  const watchingDecisions = place === 'settings' && settingsSection === 'developer'
+  useEffect(() => {
+    if (!watchingDecisions) return
+    const readDecisions = () => {
+      void window.hemera
+        .invoke('classifier.decisions', {})
+        .then(setDecisions)
+        .catch(unanswered('classifier.decisions'))
+    }
+    readDecisions()
+    return window.hemera.on((event: EngineEvent) => {
+      if (event.event === 'entry' && event.entry !== null && isDecision(event.entry)) {
+        readDecisions()
+      }
+    })
+  }, [watchingDecisions])
+
+  /** Opens the Session a decision was taken in, in its own Project. */
+  const openDecisionSession = (sessionId: string) => {
+    const projectId = decisions?.find((one) => one.session.id === sessionId)?.session.projectId
+    if (projectId !== undefined && projectId !== shell.activeProjectId) {
+      // Remembered first, so that the Project opens on this Session rather than its last one.
+      if (remembered !== null) setRemembered({ ...remembered, [projectId]: sessionId })
+      selectProject(projectId)
+    }
+    goTo(sessionId)
+  }
+
   /**
    * A new Session in the Project in front.
    *
@@ -1008,7 +1053,7 @@ export function Application() {
         return
       }
       if (action.kind === 'settings') {
-        setPlace('settings')
+        openSettings()
         return
       }
       if (action.kind === 'session') {
@@ -1067,6 +1112,7 @@ export function Application() {
         putAway,
         goTo,
         setPlace,
+        openSettings,
         setCreating,
         preference,
         onNewSession: () => void newSession(),
@@ -1113,7 +1159,7 @@ export function Application() {
         />
       }
       unseen={bell.unseen}
-      onOpenSettings={() => setPlace('settings')}
+      onOpenSettings={() => openSettings()}
       settingsActive={place === 'settings'}
       sessions={shellSessions}
       onNewSession={() => void newSession()}
@@ -1197,6 +1243,8 @@ export function Application() {
     if (place === 'settings') {
       return (
         <SettingsPage
+          section={settingsSection}
+          onSectionChange={setSettingsSection}
           subtitle={subtitle}
           theme={preference}
           onThemeChange={setThemePreference}
@@ -1211,6 +1259,15 @@ export function Application() {
               .invoke('shell.open', { what: 'diagnostic' })
               .catch(unanswered('shell.open'))
           }}
+          decisions={
+            decisions === null
+              ? null
+              : decisions.flatMap((one): DecisionLine[] => {
+                  const line = decisionLineOf(one, (ms) => new Date(ms).toLocaleTimeString())
+                  return line === null ? [] : [line]
+                })
+          }
+          onOpenSession={openDecisionSession}
           acpTrace={acpTrace}
           onAcpTraceChange={(on) => {
             setAcpTrace(on)
@@ -1615,6 +1672,7 @@ function commandsFor({
   putAway,
   goTo,
   setPlace,
+  openSettings,
   setCreating,
   preference,
   onNewSession,
@@ -1631,6 +1689,8 @@ function commandsFor({
   putAway: Session[]
   goTo: (entryId: string) => void
   setPlace: (place: Place) => void
+  /** Opens the settings of the application on their first section. */
+  openSettings: () => void
   setCreating: (creating: boolean) => void
   preference: ReturnType<typeof themePreference>
   onNewSession: () => void
@@ -1667,7 +1727,7 @@ function commandsFor({
         label: 'Settings',
         keys: keysOf('settings'),
         icon: <IconSettings size="sm" />,
-        onSelect: () => setPlace('settings'),
+        onSelect: () => openSettings(),
       },
     ],
   }

@@ -56,6 +56,7 @@ export const CHANNELS = {
     response: z.void(),
   },
   'classifier.key.remove': { arguments: nothingSchema, response: z.void() },
+  'classifier.decisions': ENGINE_REQUESTS['classifier.decisions'],
   'env.report': {
     arguments: nothingSchema,
     response: environmentReportSchema,

@@ -753,6 +753,92 @@ describe('Unavailable context asks instead of refusing', () => {
   })
 })
 
+describe('New human instructions invalidate stale context', () => {
+  it('keeps the grant the human gave after writing a new message', async () => {
+    const asked = Promise.withResolvers<void>()
+    const answer = Promise.withResolvers<void>()
+    const human: Human = {
+      asked: [],
+      service: {
+        askOutside: (question) =>
+          Effect.promise(async () => {
+            human.asked.push(question)
+            asked.resolve()
+            await answer.promise
+            return 'allowed' as const
+          }),
+        answer: () => Effect.succeed(false),
+        withdrawn: () => Effect.void,
+      },
+    }
+    const result = await engine(human)(
+      Effect.gen(function* () {
+        const session = yield* opened
+        yield* (yield* ClassifierSettings).select('hemera-auto')
+        const call = yield* Effect.forkScoped(
+          calling({
+            sessionId: session.sessionId,
+            tool: 'fs_write',
+            arguments: { path: 'granted.md', content: 'yes', key: 'granted' },
+          }),
+        )
+        yield* Effect.promise(() => asked.promise)
+        // The user writes while the question is open, then answers it: their yes is newer.
+        yield* (yield* Sessions).write(session.sessionId, {
+          role: 'user',
+          kind: 'message',
+          body: 'go ahead and write it',
+        })
+        answer.resolve()
+        return yield* Fiber.join(call)
+      }),
+    )
+    expect(result.state).toBe('completed')
+    expect(readFileSync(join(root, 'granted.md'), 'utf8')).toBe('yes')
+  })
+  it('does not dispatch an automatic allow judged before a newer message', async () => {
+    const started = Promise.withResolvers<void>()
+    const release = Promise.withResolvers<void>()
+    const transport: JevTransport = {
+      send: async () => {
+        started.resolve()
+        await release.promise
+        return jevResponse(1)
+      },
+    }
+    const human = humanSaying()
+    const result = await engine(
+      human,
+      transport,
+    )(
+      Effect.gen(function* () {
+        const session = yield* opened
+        const settings = yield* ClassifierSettings
+        yield* settings.replaceKey('ciphertext', 'private-key')
+        yield* settings.setConsent(true)
+        yield* settings.select('hemera-auto')
+        const call = yield* Effect.forkScoped(
+          calling({
+            sessionId: session.sessionId,
+            tool: 'fs_write',
+            arguments: { path: 'stale.md', content: 'no', key: 'stale' },
+          }),
+        )
+        yield* Effect.promise(() => started.promise)
+        yield* (yield* Sessions).write(session.sessionId, {
+          role: 'user',
+          kind: 'message',
+          body: 'actually, do not write anything',
+        })
+        release.resolve()
+        return yield* Fiber.join(call)
+      }),
+    )
+    expect(result.state).toBe('refused')
+    expect(existsSync(join(root, 'stale.md'))).toBe(false)
+  })
+})
+
 describe('Secrets are masked before any evaluation', () => {
   it('masks a Workspace credential in any tool, and keeps a plain variable readable', async () => {
     const sent: string[] = []

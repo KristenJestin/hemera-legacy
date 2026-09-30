@@ -1,6 +1,7 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
 import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
 
+import { expectNeverBuried, watchThereAndBack } from '../../../.storybook/sliding-mark.ts'
 import { IconMessages, IconSettings, IconTimelineEvent } from '../../icons.ts'
 import { TooltipProvider } from '../tooltip/tooltip.tsx'
 import { Tabs } from './tabs.tsx'
@@ -107,9 +108,26 @@ export const States: Story = {
   args: { defaultValue: 'journal' },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    expect(canvas.getByRole('tab', { name: /journal/i })).toHaveAttribute('aria-selected', 'true')
+    const chosen = canvas.getByRole('tab', { name: /journal/i })
+    expect(chosen).toHaveAttribute('aria-selected', 'true')
     expect(canvas.getByText('What happened, in order.')).toBeInTheDocument()
+    // The chosen tab says its name in the foreground colour, the others stay muted.
+    const foreground = colourOf(canvasElement, 'text-foreground')
+    expect(getComputedStyle(chosen).color).toBe(foreground)
+    expect(getComputedStyle(canvas.getByRole('tab', { name: /sessions/i })).color).not.toBe(
+      foreground,
+    )
   },
+}
+
+/** The colour a theme class resolves to on this page, read off a probe rather than written. */
+function colourOf(room: HTMLElement, className: string): string {
+  const probe = document.createElement('span')
+  probe.className = className
+  room.append(probe)
+  const colour = getComputedStyle(probe).color
+  probe.remove()
+  return colour
 }
 
 /** Scenario « Tabs aux flèches » of `specs/window-shell/spec.md`. */
@@ -135,5 +153,26 @@ export const Keyboard: Story = {
     await waitFor(() => {
       expect(canvas.queryByText('The Sessions of the Project.')).toBeNull()
     })
+  },
+}
+
+/**
+ * The mark crossing the strip, out to the last tab and back to the first: on every frame of the
+ * way it is drawn over the tab it crosses and never under it (issue #127).
+ */
+export const MarkCrossing: Story = {
+  parameters: { controls: { disable: true } },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const strip = canvas.getByRole('tablist')
+    const first = canvas.getByRole('tab', { name: /sessions/i })
+    const last = canvas.getByRole('tab', { name: /settings/i })
+    const watched = await watchThereAndBack(
+      strip,
+      () => userEvent.click(last),
+      () => userEvent.click(first),
+    )
+    expect(first).toHaveAttribute('aria-selected', 'true')
+    expectNeverBuried(watched)
   },
 }

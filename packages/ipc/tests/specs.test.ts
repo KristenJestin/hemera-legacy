@@ -148,6 +148,8 @@ describe('The Spec contract crosses the wire', () => {
       provider: 'claude',
       model: null,
       nativeState: 'none',
+      workspaceId: null,
+      workspaceFixed: false,
       mission: 'define',
       specId: 'spec-1',
       archivedAt: null,
@@ -254,11 +256,19 @@ describe('The Spec use cases are declared and relayed', () => {
       'specs.buffers.read',
       'specs.buffers.save',
       'specs.buffers.discard',
+      // The Workspace a Spec's build runs in, written on the Spec when it is made ready (D8-12).
+      'specs.useWorkspace',
     ]
     const declared = Object.keys(ENGINE_REQUESTS).filter((name) => name.startsWith('specs.'))
     const relayed = Object.keys(CHANNELS).filter((name) => name.startsWith('specs.'))
 
-    const withSession = [...names, 'specs.create', 'specs.openSession']
+    const withSession = [
+      ...names,
+      'specs.create',
+      'specs.declineProposal',
+      'specs.acceptExisting',
+      'specs.openSession',
+    ]
 
     expect(Object.keys(SPEC_REQUESTS).toSorted()).toEqual(names.toSorted())
     expect(declared.toSorted()).toEqual(withSession.toSorted())

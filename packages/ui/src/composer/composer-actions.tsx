@@ -1,19 +1,20 @@
 import { AnimatePresence, motion } from 'motion/react'
 import type { ReactNode } from 'react'
 
-import { Button } from '../components/button/button.tsx'
+import { Button, IconButton } from '../components/button/button.tsx'
 import { Kbd } from '../components/kbd/kbd.tsx'
 import { IconArrowUp, IconPencil, IconPlayerStop } from '../icons.ts'
-import { PRESSED_COMPACT, arrival, useTransition } from '../motion.ts'
-import { WorkspacePill } from './workspace-pill.tsx'
+import { MARK_SCALE, arrival, useTransition } from '../motion.ts'
+import { type WorkspaceChoice, WorkspacePill } from './workspace-pill.tsx'
 
 /**
  * The foot of the composer: which Workspace is being written about, and what sending does.
  *
  * Sending is the one live control of the row, and the only one that writes: `onSend` hands the
  * sentence to the page, which records it and answers with the reason it could not, or with
- * nothing when it did. `New Spec` is the Home's alone and stays disabled there — a Spec is made
- * from the question that starts a Session, and the Spec itself is lot 6 — and the arrow becomes a
+ * nothing when it did. `New Spec` is the Home's alone: a Spec is made from the question that
+ * starts a Session, and pressing it starts that Session with the intent of writing one (issue
+ * #128), on the same terms as the send since it sends the same sentence. The arrow becomes a
  * square while the write is in flight: two icons crossing in opacity and scale, a morph a
  * compositor carries, and never a swap that flickers.
  *
@@ -28,11 +29,16 @@ import { WorkspacePill } from './workspace-pill.tsx'
  */
 const MORPH = 'relative flex size-icon-md items-center justify-center'
 
+/** What `New Spec` does, in plain words, on the control itself. */
+const SPEC = 'Start a Session that writes a Spec from this'
+
 export interface ComposerActionsProps {
-  /** The Workspaces on offer; this lot has one, and lot 7 brings the others. */
-  workspaces: string[]
+  /** The Workspaces in state `ready`, `main` first (D8-08). */
+  workspaces: WorkspaceChoice[]
   workspace: string
   onWorkspaceChange: (workspace: string) => void
+  /** Whether the agent has started, which fixes the Workspace (D8-08). */
+  workspaceFixed?: boolean | undefined
   /** Whether there is anything to send at all. */
   ready: boolean
   /** Whether a send is in flight, which is what the arrow morphs into. */
@@ -47,14 +53,14 @@ export interface ComposerActionsProps {
    */
   forcing?: boolean | undefined
   /**
-   * Whether the row offers to turn what is written into a Spec (design D4b-02).
+   * Starts a Session that writes a Spec from what is written (design D4b-02, issue #128).
    *
-   * The Home does and a Session does not: a Session is a conversation already under way, and a
-   * Spec is made from the question that starts one. Off unless the page asks for it — a control
-   * drawn and disabled in every place it appears is a control that says nothing about where it
+   * The Home offers it and a Session does not: a Session is a conversation already under way, and
+   * a Spec is made from the question that starts one. No button unless the page hands this over:
+   * a control drawn in every place it appears is a control that says nothing about where it
    * belongs.
    */
-  spec?: boolean | undefined
+  onSpec?: (() => void) | undefined
   /** The word on the button: `Start chat` on the Home, `Send` inside a Session. */
   action: string
   onSend: () => void
@@ -75,17 +81,17 @@ export function ComposerActions({
   workspaces,
   workspace,
   onWorkspaceChange,
+  workspaceFixed = false,
   ready,
   sending,
   running = false,
   forcing = false,
-  spec = false,
+  onSpec,
   action,
   onSend,
   onStop,
   sendDisabledReason,
 }: ComposerActionsProps): ReactNode {
-  const transition = useTransition(arrival)
   const morphs = sending || running
   // A write in flight is a wait, and a wait that only took the press away would look like a
   // control that stopped working. The indicator the button draws is what says so; the word and
@@ -99,10 +105,18 @@ export function ComposerActions({
         workspaces={workspaces}
         workspace={workspace}
         onWorkspaceChange={onWorkspaceChange}
+        fixed={workspaceFixed}
       />
       <span className="ml-auto flex items-center gap-2">
-        {spec && (
-          <Button variant="secondary" size="sm" disabled title="A Spec comes with lot 6">
+        {onSpec !== undefined && (
+          <Button
+            variant="secondary"
+            size="sm"
+            // Off exactly when the send is: it sends the same sentence to the same agent.
+            disabled={busy || !ready}
+            title={SPEC}
+            onClick={onSpec}
+          >
             <IconPencil size="sm" />
             New Spec
           </Button>
@@ -125,35 +139,91 @@ export function ComposerActions({
           aria-keyshortcuts={running ? 'Escape' : undefined}
           onClick={running ? onStop : onSend}
         >
-          <span className={MORPH}>
-            <AnimatePresence initial={false} mode="popLayout">
-              {morphs ? (
-                <motion.span
-                  key="stop"
-                  initial={{ opacity: 0, scale: PRESSED_COMPACT }}
-                  animate={{ opacity: 1, scale: 1 }}
-                  exit={{ opacity: 0, scale: PRESSED_COMPACT }}
-                  transition={transition}
-                >
-                  <IconPlayerStop size="sm" />
-                </motion.span>
-              ) : (
-                <motion.span
-                  key="send"
-                  initial={{ opacity: 0, scale: PRESSED_COMPACT }}
-                  animate={{ opacity: 1, scale: 1 }}
-                  exit={{ opacity: 0, scale: PRESSED_COMPACT }}
-                  transition={transition}
-                >
-                  <IconArrowUp size="sm" />
-                </motion.span>
-              )}
-            </AnimatePresence>
-          </span>
+          <SendGlyph morphs={morphs} />
           {running ? (forcing ? 'Force stop' : 'Stop') : action}
           {running ? null : <Kbd keys="Enter" />}
         </Button>
       </span>
     </>
+  )
+}
+
+/**
+ * The arrow, or the square once a write is in flight or a turn runs: two icons crossing in
+ * opacity and scale, in the same box, so the control never changes size under the hand.
+ */
+function SendGlyph({ morphs }: { morphs: boolean }): ReactNode {
+  const transition = useTransition(arrival)
+  return (
+    <span className={MORPH}>
+      <AnimatePresence initial={false} mode="popLayout">
+        {morphs ? (
+          <motion.span
+            key="stop"
+            initial={{ opacity: 0, scale: MARK_SCALE }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: MARK_SCALE }}
+            transition={transition}
+          >
+            <IconPlayerStop size="sm" />
+          </motion.span>
+        ) : (
+          <motion.span
+            key="send"
+            initial={{ opacity: 0, scale: MARK_SCALE }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: MARK_SCALE }}
+            transition={transition}
+          >
+            <IconArrowUp size="sm" />
+          </motion.span>
+        )}
+      </AnimatePresence>
+    </span>
+  )
+}
+
+export type ComposerSendProps = Pick<
+  ComposerActionsProps,
+  | 'ready'
+  | 'sending'
+  | 'running'
+  | 'forcing'
+  | 'action'
+  | 'onSend'
+  | 'onStop'
+  | 'sendDisabledReason'
+>
+
+/**
+ * The send of a Session's composer (issue #241): the arrow alone, at the end of the box's own
+ * row, and the Stop in the same place and at the same size while a turn runs. No word and no
+ * key drawn beside it: the name is the control's `aria-label`, the key its `aria-keyshortcuts`.
+ * A write in flight is the square, off until the engine has answered.
+ */
+export function ComposerSend({
+  ready,
+  sending,
+  running = false,
+  forcing = false,
+  action,
+  onSend,
+  onStop,
+  sendDisabledReason,
+}: ComposerSendProps): ReactNode {
+  const busy = sending && !running
+  const blocked = !running && sendDisabledReason !== undefined
+  return (
+    <IconButton
+      variant={running ? 'destructive' : 'primary'}
+      size="sm"
+      icon={<SendGlyph morphs={sending || running} />}
+      aria-label={running ? (forcing ? 'Force stop' : 'Stop') : action}
+      disabled={running ? false : busy || !ready}
+      aria-disabled={busy || blocked ? true : undefined}
+      title={running ? undefined : sendDisabledReason}
+      aria-keyshortcuts={running ? 'Escape' : 'Enter'}
+      onClick={running ? onStop : onSend}
+    />
   )
 }

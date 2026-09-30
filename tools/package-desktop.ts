@@ -462,12 +462,20 @@ if (import.meta.main) {
   // SAFETY: `refusalFor` answered null, which it only does for one of the declared channels.
   const channel = asked as Channel
 
-  // `beta-*` tags are the pre-releases the pipeline cuts on every push to `dev`, one per build
-  // and none of them a version: excluded here so a `git describe` never answers `beta-…-3-gabc`.
+  // `beta-*` tags are the rolling pre-releases the pipeline once cut on every push to `dev`,
+  // none of them a version: excluded here so a `git describe` never answers `beta-…-3-gabc`.
+  // A beta is now `vX.Y.Z-beta.N`, and built from its tag it is named after it: `0.5.0-beta.1`.
   const described = spawnSync('git', DESCRIBE_ARGUMENTS, { cwd: repository, encoding: 'utf8' })
   const version = versionFrom(described.status === 0 ? described.stdout : '0.0.0')
 
   run('node build.ts', application)
+
+  // The icon the channel wears, drawn from the design system's component into the folder
+  // electron-builder takes it from: a package never carries an icon older than the face.
+  run(
+    `node ${JSON.stringify(join(repository, 'tools', 'app-icons.ts'))} --channel ${channel}`,
+    repository,
+  )
 
   // Before electron-builder, because it is what electron-builder is then told to carry, and
   // inside the application: a fileset whose source sits above the project matches nothing at all.

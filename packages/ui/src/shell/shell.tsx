@@ -15,6 +15,7 @@ import { ChromeBar } from './chrome-bar.tsx'
 import { Gutter } from './gutter.tsx'
 import { SIDEBAR_RAIL, type ShellProject, type ShellSession, checkedWidth } from './model.ts'
 import { Sidebar } from './sidebar.tsx'
+import type { SessionRenaming } from '../session/session.tsx'
 
 /**
  * The shell every screen of Hemera is drawn inside (design D2-01).
@@ -75,6 +76,8 @@ export interface ShellProps {
    */
   onNewSession?: (() => void) | undefined
   onRenameSession?: ((id: string) => void) | undefined
+  /** The Session whose sidebar row is its title field right now (review of #250). */
+  renamingSession?: SessionRenaming | null | undefined
   onArchiveSession?: ((id: string) => void) | undefined
   onOpenCommand: () => void
   /** The two keystrokes the shell shows, already written for the platform. */
@@ -105,6 +108,7 @@ export function Shell({
   onSelectEntry,
   onNewSession,
   onRenameSession,
+  renamingSession,
   onArchiveSession,
   onOpenCommand,
   commandShortcut,
@@ -170,6 +174,7 @@ export function Shell({
                   onSelectEntry={onSelectEntry}
                   onNewSession={onNewSession}
                   onRenameSession={onRenameSession}
+                  renaming={renamingSession}
                   onArchiveSession={onArchiveSession}
                   onOpenCommand={onOpenCommand}
                   commandShortcut={commandShortcut}

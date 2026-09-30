@@ -40,6 +40,18 @@ export const UNHURRIED: ReadonlySet<EngineRequestName> = new Set([
   'agents.check',
   // A stop gives a run the grace it is owed before its tree is taken down (D5-04, D6-12).
   'commands.stop',
+  'commands.stopService',
+  // The machine's `git`, once per repository (D8-03): a plan reads each of its locations, and a
+  // slow, refused or absent one is read on its own so that it holds back its own row and never the
+  // dialog (#110); a creation checks every base and branch, a status reads each worktree of a
+  // large tree, and a cleanup removes each worktree and then deletes a folder that may hold
+  // thousands of installed files (D8-04, D8-14, D8-15). `preparation.*` is not here: it answers
+  // with the steps at once and runs in the engine, followed through the `workspace` event (D8-05).
+  'workspaces.plan',
+  'workspaces.planRepository',
+  'workspaces.create',
+  'workspaces.status',
+  'workspaces.cleanup',
 ])
 
 /**
@@ -66,11 +78,24 @@ export class EngineRefused extends Data.TaggedError('EngineRefused')<
   OnUseCase & { readonly message: string }
 > {}
 
-/** It did not answer in time, which is an answer and not something to keep waiting for. */
-export class EngineTimeout extends Data.TaggedError('EngineTimeout')<OnUseCase> {}
+/**
+ * It did not answer in time, which is an answer and not something to keep waiting for.
+ *
+ * Said in words, as a refusal is: this is what the page shows where the action was pressed, and
+ * the fields of the error as JSON said nothing to whoever pressed it (#132). The log keeps them.
+ */
+export class EngineTimeout extends Data.TaggedError('EngineTimeout')<OnUseCase> {
+  override get message(): string {
+    return 'the application did not answer in time'
+  }
+}
 
-/** It is not there any more, so there is nobody for the message to reach. */
-export class EngineGone extends Data.TaggedError('EngineGone')<OnUseCase> {}
+/** It is not there any more, so there is nobody for the message to reach. Said in words too. */
+export class EngineGone extends Data.TaggedError('EngineGone')<OnUseCase> {
+  override get message(): string {
+    return 'the application’s engine has stopped'
+  }
+}
 
 /** What a conversation needs of a port, which is all a test has to stand in for. */
 export interface EnginePort {

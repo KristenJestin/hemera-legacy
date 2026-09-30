@@ -1,6 +1,7 @@
 import type { Decorator, Preview } from '@storybook/react-vite'
 import { MotionConfig } from 'motion/react'
 import { useEffect } from 'react'
+import { configure } from 'storybook/test'
 
 // A stylesheet is imported for its effect and has nothing to assign; this is how the
 // catalogue gets the theme, exactly as the window does.
@@ -51,8 +52,32 @@ const withMotion: Decorator = (Story) => (
   </MotionConfig>
 )
 
+/**
+ * What the accessibility check describes node by node: everything in the catalogue, where the
+ * panel shows it to a reader, and only what it refuses when the runner plays the stories.
+ *
+ * The runner is handed the whole report of every story it plays, and it is mostly passes — two
+ * hundred kilobytes of them for the one story of the loading states, over a hundred megabytes
+ * for a run of both themes. Reading that on the runner's one thread kept everything a story
+ * waits on from the runner waiting behind it. What decides a story is its violations, and those
+ * are reported whole either way; the rest is still counted, a node each.
+ */
+const RESULT_TYPES =
+  '__vitest_browser__' in globalThis
+    ? ['violations']
+    : ['violations', 'incomplete', 'passes', 'inapplicable']
+
 const preview: Preview = {
   decorators: [withMotion, withTheme],
+  /**
+   * How long a play waits for the state it asked for: one second is the budget the library
+   * ships with, and a loaded CI machine takes seconds to paint what a developer machine paints
+   * in frames. What the play waits for still has to arrive — waiting longer is the same claim
+   * made where the runner is busy, not a weaker one — and every story is measured under it.
+   */
+  beforeEach: () => {
+    configure({ asyncUtilTimeout: 10_000 })
+  },
   initialGlobals: { theme: 'light' },
   globalTypes: {
     theme: {
@@ -75,10 +100,11 @@ const preview: Preview = {
       // trip `aria-hidden-focus` while a popup is open: they are the trap's mechanism, not
       // content, so the check leaves them out rather than the rule being turned off.
       context: { include: [['body']], exclude: [['[data-base-ui-focus-guard]']] },
+      options: { resultTypes: RESULT_TYPES },
     },
     /**
-     * The sidebar is five roots and nothing else (`AGENTS.md`, "Storybook sidebar, five roots"):
-     * the roots in the order written here, and the alphabetical order inside them, which
+     * The sidebar is five roots, and a sixth, last, for a design question under way (`AGENTS.md`,
+     * "Storybook sidebar, five roots"): the roots in the order written here, and the alphabetical order inside them, which
      * `method: 'alphabetical'` is what asks for — without it Storybook keeps whatever order the
      * index was built in for every name this list does not mention.
      *
@@ -98,6 +124,7 @@ const preview: Preview = {
           'Surfaces',
           ['Session', ['Complete']],
           'Shell',
+          'Explorations',
         ],
       },
     },

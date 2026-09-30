@@ -470,6 +470,13 @@ if (import.meta.main) {
 
   run('node build.ts', application)
 
+  // The icon the channel wears, drawn from the design system's component into the folder
+  // electron-builder takes it from: a package never carries an icon older than the face.
+  run(
+    `node ${JSON.stringify(join(repository, 'tools', 'app-icons.ts'))} --channel ${channel}`,
+    repository,
+  )
+
   // Before electron-builder, because it is what electron-builder is then told to carry, and
   // inside the application: a fileset whose source sits above the project matches nothing at all.
   const adapters = join(application, ADAPTERS_FOLDER)

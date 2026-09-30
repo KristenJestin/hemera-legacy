@@ -175,8 +175,9 @@ describe('A free Session’s agent proposes a Spec, and Create makes the Session
     )
     expect(proposed).toBe(true)
     expect(await region(PROPOSAL_CARD)).toContain('feature')
-    // A `free` Session has no panel, and nothing that offers one but the proposal.
-    expect(await region('section[aria-label^="Spec "]')).toBe('')
+    // A `free` Session has no panel, and nothing that offers one but the proposal. The notices'
+    // own `Spec proposed` group, which holds the proposal, is not a panel.
+    expect(await region('section[aria-label^="Spec "]:not([aria-label="Spec proposed"])')).toBe('')
     expect(await control('Create a Spec')).toBeNull()
     expect(await control('Join a Spec')).toBeNull()
   })

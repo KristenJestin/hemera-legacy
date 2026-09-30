@@ -1,30 +1,29 @@
 #!/usr/bin/env node
 /**
- * Draws Hemera's application icon for the packages, from the master SVGs of one variant.
+ * Draws Hemera's application icon for a package, from the design system's `AppIcon`.
  *
- * electron-builder takes its icons from `apps/desktop/build/`: `icon.png` (1024) as the source
- * of everything it is not handed, `icons/<n>x<n>.png` for Linux, which the deb installs under
- * `hicolor` as `hemera.png`, and `icon.ico` for Windows. Each variant has two masters: the full
- * one, and a small one redrawn for 16 to 32 px, where the full drawing would blur its strokes
- * together. The SVGs are rasterised by Chromium, which is what already draws them in Storybook,
- * so what is packaged is what was chosen there.
+ * Run by `tools/package-desktop.ts` before electron-builder, so a package always wears the icon
+ * the component draws today: nobody regenerates anything by hand, and no icon is committed. The
+ * component is rendered to a standalone SVG by `react-dom/server` and rasterised by resvg, which
+ * needs no browser and draws the same pixels on every machine.
  *
- *   node tools/app-icons.ts <tile|line|monogram> [--out <folder>]
+ * It writes into `apps/desktop/build/generated/` (ignored by Git), where electron-builder is
+ * pointed: `icon.png` (1024), `icons/<n>x<n>.png` for Linux, which the deb installs under
+ * `hicolor` named after the executable, and `icon.ico` for Windows.
  *
- * Without `--out` it writes into `apps/desktop/build/`.
+ *   node tools/app-icons.ts [--channel prod|beta|dev] [--out <folder>]
  */
 
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { mkdirSync, writeFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
+
+import { type AppIconChannel, appIconMarkup } from '@hemera/ui/app-icon'
+import { Resvg } from '@resvg/resvg-js'
 
 const repository = resolve(import.meta.dirname, '..')
 
-/** Where the masters are drawn, as the Storybook exploration of the icon shows them. */
-const MASTERS = join(repository, 'packages', 'ui', 'src', 'explorations', 'app-icon')
-
-export const VARIANTS = ['tile', 'line', 'monogram'] as const
-
-export type Variant = (typeof VARIANTS)[number]
+/** Where the icons are written, and where `electron-builder.yml` looks for them. */
+export const GENERATED = join(repository, 'apps', 'desktop', 'build', 'generated')
 
 /** The sizes of the Linux set, the ones launchers and the `hicolor` theme ask for. */
 export const LINUX_SIZES = [16, 24, 32, 48, 64, 128, 256, 512] as const
@@ -32,23 +31,18 @@ export const LINUX_SIZES = [16, 24, 32, 48, 64, 128, 256, 512] as const
 /** The sizes of the Windows icon: the taskbar, the Explorer views and the Alt+Tab switcher. */
 export const ICO_SIZES = [16, 24, 32, 48, 64, 128, 256] as const
 
-/** The largest size drawn from the small master. */
-const SMALL_UP_TO = 32
+/** The size of the one PNG electron-builder derives anything else from. */
+export const SOURCE_SIZE = 1024
 
-/** The size of the one PNG electron-builder derives the rest from. */
-const SOURCE_SIZE = 1024
-
-/** Which master a size is drawn from. */
-export function drawnFrom(size: number): 'master' | 'small' {
-  return size <= SMALL_UP_TO ? 'small' : 'master'
+/**
+ * The icon a package's channel wears. A `dev` package wears the beta's: it is never the release,
+ * and should never be taken for it in a launcher.
+ */
+export function iconChannelOf(channel: string): AppIconChannel {
+  return channel === 'prod' ? 'prod' : 'beta'
 }
 
-/** The file of a variant's master. */
-export function masterOf(variant: Variant, kind: 'master' | 'small'): string {
-  return join(MASTERS, kind === 'small' ? `${variant}-small.svg` : `${variant}.svg`)
-}
-
-/** Where a size of the Linux set goes, under the build folder. */
+/** Where a size of the Linux set goes, under the output folder. */
 export function linuxFileOf(size: number): string {
   return `icons/${String(size)}x${String(size)}.png`
 }
@@ -79,8 +73,6 @@ export function icoOf(images: readonly Buffer[]): Buffer {
     // A byte holds up to 255, and 0 is how the format says 256.
     entry.writeUInt8(size >= 256 ? 0 : size, 0)
     entry.writeUInt8(size >= 256 ? 0 : size, 1)
-    entry.writeUInt8(0, 2)
-    entry.writeUInt8(0, 3)
     entry.writeUInt16LE(1, 4)
     entry.writeUInt16LE(32, 6)
     entry.writeUInt32LE(png.length, 8)
@@ -91,51 +83,31 @@ export function icoOf(images: readonly Buffer[]): Buffer {
   return Buffer.concat([header, ...entries, ...images])
 }
 
-/** Each size drawn by Chromium from the master it belongs to, on a transparent ground. */
-async function rasterised(
-  variant: Variant,
-  sizes: readonly number[],
-): Promise<Map<number, Buffer>> {
-  const { chromium } = await import('playwright')
-  const browser = await chromium.launch()
-  try {
-    // One page per size, each drawn at its own viewport, all at once.
-    const drawn = await Promise.all(
-      sizes.map(async (size): Promise<[number, Buffer]> => {
-        const page = await browser.newPage({
-          deviceScaleFactor: 1,
-          viewport: { width: size, height: size },
-        })
-        const svg = readFileSync(masterOf(variant, drawnFrom(size)), 'utf8').replace(
-          '<svg ',
-          `<svg width="${String(size)}" height="${String(size)}" `,
-        )
-        await page.setContent(
-          `<!doctype html><html><body style="margin:0;background:transparent">${svg}</body></html>`,
-        )
-        const png = await page.screenshot({
-          omitBackground: true,
-          clip: { x: 0, y: 0, width: size, height: size },
-        })
-        return [size, png]
-      }),
-    )
-    return new Map(drawn)
-  } finally {
-    await browser.close()
-  }
+/** The icon of a channel at a size, as a PNG. */
+export function pngOf(channel: AppIconChannel, size: number): Buffer {
+  const svg = appIconMarkup(channel, size)
+  return new Resvg(svg, { fitTo: { mode: 'width', value: size } }).render().asPng()
 }
 
-/** Writes the icon of a variant into a build folder: the source PNG, the Linux set, the ICO. */
-export async function writeIcons(variant: Variant, out: string): Promise<string[]> {
-  const sizes = [...new Set([SOURCE_SIZE, ...LINUX_SIZES, ...ICO_SIZES])]
-  const drawn = await rasterised(variant, sizes)
+/** Every file of a channel's icon, named as it is written under the output folder. */
+export function iconFiles(channel: AppIconChannel): [string, Buffer][] {
+  const drawn = new Map(
+    [...new Set([SOURCE_SIZE, ...LINUX_SIZES, ...ICO_SIZES])].map((size) => [
+      size,
+      pngOf(channel, size),
+    ]),
+  )
   const png = (size: number): Buffer => drawn.get(size)!
-  const files: [string, Buffer][] = [
+  return [
     ['icon.png', png(SOURCE_SIZE)],
     ...LINUX_SIZES.map((size): [string, Buffer] => [linuxFileOf(size), png(size)]),
     ['icon.ico', icoOf(ICO_SIZES.map(png))],
   ]
+}
+
+/** Writes a channel's icon into a folder, and says what it wrote. */
+export function writeIcons(channel: AppIconChannel, out: string): string[] {
+  const files = iconFiles(channel)
   for (const [name, data] of files) {
     const file = join(out, name)
     mkdirSync(dirname(file), { recursive: true })
@@ -144,23 +116,14 @@ export async function writeIcons(variant: Variant, out: string): Promise<string[
   return files.map(([name]) => name)
 }
 
-function variantOf(asked: string | undefined): Variant {
-  const found = VARIANTS.find((variant) => variant === asked)
-  if (found === undefined) throw new Error(`name a variant: ${VARIANTS.join(', ')}`)
-  return found
-}
-
 if (import.meta.main) {
-  try {
-    const args = process.argv.slice(2)
-    const variant = variantOf(args[0])
-    const at = args.indexOf('--out')
-    const out =
-      at === -1 ? join(repository, 'apps', 'desktop', 'build') : resolve(args[at + 1] ?? '.')
-    const written = await writeIcons(variant, out)
-    console.log(`${variant}: ${written.join(', ')} in ${out}`)
-  } catch (error) {
-    console.error(error instanceof Error ? error.message : error)
-    process.exit(1)
+  const args = process.argv.slice(2)
+  const valueOf = (flag: string): string | undefined => {
+    const at = args.indexOf(flag)
+    return at === -1 ? undefined : args[at + 1]
   }
+  const channel = iconChannelOf(valueOf('--channel') ?? 'dev')
+  const out = resolve(valueOf('--out') ?? GENERATED)
+  const written = writeIcons(channel, out)
+  console.log(`the ${channel} icon: ${written.join(', ')} in ${out}`)
 }

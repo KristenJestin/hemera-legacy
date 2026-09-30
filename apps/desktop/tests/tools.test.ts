@@ -900,6 +900,112 @@ describe('Concurrent calls keep independent decisions', () => {
   })
 })
 
+describe('Mandatory guards survive an allowing judge', () => {
+  it('refuses a tool the mission does not offer and asks before writing outside', async () => {
+    let evaluated = 0
+    const transport: JevTransport = {
+      send: async () => {
+        evaluated += 1
+        return jevResponse(0)
+      },
+    }
+    const human = humanSaying('refused')
+    const outside = join(folder, 'outside.md')
+    const seen = await engine(
+      human,
+      transport,
+    )(
+      Effect.gen(function* () {
+        const session = yield* opened
+        const settings = yield* ClassifierSettings
+        yield* settings.replaceKey('ciphertext', 'private-key')
+        yield* settings.setConsent(true)
+        yield* settings.select('hemera-auto')
+        const unoffered = yield* calling({
+          sessionId: session.sessionId,
+          tool: 'fs_write',
+          arguments: { path: 'unoffered.md', content: 'no', key: 'unoffered' },
+          offered: ['fs_read'],
+        })
+        const escaped = yield* calling({
+          sessionId: session.sessionId,
+          tool: 'fs_write',
+          arguments: { path: outside, content: 'no', key: 'escaped' },
+        })
+        return { unoffered, escaped }
+      }),
+    )
+    expect(seen.unoffered.state).toBe('refused')
+    expect(existsSync(join(root, 'unoffered.md'))).toBe(false)
+    // The judge allowed the outside write; the root still asks, and the human said no.
+    expect(evaluated).toBe(1)
+    expect(human.asked).toHaveLength(1)
+    expect(seen.escaped.state).not.toBe('completed')
+    expect(existsSync(outside)).toBe(false)
+  })
+})
+
+describe('Every invalid or unavailable evaluation asks', () => {
+  it.each([
+    ['a 5xx', async () => new Response('down', { status: 503 })],
+    ['a rate limit', async () => new Response('slow down', { status: 429 })],
+    ['a network failure', async (): Promise<Response> => Promise.reject(new Error('offline'))],
+    ['a malformed answer', async () => Response.json({ model: JEV_MODEL, answers: {} })],
+  ])('asks the human after %s, and executes nothing when they refuse', async (_, send) => {
+    const human = humanSaying('refused')
+    const seen = await engine(human, { send })(
+      Effect.gen(function* () {
+        const session = yield* opened
+        const settings = yield* ClassifierSettings
+        yield* settings.replaceKey('ciphertext', 'private-key')
+        yield* settings.setConsent(true)
+        yield* settings.select('hemera-auto')
+        return yield* calling({
+          sessionId: session.sessionId,
+          tool: 'fs_write',
+          arguments: { path: 'failed.md', content: 'no', key: 'failed' },
+        })
+      }),
+    )
+    expect(human.asked).toHaveLength(1)
+    expect(seen.state).toBe('refused')
+    expect(existsSync(join(root, 'failed.md'))).toBe(false)
+  })
+})
+
+describe('Reflected provider errors cannot leak secrets', () => {
+  it('keeps an echoed key and request out of the thread and the Journal', async () => {
+    const transport: JevTransport = {
+      send: async (body, key) => new Response(`invalid key ${key} for ${body}`, { status: 401 }),
+    }
+    const seen = await engine(
+      humanSaying('refused'),
+      transport,
+    )(
+      Effect.gen(function* () {
+        const session = yield* opened
+        const settings = yield* ClassifierSettings
+        yield* settings.replaceKey('ciphertext', 'private-key')
+        yield* settings.setConsent(true)
+        yield* settings.select('hemera-auto')
+        yield* calling({
+          sessionId: session.sessionId,
+          tool: 'fs_write',
+          arguments: { path: 'echo.md', content: 'echoed-request-text', key: 'echo' },
+        })
+        return {
+          entries: yield* threadEntries(session.sessionId),
+          lines: yield* journalLines(session.projectId),
+        }
+      }),
+    )
+    const written = JSON.stringify([seen.entries, seen.lines])
+    expect(written).not.toContain('private-key')
+    expect(written).not.toContain('invalid key')
+    expect(written).not.toContain('"questions"')
+  })
+})
+
 describe('Secrets are masked before any evaluation', () => {
   it('masks a Workspace credential in any tool, and keeps a plain variable readable', async () => {
     const sent: string[] = []

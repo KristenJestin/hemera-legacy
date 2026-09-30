@@ -438,7 +438,7 @@ export function newFinding(
       sessions: [context.session.id],
       ...environmentOf(context),
     },
-    body: `${top}${occurrenceSection(1, reported, context, null)}`,
+    body: `${top}\n${occurrenceSection(1, reported, context, null)}`,
   }
 }
 

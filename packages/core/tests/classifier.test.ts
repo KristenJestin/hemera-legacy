@@ -109,7 +109,7 @@ describe('Jev asks instead of refusing, at the strictness the user chose', () =>
   ) => classifierVerdictFromScores({ risk, approval, userRequested, hasHumanContext }, strictness)
 
   test('the policy that records the strictness is a new version', () => {
-    expect(CLASSIFIER_POLICY_VERSION).toBe('2')
+    expect(CLASSIFIER_POLICY_VERSION).toBe('3')
     expect(CLASSIFIER_STRICTNESS_LEVELS).toEqual(['careful', 'normal', 'permissive'])
     expect(DEFAULT_CLASSIFIER_STRICTNESS).toBe('normal')
   })

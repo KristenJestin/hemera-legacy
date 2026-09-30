@@ -180,6 +180,16 @@ export interface GitService {
     from: string,
     to: string,
   ) => Effect.Effect<{ readonly numstat: string; readonly nameStatus: string }, Refusal>
+  /**
+   * Where two commits' histories meet, locally: the commit a branch left its base at, which a review
+   * round lists its files from (issue #278).
+   */
+  readonly mergeBase: (cwd: string, one: string, other: string) => Effect.Effect<string, Refusal>
+  /**
+   * The files of the working tree Git does not track, what `.gitignore` leaves out left out, by
+   * their path from the repository's top (issue #278).
+   */
+  readonly untracked: (cwd: string) => Effect.Effect<readonly string[], Refusal>
 }
 
 export class Git extends Context.Service<Git, GitService>()('Git') {}
@@ -373,5 +383,13 @@ export const gitLayer = (program = 'git', spawn: GitSpawn = spawnGit): Layer.Lay
         const nameStatus = yield* run(cwd, ['diff-tree', '--name-status', ...between])
         return { numstat, nameStatus }
       }),
+    mergeBase: (cwd, one, other) =>
+      run(cwd, ['merge-base', '--end-of-options', one, other]).pipe(
+        Effect.map((printed) => printed.trim()),
+      ),
+    untracked: (cwd) =>
+      run(cwd, ['ls-files', '--others', '--exclude-standard', '-z']).pipe(
+        Effect.map((printed) => printed.split('\0').filter((path) => path !== '')),
+      ),
   })
 }

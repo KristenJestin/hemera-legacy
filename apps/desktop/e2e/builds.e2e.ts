@@ -127,7 +127,19 @@ describe('A build prepares before it executes', () => {
       specId,
       workspaceId,
     )
-    expect(launch.state).toBe('started')
+    // Answered once the launch is written, never after the agent (#132): on a Workspace already
+    // ready it is started in the engine right after, and the window follows it.
+    expect(launch.state).toBe('waiting')
+    await browser.waitUntil(
+      async () =>
+        await browser.execute(
+          async (spec: string) =>
+            (await window.hemera.invoke('launches.forSpec', { specId: spec })).launch?.state ===
+            'started',
+          specId,
+        ),
+      { timeout: 20_000, interval: 200, timeoutMsg: 'the build was never started' },
+    )
 
     await browser.waitUntil(async () => (await sidebar()).includes(BUILD), {
       timeout: 20_000,

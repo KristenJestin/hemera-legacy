@@ -14,7 +14,7 @@ import { SpecQuestion, SpecQuestionRecord } from './spec-question.tsx'
 const meta = {
   title: 'Blocks/Spec/SpecQuestion',
   component: SpecQuestion,
-  tags: ['autodocs', 'updated'],
+  tags: ['autodocs'],
   parameters: { layout: 'padded' },
   args: { question: CREDIT_NOTES, onAnswer: fn() },
   argTypes: {

@@ -387,7 +387,7 @@ function Bench({ waiting: first, script = [], defaultOpen, onAnswer }: BenchProp
 const meta = {
   title: 'Blocks/Session/SessionNotices',
   component: Bench,
-  tags: ['autodocs', 'new'],
+  tags: ['autodocs'],
   parameters: { layout: 'fullscreen' },
   args: { waiting: [ASK], onAnswer: fn() },
 } satisfies Meta<typeof Bench>

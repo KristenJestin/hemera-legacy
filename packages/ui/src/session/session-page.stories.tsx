@@ -163,7 +163,7 @@ const THREAD = [
 ]
 
 const meta = {
-  tags: ['autodocs', 'updated'],
+  tags: ['autodocs'],
   title: 'Surfaces/Session',
   component: Page,
   parameters: { layout: 'fullscreen' },

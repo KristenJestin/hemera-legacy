@@ -34,7 +34,7 @@ function Frame(props: RunCommandProps): ReactNode {
 const meta = {
   title: 'Blocks/Session/RunCommand',
   component: Frame,
-  tags: ['autodocs', 'updated'],
+  tags: ['autodocs'],
   parameters: {
     layout: 'fullscreen',
     docs: { story: { inline: false, height: '28rem' } },

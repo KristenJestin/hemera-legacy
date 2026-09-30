@@ -78,10 +78,14 @@ const SHIPPED = join(import.meta.dirname, '..', 'drizzle')
 /** The version the shipped migrations are opened with, as the engine opens them. */
 const VERSION = '0.4.0'
 
+/** What the engine wrote to its diagnostic log in the current test. */
+const diagnostics: string[] = []
+
 let folder: string
 let root: string
 
 beforeEach(() => {
+  diagnostics.length = 0
   folder = join(tmpdir(), `hemera-tools-${String(Date.now())}-${String(Math.random())}`)
   mkdirSync(join(folder, 'workspace'), { recursive: true })
   // The Workspace as the disk spells it, which is how a Project keeps its root.
@@ -157,7 +161,9 @@ function engine(
   transport: JevTransport = typeSafeTransport,
   lookup: Layer.Layer<never> = Layer.empty,
 ) {
-  const sink = Layer.succeed(StderrSink, { write: () => Effect.void })
+  const sink = Layer.succeed(StderrSink, {
+    write: (line: string) => Effect.sync(() => void diagnostics.push(line)),
+  })
   const processes = processSupervisorLayer.pipe(
     Layer.provideMerge(Layer.mergeAll(hostProcessesLayer, sink)),
   )
@@ -1258,6 +1264,72 @@ describe("Hemera Auto's decisions are quiet records, and what it cannot decide w
     expect(question === undefined ? null : waitingAs(question, seen.entries, null, null)).toBe(
       'permission',
     )
+  })
+})
+
+describe('Every Hemera Auto decision leaves one line in the diagnostic log', () => {
+  it('says the call, who decided, the verdict, the policy, the model, the scores and the time', async () => {
+    let calls = 0
+    const transport: JevTransport = {
+      send: async () => {
+        calls += 1
+        return calls === 1 ? jevResponse(1) : new Response('down', { status: 503 })
+      },
+    }
+    const human = humanSaying('allowed')
+    await engine(
+      human,
+      transport,
+    )(
+      Effect.gen(function* () {
+        const session = yield* opened
+        yield* (yield* Variables).set(session.projectId, null, 'API_TOKEN', 'tok-very-private')
+        const settings = yield* ClassifierSettings
+        yield* settings.replaceKey('ciphertext', 'private-key')
+        yield* settings.setConsent(true)
+        yield* settings.select('hemera-auto')
+        yield* calling({
+          sessionId: session.sessionId,
+          tool: 'fs_write',
+          arguments: { path: 'judged.md', content: 'FILE-CONTENT tok-very-private', key: 'j' },
+        })
+        yield* calling({
+          sessionId: session.sessionId,
+          tool: 'commands_run',
+          arguments: {
+            line: 'node -e 0 "Authorization: Bearer sk-live-SECRET"',
+            key: 'c',
+          },
+        })
+        yield* calling({
+          sessionId: session.sessionId,
+          tool: 'commands_run',
+          arguments: { line: 'rm -rf .git', key: 'd' },
+        })
+      }),
+    )
+    const lines = diagnostics.filter((line) => line.startsWith('hemera-auto:'))
+    const all = lines.join('\n')
+    for (const leaked of ['FILE-CONTENT', 'tok-very-private', 'sk-live-SECRET', 'private-key']) {
+      expect(all).not.toContain(leaked)
+    }
+    // The judged write: its path, the judge, its verdict, policy, model, scores and time.
+    expect(lines[0]).toMatch(/fs_write .*judged\.md/)
+    expect(lines[0]).toContain('by=judge verdict=allow')
+    expect(lines[0]).toContain('policy=1')
+    expect(lines[0]).toContain(`model=${JEV_MODEL}`)
+    expect(lines[0]).toContain('risk=1 approval=0.2 userRequested=0.9')
+    expect(lines[0]).toMatch(/jev=\d+ms/)
+    // The command Jev failed on: the failure, the fall back to asking, then the human's answer.
+    expect(lines[1]).toMatch(/commands_run node -e 0/)
+    expect(lines[1]).toContain('verdict=ask')
+    expect(lines[1]).toContain('failure=http 503')
+    expect(lines[1]).toContain('fallback=ask')
+    expect(lines[2]).toContain('by=human verdict=allow')
+    // The deletion the rules refused, with no call to Jev.
+    expect(lines[3]).toContain('commands_run rm -rf .git')
+    expect(lines[3]).toContain('by=rules verdict=deny')
+    expect(lines).toHaveLength(4)
   })
 })
 

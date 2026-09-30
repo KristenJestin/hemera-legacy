@@ -44,6 +44,7 @@ describe('Every invalid or unavailable evaluation asks', () => {
       verdict: 'allow',
       model: JEV_MODEL,
       scores: { risk: 1, approval: 0.2, userRequested: 0.9 },
+      ms: expect.any(Number),
     })
     expect(
       await evaluateJev(state, 'test-key', new AbortController().signal, transport(answer(2.5))),
@@ -86,7 +87,20 @@ describe('Every invalid or unavailable evaluation asks', () => {
     expect(sent).toBe(0)
     expect(
       await evaluateJev(state, 'test-key', new AbortController().signal, transport(answer(), 429)),
+    ).toMatchObject({ kind: 'unavailable', reason: 'http', status: 429 })
+    expect(
+      await evaluateJev(state, 'test-key', new AbortController().signal, transport(answer(), 503)),
+    ).toMatchObject({ kind: 'unavailable', reason: 'http', status: 503, ms: expect.any(Number) })
+    expect(
+      await evaluateJev(state, 'test-key', new AbortController().signal, {
+        send: () => Promise.reject(new Error('offline')),
+      }),
     ).toMatchObject({ kind: 'unavailable', reason: 'network' })
+    expect(
+      await evaluateJev(state, 'test-key', new AbortController().signal, {
+        send: async () => new Response('<html>not json</html>', { status: 200 }),
+      }),
+    ).toMatchObject({ kind: 'unavailable', reason: 'response' })
   })
 
   test('abort makes a late provider answer inert', async () => {
@@ -287,9 +301,9 @@ describe('Jev never waits indefinitely', () => {
         evaluateJev(state, 'test-key', new AbortController().signal, hanging, [], 30),
       ),
     )
-    expect(results).toEqual([
-      { kind: 'unavailable', reason: 'network' },
-      { kind: 'unavailable', reason: 'network' },
+    expect(results).toMatchObject([
+      { kind: 'unavailable', reason: 'timeout' },
+      { kind: 'unavailable', reason: 'timeout' },
     ])
     expect(performance.now() - began).toBeLessThan(2_000)
   })

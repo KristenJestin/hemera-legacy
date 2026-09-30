@@ -49,7 +49,7 @@ const AUTH: ServiceLine = {
 }
 
 const meta = {
-  tags: ['autodocs', 'updated'],
+  tags: ['autodocs'],
   title: 'Blocks/Workspace/ServiceList',
   component: ServiceList,
   parameters: { layout: 'padded' },

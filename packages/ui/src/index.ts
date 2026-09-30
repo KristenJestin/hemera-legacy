@@ -139,7 +139,6 @@ export {
   DecisionsPanel,
   DeveloperSection,
   DiagnosticsPanel,
-  TesterPanel,
   type FindingKind,
   type FindingLine,
   type FindingSeverity,

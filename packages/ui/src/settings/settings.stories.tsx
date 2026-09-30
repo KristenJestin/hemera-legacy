@@ -491,20 +491,28 @@ export const CredentialJourney: Story = {
     await userEvent.type(field, 'storybook-demo-key')
     await userEvent.click(canvas.getByRole('button', { name: 'Save key' }))
     expect(args.classifier?.onSaveKey).toHaveBeenCalledWith('storybook-demo-key')
-    await waitFor(() => expect(canvas.getByText('Saved')).toBeInTheDocument())
+    await waitFor(() => expect(canvas.getByRole('img', { name: 'Saved' })).toBeInTheDocument())
+    expect(canvas.queryByText('Saved')).toBeNull()
     expect(canvas.getByRole('radio', { name: /Hemera Auto/ })).toBeChecked()
     await userEvent.type(field, 'replacement-demo-key')
     await userEvent.click(canvas.getByRole('button', { name: 'Replace key' }))
     expect(args.classifier?.onSaveKey).toHaveBeenCalledWith('replacement-demo-key')
     await userEvent.click(canvas.getByRole('button', { name: 'Remove key' }))
-    await waitFor(() => expect(canvas.getByText('Key required')).toBeVisible())
+    await waitFor(() => expect(canvas.getByRole('img', { name: 'Key required' })).toBeVisible())
     await expect(field).toHaveFocus()
     expect(args.classifier?.onRemoveKey).toHaveBeenCalled()
   },
 }
 
+/** Each state of Hemera Auto is a dot; its word is the dot's name and its hover, never a badge. */
 export const MissingKey: Story = {
   args: { defaultSection: 'hemera-auto', classifier: { ...CLASSIFIER, mode: 'hemera-auto' } },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const dot = canvas.getByRole('img', { name: 'Key required' })
+    expect(dot).toHaveAttribute('title', 'Key required')
+    expect(canvas.queryByText('Key required')).toBeNull()
+  },
 }
 
 export const InvalidKey: Story = {
@@ -519,7 +527,8 @@ export const InvalidKey: Story = {
   },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    expect(canvas.getByText('Key rejected')).toBeVisible()
+    expect(canvas.getByRole('img', { name: 'Key rejected' })).toBeVisible()
+    expect(canvas.queryByText('Key rejected')).toBeNull()
     expect(canvas.getByRole('alert')).toHaveTextContent('The key was rejected')
   },
 }
@@ -536,7 +545,8 @@ export const StorageUnavailable: Story = {
   },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    expect(canvas.getByText('Protected storage unavailable')).toBeVisible()
+    expect(canvas.getByRole('img', { name: 'Protected storage unavailable' })).toBeVisible()
+    expect(canvas.queryByText('Protected storage unavailable')).toBeNull()
     expect(canvas.getByLabelText('Jev API key')).toBeDisabled()
     expect(canvas.getByRole('button', { name: 'Save key' })).toBeDisabled()
   },
@@ -552,6 +562,11 @@ export const EvaluatorUnavailable: Story = {
       evaluator: 'unavailable',
     },
   },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    expect(canvas.getByRole('img', { name: 'Evaluator unavailable' })).toBeVisible()
+    expect(canvas.queryByText('Evaluator unavailable')).toBeNull()
+  },
 }
 
 export const ConsentRequired: Story = {
@@ -561,9 +576,10 @@ export const ConsentRequired: Story = {
   },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    expect(canvas.getByText('Consent required')).toBeVisible()
+    expect(canvas.getByRole('img', { name: 'Consent required' })).toBeVisible()
     await userEvent.click(canvas.getByRole('checkbox', { name: /Allow this evaluation data/ }))
-    await waitFor(() => expect(canvas.getByText('Ready')).toBeVisible())
+    await waitFor(() => expect(canvas.getByRole('img', { name: 'Ready' })).toBeVisible())
+    expect(canvas.queryByText('Ready')).toBeNull()
   },
 }
 
@@ -579,7 +595,8 @@ export const TransitionPending: Story = {
   },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    expect(canvas.getByText('Changing across Sessions…')).toBeVisible()
+    expect(canvas.getByRole('img', { name: 'Changing across Sessions…' })).toBeVisible()
+    expect(canvas.queryByText('Changing across Sessions…')).toBeNull()
     expect(canvas.getByRole('radio', { name: /Agent default/ })).toBeDisabled()
     expect(canvas.getByRole('radio', { name: /Hemera Auto/ })).toBeDisabled()
   },

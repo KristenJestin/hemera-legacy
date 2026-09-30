@@ -1,101 +1,167 @@
-import { type ReactNode, type RefObject, useState } from 'react'
+import { type ReactNode, useEffect, useRef, useState } from 'react'
 
-import type { SpecAnswer, SpecView } from '../../spec/model.ts'
-import { PHASE_TITLES } from '../../spec/model.ts'
+import { PHASE_TITLES, type SpecTarget, type SpecView } from '../../spec/model.ts'
 import { PhaseGlyph } from '../../spec/phase-glyph.tsx'
-import { SpecColumn, goToPhase } from '../../spec/spec-column.tsx'
-import { type PhaseGroup, isWriting, phaseProgressOf } from '../../spec/spec-phases.ts'
-import { SpecQuestion } from '../../spec/spec-question.tsx'
+import { SpecPart } from '../../spec/spec-part.tsx'
+import {
+  type PhaseGroup,
+  isWriting,
+  phaseProgressOf,
+  writtenWords,
+} from '../../spec/spec-phases.ts'
 
 /**
- * The Spec laid over the chat (maintainer's feedback of 30 September on issue #77): the width
- * shows more, not the same column spread out. Three columns:
+ * The Spec laid over the chat (maintainer's feedback of 30 September on issue #77): the width goes
+ * to reading, and the way through the Spec becomes a sidebar.
  *
- * - on the left, the outline: each phase with its glyph and the parts it writes, a press going to
- *   it, then the stories, key and title;
- * - in the middle, the Spec as it reads beside the chat, at a reading measure;
- * - on the right, the questions still open, answered there as in the thread.
+ * On the left, the phases one under the other — each its glyph, tinted by how far along it is,
+ * its name and how much of it is written — and under each, its sections, a press going to one.
+ * The one being read is marked, and follows the reading. It replaces the menu the phase headings
+ * open beside the chat.
+ *
+ * The rest of the width is the Spec's own text, one column at a reading measure, its phases parted
+ * by a quiet rule and its questions in their place in the flow.
  */
 
 const COLUMNS = 'flex min-h-0 flex-1'
 
-const OUTLINE =
-  'flex w-sidebar shrink-0 flex-col gap-5 overflow-y-auto border-r border-border px-4 py-4'
-
-const PART_HEAD = 'text-xs font-medium text-muted-foreground'
+const NAV =
+  'flex w-sidebar shrink-0 flex-col gap-5 overflow-y-auto border-r border-border bg-surface-rim px-3 py-4'
 
 const PHASE =
-  'flex w-full items-center gap-2 rounded-md px-1 py-1 text-left text-sm font-medium outline-none hover:bg-accent focus-ring'
+  'flex w-full items-center gap-2.5 rounded-md px-1.5 py-1 text-left outline-none hover:bg-accent focus-ring'
 
-const PART = 'truncate pl-10 text-xs text-muted-foreground'
+const PHASE_NAME = 'flex min-w-0 flex-col'
 
-const STORY = 'flex min-w-0 items-baseline gap-2 text-sm'
+const PHASE_WORDS = 'text-xs text-muted-foreground'
 
-const READING = 'relative flex min-w-0 flex-1 flex-col'
+/** A phase's sections, on a rule that runs down from its glyph. */
+const SECTIONS = 'ml-4 flex flex-col border-l border-border pl-2'
 
-const QUESTIONS =
-  'flex w-menu-panel shrink-0 flex-col gap-3 overflow-y-auto border-l border-border px-4 py-4'
+const SECTION =
+  'relative -ml-2.5 rounded-r-md border-l-2 border-transparent py-1 pr-2 pl-4 text-left text-sm text-muted-foreground outline-none hover:text-foreground focus-ring data-current:border-primary data-current:font-medium data-current:text-foreground'
+
+const READER = 'relative min-h-0 min-w-0 flex-1 overflow-y-auto outline-none focus-ring'
+
+const PAGE = 'mx-auto flex max-w-3xl flex-col px-8 pt-6 pb-24'
+
+const PHASE_RULE =
+  'flex items-center gap-2 border-b border-border pt-10 pb-2 text-xs font-medium text-muted-foreground first:pt-0'
+
+const PARTS = 'flex flex-col gap-8 pt-6'
 
 export interface DefineWideProps {
   spec: SpecView
   groups: PhaseGroup[]
-  column: RefObject<HTMLDivElement | null>
   still: boolean
 }
 
-export function DefineWide({ spec, groups, column, still }: DefineWideProps): ReactNode {
-  const [answers, setAnswers] = useState<Record<string, SpecAnswer>>({})
-  const open = spec.questions.filter((question) => question.answer === null)
+export function DefineWide({ spec, groups, still }: DefineWideProps): ReactNode {
+  const reader = useRef<HTMLDivElement>(null)
+  const [current, setCurrent] = useState<SpecTarget | null>(groups[0]?.rows[0]?.target ?? null)
+
+  // The part being read is the first one showing in the top third of the reader.
+  useEffect(() => {
+    const root = reader.current
+    if (root === null) return
+    const showing = new Set<string>()
+    const watch = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          const part = entry.target.getAttribute('data-part')
+          if (part === null) continue
+          if (entry.isIntersecting) showing.add(part)
+          else showing.delete(part)
+        }
+        const order = groups.flatMap((group) => group.rows.map((row) => row.target))
+        const first = order.find((target) => showing.has(target))
+        if (first !== undefined) setCurrent(first)
+      },
+      { root, rootMargin: '0px 0px -66% 0px' },
+    )
+    for (const part of root.querySelectorAll('[data-part]')) watch.observe(part)
+    return () => watch.disconnect()
+  }, [groups])
+
+  function goTo(target: SpecTarget): void {
+    const root = reader.current
+    const part = root?.querySelector<HTMLElement>(`[data-part="${target}"]`)
+    if (root === null || root === undefined || part === null || part === undefined) return
+    setCurrent(target)
+    root.scrollTo({ top: part.offsetTop - 24, behavior: still ? 'instant' : 'smooth' })
+  }
+
   return (
     <div className={COLUMNS}>
-      <nav aria-label={`Outline of ${spec.key}`} className={OUTLINE}>
-        <div className="flex flex-col gap-2">
-          <span className={PART_HEAD}>Outline</span>
-          {groups.map((group) => (
-            <div key={group.phase} className="flex flex-col gap-0.5">
+      <nav aria-label={`Outline of ${spec.key}`} className={NAV}>
+        {groups.map((group) => {
+          const writing = isWriting(group, spec.focus)
+          return (
+            <div key={group.phase} className="flex flex-col gap-1">
               <button
                 type="button"
                 className={PHASE}
-                onClick={() => goToPhase(column, group.phase, still)}
+                onClick={() => {
+                  const first = group.rows[0]
+                  if (first !== undefined) goTo(first.target)
+                }}
               >
                 <PhaseGlyph
                   phase={group.phase}
                   progress={phaseProgressOf(group, spec.focus)}
-                  writing={isWriting(group, spec.focus)}
+                  writing={writing}
                 />
-                {PHASE_TITLES[group.phase]}
-              </button>
-              {group.rows.map((row) => (
-                <span key={row.target} className={PART}>
-                  {row.label}
+                <span className={PHASE_NAME}>
+                  <span className="text-sm font-medium">{PHASE_TITLES[group.phase]}</span>
+                  <span className={PHASE_WORDS}>
+                    {writing ? `${writtenWords(group)} · writing…` : writtenWords(group)}
+                  </span>
                 </span>
-              ))}
+              </button>
+              <div className={SECTIONS}>
+                {group.rows.map((row) => (
+                  <button
+                    key={row.target}
+                    type="button"
+                    className={SECTION}
+                    data-current={current === row.target ? '' : undefined}
+                    aria-current={current === row.target ? 'location' : undefined}
+                    onClick={() => goTo(row.target)}
+                  >
+                    {row.label}
+                  </button>
+                ))}
+              </div>
             </div>
-          ))}
-        </div>
-        <div className="flex flex-col gap-1.5">
-          <span className={PART_HEAD}>Stories</span>
-          {spec.stories.map((story) => (
-            <span key={story.id} className={STORY}>
-              <span className="font-mono text-xs text-muted-foreground">{story.key}</span>
-              <span className="min-w-0 truncate">{story.title}</span>
-            </span>
-          ))}
-        </div>
+          )
+        })}
       </nav>
-      <div className={READING}>
-        <SpecColumn spec={spec} groups={groups} column={column} still={still} />
+      <div
+        ref={reader}
+        role="region"
+        aria-label={`Contents of ${spec.key}`}
+        tabIndex={0}
+        className={READER}
+      >
+        <div className={PAGE}>
+          {groups.map((group) => (
+            <section
+              key={group.phase}
+              aria-label={`${PHASE_TITLES[group.phase]} phase`}
+              className="flex flex-col"
+            >
+              <span className={PHASE_RULE}>{PHASE_TITLES[group.phase]}</span>
+              <div className={PARTS}>
+                {group.rows.map((row) => (
+                  <div key={row.target} data-part={row.target}>
+                    <SpecPart spec={spec} target={row.target} />
+                  </div>
+                ))}
+              </div>
+            </section>
+          ))}
+        </div>
       </div>
-      <aside aria-label="Open questions" className={QUESTIONS}>
-        <span className={PART_HEAD}>Questions · {open.length}</span>
-        {open.map((question) => (
-          <SpecQuestion
-            key={question.id}
-            question={{ ...question, answer: answers[question.id] ?? null }}
-            onAnswer={(answer) => setAnswers({ ...answers, [question.id]: answer })}
-          />
-        ))}
-      </aside>
     </div>
   )
 }

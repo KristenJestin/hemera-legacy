@@ -298,7 +298,9 @@ const NAMED_STATES = new Map([
       'FoldPushesTheChat',
       'SpecOpen',
       'SpecTakesTheViewsPlace',
-      'BannerOpensTheTask',
+      'NoticeOpensTheTask',
+      'YoursAmongTheNotices',
+      'ReviewAmongTheNotices',
       'Keyboard',
     ],
   ],
@@ -626,9 +628,6 @@ describe('Catalogue, coquille et surfaces, et rien d’autre', () => {
       'ReviewCard',
       'BuildSpecPanel',
       'BuildPanel',
-      // Lot 5c (issue #115): the banner above the chat's composer, which opens what waits for the
-      // user in the build on the view's stage.
-      'BuildBanner',
       'BuildChecks',
       'CheckDialog',
     ]
@@ -667,6 +666,9 @@ describe('Catalogue, coquille et surfaces, et rien d’autre', () => {
       // hand, and on what.
       'waitsOf',
       'waitingOf',
+      // What a build waits for the user on, as one kind of the Session's notices (issue #237).
+      'buildNotices',
+      'buildNoticeItems',
       'HOME_ENTRY',
       'JOURNAL_ENTRY',
       'NESTED_RADIUS',

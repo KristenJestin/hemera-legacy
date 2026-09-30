@@ -1,3 +1,4 @@
+import { spawnSync } from 'node:child_process'
 import { readFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { describe, expect, test } from 'vite-plus/test'
@@ -19,39 +20,73 @@ const srcinfoOf = (name: string): string => readFileSync(join(packaging, name, '
 
 const HASH = 'a'.repeat(64)
 
+/** What pacman answers comparing two versions, where it is installed: -1, 0 or 1. */
+function vercmp(left: string, right: string): number {
+  const run = spawnSync('vercmp', [left, right], { encoding: 'utf8' })
+  return Number(run.stdout.trim())
+}
+const hasVercmp = spawnSync('vercmp', ['1', '1']).status === 0
+
 describe('A release becomes hemera-bin', () => {
   test('the tag semantic-release puts on main is the pkgver', () => {
     expect(versionOf('hemera-bin', 'v0.4.0')).toEqual({ version: '0.4.0', pkgver: '0.4.0' })
   })
 
   test('a beta tag is refused', () => {
+    expect(() => versionOf('hemera-bin', 'v0.5.0-beta.1')).toThrow()
+  })
+
+  test('an old rolling beta tag is refused', () => {
     expect(() => versionOf('hemera-bin', 'beta-0.4.0-3-gabc1234')).toThrow()
   })
 })
 
 describe('A beta becomes hemera-beta-bin', () => {
-  test('the commits since the tag and the hash follow the version, without a dash', () => {
-    expect(versionOf('hemera-beta-bin', 'beta-0.4.0-3-gabc1234')).toEqual({
-      version: '0.4.0-3-gabc1234',
-      pkgver: '0.4.0.r3.gabc1234',
+  test('the pre-release semantic-release puts on dev becomes a pkgver without a dash', () => {
+    expect(versionOf('hemera-beta-bin', 'v0.5.0-beta.1')).toEqual({
+      version: '0.5.0-beta.1',
+      pkgver: '0.5.0beta1',
     })
-  })
-
-  test('a beta built on the tagged commit itself is that version', () => {
-    expect(versionOf('hemera-beta-bin', 'beta-0.4.0')).toEqual({
-      version: '0.4.0',
-      pkgver: '0.4.0',
+    expect(versionOf('hemera-beta-bin', 'v0.5.0-beta.12')).toEqual({
+      version: '0.5.0-beta.12',
+      pkgver: '0.5.0beta12',
     })
   })
 
   test('a release tag is refused', () => {
     expect(() => versionOf('hemera-beta-bin', 'v0.4.0')).toThrow()
   })
+
+  test('an old rolling beta tag is refused', () => {
+    expect(() => versionOf('hemera-beta-bin', 'beta-0.4.0-3-gabc1234')).toThrow()
+  })
+})
+
+// The two packages replace each other, so pacman must order every beta before its release and
+// after the release before it. Checked with pacman's own vercmp where it is installed.
+describe.skipIf(!hasVercmp)('pacman orders the betas and the releases on one line', () => {
+  const line = [
+    versionOf('hemera-bin', 'v0.4.0').pkgver,
+    versionOf('hemera-beta-bin', 'v0.4.1-beta.1').pkgver,
+    versionOf('hemera-beta-bin', 'v0.5.0-beta.1').pkgver,
+    versionOf('hemera-beta-bin', 'v0.5.0-beta.2').pkgver,
+    versionOf('hemera-beta-bin', 'v0.5.0-beta.10').pkgver,
+    versionOf('hemera-bin', 'v0.5.0').pkgver,
+    versionOf('hemera-beta-bin', 'v0.6.0-beta.1').pkgver,
+  ]
+
+  test.each(line.slice(1).map((newer, at) => [line[at] ?? '', newer]))(
+    '%s comes before %s',
+    (older, newer) => {
+      expect(vercmp(older, newer)).toBe(-1)
+      expect(vercmp(newer, older)).toBe(1)
+    },
+  )
 })
 
 describe('The PKGBUILD follows the release', () => {
   test.each(AUR_PACKAGES)('%s takes the new version, pkgrel 1 and the new checksum', (name) => {
-    const tag = name === 'hemera-bin' ? 'v0.4.0' : 'beta-0.4.0-3-gabc1234'
+    const tag = name === 'hemera-bin' ? 'v0.4.0' : 'v0.5.0-beta.1'
     const version = versionOf(name, tag)
     const rendered = renderPkgbuild(
       pkgbuildOf(name).replace(/^pkgrel=.*$/m, 'pkgrel=4'),
@@ -62,17 +97,17 @@ describe('The PKGBUILD follows the release', () => {
     expect(rendered).toMatch(new RegExp(`^pkgver=${version.pkgver.replaceAll('.', '\\.')}$`, 'm'))
     expect(rendered).toMatch(/^pkgrel=1$/m)
     expect(rendered).toMatch(new RegExp(`^sha256sums=\\('${HASH}'\\)$`, 'm'))
-    if (name === 'hemera-beta-bin') expect(rendered).toMatch(/^_version=0\.4\.0-3-gabc1234$/m)
+    if (name === 'hemera-beta-bin') expect(rendered).toMatch(/^_version=0\.5\.0-beta\.1$/m)
   })
 
   test('the beta downloads the asset GitHub names after its tag', () => {
     const rendered = renderPkgbuild(
       pkgbuildOf('hemera-beta-bin'),
-      versionOf('hemera-beta-bin', 'beta-0.4.0-3-gabc1234'),
+      versionOf('hemera-beta-bin', 'v0.5.0-beta.1'),
       HASH,
     )
     expect(expandedSource(rendered)).toBe(
-      'hemera-beta-0.4.0-3-gabc1234.deb::https://github.com/KristenJestin/hemera/releases/download/beta-0.4.0-3-gabc1234/Hemera.Beta-0.4.0-3-gabc1234.deb',
+      'hemera-beta-0.5.0-beta.1.deb::https://github.com/KristenJestin/hemera/releases/download/v0.5.0-beta.1/Hemera.Beta-0.5.0-beta.1.deb',
     )
   })
 
@@ -96,7 +131,7 @@ describe('The .SRCINFO follows the PKGBUILD', () => {
   })
 
   test.each(AUR_PACKAGES)('%s carries the new version, source and checksum', (name) => {
-    const tag = name === 'hemera-bin' ? 'v0.4.0' : 'beta-0.4.0-3-gabc1234'
+    const tag = name === 'hemera-bin' ? 'v0.4.0' : 'v0.5.0-beta.1'
     const version = versionOf(name, tag)
     const pkgbuild = renderPkgbuild(pkgbuildOf(name), version, HASH)
     const rendered = renderSrcinfo(srcinfoOf(name), pkgbuild)

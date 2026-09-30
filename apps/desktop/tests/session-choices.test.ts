@@ -24,6 +24,7 @@ import {
 import { IDLE_AFTER_MS } from '#engine/agents/pool.ts'
 import { AgentRuntime } from '#engine/agents/runtime.ts'
 import { ClassifierSettings } from '#engine/classifier/settings.ts'
+import { Journal, journalLayer } from '#engine/journal.ts'
 import { Specs } from '#engine/specs/specs.ts'
 import { application, aSession, machine, pause } from './application.ts'
 
@@ -284,6 +285,194 @@ describe("A Session's model and effort survive a restart of its agent", () => {
         expect(second.answers.resumes).toBe(1)
         expect(second.answers.choices).toEqual(['model=sonnet', 'effort=low'])
         expect(yield* standing(sessionId)).toEqual({ model: 'sonnet', effort: 'low' })
+      }),
+    )
+  })
+})
+
+/** An agent with modes, as Claude Code has: it opens on `default`, and moves when told. */
+const withModes = (script: Partial<FakeScript> = {}): FakeAgent => {
+  let mode = 'default'
+  const now = () => [
+    {
+      id: 'mode',
+      type: 'select' as const,
+      name: 'Mode',
+      category: 'mode' as const,
+      currentValue: mode,
+      options: [
+        { value: 'default', name: 'Default' },
+        { value: 'plan', name: 'Plan' },
+      ],
+    },
+  ]
+  return fakeAgent({
+    continues: true,
+    ...script,
+    configOptions: now(),
+    onChoice: (choice) => {
+      if (choice.id === 'mode') mode = choice.value
+      return now()
+    },
+  })
+}
+
+describe('A mode the agent left is not put back by a restart', () => {
+  for (const as of ['mode', 'config'] as const) {
+    test(`an agent that left plan mode by itself (${as} update) starts again out of it`, async () => {
+      const first = withModes({
+        steps: [
+          { does: 'switches', option: 'mode', value: 'default', as },
+          { does: 'says', text: 'The plan is approved.' },
+        ],
+      })
+      const second = withModes()
+
+      await twoStarts(
+        first,
+        second,
+      )(
+        Effect.gen(function* () {
+          const runtime = yield* AgentRuntime
+          const session = yield* aSession(workingDirectory)
+          yield* runtime.setOption(session.id, 'mode', 'plan')
+          yield* runtime.prompt(session.id, 'approve the plan')
+          expect(yield* standing(session.id)).toEqual({ mode: 'default' })
+          yield* endedBy(first, true)
+
+          yield* runtime.prompt(session.id, 'carry on')
+
+          expect(second.answers.choices).not.toContain('mode=plan')
+          expect(yield* standing(session.id)).toEqual({ mode: 'default' })
+        }),
+      )
+    })
+  }
+})
+
+/**
+ * An agent whose efforts are the model's own: Fable takes `low` and `high`, Sonnet those and
+ * `max`, a model chosen starts on `high`, and an effort its model does not have is refused.
+ */
+const effortsByModel = (): FakeAgent => {
+  const efforts = new Map([
+    ['fable', ['low', 'high']],
+    ['sonnet', ['low', 'high', 'max']],
+  ])
+  let model = 'fable'
+  let effort = 'high'
+  const now = () => [
+    {
+      id: 'model',
+      type: 'select' as const,
+      name: 'Model',
+      category: 'model' as const,
+      currentValue: model,
+      options: [
+        { value: 'fable', name: 'Fable 5.1' },
+        { value: 'sonnet', name: 'Sonnet 5' },
+      ],
+    },
+    {
+      id: 'effort',
+      type: 'select' as const,
+      name: 'Effort',
+      category: 'thought_level' as const,
+      currentValue: effort,
+      options: (efforts.get(model) ?? []).map((value) => ({ value, name: value })),
+    },
+  ]
+  return fakeAgent({
+    continues: true,
+    configOptions: now(),
+    onChoice: (choice) => {
+      if (choice.id === 'model') {
+        model = choice.value
+        effort = 'high'
+      }
+      if (choice.id === 'effort') {
+        if (!(efforts.get(model) ?? []).includes(choice.value)) {
+          throw new Error(`${model} has no ${choice.value} effort`)
+        }
+        effort = choice.value
+      }
+      return now()
+    },
+  })
+}
+
+describe('A start puts the model back before the effort', () => {
+  test('an effort chosen on the Home before its model lands on the new Session, on that model', async () => {
+    const probe = effortsByModel()
+    const agent = effortsByModel()
+
+    await twoStarts(
+      probe,
+      agent,
+    )(
+      Effect.gen(function* () {
+        const runtime = yield* AgentRuntime
+        const session = yield* aSession(workingDirectory)
+        yield* runtime.offerSet(session.projectId, 'claude', 'effort', 'low')
+        yield* runtime.offerSet(session.projectId, 'claude', 'model', 'sonnet')
+        yield* runtime.offerSet(session.projectId, 'claude', 'effort', 'max')
+
+        yield* runtime.prompt(session.id, 'start on the reader')
+
+        expect(agent.answers.choices).toEqual(['model=sonnet', 'effort=max'])
+        expect(yield* standing(session.id)).toEqual({ model: 'sonnet', effort: 'max' })
+      }),
+    )
+  })
+
+  test('a model that moved the effort is recorded with the effort it moved to', async () => {
+    const first = effortsByModel()
+    const second = effortsByModel()
+
+    await twoStarts(
+      first,
+      second,
+    )(
+      Effect.gen(function* () {
+        const runtime = yield* AgentRuntime
+        const session = yield* aSession(workingDirectory)
+        yield* runtime.setOption(session.id, 'effort', 'low')
+        yield* runtime.setOption(session.id, 'model', 'sonnet')
+        yield* runtime.prompt(session.id, 'start on the reader')
+        expect(yield* standing(session.id)).toEqual({ model: 'sonnet', effort: 'high' })
+        yield* endedBy(first, true)
+
+        yield* runtime.prompt(session.id, 'carry on')
+
+        expect(second.answers.choices).toEqual(['model=sonnet', 'effort=high'])
+        expect(yield* standing(session.id)).toEqual({ model: 'sonnet', effort: 'high' })
+      }),
+    )
+  })
+})
+
+describe("The Journal keeps what the agent stands on as the engine's", () => {
+  test('a mode the agent moved to is a line of Hemera’s, not the user’s', async () => {
+    const agent = withModes({
+      steps: [{ does: 'switches', option: 'mode', value: 'default', as: 'mode' }],
+    })
+
+    await application(dataFolder)(agent)(
+      Effect.gen(function* () {
+        const runtime = yield* AgentRuntime
+        const session = yield* aSession(workingDirectory)
+        yield* runtime.setOption(session.id, 'mode', 'plan')
+        yield* runtime.prompt(session.id, 'approve the plan')
+
+        const page = yield* Effect.gen(function* () {
+          return yield* (yield* Journal).read({ projectId: session.projectId })
+        }).pipe(Effect.provide(journalLayer))
+        const recorded = page.entries.filter((entry) => entry.type === 'session.choice_recorded')
+        expect(recorded.map((entry) => [entry.payload.value, entry.author])).toEqual([
+          ['default', 'hemera'],
+          ['plan', 'hemera'],
+          ['default', 'hemera'],
+        ])
       }),
     )
   })

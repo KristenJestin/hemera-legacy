@@ -1,12 +1,12 @@
-import { useRef, useState, useSyncExternalStore } from 'react'
+import { Fragment, useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import type { ReactNode } from 'react'
 
 import type {
+  Command,
   CommandRun,
   ConfigOption,
   ContextView as Provided,
   PlanRepository,
-  SectionName,
   Session,
   SessionEntry,
   SpecRevision,
@@ -14,12 +14,10 @@ import type {
   WorkspacePlan,
 } from '@hemera/ipc'
 import {
-  ActivityRow,
+  ActionGroup,
   AgentModelMenu,
-  BlockedBanner,
-  BuildBanner,
-  BuildSession,
-  CommandsPanel,
+  BuildPanel,
+  Button,
   Composer,
   ContextView,
   MessageDaySeparator,
@@ -28,25 +26,60 @@ import {
   MessageText,
   SessionEmpty,
   CreateWorkspaceDialog,
+  GoingOnLine,
+  RunCommand,
   SessionDetails,
   SessionHeader,
-  SessionLayout,
+  SessionNotices,
   SpecPanel,
-  UsageMeter,
-  type ChatState,
+  TurnLine,
+  STUCK_AFTER_MS,
   type BuildViewProps,
   type MessageLine,
   type MessageState,
+  type NoticeGroup,
+  type NoticeItem,
+  type RepositoryLine,
+  SessionCatalogue,
+  type SessionCatalogueProps,
+  SessionHistory,
   type OfferedAgent,
   type MenuClassifier,
   type PermissionOption,
+  type RunRepository,
   type ScrollerEntry,
-  waitsOf,
+  type UsageMeterProps,
+  buildNotices,
 } from '@hemera/ui'
+import {
+  IconBookmarkPlus,
+  IconFlag,
+  IconListCheck,
+  IconMessageQuestion,
+  IconShield,
+} from '@hemera/ui/icons'
 
-import { activityOf, hasEnded, type Activity, type AgentSessionState } from '../agent-store.ts'
+import {
+  hasEnded,
+  hasTrace,
+  heardSince,
+  openTrace,
+  specWritingOf,
+  turnRowOf,
+  type Activity,
+  type AgentSessionState,
+} from '../agent-store.ts'
+import { type Grouping, groupActions, groupingOf } from '../action-groups.ts'
 import { effortDefaultOf, effortStage, modeStage, modelStage } from '../agent-options.ts'
-import { drawEntry, planOf, touchedOf, usageOf, waitingOf } from '../agent-blocks.tsx'
+import {
+  type AgentContext,
+  drawEntry,
+  drawNotice,
+  planOf,
+  touchedOf,
+  usageOf,
+} from '../agent-blocks.tsx'
+import { agentShellCallsOf, commandProposalOf, foldedCallsOf } from '../agent-tool-payloads.ts'
 import {
   acceptBuild,
   buildSnapshot,
@@ -59,35 +92,57 @@ import {
   subscribeToBuild,
 } from '../build-store.ts'
 import { buildViewDataOf } from '../build-views.ts'
-import { elsewhereOf, foldedCallsOf } from '../agent-tool-payloads.ts'
+import { callLinksOf } from '../call-links.ts'
 import { whenOf } from '../journal-lines.ts'
-import { contextListsOf, detailsTabsOf, openingTabOf, panelRunsOf } from '../session-details.ts'
-import { openSessions, type OfferedWorkspace, workspaceFixedOf } from '../sessions-store.ts'
-import { selectEntry, setChatMinimised, shellState, subscribeToShell } from '../shell-store.ts'
-import { type DefinedSpec, questionAnchor, waitsForAnswer } from '../spec-entries.ts'
+import { type CommandWrite, commandLineOf, commandWriteOf } from '../project-lines.ts'
+import {
+  asksToRunALine,
+  NOTICE_KINDS,
+  type NoticeKind,
+  setupBatchesWaiting,
+  waitingAs,
+} from '../notices.ts'
+import {
+  contextListsOf,
+  detailsTabsOf,
+  goingOnOf,
+  lineOf,
+  openingTabOf,
+  overBefore,
+} from '../session-details.ts'
+import { linesSnapshot, marksOf, removeFromLine, subscribeToLines } from '../line-store.ts'
+import { openSessions, type OfferedWorkspace } from '../sessions-store.ts'
+import { selectEntry } from '../shell-store.ts'
+import { type DefinedSpec, questionMarkOf } from '../spec-entries.ts'
 import {
   answerQuestion,
   askForBuild,
   createSpec,
   declineSpecProposal,
-  discardMine,
+  joinSpec,
   markReady,
+  resumeBuildWorkspace,
   retryBuild,
   rework,
-  saveSection,
-  saveStory,
   selectRevision,
   specSnapshot,
   startBuild,
   subscribeToSpec,
   takeOver,
 } from '../spec-store.ts'
-import { launchOf, readerOf, specViewOf, specWorkspacesOf } from '../spec-views.ts'
+import {
+  launchOf,
+  provisionalViewOf,
+  readerOf,
+  specViewOf,
+  specWorkspacesOf,
+} from '../spec-views.ts'
 import {
   closePlanReading,
   createForSpec,
   isPlanReadingOpen,
   openPlanReading,
+  pickWorkspacesFolder,
   planForSpec,
   readPlanRepositories,
 } from '../workspaces-store.ts'
@@ -136,14 +191,86 @@ function together(read: readonly SessionEntry[], live: readonly SessionEntry[]):
   ]
 }
 
-/** The stack under the thread: in the page's one column, or narrow in a build's chat. */
-const FOOT = 'mx-auto flex w-full max-w-3xl flex-col gap-2 px-6 pb-4'
-const FOOT_NARROW = 'flex w-full flex-col gap-2 px-4 pb-4'
+/** How often a running turn's silence is measured again: the line counts it by fives. */
+const QUIET_TICK_MS = 5_000
 
-/** The head of a build Session, drawn across the top of the page. */
+/**
+ * The clock a running turn's silence is read on, moving every few seconds while it is asked to
+ * and standing still otherwise: a page that rendered every second for a line that changes every
+ * five would be a thread redrawn for nothing.
+ */
+function useTicking(active: boolean): number {
+  const [now, setNow] = useState(() => Date.now())
+  useEffect(() => {
+    if (!active) return undefined
+    setNow(Date.now())
+    const timer = setInterval(() => setNow(Date.now()), QUIET_TICK_MS)
+    return () => clearInterval(timer)
+  }, [active])
+  return now
+}
 
-/** What a turn that has just been asked for is doing, before anything of it has arrived. */
-const THINKING: Activity = { state: 'thinking' }
+/** Whether a Session has a trace to open, asked each time `asking` turns true. */
+function useTrace(sessionId: string, asking: boolean): boolean {
+  const [traced, setTraced] = useState(false)
+  useEffect(() => {
+    if (!asking) return undefined
+    let current = true
+    void hasTrace(sessionId).then((held) => {
+      if (current) setTraced(held)
+    })
+    return () => {
+      current = false
+    }
+  }, [sessionId, asking])
+  return traced
+}
+
+/**
+ * The row above the box (`TurnLine`): what the turn is doing and what the Session has spent. The
+ * running turn is told how long it has heard nothing (issue #131): past half a minute its line
+ * says so, and past two it offers Stop and, when the settings had it written, the trace of what
+ * the agent and Hemera said. Its own component, so the clock it ticks on redraws the row and not
+ * the thread.
+ */
+function TurnRow({
+  activity,
+  usage,
+  since,
+  sessionId,
+  onStop,
+  notched,
+}: {
+  activity: Activity | null
+  usage: UsageMeterProps | null
+  since: number | null
+  sessionId: string
+  onStop: () => void
+  /** Whether the Session's notices stand in the middle of the row. */
+  notched: boolean
+}): ReactNode {
+  const listening = activity !== null && since !== null && !hasEnded(activity)
+  const now = useTicking(listening)
+  const quietMs = listening ? Math.max(0, now - since) : undefined
+  const stuck = quietMs !== undefined && quietMs >= STUCK_AFTER_MS
+  const traced = useTrace(sessionId, stuck)
+  return (
+    <TurnLine
+      activity={
+        activity === null
+          ? null
+          : {
+              ...activity,
+              quietMs,
+              onStop,
+              onOpenTrace: traced ? () => void openTrace(sessionId) : undefined,
+            }
+      }
+      usage={usage}
+      notched={notched}
+    />
+  )
+}
 
 /** When a run was written, `HH:MM`, in the one reading the whole window uses. */
 function timeOf(at: number): string {
@@ -153,25 +280,6 @@ function timeOf(at: number): string {
 /** The whole date behind that time, for the reader who asks a time three days old which day it is. */
 function dateOf(at: number): string {
   return new Date(at).toLocaleString('en-GB')
-}
-
-/** `4 messages`, and the singular for the one that has just been written. */
-function countOf(entries: number): string {
-  return entries === 1 ? '1 message' : `${String(entries)} messages`
-}
-
-/**
- * The line under a Session's title: when it was made, what runs it, and how much is in it — or,
- * for a `define` or a `build` Session, its mission, its agent and model, and the key of its Spec
- * (core.md, "Session view": `DEFINE · Claude Sonnet`).
- */
-function metaOf(session: Session, entries: number, now: number, specKey: string | null): string {
-  const agent = session.provider === null ? 'no agent' : session.provider
-  if (session.mission === 'define' || session.mission === 'build') {
-    const mission = session.mission === 'define' ? 'DEFINE' : 'BUILD'
-    return [mission, agent, session.model, specKey].filter((one) => one !== null).join(' · ')
-  }
-  return `created ${whenOf(session.createdAt, now)} · ${agent} · ${countOf(entries)}`
 }
 
 /** The Spec a Session defines as its first revision named it, once it is read (D7-07). */
@@ -184,19 +292,8 @@ function definedOf(
   return { key: snapshot.spec.key, title: first.title, type: first.type }
 }
 
-/**
- * Takes the thread to where a question of the Spec is asked, and the keyboard to its first
- * answer: the register of the panel links there, and the answer is given in the thread.
- */
-function goToQuestion(id: string): void {
-  const block = document.getElementById(questionAnchor(id))
-  block?.scrollIntoView({ block: 'center' })
-  block?.querySelector('button')?.focus()
-}
-
 /** What the last act of a thread was refused with, when the engine refused it. */
 export interface SessionPageProps {
-  projectName: string
   session: Session
   /** The thread, oldest first, as the engine read it back. */
   entries: SessionEntry[]
@@ -204,8 +301,6 @@ export interface SessionPageProps {
   loaded: boolean
   /** What "today" means for this render, so the separators are read once. */
   now: number
-  /** Whether the title is being typed into, which the page that called this one decides. */
-  editing: boolean
   /** What the last act was refused with, in the engine's own words, or null. */
   refusal: string | null
   /** What the engine has pushed for this Session since it was opened. */
@@ -241,9 +336,9 @@ export interface SessionPageProps {
   onDecide: (toolCallId: string, option: PermissionOption) => void
   /** Sets one of the agent's own options for the turn to come. */
   onChooseOption: (optionId: string, value: string) => void
-  onRename: (title: string) => void
-  onStartEditing: () => void
-  onCancelEditing: () => void
+  /** Renames the Session, in its row of the sidebar where its title lives (review of #250). */
+  onRename: () => void
+  onArchive: () => void
   onSearchFiles: (query: string) => Promise<string[]>
   onPickFiles: () => Promise<string[]>
   /** Opens one of the files the turn touched, when the page around this one can open one. */
@@ -254,52 +349,67 @@ export interface SessionPageProps {
   onOpenUrl: (url: string) => void
   /** Stops a run and everything it started. */
   onStopRun: (runId: string) => void
+  /** Runs a run of the Session again, from its chip or the history (issue #237). */
+  onRunAgain: (runId: string) => void
+  /** Hands the agent again what waits for it, after a delivery it did not take (issue #211). */
+  onHandOver: () => void
   /** The Workspace root, which is what a run's folder is said relative to; null until known. */
   root: string | null
-  /** Runs a line from the Commands panel: a command of the catalogue by name, or a one-off. */
+  /** The Project's repositories, which a place is said as rather than as a folder (#239). */
+  repositories: readonly RunRepository[]
+  /** Runs a line from the Run of the line: a command of the catalogue by name, or a one-off. */
   onRunCommand: (line: string) => void
+  /** The Project's catalogue, which the Run of the line offers. */
+  catalogue: readonly Command[]
   /** What this Session was provided, may consult, and keeps to its agent; null until read. */
   context: Provided | null
-  /** The Workspaces the pill lists: `ready`, `main` first, and the Session's own (D8-08). */
+  /**
+   * The Workspaces of the Project, the Session's own among them (D8-08): what its Workspace is
+   * named by. The Session's composer offers no choice of it since issue #241.
+   */
   workspaces: readonly OfferedWorkspace[]
-  /** Moves the Session to another Workspace, null for `main`, before its agent has started. */
-  onChooseWorkspace: (workspaceId: string | null) => void
   /** Accepts a command the agent proposed; answers the engine's refusal, or null (D8-11). */
   onAcceptProposal: (proposalId: string) => Promise<string | null>
   /** Declines it; answers the engine's refusal, or null. */
   onDeclineProposal: (proposalId: string) => Promise<string | null>
   /** Keeps a one-off run in the catalogue; answers the engine's refusal, or null (D8-11). */
   onAddToCatalogue: (run: CommandRun) => Promise<string | null>
+  /** Applies a change to the Project's setup the agent proposed; answers the refusal, or null. */
+  onAcceptSetup: (proposalId: string) => Promise<string | null>
+  /**
+   * Applies every change of a batch still waiting, in the order proposed (#218): what the setup's
+   * Accept all calls for each batch; answers the refusal, or null.
+   */
+  onAcceptSetupBatch: (batchId: string) => Promise<string | null>
+  /** Declines a proposed change; answers the refusal, or null. */
+  onDeclineSetup: (proposalId: string) => Promise<string | null>
+  /**
+   * The catalogue as the Session's details edit it (issue #237): the Project's repositories a
+   * command may run from, whether Portless is here, the Project's name, and the writes.
+   */
+  catalogueEditing: CatalogueEditing
+  /** Bumped each time Run's keystroke is pressed: Run opens (review of #250). */
+  runAsked: number
+  /** That keystroke, written for the platform, which Run's tooltip says. */
+  runShortcut: string
 }
 
-/**
- * What the chat's button wears (lot 5c, issue #115): the turn's own state, said in the chat's five
- * words. A turn thinking, running or streaming is one the ring turns for; a stopped turn is red.
- */
-function chatStateOf(activity: Activity | null): ChatState {
-  if (activity === null) return 'idle'
-  switch (activity.state) {
-    case 'thinking':
-    case 'running':
-    case 'streaming':
-      return 'working'
-    case 'waiting':
-      return 'waiting'
-    case 'done':
-      return 'done'
-    case 'stopped':
-    case 'failed':
-      return 'failed'
-  }
+/** What the Catalogue tab of the details needs to edit the Project's catalogue (issue #237). */
+export interface CatalogueEditing {
+  repositories: readonly RepositoryLine[]
+  portlessInstalled: boolean
+  projectName: string
+  /** Writes a command, new or of the same name; answers the engine's refusal, or null. */
+  onSave: (command: CommandWrite, existing: boolean) => Promise<string | null>
+  onRemove: (name: string) => void
+  onListFolder: NonNullable<SessionCatalogueProps['onListFolder']>
 }
 
 export function SessionPage({
-  projectName,
   session,
   entries,
   loaded,
   now,
-  editing,
   refusal,
   agent,
   sessions,
@@ -313,50 +423,41 @@ export function SessionPage({
   onDecide,
   onChooseOption,
   onRename,
-  onStartEditing,
-  onCancelEditing,
+  onArchive,
   onSearchFiles,
   onPickFiles,
   onOpenFile,
   commandRuns,
+  catalogue,
   onOpenUrl,
   onStopRun,
+  onRunAgain,
+  onHandOver,
   root,
+  repositories,
   onRunCommand,
   context,
   workspaces,
-  onChooseWorkspace,
   onAcceptProposal,
   onDeclineProposal,
   onAddToCatalogue,
+  onAcceptSetup,
+  onAcceptSetupBatch,
+  onDeclineSetup,
+  catalogueEditing,
+  runAsked,
+  runShortcut,
 }: SessionPageProps): ReactNode {
   const [value, setValue] = useState('')
   const [files, setFiles] = useState<string[]>([])
-  /*
-    Whether the chat is minimised, which is the page's to hold and not the panel's (lot 5c, issue
-    #115): the page is keyed on the Session, so a Session remembers it while it is open, and the
-    mission it opens on is the one that decides — a build opens with the build view as its page
-    and its chat a button, every other mission opens with the chat at the centre.
-  */
-  /*
-    The chat's state is the shell's, remembered by Session: leaving a Session and coming back to
-    it finds the chat as it was left (lot 5c, issue #115). A Session nobody has touched opens on
-    its mission's own default — a build's chat is minimised and every other mission's is open —
-    and the panel is given the width it takes from the row in the same breath.
-  */
-  const shell = useSyncExternalStore(subscribeToShell, shellState, shellState)
-  const remembered = shell.chatMinimised[session.id]
-  const chatMinimised = remembered ?? session.mission === 'build'
-  const minimiseChat = (minimised: boolean): void => setChatMinimised(session.id, minimised)
-  // Which task the banner above the composer unfolded, on the build view's stage: the banner and
-  // the view are two readings of one build, and the head's own choice answers to the same state.
-  const [openBuildTask, setOpenBuildTask] = useState<string | null | undefined>(undefined)
   const [writes, setWrites] = useState<MessageState>('saved')
   const [failure, setFailure] = useState<string | undefined>(undefined)
   /** What was last handed to the engine, so `Retry` has something to send again. */
   const [attempted, setAttempted] = useState<string | null>(null)
   /** Whether the reader has the Session details open: only the head's button opens them. */
   const [detailsOpen, setDetailsOpen] = useState(false)
+  // Whether the details have a trace to offer, asked each time they open (#131).
+  const traced = useTrace(session.id, detailsOpen)
   /**
    * What the reader's last decision in the thread was refused with — a proposal or a one-off
    * run whose name the catalogue already holds (D8-11) — or null once one went through. Said
@@ -367,21 +468,6 @@ export function SessionPage({
     void decision.then(setRefused)
   }
   const stored = useSyncExternalStore(subscribeToSpec, specSnapshot, specSnapshot)
-  // Whether this Session was free when the page opened it: its Spec panel, once there, is one the
-  // proposal just made, and it arrives rather than standing there (issue #130). The page is
-  // keyed by the Session, so this is read once per Session opened.
-  const openedFree = useRef(session.mission === 'free')
-  const defined = stored.snapshot?.spec.id === session.specId ? stored.snapshot : null
-  const spec =
-    defined === null
-      ? null
-      : specViewOf({
-          snapshot: defined,
-          revisions: stored.revisions,
-          buffers: stored.buffers,
-          journal: stored.journal,
-          readyRefused: stored.readyRefused,
-        })
   // The build of a `build` Session, and the frozen revision it works from (D10-12).
   const built = useSyncExternalStore(subscribeToBuild, buildSnapshot, buildSnapshot)
   const build = built.view?.sessionId === session.id ? built.view : null
@@ -391,12 +477,38 @@ export function SessionPage({
       : specViewOf({
           snapshot: built.spec,
           revisions: built.revisions,
-          buffers: [],
           journal: [],
           readyRefused: null,
         })
-  const versionOf = (name: SectionName): number =>
-    spec?.sections.find((one) => one.name === name)?.version ?? 0
+  // Which task the banner above the composer opened, on the build view's stage: the banner and the
+  // view are two readings of one build, and the view's own choice answers to the same state.
+  const [openBuildTask, setOpenBuildTask] = useState<string | null | undefined>(undefined)
+  // Whether the composer takes the keyboard: the build's review is written there (issue #117).
+  const [composing, setComposing] = useState(false)
+  // What the reader did to the line of this Session, and when the Session was opened: a one-off
+  // over by then is not news (issue #237).
+  const lines = useSyncExternalStore(subscribeToLines, linesSnapshot, linesSnapshot)
+  const opened = useRef(Date.now())
+  // Whether this Session was free when the page opened it: its Spec panel, once there, is one the
+  // proposal just made, and it arrives rather than standing there (issue #130). The page is
+  // keyed by the Session, so this is read once per Session opened.
+  const openedFree = useRef(session.mission === 'free')
+  const defined = stored.snapshot?.spec.id === session.specId ? stored.snapshot : null
+  // New Spec's provisional Spec, while this Session has no Spec of its own (issue #198).
+  const provisional = stored.provisional.get(session.id) ?? null
+  const thread = together(entries, agent.entries)
+  const spec =
+    defined === null
+      ? null
+      : specViewOf({
+          snapshot: defined,
+          revisions: stored.revisions,
+          journal: stored.journal,
+          readyRefused: stored.readyRefused,
+          // The part a `spec_write` of the running turn is writing, as the thread says it: the
+          // section says so at once, and goes back to what it held if the write fails.
+          writing: agent.running ? specWritingOf(thread) : null,
+        })
   /** The plan the Workspace dialog is open on, and what it is to leave behind. */
   const [workspacePlan, setWorkspacePlan] = useState<WorkspacePlan | null>(null)
   /** What Git has answered of that plan so far, in the order the answers arrived (#110). */
@@ -462,9 +574,6 @@ export function SessionPage({
     return said
   }
 
-  const thread = together(entries, agent.entries)
-  const waiting = waitingOf(thread)
-
   // The Workspace the Session works in, on the pill: it can be changed until the agent has
   // started, and is fixed from then on, which the pill says in words (D8-08). A run in another
   // one — a Project-scoped service, in `main` — names it on its block.
@@ -502,9 +611,14 @@ export function SessionPage({
    */
   const byLine = new Map(runs.map((run, index) => [run.lines[0]?.id ?? '', index]))
   const byEntry = new Map<string, ScrollerEntry>()
+  // What each block is to a run of tool calls, which the thread folds into one group (#149).
+  const groupings = new Map<string, Grouping>()
   // A call to one of Hemera's tools is drawn once, as Hemera's block, where the agent reported
   // it: the agent's own report of it stays in the thread and is not drawn a second time (D6-06).
   const folded = foldedCallsOf(thread)
+  // What became of each of Hemera's calls — its permission, its run, its proposal — drawn with the
+  // call, and not a second and a third time on rows of their own (review of #250).
+  const links = callLinksOf(thread, folded)
   // The agent's reports of its calls, by the identifier it gave each: a question it asks about one
   // is headed by that call's line.
   const reported = new Map<string, SessionEntry>()
@@ -519,27 +633,36 @@ export function SessionPage({
       ? new Set(stored.current.questions.map((one) => one.id))
       : null
   /**
-   * What waits for the reader's answer — the agent's proposal, a question of the Spec — drawn
-   * above the composer rather than where it was asked, for as long as it waits (issue #130): the
-   * agent goes on writing under it, and the reader had to scroll back up past all of it to answer.
+   * What waits for a human, by kind (issue #237): the Session's notices, on the composer's edge,
+   * whatever the thread's scroll. Each entry of it is drawn there with what answers it, and the
+   * thread keeps its quiet record where it was asked.
    */
-  const pinned: { id: string; content: ReactNode }[] = []
+  const waitingByKind = new Map<NoticeKind, NoticeItem[]>(NOTICE_KINDS.map((kind) => [kind, []]))
+  /** The proposals that wait, which `Add all` answers in one press. */
+  const proposalsWaiting: string[] = []
+  /** Whether every permission that waits is a line to run once, which its group's head says. */
+  let linesOnly = true
   for (let at = 0; at < thread.length; at += 1) {
     const entry = thread[at]
     if (entry === undefined || folded.hidden.has(entry.id)) continue
     const next = thread[at + 1]
-    const block = drawEntry(folded.inPlaceOf.get(entry.id) ?? entry, {
+    const drawn = folded.inPlaceOf.get(entry.id) ?? entry
+    const drawing: AgentContext = {
       now,
       nextAt: next === undefined ? null : next.createdAt,
       onDecide,
       runs: commandRuns,
       workspace: workspace?.name,
+      root,
+      repositories,
       onOpenUrl,
-      onStopRun,
+      onHandOver,
+      callLink: (drawnId) => links.byCall.get(drawnId),
       reportedCall: (toolCallId) => reported.get(toolCallId),
       onAcceptProposal: (proposalId) => deciding(onAcceptProposal(proposalId)),
       onDeclineProposal: (proposalId) => deciding(onDeclineProposal(proposalId)),
-      onAddToCatalogue: (run) => deciding(onAddToCatalogue(run)),
+      onAcceptSetup: (proposalId) => deciding(onAcceptSetup(proposalId)),
+      onDeclineSetup: (proposalId) => deciding(onDeclineSetup(proposalId)),
       spec: {
         thread,
         specId: session.specId,
@@ -547,25 +670,189 @@ export function SessionPage({
         asked,
         onAnswer: (questionId, answer) => void answerQuestion(questionId, answer),
         onCreate: (title, type) => void createSpec(session.id, type, title),
+        onJoin: (proposalId) => void joinSpec(session.id, proposalId),
         onDecline: (proposalId) => deciding(declineSpecProposal(session.id, proposalId)),
       },
-    })
+    }
+    const kind = waitingAs(entry, thread, session.specId, asked)
+    if (kind !== null) {
+      const notice = drawNotice(drawn, drawing)
+      if (notice !== null) waitingByKind.get(kind)?.push({ id: entry.id, content: notice })
+      const proposal = kind === 'proposal' ? commandProposalOf(entry) : null
+      if (proposal !== null) proposalsWaiting.push(proposal.proposalId)
+      if (kind === 'permission' && !asksToRunALine(entry)) linesOnly = false
+    }
+    // Carried by its call: drawn with it, never on its own row.
+    if (links.absorbed.has(entry.id)) continue
+    const block = drawEntry(drawn, drawing)
     // No mark: the rail is navigated by what the reader wrote, and a tick for every block of a
     // turn was forty ticks for one question (trial of 22 September 2026).
     if (block === null) continue
-    if (waitsForAnswer(entry, thread, session.specId, asked)) {
-      pinned.push({ id: entry.id, content: block })
-      continue
-    }
-    byEntry.set(entry.id, { id: entry.id, content: block })
+    // An answer to a question is the reader's, and marked on the rail as their messages are (issue
+    // #149), by what they typed or the choice they made; the card that holds it carries the mark.
+    const mark = entry.kind === 'spec_question' ? questionMarkOf(entry, thread, asked) : undefined
+    byEntry.set(entry.id, { id: entry.id, mark, content: block })
+    groupings.set(entry.id, groupingOf(drawn))
   }
 
+  /** Accepts every proposal that waits, one after the other, until the engine refuses one. */
+  const acceptAll = (): void => {
+    const ids = [...proposalsWaiting]
+    void (async () => {
+      for (const id of ids) {
+        // One at a time, in the order they were proposed: each is a write of the catalogue.
+        // oxlint-disable-next-line no-await-in-loop -- the catalogue is written one command at a time
+        const said = await onAcceptProposal(id)
+        if (said !== null) {
+          setRefused(said)
+          return
+        }
+      }
+      setRefused(null)
+    })()
+  }
+  /**
+   * Accepts every setup change that waits (Decided 1 of #218): batch after batch, in the order they
+   * were proposed, each in the order of its changes; the first refusal stops it, and is said.
+   */
+  const acceptAllSetup = (): void => {
+    const batches = setupBatchesWaiting(thread)
+    void (async () => {
+      for (const batch of batches) {
+        // oxlint-disable-next-line no-await-in-loop -- one batch applied after the other
+        const said = await onAcceptSetupBatch(batch)
+        if (said !== null) {
+          setRefused(said)
+          return
+        }
+      }
+      setRefused(null)
+    })()
+  }
+  // The build's data and its handlers, which both readings of it need: the panel's view, and the
+  // Session's notices, whose Open puts a task on the view's stage (D10-12).
+  const buildView: Omit<BuildViewProps, 'specOpen' | 'onToggleSpec'> | null =
+    session.mission !== 'build' || build === null
+      ? null
+      : {
+          build: buildViewDataOf(build),
+          now: new Date(now).toISOString(),
+          onPause: () => void pauseBuild(),
+          onResume: () => void resumeBuild(),
+          onAccept: () => void acceptBuild(),
+          onStop: () => void stopBuild(),
+          onTaskDone: (taskId) => void doneTask(taskId),
+          onTaskSkip: (taskId, reason, unblock) => void skipTask(taskId, reason, unblock),
+          onDismissBlocker: (blockerId, note) => void dismissBlocker(blockerId, note),
+          // The review is written in the composer, which takes the keyboard (issue #117).
+          onOpenChat: () => setComposing(true),
+        }
+
+  const itemsOf = (kind: NoticeKind): NoticeItem[] => waitingByKind.get(kind) ?? []
+  // What the build waits for the user on: a kind of the notices of its own.
+  const building = buildView === null ? null : buildNotices(buildView, setOpenBuildTask)
+  const notices: NoticeGroup[] = [
+    {
+      kind: 'permission',
+      label: 'Permissions',
+      title: linesOnly ? 'Run once' : 'Allow once',
+      icon: <IconShield size="md" aria-hidden="true" />,
+      urgent: true,
+      tone: 'warning',
+      items: itemsOf('permission'),
+    },
+    {
+      kind: 'question',
+      label: 'Questions',
+      title: 'Questions',
+      tone: 'info',
+      icon: <IconMessageQuestion size="md" aria-hidden="true" />,
+      items: itemsOf('question'),
+    },
+    {
+      kind: 'spec',
+      label: 'Spec proposed',
+      title: 'Start a Spec',
+      tone: 'success',
+      icon: <IconFlag size="md" aria-hidden="true" />,
+      items: itemsOf('spec'),
+    },
+    {
+      kind: 'proposal',
+      label: 'Proposed commands',
+      title: 'Add to the catalogue',
+      tone: 'primary',
+      icon: <IconBookmarkPlus size="md" aria-hidden="true" />,
+      items: itemsOf('proposal'),
+      actions:
+        proposalsWaiting.length > 1 ? (
+          <Button variant="link" size="sm" onClick={acceptAll}>
+            Add all
+          </Button>
+        ) : undefined,
+    },
+    {
+      kind: 'setup',
+      label: 'Setup changes',
+      title: 'Set up the Project',
+      tone: 'build',
+      icon: <IconListCheck size="md" aria-hidden="true" />,
+      items: itemsOf('setup'),
+      actions:
+        itemsOf('setup').length > 1 ? (
+          <Button variant="link" size="sm" onClick={acceptAllSetup}>
+            Accept all
+          </Button>
+        ) : undefined,
+    },
+    ...(building === null ? [] : [building]),
+  ]
+  /**
+   * The first kind that waits for the reader, in the notices' order, or null: the row above the box
+   * says it waits as long as anything does, and its face says what for (issue #140).
+   */
+  const waitsFor = NOTICE_KINDS.find((kind) => itemsOf(kind).length > 0) ?? null
+  /** Whether anything waits for the reader, the build among it. */
+  const waitsForYou = waitsFor !== null || (building?.items.length ?? 0) > 0
+
   const scroller: ScrollerEntry[] = []
+  /**
+   * The agent's blocks since the last thing the user wrote, waiting to be laid out: every run of
+   * two tool calls or more between two things the agent said is one row, folded (issue #149).
+   */
+  let pending: { item: ScrollerEntry; grouping: Grouping }[] = []
+  const lay = (): void => {
+    for (const piece of groupActions(pending)) {
+      if (piece.kind === 'one') {
+        scroller.push(piece.item)
+        continue
+      }
+      scroller.push({
+        // Named after its first row, which stays its first row however long the run grows: the
+        // group the reader unfolded is the same group when the next call arrives in it.
+        id: `actions-${piece.items[0]?.id ?? ''}`,
+        content: (
+          <ActionGroup
+            count={piece.count}
+            status={piece.status}
+            latest={piece.latest}
+            unit={piece.unit}
+          >
+            {piece.items.map((one) => (
+              <Fragment key={one.id}>{one.content}</Fragment>
+            ))}
+          </ActionGroup>
+        ),
+      })
+    }
+    pending = []
+  }
   /** The day last named over the thread, so a run that follows the agent's words repeats nothing. */
   let named: string | null = null
   for (const entry of thread) {
     const run = byLine.get(entry.id)
     if (run !== undefined) {
+      lay()
       const held = runs[run]
       const last = run === runs.length - 1
       const day = held?.day ?? ''
@@ -609,8 +896,10 @@ export function SessionPage({
     const held = runs.at(-1)
     if (held !== undefined) held.broken = true
     const block = byEntry.get(entry.id)
-    if (block !== undefined) scroller.push(block)
+    if (block !== undefined)
+      pending.push({ item: block, grouping: groupings.get(entry.id) ?? null })
   }
+  lay()
 
   /**
    * What the turn is doing, for as long as it runs (design D17-04, trial of 22 September 2026).
@@ -622,21 +911,10 @@ export function SessionPage({
    *
    * Once the turn is over the row stays, quiet, and says how it ended — "Done in 12 s",
    * "Stopped", "Failed" — for as long as that end is the last thing that happened: the next
-   * message sets a turn running again, and the row goes back to saying what that one is doing.
-   * Until the engine has echoed that message the thread still ends on the previous turn's end,
-   * which is not what a turn just asked for is doing: it is thinking. The end is believed while
-   * running only when it is the very entry the engine pushed last, the few instants between the
-   * `turn` entry and the `turn` event that follows it.
+   * message sets a turn running again, and the row goes back to saying what that one is doing
+   * (`turnRowOf`).
    */
-  const read = activityOf(thread, agent.latest)
-  const endedNow = thread.find((entry) => entry.id === agent.latest)?.kind === 'turn'
-  const activity = agent.running
-    ? hasEnded(read) && !endedNow
-      ? THINKING
-      : read
-    : hasEnded(read)
-      ? read
-      : null
+  const activity = turnRowOf(thread, agent.running, agent.latest, waitsFor)
 
   // What the agent is on is the agent's own answer, read back after every change: this page
   // draws what it was told and never a value it remembers (D5-13).
@@ -648,32 +926,56 @@ export function SessionPage({
   // touched. Both are states rather than events, and they are read here because the meter above
   // the box and the details are two readings of the same turn.
   const plan = planOf(thread)
+  // The commands the agent ran in its own shell, which the line and the history list (#219, #237).
+  const shells = agentShellCallsOf(thread)
+  // Everything the Session ran, in the order it began: the line's and the history's (issue #237).
+  const goingOn = goingOnOf(commandRuns, shells, root, workspace?.name, repositories)
   const touched = touchedOf(thread)
   const usage = usageOf(thread)
   // Which tabs have something to show, which is what the details open on.
-  const tabs = detailsTabsOf(plan.length, touched.length, commandRuns, context)
+  const tabs = detailsTabsOf(plan.length, touched.length, context)
 
   /**
    * The panel beside the chat, chosen by the Session's mission here and nowhere else. A `define`
    * Session has its Spec. A `free` Session has no panel and nothing that offers one: a Spec begins
-   * with the agent's proposal in the thread (D7-07). `build` plugs in here, with the panel of its
-   * tasks, workers and evidence standing in the same `MissionPanel` the Spec stands in.
+   * with the agent's proposal in the thread (D7-07). A `build` Session has its build: the build
+   * view, and the frozen revision read only in its place when "Spec" opens it (D10-12). The Spec
+   * panel is its own slot of the row: folded to a small frame at the window's edge, and swapped for
+   * the open panel, which pushes the chat (issue #164).
    */
-  function missionPanel(page: boolean): ReactNode {
+  function missionPanel(): ReactNode {
+    if (buildView !== null) {
+      // Until the build and its revision are read, no panel: the chat alone.
+      if (frozen === null) return null
+      return (
+        <BuildPanel
+          {...buildView}
+          spec={frozen}
+          selected={openBuildTask}
+          onSelect={setOpenBuildTask}
+        />
+      )
+    }
+    // New Spec's Spec before it exists (issue #198): the same panel, on a provisional Spec, until
+    // the real one is read — it then takes its place in the panel already there, with no jump.
+    if (spec === null && provisional !== null) {
+      return (
+        <SpecPanel
+          spec={provisionalViewOf(provisional)}
+          arrives={openedFree.current}
+          onMarkReady={() => undefined}
+          onRework={() => undefined}
+          onPickRevision={() => undefined}
+          onTakeOver={() => undefined}
+        />
+      )
+    }
     if (session.mission !== 'define' || spec === null || defined === null) return null
     return (
       <SpecPanel
         spec={spec}
         arrives={openedFree.current}
         reader={readerOf(defined, session.id, sessions, running)}
-        page={page}
-        // Checked against the version the edit was opened on, which the panel hands back:
-        // an agent may have written the section meanwhile (D7-12).
-        onSaveSection={(name, body, base) => void saveSection(session.id, name, body, base)}
-        onApplyMine={(name, body) => void saveSection(session.id, name, body, versionOf(name))}
-        onDiscardMine={(name) => void discardMine(name)}
-        onSaveStory={(story) => void saveStory(session.id, story)}
-        onGoToQuestion={goToQuestion}
         onMarkReady={() => void markReady(session.id)}
         onRework={(reason) => void rework(session.id, reason)}
         onPickRevision={(revision) => {
@@ -681,16 +983,17 @@ export function SessionPage({
           void selectRevision(revision === current?.number ? null : revision)
         }}
         onTakeOver={() => void takeOver(session.id)}
-        // Where the build of this frozen Spec stands, and what is to be pressed next (D8-12,
-        // D8-13): the panel's head holds it, and the whole journey it opens — the plan, the
-        // Workspace, the launch — belongs here.
+        // Where the build of this ready Spec stands, and what is to be pressed next (D8-12,
+        // D8-13): the panel's footer holds it (issue #135), and the whole journey it
+        // opens — the plan, the Workspace, the launch — belongs here.
         build={{
-          launch: launchOf(stored.launches),
+          launch: launchOf(stored.launches, defined.spec),
           ...specWorkspacesOf(stored.launches),
           onPrepareAndStart: () => prepareWorkspace(true),
           onPrepareOnly: () => prepareWorkspace(false),
           onUseWorkspace: (id) => void askForBuild(id),
           onStart: () => void startBuild(),
+          onResume: () => void resumeBuildWorkspace(),
           onRetry: () => void retryBuild(),
           onOpen: openBuild,
         }}
@@ -698,276 +1001,91 @@ export function SessionPage({
     )
   }
 
-  const head = (
-    <SessionHeader
-      title={session.title}
-      projectName={projectName}
-      meta={metaOf(session, thread.length, now, build?.specKey ?? spec?.key ?? null)}
-      onRename={onRename}
-      editing={editing}
-      onStartEditing={onStartEditing}
-      onCancelEditing={onCancelEditing}
-      // The one way to the Session details: nothing the agent does opens them.
-      onOpenDetails={() => setDetailsOpen(true)}
-    />
-  )
-
-  const threadNode =
-    thread.length === 0 ? (
-      <div className="mx-auto flex min-h-0 w-full max-w-3xl flex-1 flex-col px-6">
-        {loaded ? <SessionEmpty /> : null}
-      </div>
-    ) : (
-      <MessageScroller className="flex-1" label="The thread of this Session" entries={scroller} />
-    )
-
-  // What the turn waits on in the thread, said above the composer (D5-09).
-  const permission =
-    waiting === null ? undefined : (
-      <BlockedBanner waiting="The agent is asking to go on." onStop={onStop} />
-    )
-  const said = refused ?? refusal ?? stored.refusal ?? built.refusal
-
-  /**
-   * What stands under the thread: what the turn is doing and has cost, the page's last refusal,
-   * and the composer, with what blocks it above it. Wide under a free or define thread, narrow in
-   * the chat of a build (D10-12).
-   */
-  const foot = (blocked: ReactNode, narrow: boolean): ReactNode => (
-    <div className={narrow ? FOOT_NARROW : FOOT}>
-      {(activity !== null || usage !== null) && (
-        <div className="flex items-center justify-between gap-3">
-          {activity !== null ? (
-            <ActivityRow
-              state={activity.state}
-              detail={activity.detail}
-              thought={activity.thought}
-              elapsedMs={activity.elapsedMs}
-            />
-          ) : (
-            <span />
-          )}
-          {usage !== null && <UsageMeter used={usage.used} size={usage.size} cost={usage.cost} />}
-        </div>
-      )}
-      {/*
-        What the page's last act was refused with — a rename, an archive, a thread that could
-        not be read, a Workspace changed once the agent had started (D8-08) — said here and
-        not on the send: those are refusals of the header and of the opening, and a Session
-        whose archive was refused is one that can still be written in. It stands in the same
-        stack as the meter rather than over the thread, so what it moves is itself and nothing
-        above it (D4b-02).
-      */}
-      {said !== null && (
-        <p role="alert" className="text-sm text-muted-foreground">
-          {said}
-        </p>
-      )}
-      <Composer
-        value={value}
-        onValueChange={setValue}
-        files={files}
-        onFilesChange={setFiles}
-        onSearchFiles={onSearchFiles}
-        onPickFiles={onPickFiles}
-        variant="inline"
-        action={session.provider === null ? 'Write' : 'Send'}
-        placeholder={
-          session.provider === null
-            ? 'Write to this Session…'
-            : `Say something to ${session.provider}…`
-        }
-        onSend={write}
-        workspaces={[...workspaces]}
-        workspace={workspace?.name}
-        workspaceFixed={workspaceFixedOf(session, agent.running)}
-        onWorkspaceChange={(name) => {
-          const chosen = workspaces.find((one) => one.name === name)
-          if (chosen !== undefined && chosen.id !== session.workspaceId) {
-            onChooseWorkspace(chosen.id)
-          }
-        }}
-        // Nothing is handed over here: a refusal of this page is not a reason not to write,
-        // and a write that is refused answers `write` itself — which is what the composer
-        // shows under the box, on the sentence that was not written (D4b-02).
-        agentMenu={
-          <AgentModelMenu
-            classifier={classifier}
-            agents={agents}
-            agent={session.provider}
-            // The agent of a Session is the one it was made with and cannot be changed:
-            // `fixed` takes the agent stage out of the panel altogether, and the panel opens
-            // on the models of the agent that is answering (D17-11).
-            fixed
-            onAgentChange={() => undefined}
-            models={model?.choices ?? []}
-            model={model?.current ?? null}
-            onModelChange={(chosen) => {
-              if (model !== null) onChooseOption(model.optionId, chosen)
-            }}
-            efforts={effort?.choices ?? []}
-            effort={effort?.current ?? null}
-            onEffortChange={(chosen) => {
-              if (effort !== null) onChooseOption(effort.optionId, chosen)
-            }}
-            // The level the agent recommends, which the scale marks.
-            effortDefault={effortDefaultOf(options)}
-            // The mode is a row of that same panel since the trial of 22 September 2026: it
-            // is one of the four things the agent is set on, and a control of its own beside
-            // the menu was a second control asking about one agent.
-            modes={mode?.choices ?? []}
-            mode={mode?.current ?? null}
-            onModeChange={(chosen) => {
-              if (mode !== null) onChooseOption(mode.optionId, chosen)
-            }}
-          />
-        }
-        running={agent.running}
-        onStop={onStop}
-        pinned={pinned}
-        blocked={blocked}
-      />
-    </div>
-  )
-
-  const details = (
-    <SessionDetails
-      open={detailsOpen}
-      onOpenChange={setDetailsOpen}
-      plan={plan}
-      files={touched}
-      onSelectFile={onOpenFile}
-      // The commands of a Session with an agent, whoever started them (D6-12): the same runs
-      // the thread's blocks read, and the line a one-off is run from. A Session nothing
-      // answers has no agent to lend a command to, and says so on the tab.
-      commands={
-        session.provider === null ? undefined : (
-          <CommandsPanel
-            // A one-off offers "Add to catalogue" here as it does in the thread (D8-11), and a
-            // run in another Workspace names it (D8-08).
-            runs={panelRunsOf(commandRuns, root).map((shown) => {
-              const run = commandRuns.find((one) => one.id === shown.id)
-              if (run !== undefined) {
-                shown.onAddToCatalogue = () => deciding(onAddToCatalogue(run))
-                shown.workspace = elsewhereOf(run, workspace?.name)
-              }
-              return shown
-            })}
-            onStop={onStopRun}
-            onOpenUrl={onOpenUrl}
-            onRun={onRunCommand}
-          />
-        )
-      }
-      // What the agent works from, its Workspace, instructions and tools (D6-10), once the engine
-      // has said it and the Session's Workspace is known: no root is guessed before (D8-08).
-      context={
-        context === null || root === null ? undefined : (
-          <ContextView {...contextListsOf(context, root, workspace?.name)} />
-        )
-      }
-      // The tab it opens on follows what is happening: a command running opens on Commands,
-      // then the tab that has something, and the Context when no tab has anything (D6-12). It
-      // is read when the dialog opens, so an open dialog never changes tab under the reader.
-      defaultTab={openingTabOf(commandRuns, tabs)}
-    />
-  )
-
-  /**
-   * A `build` Session in the layout every Session has (lot 5c, issue #115): the chat at the
-   * centre, the panel on its right, and the build standing in the panel — its view, and the frozen
-   * revision read only beside it when "Spec" opens it. Its own default is its own alone: a build
-   * opens with the chat minimised, so the build view is the page and the chat is the button at the
-   * end of the head, wearing the ring of what waits for the hand in the build. Until the build and
-   * its revision are read, the head alone.
-   */
-  if (session.mission === 'build') {
-    if (build === null || frozen === null) {
-      return (
-        <div className="mx-auto flex w-full max-w-3xl flex-col gap-4 px-6 pt-6 pb-4">
-          {head}
-          {said !== null && (
-            <p role="alert" className="text-sm text-muted-foreground">
-              {said}
-            </p>
-          )}
-        </div>
-      )
-    }
-    // The data and the handlers both readings of the build need: the panel's view, and the banner
-    // above the composer, which opens a task on the view's stage.
-    const view: Omit<BuildViewProps, 'specOpen' | 'onToggleSpec'> = {
-      build: buildViewDataOf(build),
-      now: new Date(now).toISOString(),
-      onPause: () => void pauseBuild(),
-      onResume: () => void resumeBuild(),
-      onAccept: () => void acceptBuild(),
-      onStop: () => void stopBuild(),
-      onTaskDone: (taskId) => void doneTask(taskId),
-      onTaskSkip: (taskId, reason, unblock) => void skipTask(taskId, reason, unblock),
-      onDismissBlocker: (blockerId, note) => void dismissBlocker(blockerId, note),
-      onOpenChat: () => minimiseChat(false),
-    }
-    return (
-      <>
-        <BuildSession
-          {...view}
-          head={head}
-          spec={frozen}
-          selected={openBuildTask}
-          onSelect={setOpenBuildTask}
-          chat={
-            <>
-              {threadNode}
-              {
-                // What waits for the user in the build comes before a permission, which the
-                // thread shows as well: one banner above the box, and it is the build's.
-                foot(
-                  waitsOf(view.build) ? (
-                    <BuildBanner view={view} onOpen={setOpenBuildTask} />
-                  ) : (
-                    permission
-                  ),
-                  true,
-                )
-              }
-            </>
-          }
-          chatOpen={!chatMinimised}
-          onChatOpenChange={(open) => minimiseChat(!open)}
-          chatState={chatStateOf(activity)}
-          chatDetail={activity?.detail}
-        />
-        {details}
-      </>
-    )
-  }
-
   return (
     /*
-      One column (review of #40, defect 2): the header, the thread and the composer share one width
-      and one left edge, and nothing stands beside them but the panel of the Session's mission,
-      which lot 5c (issue #115) took into the layout every Session has — the chat at the centre,
-      the panel on its right, and the button that minimises the chat at the end of the head. The
-      Session details are a dialog the reader opens from the head (second review of #18). The
+      One column (review of #40, defect 2): the header, the thread and the composer share one
+      width and one left edge, and nothing stands beside them but the Spec of a `define` Session —
+      the Session details are a dialog the reader opens from the head (second review of #18). The
       screen runs under the frame all the same, and the page's own scroll is the thread's. The row
-      is the container the panel's width is a share of.
+      is the container the unfolded Spec panel's width is a share of. The chat takes what the
+      panel leaves it and no more: never wider than that for what it holds, which would push the
+      row past the window and make it scroll sideways (issue #181).
     */
-    <>
-      <SessionLayout
-        head={head}
-        chat={
-          <>
-            {/*
+    <div className="@container flex h-full min-h-0">
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+        <div className="mx-auto w-full max-w-3xl px-6 pt-6 pb-4">
+          {/*
+            One row (issue #241): what goes on in the Session — the runs Hemera holds, the commands
+            the agent ran in its own shell, and the Run a command is started from (issue #219) — and
+            the head's ⓘ and `…` at its end. No title: the sidebar says it. A Session nothing
+            answers has no agent to lend a command to, and offers no Run.
+          */}
+          <SessionHeader
+            title={session.title}
+            onRename={onRename}
+            onArchive={onArchive}
+            // A Session nothing was ever written in is one the user made by mistake far more often
+            // than one they are done with, and putting it away is a press they would come to
+            // regret: the archive is where threads go.
+            archiveDisabled={thread.length === 0}
+            // The one way to the Session details: nothing the agent does opens them.
+            onOpenDetails={() => setDetailsOpen(true)}
+          >
+            <GoingOnLine
+              items={lineOf(goingOn, {
+                ...marksOf(session.id, lines),
+                before: overBefore(commandRuns, shells, opened.current),
+              })}
+              onStop={(run) => onStopRun(run.id)}
+              onRunAgain={(run) => onRunAgain(run.id)}
+              onRemove={(item) => removeFromLine(session.id, item.id)}
+              onOpenUrl={onOpenUrl}
+              onAddToCatalogue={(shown) => {
+                const run = commandRuns.find((one) => one.id === shown.id)
+                if (run !== undefined) deciding(onAddToCatalogue(run))
+              }}
+              end={
+                session.provider === null ? undefined : (
+                  <RunCommand
+                    catalogue={catalogue.map((command) => ({
+                      name: command.name,
+                      command: command.line,
+                      type: command.type,
+                      running: commandRuns.some(
+                        (run) => run.commandId === command.id && run.state === 'running',
+                      ),
+                    }))}
+                    workspace={workspace?.name ?? 'main'}
+                    onRunCommand={(entry) => onRunCommand(entry.name)}
+                    onRunOnce={onRunCommand}
+                    shortcut={runShortcut}
+                    asked={runAsked}
+                  />
+                )
+              }
+            />
+          </SessionHeader>
+        </div>
+        {/*
           The thread is given the whole width under the head, and lays its own column on the one
           the head and the composer are laid on: a wheel anywhere beside the thread scrolls it
           (trial of 22 September 2026, evening). An empty Session has nothing to scroll, and its
           sentence stands in the column like everything else.
         */}
-            {threadNode}
-            {/*
-          What the turn has spent stands above the box rather than in its foot: the foot is the
-          Workspace and the send alone, and a figure read at a glance is a figure that must not be
+        {thread.length === 0 ? (
+          <div className="mx-auto flex min-h-0 w-full max-w-3xl flex-1 flex-col px-6">
+            {loaded ? <SessionEmpty /> : null}
+          </div>
+        ) : (
+          <MessageScroller
+            className="flex-1"
+            label="The thread of this Session"
+            entries={scroller}
+          />
+        )}
+        {/*
+          What the turn has spent stands above the box: the box has no foot (issue #241), its send
+          is an icon on its own row, and a figure read at a glance is a figure that must not be
           what makes a row wrap. A Session no agent has accounted for yet shows no meter at all —
           a meter drawn at zero is a figure that says nothing (D5-20).
 
@@ -976,21 +1094,153 @@ export function SessionPage({
           a row the other would have asked for anyway. The row is drawn as soon as either has
           something to say, and the meter keeps its end of it whether or not a turn is running.
         */}
-            {foot(permission, false)}
-          </>
-        }
-        panel={missionPanel}
-        chatOpen={!chatMinimised}
-        onChatOpenChange={(open) => minimiseChat(!open)}
-        chatState={chatStateOf(activity)}
-        chatDetail={activity?.detail}
-      />
+        <div className="mx-auto flex w-full max-w-3xl flex-col gap-2 px-6 pb-4">
+          <TurnRow
+            activity={activity}
+            usage={usage}
+            since={agent.running ? heardSince(agent, thread) : null}
+            sessionId={session.id}
+            onStop={onStop}
+            notched={waitsForYou}
+          />
+          {/*
+            What the page's last act was refused with — a rename, an archive, a thread that could
+            not be read, a Workspace changed once the agent had started (D8-08) — said here and
+            not on the send: those are refusals of the header and of the opening, and a Session
+            whose archive was refused is one that can still be written in. It stands in the same
+            stack as the meter rather than over the thread, so what it moves is itself and nothing
+            above it (D4b-02). A build that could not be asked for is said here too, as a sentence
+            (#132), until the build's actions have a place of their own to say it.
+          */}
+          {(refused ?? refusal ?? stored.refusal ?? stored.buildRefused ?? built.refusal) !==
+            null && (
+            <p role="alert" className="text-sm text-muted-foreground">
+              {refused ?? refusal ?? stored.refusal ?? stored.buildRefused ?? built.refusal}
+            </p>
+          )}
+          <Composer
+            value={value}
+            onValueChange={setValue}
+            files={files}
+            onFilesChange={setFiles}
+            onSearchFiles={onSearchFiles}
+            onPickFiles={onPickFiles}
+            variant="inline"
+            action={session.provider === null ? 'Write' : 'Send'}
+            placeholder={
+              session.provider === null
+                ? 'Write to this Session…'
+                : `Say something to ${session.provider}…`
+            }
+            onSend={write}
+            // Nothing is handed over here: a refusal of this page is not a reason not to write,
+            // and a write that is refused answers `write` itself — which is what the composer
+            // shows under the box, on the sentence that was not written (D4b-02).
+            agentMenu={
+              <AgentModelMenu
+                classifier={classifier}
+                agents={agents}
+                agent={session.provider}
+                // The agent of a Session is the one it was made with and cannot be changed:
+                // `fixed` takes the agent stage out of the panel altogether, and the panel opens
+                // on the models of the agent that is answering (D17-11).
+                fixed
+                onAgentChange={() => undefined}
+                models={model?.choices ?? []}
+                model={model?.current ?? null}
+                onModelChange={(chosen) => {
+                  if (model !== null) onChooseOption(model.optionId, chosen)
+                }}
+                efforts={effort?.choices ?? []}
+                effort={effort?.current ?? null}
+                onEffortChange={(chosen) => {
+                  if (effort !== null) onChooseOption(effort.optionId, chosen)
+                }}
+                // The level the agent recommends, which the scale marks.
+                effortDefault={effortDefaultOf(options)}
+                // The mode is a row of that same panel since the trial of 22 September 2026: it
+                // is one of the four things the agent is set on, and a control of its own beside
+                // the menu was a second control asking about one agent.
+                modes={mode?.choices ?? []}
+                mode={mode?.current ?? null}
+                onModeChange={(chosen) => {
+                  if (mode !== null) onChooseOption(mode.optionId, chosen)
+                }}
+              />
+            }
+            running={agent.running}
+            onStop={onStop}
+            // Everything that waits for the reader, on the box's edge (issue #237): it rises from
+            // behind the box when something starts waiting, and goes back there when nothing does.
+            notices={<SessionNotices groups={notices} />}
+            takeFocus={composing}
+            onFocusTaken={() => setComposing(false)}
+          />
+        </div>
+      </div>
       {/*
         The Session details: a centred dialog the reader opens from the head, and nothing else
         opens (second review of #18). A permission, a run or a plan that arrives updates the thread
         and, while the dialog is open, the tab it concerns — never which tab is shown.
       */}
-      {details}
+      <SessionDetails
+        open={detailsOpen}
+        onOpenChange={setDetailsOpen}
+        plan={plan}
+        files={touched}
+        onSelectFile={onOpenFile}
+        onOpenTrace={traced ? () => void openTrace(session.id) : undefined}
+        // Everything the Session ran, whoever started it, in order (issue #237): the line keeps
+        // what matters now, and this keeps the whole trace.
+        history={
+          <SessionHistory
+            items={goingOn}
+            onRunAgain={(run) => onRunAgain(run.id)}
+            onStop={(run) => onStopRun(run.id)}
+          />
+        }
+        // The Project's catalogue, seen, run and edited without leaving the Session (issue #237).
+        catalogue={
+          session.provider === null ? undefined : (
+            <SessionCatalogue
+              commands={catalogue.map(commandLineOf)}
+              running={catalogue
+                .filter((command) =>
+                  commandRuns.some(
+                    (run) => run.commandId === command.id && run.state === 'running',
+                  ),
+                )
+                .map((command) => command.name)}
+              repositories={catalogueEditing.repositories}
+              portlessInstalled={catalogueEditing.portlessInstalled}
+              projectName={catalogueEditing.projectName}
+              onRun={(command) => onRunCommand(command.name)}
+              onAdd={async (line) => await catalogueEditing.onSave(commandWriteOf(line), false)}
+              onUpdate={async (line) => await catalogueEditing.onSave(commandWriteOf(line), true)}
+              onRemove={(command) => catalogueEditing.onRemove(command.name)}
+              onListFolder={catalogueEditing.onListFolder}
+            />
+          )
+        }
+        // What the agent works from, its Workspace, instructions and tools (D6-10), once the engine
+        // has said it and the Session's Workspace is known: no root is guessed before (D8-08).
+        context={
+          context === null || root === null ? undefined : (
+            <ContextView {...contextListsOf(context, root, workspace?.name)} />
+          )
+        }
+        // The tab it opens on is what the turn has done when it has done anything, and the Context
+        // otherwise. It is read when the dialog opens, so an open dialog never changes tab under
+        // the reader.
+        defaultTab={openingTabOf(tabs)}
+      />
+      {/*
+        The panel of the Session's mission, beside the chat: the working surface the thread gave
+        up width for, where the side column stood before the Session details took its plan and its
+        files into a dialog. It opens folded to a small frame at the window's edge, and is swapped
+        for its panel, which pushes the chat aside, when the hand or the agent asks (issue #164).
+      */}
+      {missionPanel()}
       {workspacePlan !== null && (
         <CreateWorkspaceDialog
           open={intent !== null}
@@ -1001,6 +1251,8 @@ export function SessionPage({
             }
           }}
           root={workspacePlan.root}
+          temporary={workspacePlan.temporary}
+          onBrowse={pickWorkspacesFolder}
           defaultName={workspacePlan.name}
           repositories={planLinesOf(workspacePlan, workspaceReads)}
           gitMissing={!workspacePlan.gitAvailable}
@@ -1014,6 +1266,7 @@ export function SessionPage({
               held.spec.id,
               draft.name,
               worktreesOf(draft),
+              draft.root,
             )
             if (made.workspace === null) return made.refusal
             // A build asked for while the preparation runs waits for it, then starts (D8-13):
@@ -1024,6 +1277,6 @@ export function SessionPage({
           }}
         />
       )}
-    </>
+    </div>
   )
 }

@@ -64,6 +64,7 @@ export type {
   EngineRequests,
   EngineResponse,
   EngineStatus,
+  PathEntryKind,
   SidebarPreference,
   ThemePreference,
   JournalEntry,
@@ -82,6 +83,7 @@ export {
   bareModeSchema,
   configOptionSchema,
   installerToolSchema,
+  promptIntentSchema,
   resumeStateSchema,
   stopReasonSchema,
   toolCallStatusSchema,
@@ -95,6 +97,7 @@ export type {
   BareModeState,
   ConfigOption,
   InstallerTool,
+  PromptIntent,
   ResumeState,
   StopReason,
   ToolCallStatus,
@@ -143,6 +146,8 @@ export type {
   WorkspaceStep,
   Worktree,
 } from './workspaces.ts'
+export { setupChangeSchema, setupProposalSchema, setupProposalStateSchema } from './setup.ts'
+export type { SetupChange, SetupProposal, SetupProposalState } from './setup.ts'
 export {
   LAUNCH_REQUESTS,
   launchSchema,

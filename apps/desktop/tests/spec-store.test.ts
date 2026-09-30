@@ -9,22 +9,19 @@
 
 import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
 
-import type { EditBuffer, EngineEvent, SpecLaunches, SpecSnapshot } from '@hemera/ipc'
+import type { EngineEvent, SpecLaunches, SpecSnapshot } from '@hemera/ipc'
 import {
   answerQuestion,
   askForBuild,
   closeSpec,
   createSpec,
   declineSpecProposal,
-  discardMine,
   forgetSpecRefusal,
   listenToSpecs,
   markReady,
   openSpec,
   rework,
-  saveSection,
   retryBuild,
-  saveStory,
   selectRevision,
   specSnapshot,
   startBuild,
@@ -83,15 +80,11 @@ function snapshot(version: number, writer = 'writer', number = 1): SpecSnapshot 
   }
 }
 
-function buffer(body: string, baseVersion: number): EditBuffer {
-  return { specId: 'spec-7', name: 'scope', body, baseVersion, updatedAt: 0 }
-}
-
 /** What was asked of the bridge, in the order it was asked. */
 let asked: { name: string; argument: { revision?: number } }[] = []
 
 /** What the bridge answers, per channel: a value, or an error to throw. */
-let answers: Map<string, SpecSnapshot | EditBuffer[] | Error | object>
+let answers: Map<string, SpecSnapshot | Error | object>
 
 /** While set, a `specs.read` answers what it was asked for only once this settles. */
 let holding: Promise<void> | null = null
@@ -121,11 +114,10 @@ function launches(over: Partial<SpecLaunches> = {}): SpecLaunches {
   }
 }
 
-/** The answers of an open Spec whose `scope` is at `version`, with the buffers kept. */
-function reads(version: number, buffers: EditBuffer[] = [], writer = 'writer'): void {
+/** The answers of an open Spec whose `scope` is at `version`. */
+function reads(version: number, writer = 'writer'): void {
   answers.set('specs.read', snapshot(version, writer))
   answers.set('specs.revisions', [snapshot(version).revision])
-  answers.set('specs.buffers.read', buffers)
   answers.set('journal.read', { entries: [], nextBefore: null })
   answers.set('launches.forSpec', launches())
 }
@@ -178,7 +170,7 @@ afterEach(() => {
 })
 
 describe('A Spec is opened with everything the panel draws', () => {
-  test('its revision, its revisions, its buffers and its Journal', async () => {
+  test('its revision, its revisions and its Journal, and no edit buffer', async () => {
     reads(2)
 
     await openSpec('spec-7')
@@ -186,118 +178,12 @@ describe('A Spec is opened with everything the panel draws', () => {
     expect(names().toSorted()).toEqual([
       'journal.read',
       'launches.forSpec',
-      'specs.buffers.read',
       'specs.read',
       'specs.revisions',
     ])
     expect(argumentOf('journal.read')).toEqual({ projectId: 'atlas', specId: 'spec-7', limit: 200 })
     expect(specSnapshot().snapshot?.spec.key).toBe('ATL-7')
     expect(specSnapshot().snapshot?.spec.contentVersion).toBe(2)
-  })
-})
-
-describe('A human edit is recorded and reaches the agent', () => {
-  test('a save is sent from its Session with the version it is handed', async () => {
-    reads(2)
-    await openSpec('spec-7')
-    answers.set('specs.writeSection', snapshot(3))
-    asked = []
-
-    expect(await saveSection('writer', 'scope', 'My scope.', 2)).toBe(true)
-
-    expect(asked[0]).toEqual({
-      name: 'specs.writeSection',
-      argument: {
-        specId: 'spec-7',
-        sessionId: 'writer',
-        name: 'scope',
-        body: 'My scope.',
-        baseVersion: 2,
-      },
-    })
-    expect(names()).toContain('specs.read')
-    expect(specSnapshot().refusal).toBeNull()
-  })
-})
-
-describe('A conflict keeps the human’s text', () => {
-  test('a save refused on a section that moved keeps the text in a buffer', async () => {
-    reads(2)
-    await openSpec('spec-7')
-    answers.set(
-      'specs.writeSection',
-      new Error('the scope section changed since version 1: it is at version 2'),
-    )
-    answers.set('specs.buffers.save', [buffer('My scope.', 1)])
-    reads(2, [buffer('My scope.', 1)])
-    asked = []
-
-    expect(await saveSection('writer', 'scope', 'My scope.', 1)).toBe(false)
-
-    expect(names().slice(0, 3)).toEqual(['specs.writeSection', 'specs.read', 'specs.buffers.save'])
-    expect(argumentOf('specs.buffers.save')).toEqual({
-      specId: 'spec-7',
-      name: 'scope',
-      body: 'My scope.',
-      baseVersion: 1,
-    })
-    expect(specSnapshot().buffers).toEqual([buffer('My scope.', 1)])
-    expect(specSnapshot().refusal).toBeNull()
-  })
-
-  test('a kept text is read again when the Spec is opened after a relaunch', async () => {
-    reads(2, [buffer('My scope.', 1)])
-
-    await openSpec('spec-7')
-
-    expect(specSnapshot().buffers[0]?.body).toBe('My scope.')
-  })
-
-  test('applying mine saves it on the version the conflict names as current', async () => {
-    reads(2, [buffer('My scope.', 1)])
-    await openSpec('spec-7')
-    answers.set('specs.writeSection', snapshot(3))
-    reads(3)
-    asked = []
-
-    expect(await saveSection('writer', 'scope', 'My scope, again.', 2)).toBe(true)
-
-    expect(argumentOf('specs.writeSection')).toEqual({
-      specId: 'spec-7',
-      sessionId: 'writer',
-      name: 'scope',
-      body: 'My scope, again.',
-      baseVersion: 2,
-    })
-    expect(specSnapshot().buffers).toEqual([])
-  })
-
-  test('discarding lets the kept text go, and the Spec is read again', async () => {
-    reads(2, [buffer('My scope.', 1)])
-    await openSpec('spec-7')
-    answers.set('specs.buffers.discard', [])
-    reads(2)
-    asked = []
-
-    expect(await discardMine('scope')).toBe(true)
-
-    expect(asked[0]).toEqual({
-      name: 'specs.buffers.discard',
-      argument: { specId: 'spec-7', name: 'scope' },
-    })
-    expect(specSnapshot().buffers).toEqual([])
-  })
-
-  test('any other refusal of a save is said, and no buffer is written', async () => {
-    reads(2)
-    await openSpec('spec-7')
-    answers.set('specs.writeSection', new Error('ATL-7 is ready: only a draft is written'))
-    asked = []
-
-    expect(await saveSection('writer', 'scope', 'My scope.', 2)).toBe(false)
-
-    expect(names()).not.toContain('specs.buffers.save')
-    expect(specSnapshot().refusal).toBe('ATL-7 is ready: only a draft is written')
   })
 })
 
@@ -336,6 +222,40 @@ describe('An obsolete request is refused', () => {
     )
     // Said by the bar it was pressed on, and not a second time under the thread.
     expect(specSnapshot().refusal).toBe(null)
+  })
+
+  test('a refusal is forgotten once the Spec it refused changes', async () => {
+    reads(4)
+    await openSpec('spec-7')
+    answers.set('specs.markReady', new Error('ATL-7 does not pass its gate: phases.'))
+    await markReady('writer')
+    expect(specSnapshot().readyRefused).toBe('ATL-7 does not pass its gate: phases.')
+
+    // Read again on the same content, it stands.
+    push({ event: 'turn', sessionId: 'writer', entry: null })
+    await settled()
+    expect(specSnapshot().readyRefused).toBe('ATL-7 does not pass its gate: phases.')
+
+    // The agent writes on: the content version moves on, and the refusal is gone.
+    reads(5)
+    push({ event: 'spec.changed', specId: 'spec-7', projectId: 'atlas' })
+    await settled()
+    expect(specSnapshot().readyRefused).toBe(null)
+  })
+
+  test('a refusal is forgotten once the Spec is on another revision', async () => {
+    reads(4)
+    await openSpec('spec-7')
+    answers.set('specs.markReady', new Error('ATL-7 does not pass its gate: phases.'))
+    await markReady('writer')
+    const reworked = snapshot(4)
+    reworked.spec.currentRevisionId = 'rev-2'
+    answers.set('specs.read', reworked)
+
+    push({ event: 'spec.changed', specId: 'spec-7', projectId: 'atlas' })
+    await settled()
+
+    expect(specSnapshot().readyRefused).toBe(null)
   })
 
   test('the next act that goes through forgets the refused click', async () => {
@@ -388,7 +308,7 @@ describe('A second Session reads but does not write', () => {
     reads(2)
     await openSpec('spec-7')
     answers.set('specs.transferWrite', snapshot(2, 'reader'))
-    reads(2, [], 'reader')
+    reads(2, 'reader')
     asked = []
 
     expect(await takeOver('reader')).toBe(true)
@@ -505,75 +425,6 @@ describe('A refusal stays with the Session it was made in', () => {
   })
 })
 
-describe('A story is written back onto the story it was edited in', () => {
-  const stories = (ids: string[]): SpecSnapshot => ({
-    ...snapshot(2),
-    stories: ids.map((id, at) => ({
-      id,
-      revisionId: 'rev-1',
-      title: id,
-      narrative: `The ${id} story.`,
-      priority: null,
-      rank: String(at),
-    })),
-  })
-  const edited = { id: 'credit', key: 'S2', title: 'credit', narrative: 'Mine.', criteria: [] }
-
-  test('a story edited in place is written, the others as they were', async () => {
-    reads(2)
-    answers.set('specs.read', stories(['export', 'credit']))
-    await openSpec('spec-7')
-    answers.set('specs.writeStories', stories(['export', 'credit']))
-
-    expect(await saveStory('writer', edited)).toBe(true)
-
-    expect(argumentOf('specs.writeStories')).toEqual({
-      specId: 'spec-7',
-      sessionId: 'writer',
-      stories: [
-        {
-          id: 'export',
-          title: 'export',
-          narrative: 'The export story.',
-          priority: null,
-          criteria: [],
-        },
-        { id: 'credit', title: 'credit', narrative: 'Mine.', priority: null, criteria: [] },
-      ],
-    })
-  })
-
-  test('a story edited while the list moved is written onto its own story', async () => {
-    reads(2)
-    answers.set('specs.read', stories(['export', 'refund', 'credit']))
-    await openSpec('spec-7')
-    answers.set('specs.writeStories', stories(['export', 'refund', 'credit']))
-
-    expect(await saveStory('writer', edited)).toBe(true)
-
-    expect(argumentOf('specs.writeStories')).toMatchObject({
-      stories: [
-        { id: 'export', narrative: 'The export story.' },
-        { id: 'refund', narrative: 'The refund story.' },
-        { id: 'credit', narrative: 'Mine.' },
-      ],
-    })
-  })
-
-  test('a story taken away while it was edited is not written at all', async () => {
-    reads(2)
-    answers.set('specs.read', stories(['export']))
-    await openSpec('spec-7')
-    asked = []
-
-    expect(await saveStory('writer', edited)).toBe(false)
-
-    expect(names()).not.toContain('specs.writeStories')
-    expect(names()).toContain('specs.read')
-    expect(specSnapshot().refusal).toContain('your edit was not saved')
-  })
-})
-
 describe('An older read of the Spec never replaces a newer one', () => {
   test('a read answered after a later one is dropped', async () => {
     reads(2)
@@ -616,7 +467,7 @@ describe('The build of a frozen Spec is read and reached', () => {
       'launches.forSpec',
       launches({
         launch: { ...held },
-        workspace: { id: 'w-1', name: 'csv-invoice' },
+        workspace: { id: 'w-1', name: 'csv-invoice', state: 'ready' },
         step: 'install',
       }),
     )
@@ -693,5 +544,61 @@ describe('The build of a frozen Spec is read and reached', () => {
 
     expect(await retryBuild()).toBe(false)
     expect(names()).toEqual([])
+  })
+})
+
+describe('A build that could not be asked for is said in words', () => {
+  test('a refused request is said as the build that could not be asked for, not as the thread’s refusal', async () => {
+    reads(2)
+    await openSpec('spec-7')
+    answers.set('launches.request', new Error('the application did not answer in time'))
+
+    expect(await askForBuild('w-1')).toBe(false)
+
+    // Kept for the build's actions, where it was pressed (#132), and never the page's own line.
+    expect(specSnapshot().buildRefused).toBe(
+      'The build could not be asked for: the application did not answer in time.',
+    )
+    expect(specSnapshot().refusal).toBeNull()
+  })
+
+  test('a refused retry says the build could not be started again', async () => {
+    reads(2)
+    answers.set(
+      'launches.forSpec',
+      launches({
+        launch: {
+          id: 'l-1',
+          specId: 'spec-7',
+          revisionId: 'rev-1',
+          workspaceId: 'w-1',
+          state: 'failed',
+          sessionId: 's-1',
+          detail: 'it did not answer within 120 seconds',
+          createdAt: '2026-09-25T09:00:00.000Z',
+          updatedAt: '2026-09-25T09:00:00.000Z',
+        },
+      }),
+    )
+    await openSpec('spec-7')
+    answers.set('launches.retry', new Error('only a build whose agent failed is started again.'))
+
+    expect(await retryBuild()).toBe(false)
+
+    expect(specSnapshot().buildRefused).toBe(
+      'The build could not be started again: only a build whose agent failed is started again.',
+    )
+  })
+
+  test('the next build act that goes through forgets what the last one was refused with', async () => {
+    reads(2)
+    await openSpec('spec-7')
+    answers.set('launches.start', new Error('the application did not answer in time'))
+    expect(await startBuild()).toBe(false)
+    answers.set('launches.start', {})
+
+    expect(await startBuild()).toBe(true)
+
+    expect(specSnapshot().buildRefused).toBeNull()
   })
 })

@@ -1,29 +1,23 @@
 import type {
-  EditBuffer,
   EngineEvent,
   JournalEntry,
-  SectionName,
   SpecLaunches,
   SpecRevision,
   SpecSnapshot,
   SpecType,
 } from '@hemera/ipc'
-import type { StoryView } from '@hemera/ui'
-
-import { storiesWith } from './spec-views.ts'
 
 /**
  * The Spec a `define` Session shows beside its chat (design D7-07, D7-10, D7-11, D7-12).
  *
  * Like every store of this window, it holds what the engine answered and nothing else: after
- * each act the Spec, its revisions, its edit buffers and its Journal are read again
+ * each act the Spec, its revisions and its Journal are read again
  * rather than patched here. The engine pushes `spec.changed` for every write, whoever made it —
- * the agent, another Session, the human in another panel — and the Spec on screen is read again
+ * the agent, another Session, an answer given in the chat — and the Spec on screen is read again
  * when it is about that one.
  *
- * A human save refused because the section moved under it is never lost (D7-12): its text goes
- * into the Spec's edit buffers, which the engine keeps across a restart, and the panel shows the
- * conflict from those buffers against the current text.
+ * The agent writes the Spec and the human reads it and answers: nothing here edits a section or a
+ * story by hand (issue #135).
  */
 export interface SpecState {
   /** The revision on screen, or null while no Spec is open. */
@@ -34,8 +28,6 @@ export interface SpecState {
   revision: number | null
   /** Every revision of the open Spec, as the engine lists them. */
   revisions: SpecRevision[]
-  /** The human texts kept after a refused save (D7-12). */
-  buffers: EditBuffer[]
   /** The Spec's lines of the Journal, newest first: `spec.ready` says when a revision froze. */
   journal: JournalEntry[]
   /**
@@ -47,9 +39,22 @@ export interface SpecState {
   refusal: string | null
   /**
    * What the last "Mark ready" was refused with, or null: said by the readiness bar it was
-   * pressed on rather than under the thread, and forgotten with the next act that goes through.
+   * pressed on rather than under the thread, and forgotten with the next act that goes through or
+   * once the Spec moves on from the content it was refused on.
    */
   readyRefused: string | null
+  /**
+   * What the last act on the build was refused with, said as a sentence — "The build could not be
+   * asked for: the application did not answer in time." — or null. Kept for the build's actions,
+   * where it was pressed, and forgotten with the next act on the build that goes through (#132).
+   */
+  buildRefused: string | null
+  /**
+   * New Spec's provisional Spec, by Session: the title its request gave it (issue #198). Saved
+   * nowhere: the Spec exists once the user accepts the agent's proposal or continues the Spec it
+   * pointed to, and until then this is all there is of it. It outlives the Spec on screen.
+   */
+  provisional: ReadonlyMap<string, string>
 }
 
 const EMPTY: SpecState = {
@@ -57,15 +62,13 @@ const EMPTY: SpecState = {
   current: null,
   revision: null,
   revisions: [],
-  buffers: [],
   journal: [],
   launches: null,
   refusal: null,
   readyRefused: null,
+  buildRefused: null,
+  provisional: new Map(),
 }
-
-/** What a story edit is refused with when its story was taken away meanwhile. */
-const GONE = 'The story you were editing is gone: your edit was not saved.'
 
 /** How many lines of the Spec's Journal are read, which is the most one page may hold. */
 const JOURNAL_PAGE = 200
@@ -102,15 +105,27 @@ function message(cause: unknown): string {
  */
 let started = 0
 
-/** Reads the open Spec, its revisions, its buffers and its Journal again. */
+/**
+ * The revision and content version the last refused "Mark ready" was read on once refused, or
+ * null. The refusal is about that content: once the Spec moves on from it — the agent writes, a
+ * Rework opens a new revision — it no longer says anything true, and is forgotten.
+ */
+let refusedOn: string | null = null
+
+/** A Spec's current revision and content version, as one value to compare. */
+function versionOf(current: SpecSnapshot | null): string | null {
+  if (current === null) return null
+  return `${current.spec.currentRevisionId}@${String(current.spec.contentVersion)}`
+}
+
+/** Reads the open Spec, its revisions and its Journal again. */
 async function reload(specId: string): Promise<void> {
   started += 1
   const ticket = started
   const picked = state.revision
-  const [current, revisions, buffers, launches] = await Promise.all([
+  const [current, revisions, launches] = await Promise.all([
     window.hemera.invoke('specs.read', { specId }),
     window.hemera.invoke('specs.revisions', { specId }),
-    window.hemera.invoke('specs.buffers.read', { specId }),
     window.hemera.invoke('launches.forSpec', { specId }),
   ])
   const snapshot =
@@ -128,11 +143,12 @@ async function reload(specId: string): Promise<void> {
     snapshot,
     current,
     revisions,
-    buffers,
     // The read may answer nothing at all where nothing has been asked for: absent and null are
     // the same thing to the panel.
     launches: launches ?? null,
     journal: journal.entries,
+    readyRefused:
+      refusedOn !== null && refusedOn !== versionOf(current) ? null : state.readyRefused,
   })
 }
 
@@ -163,14 +179,56 @@ async function acting(act: (specId: string) => Promise<void>): Promise<boolean> 
 
 /** Opens a Spec on its current revision; the same Spec is read again, not closed. */
 export async function openSpec(specId: string): Promise<void> {
-  if (shown !== specId) replace(EMPTY)
+  if (shown !== specId) replace({ ...EMPTY, provisional: state.provisional })
   shown = specId
   await refresh(specId)
 }
 
 export function closeSpec(): void {
   shown = null
-  replace(EMPTY)
+  replace({ ...EMPTY, provisional: state.provisional })
+}
+
+/** How long a provisional title may be, cut on a word. */
+const PROVISIONAL_CHARACTERS = 80
+
+/**
+ * The title a provisional Spec takes from New Spec's request (issue #198): its first line, the
+ * spaces folded, cut on a word when it is long.
+ */
+export function provisionalTitleOf(request: string): string {
+  const line = request
+    .split('\n')
+    .map((one) => one.replace(/\s+/g, ' ').trim())
+    .find((one) => one.length > 0)
+  const title = line ?? 'New Spec'
+  if (title.length <= PROVISIONAL_CHARACTERS) return title
+  const cut = title.slice(0, PROVISIONAL_CHARACTERS)
+  const space = cut.lastIndexOf(' ')
+  return `${space > 0 ? cut.slice(0, space) : cut}…`
+}
+
+/**
+ * New Spec, before the agent has said anything (issue #198): the Session shows a provisional
+ * Spec titled with the request, which nothing saves.
+ */
+export function holdProvisionalSpec(sessionId: string, request: string): void {
+  const provisional = new Map(state.provisional)
+  provisional.set(sessionId, provisionalTitleOf(request))
+  replace({ ...state, provisional })
+}
+
+/** The provisional Spec of a Session, by its title, or null when it has none. */
+export function provisionalSpecOf(sessionId: string): string | null {
+  return state.provisional.get(sessionId) ?? null
+}
+
+/** Lets go of a Session's provisional Spec: the real one took its place. */
+function forgetProvisional(sessionId: string): void {
+  if (!state.provisional.has(sessionId)) return
+  const provisional = new Map(state.provisional)
+  provisional.delete(sessionId)
+  replace({ ...state, provisional })
 }
 
 /** Picks a revision to read: an older one is shown as it was frozen (D7-05). */
@@ -193,6 +251,25 @@ export async function createSpec(
   try {
     const made = await window.hemera.invoke('specs.create', { sessionId, type, title })
     await openSpec(made.snapshot.spec.id)
+    // The provisional Spec became this one, in place (issue #198).
+    forgetProvisional(sessionId)
+    return true
+  } catch (cause) {
+    replace({ ...state, refusal: message(cause) })
+    return false
+  }
+}
+
+/**
+ * Continues the existing Spec the agent pointed to (issue #198): its proposal accepted, this
+ * `free` Session turns `define` on that Spec, and the panel shows it where the provisional Spec
+ * was. No Spec is created.
+ */
+export async function joinSpec(sessionId: string, proposalId: string): Promise<boolean> {
+  try {
+    const joined = await window.hemera.invoke('specs.acceptExisting', { sessionId, proposalId })
+    await openSpec(joined.snapshot.spec.id)
+    forgetProvisional(sessionId)
     return true
   } catch (cause) {
     replace({ ...state, refusal: message(cause) })
@@ -214,71 +291,6 @@ export async function declineSpecProposal(
   } catch (cause) {
     return message(cause)
   }
-}
-
-/**
- * Saves one section on the version its editor was opened on (D7-12).
- *
- * Refused while the section moved on since that version, the text goes into the Spec's edit
- * buffers, where a restart finds it too, and the panel shows the conflict against the current
- * text. Any other refusal is said as it was said, and nothing is kept.
- *
- * "Apply mine" is this same save, on the version the conflict names as current: written, the
- * engine lets the buffer go with it; refused again, the conflict is the newer one.
- */
-export async function saveSection(
-  sessionId: string,
-  name: SectionName,
-  body: string,
-  baseVersion: number,
-): Promise<boolean> {
-  const specId = shown
-  if (specId === null) return false
-  try {
-    await window.hemera.invoke('specs.writeSection', { specId, sessionId, name, body, baseVersion })
-  } catch (cause) {
-    try {
-      const now = await window.hemera.invoke('specs.read', { specId })
-      const moved = (now.sections.find((one) => one.name === name)?.version ?? 0) !== baseVersion
-      if (!moved) throw cause
-      await window.hemera.invoke('specs.buffers.save', { specId, name, body, baseVersion })
-      replace({ ...state, refusal: null })
-    } catch (refused) {
-      replace({ ...state, refusal: message(refused) })
-    }
-    await refresh(specId)
-    return false
-  }
-  replace({ ...state, refusal: null })
-  await refresh(specId)
-  return true
-}
-
-/** Lets the human's text of a conflict go, keeping the current one (D7-12). */
-export async function discardMine(name: SectionName): Promise<boolean> {
-  return await acting(async (specId) => {
-    await window.hemera.invoke('specs.buffers.discard', { specId, name })
-  })
-}
-
-/**
- * Writes back a story edited in place, all the stories of the revision with it (D7-12), onto the
- * story of its id wherever it stands now. A story taken away since is not written at all, and
- * the Spec is read again instead.
- */
-export async function saveStory(sessionId: string, changed: StoryView): Promise<boolean> {
-  const specId = shown
-  const current = state.snapshot
-  if (specId === null || current === null) return false
-  const stories = storiesWith(current, changed)
-  if (stories === null) {
-    replace({ ...state, refusal: GONE })
-    await refresh(specId)
-    return false
-  }
-  return await acting(async (id) => {
-    await window.hemera.invoke('specs.writeStories', { specId: id, sessionId, stories })
-  })
 }
 
 /** Answers a question of the open Spec with one of its options or a text (D7-03). */
@@ -314,8 +326,11 @@ export async function markReady(sessionId: string): Promise<boolean> {
       sessionId,
     })
   } catch (cause) {
+    // Read again first: a Spec that changed as it was pressed is refused on what it is now.
+    refusedOn = null
     replace({ ...state, readyRefused: message(cause) })
     await refresh(specId)
+    refusedOn = versionOf(state.current)
     return false
   }
   replace({ ...state, refusal: null, readyRefused: null })
@@ -355,7 +370,7 @@ export async function takeOver(sessionId: string): Promise<boolean> {
  * agent in it (D8-13).
  */
 export async function askForBuild(workspaceId: string): Promise<boolean> {
-  return await acting(async (specId) => {
+  return await building(ASK_REFUSED, async (specId) => {
     await window.hemera.invoke('launches.request', { specId, workspaceId })
   })
 }
@@ -365,7 +380,7 @@ export async function askForBuild(workspaceId: string): Promise<boolean> {
  * a preparation was made and no build was asked for.
  */
 export async function startBuild(): Promise<boolean> {
-  return await acting(async (specId) => {
+  return await building(ASK_REFUSED, async (specId) => {
     await window.hemera.invoke('launches.start', { specId })
   })
 }
@@ -374,9 +389,51 @@ export async function startBuild(): Promise<boolean> {
 export async function retryBuild(): Promise<boolean> {
   const launchId = state.launches?.launch?.id
   if (launchId === undefined) return false
-  return await acting(async () => {
+  return await building(RETRY_REFUSED, async () => {
     await window.hemera.invoke('launches.retry', { launchId })
   })
+}
+
+/**
+ * Resumes the preparation of the Workspace the Spec is set on, after it failed (D8-05): what is
+ * left of it runs in the engine, and the panel follows the Workspace through its `workspace`
+ * event until it can start the build there.
+ */
+export async function resumeBuildWorkspace(): Promise<boolean> {
+  const workspaceId = state.launches?.workspace?.id
+  if (workspaceId === undefined) return false
+  return await building(RESUME_REFUSED, async () => {
+    await window.hemera.invoke('preparation.resume', { workspaceId })
+  })
+}
+
+/** What a preparation that could not be resumed is said as, before the engine's own words. */
+const RESUME_REFUSED = 'The preparation could not be resumed'
+
+/** What a build that could not be asked for is said as, before the engine's own words. */
+const ASK_REFUSED = 'The build could not be asked for'
+
+/** What a build that could not be started again is said as, before the engine's own words. */
+const RETRY_REFUSED = 'The build could not be started again'
+
+/**
+ * An act on the build: its refusal is a sentence kept apart from the page's own line (#132), and
+ * the panel is read again either way — the launch says the rest through `launch.changed`.
+ */
+async function building(said: string, act: (specId: string) => Promise<void>): Promise<boolean> {
+  const specId = shown
+  if (specId === null) return false
+  try {
+    await act(specId)
+  } catch (cause) {
+    const reason = message(cause).replace(/\.$/, '')
+    replace({ ...state, buildRefused: `${said}: ${reason}.` })
+    await refresh(specId)
+    return false
+  }
+  replace({ ...state, buildRefused: null })
+  await refresh(specId)
+  return true
 }
 
 export function forgetSpecRefusal(): void {
@@ -398,6 +455,15 @@ export function listenToSpecs(changed: (projectId: string) => void): () => void 
     // The launch of the Spec on screen moved on: asked for, started, refused or taken back
     // (D8-13). Nothing else crosses — the panel reads the whole of it again, as it stands.
     if (event.event === 'launch.changed' && event.specId === shown) void refresh(event.specId)
+    // The Workspace the Spec is set on moved on — resumed, ready, failed again — and what the
+    // panel offers follows where it stands (D8-12).
+    if (
+      event.event === 'workspace' &&
+      shown !== null &&
+      event.workspaceId === state.launches?.workspace?.id
+    ) {
+      void refresh(shown)
+    }
     if (event.event !== 'spec.changed') return
     changed(event.projectId)
     if (event.specId === shown) void refresh(event.specId)

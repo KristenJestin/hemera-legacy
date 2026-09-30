@@ -17,6 +17,7 @@ import { fileURLToPath } from 'node:url'
 
 import { installFakeAgent } from './e2e/agent/install.ts'
 import { QUALIFIED_VARIABLE } from './src/engine/agents/bare.ts'
+import { ARGUMENT_PROFILE } from './src/main/channel.ts'
 
 const application = dirname(fileURLToPath(import.meta.url))
 
@@ -97,16 +98,19 @@ export const config: WebdriverIO.Config = {
   services: ['electron'],
   // One capability per spec file, each pointed at a data folder of its own.
   //
-  // `--user-data-dir` as well as `--data-dir`, and both the same folder: the driver looks for
-  // the port file Chromium writes inside the user data directory it chose, and the application
-  // moves `userData` onto its data folder. Told the same folder twice, the two agree; told
-  // nothing, they disagree and no session is ever created.
+  // `--user-data-dir` as well as `--data-dir`, and the two agreeing: the driver looks for the
+  // port file Chromium writes inside the user data directory it chose, and the application
+  // moves `userData` onto the `profile` folder inside its data folder. Told the same folder
+  // twice, the two agree; told nothing, they disagree and no session is ever created.
   capabilities: SPECS.map((spec) => ({
     browserName: 'electron',
     specs: [`./e2e/${spec}`],
     'wdio:electronServiceOptions': {
       appEntryPoint: `${application}/dist/main/index.js`,
-      appArgs: [`--user-data-dir=${e2eDataOf(spec)}`, `--data-dir=${e2eDataOf(spec)}`],
+      appArgs: [
+        `--user-data-dir=${join(e2eDataOf(spec), ARGUMENT_PROFILE)}`,
+        `--data-dir=${e2eDataOf(spec)}`,
+      ],
     },
   })),
   logLevel: 'warn',

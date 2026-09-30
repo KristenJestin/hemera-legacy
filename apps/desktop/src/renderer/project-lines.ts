@@ -25,6 +25,7 @@ export function commandLineOf(command: Command): CommandLine {
     scope: command.scope,
     portless: command.portless,
     portlessName: command.portlessName,
+    runAtOpen: command.runAtOpen,
     folderBase: command.folderBase,
     folder: command.folder?.replace(/^\.\//, '') ?? '',
   }
@@ -43,6 +44,7 @@ export type CommandWrite = Pick<
   | 'scope'
   | 'portless'
   | 'portlessName'
+  | 'runAtOpen'
 >
 
 /** A row as the engine writes it: the base itself is no folder at all, and is null. */
@@ -58,6 +60,7 @@ export function commandWriteOf(line: CommandLine): CommandWrite {
     scope: line.scope,
     portless: line.portless,
     portlessName: line.portlessName,
+    runAtOpen: line.runAtOpen,
   }
 }
 
@@ -78,37 +81,6 @@ function segmentsOf(path: string): string[] {
 /** Whether a path is one Windows writes: a drive letter, or the two backslashes a share starts with. */
 function windowsPath(path: string): boolean {
   return /^[a-zA-Z]:[\\/]/.test(path) || path.startsWith('\\\\')
-}
-
-/**
- * What the folder picker answered, written relative to the folder a command runs from (recette 2
- * of lot 20): `src` under a base of `./sources/web`, `.` for that folder itself.
- *
- * `main` is the folder of the main Workspace, which is what a base is relative to; `base` is null
- * for the Workspace root and one of the Project's repositories otherwise, as the dialog names it.
- * Both sides are read the way their system writes them: on Windows a path is compared without its
- * case, where `D:` and `d:` are one drive and a capital does not make two folders of one.
- *
- * A folder outside the base answers the `..` that would reach it, which is not a folder a command
- * may run in: the field refuses it, in the words of the schema the engine shares.
- */
-export function folderUnderBase(mainPath: string, base: string | null, chosen: string): string {
-  const under = segmentsOf(base === null ? mainPath : `${mainPath}/${base}`)
-  const picked = segmentsOf(chosen)
-  const folded = windowsPath(mainPath) || windowsPath(chosen)
-  const same = (one: string, other: string): boolean =>
-    folded ? one.toLowerCase() === other.toLowerCase() : one === other
-  let shared = 0
-  while (
-    shared < under.length &&
-    shared < picked.length &&
-    same(under[shared] ?? '', picked[shared] ?? '')
-  ) {
-    shared += 1
-  }
-  const up = under.slice(shared).map(() => '..')
-  const joined = [...up, ...picked.slice(shared)].join('/')
-  return joined === '' ? '.' : joined
 }
 
 /**

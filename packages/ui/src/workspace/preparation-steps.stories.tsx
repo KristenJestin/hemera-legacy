@@ -128,6 +128,9 @@ export const Running: Story = {
     await expect(rows[0]).toHaveTextContent('Done')
     await expect(rows[1]).toHaveTextContent('Running')
     await expect(rows[2]).toHaveTextContent('Pending')
+    // The step running wears the loader of the whole application, turning.
+    const loader = rows[1]!.querySelector('[role="status"]')
+    await expect(getComputedStyle(loader!.children[0]!).animationName).toBe('turn')
   },
 }
 

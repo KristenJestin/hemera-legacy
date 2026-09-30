@@ -93,6 +93,15 @@ export async function choose(label: string, option: string): Promise<void> {
  * pointer, not on a click event.
  */
 export async function pressTab(name: string): Promise<void> {
+  // A Dialog still leaving covers the page until it has gone, and a pointer pressed through it
+  // lands on the Dialog: the press waits for the page to be what it presses.
+  await browser.waitUntil(
+    async () =>
+      await browser.execute(
+        () => document.querySelector('[role="dialog"][data-ending-style]') === null,
+      ),
+    { timeout: 10_000, interval: 100, timeoutMsg: 'a Dialog never finished leaving' },
+  )
   const found = await $$('[role="tab"]')
   let pressed = false
   for (const tab of found) {
@@ -314,31 +323,142 @@ export async function pressIn(area: string, name: string): Promise<void> {
   await browser.pause(300)
 }
 
+/** The Session's notices, open: what waits for the reader, above the composer (issue #237). */
+export const NOTICES = '[role="dialog"][aria-label="Waiting for your answer"]'
+
+/** The pill the notices open from, on the composer's edge; its name counts what waits. */
+const PILL = 'button[aria-label^="Waiting for your answer"]'
+
 /**
- * Puts a part of a Spec on its panel's stage, the way a hand picks it in the rail: the stage
- * shows one part at a time, and a part that is not on it is not on the page at all.
+ * Waits for the notices to hold something of this kind — `Permissions`, `Questions`, `Spec
+ * proposed`, `Proposed commands` — and opens them, the way a hand does: they are closed until
+ * pressed (issue #237). Whatever waits is answered in there, never in the thread.
  */
-export async function showPart(key: string, part: string): Promise<void> {
-  await pressIn(`nav[aria-label="Parts of ${key}"]`, part)
+export async function openNotices(kind: string, within = 20_000): Promise<void> {
+  await browser.waitUntil(
+    async () =>
+      await browser.execute(
+        (pill: string, named: string) =>
+          (document.querySelector(pill)?.getAttribute('aria-label') ?? '').includes(named),
+        PILL,
+        kind,
+      ),
+    { timeout: within, interval: 200, timeoutMsg: `the notices never held ${kind}` },
+  )
+  const open = await browser.execute(
+    (panel: string) => document.querySelector(panel) !== null,
+    NOTICES,
+  )
+  if (!open) {
+    await browser.execute((pill: string) => {
+      const button = document.querySelector(pill)
+      if (button instanceof HTMLButtonElement) button.click()
+    }, PILL)
+  }
+  await browser.waitUntil(
+    async () =>
+      await browser.execute((panel: string) => document.querySelector(panel) !== null, NOTICES),
+    { timeout: 5000, interval: 100, timeoutMsg: 'the notices never opened' },
+  )
+  await browser.pause(300)
 }
 
 /**
- * Unfolds the panel of a Spec from the band it opens folded to, the way a hand does: a Session
- * opens its panel folded, and what is read in it — the head, the stage, the reader bar — is drawn
- * only once it is open. A panel already open is left as it is.
+ * Waits for a line of the thread named this way, a record of something that waited for the reader
+ * (issue #237): `Spec proposed, ATL-1 «…», created`, `Proposed command dev, added to the catalogue`.
+ * Read by its name, which says the answer the dot draws.
+ */
+export async function awaitsRecord(name: string, within = 20_000): Promise<void> {
+  await browser.waitUntil(
+    async () =>
+      await browser.execute(
+        (named: string) =>
+          [...document.querySelectorAll('[role="group"][aria-label]')].some((group) =>
+            (group.getAttribute('aria-label') ?? '').startsWith(named),
+          ),
+        name,
+      ),
+    { timeout: within, interval: 200, timeoutMsg: `the thread never kept "${name}"` },
+  )
+}
+
+/**
+ * Answers the question the agent asked with the option that says this, among the Session's
+ * notices (issue #237), and waits for its record in the thread to say it was answered.
+ *
+ * Not through `pressIn`: an option is lettered by Hemera (issue #134), so what the button says
+ * starts with its letter — `AThe issue date` — and a hand reads the option, not the letter. A
+ * press on a choice is the answer (issue #199); the record the thread keeps of the question then
+ * names itself after the answer.
+ */
+export async function answerWith(option: string): Promise<void> {
+  await openNotices('Questions')
+  const pressed = await browser.execute(
+    (panel: string, label: string) => {
+      const options = document.querySelectorAll(
+        `${panel} [aria-label="Answers"] button:not(:disabled)`,
+      )
+      const button = [...options].find((one) => (one.textContent ?? '').includes(label))
+      if (!(button instanceof HTMLButtonElement)) return false
+      button.click()
+      return true
+    },
+    NOTICES,
+    option,
+  )
+  expect(pressed).toBe(true)
+  await browser.waitUntil(
+    async () =>
+      await browser.execute(
+        (label: string) =>
+          [...document.querySelectorAll('[id^="ask-"] [role="group"]')].some((record) =>
+            (record.getAttribute('aria-label') ?? '').endsWith(label),
+          ),
+        option,
+      ),
+    {
+      timeout: 5000,
+      timeoutMsg: `the question's record never says it was answered with ${option}`,
+    },
+  )
+}
+
+/**
+ * Waits for a part of a Spec to be in its panel's column: every part is laid there one after the
+ * other under the heading of its phase (issue #164), so there is nothing to pick for it to be read.
+ */
+export async function showPart(key: string, part: string): Promise<void> {
+  await browser.waitUntil(
+    async () =>
+      await browser.execute(
+        (scope: string, name: string) =>
+          [...(document.querySelector(scope)?.querySelectorAll('[data-part] h3') ?? [])].some(
+            (heading) => (heading.textContent ?? '').startsWith(name),
+          ),
+        `[role="region"][aria-label="Contents of ${key}"]`,
+        part,
+      ),
+    { timeout: 5000, timeoutMsg: `the ${part} of ${key} is not in its column` },
+  )
+}
+
+/**
+ * Unfolds the panel of a Spec from the small frame it opens folded to, the way a hand does: a
+ * Session opens its Spec folded, and what is read in it — the head, the column, the reader bar —
+ * is drawn only once it is open. A panel already open is left as it is.
  */
 export async function unfoldSpec(key: string): Promise<void> {
   await browser.execute((scope: string) => {
-    const band = document
+    const unfold = document
       .querySelector(scope)
       ?.querySelector('button[aria-label="Unfold the Spec"]')
-    if (band instanceof HTMLButtonElement) band.click()
+    if (unfold instanceof HTMLButtonElement) unfold.click()
   }, `section[aria-label="Spec ${key}"]`)
   await browser.waitUntil(
     async () =>
       await browser.execute(
         (scope: string) => document.querySelector(scope) !== null,
-        `[role="region"][aria-label="Stage of ${key}"]`,
+        `[role="region"][aria-label="Contents of ${key}"]`,
       ),
     { timeout: 5000, timeoutMsg: `the panel of ${key} never unfolded` },
   )
@@ -350,51 +470,5 @@ export async function region(selector: string): Promise<string> {
   return await browser.execute(
     (scope: string) => document.querySelector(scope)?.textContent ?? '',
     selector,
-  )
-}
-
-/**
- * Types into a text of the page the way a hand does: the caret goes in, the text is typed, and
- * the caret stays there until `leave` takes it out — which is when a text edited in place, a
- * section of the Spec, is handed over.
- */
-export async function typeIn(label: string, text: string): Promise<void> {
-  const typed = await browser.execute(
-    (name: string, said: string) => {
-      const field = document.querySelector(`textarea[aria-label="${name}"]`)
-      if (!(field instanceof HTMLTextAreaElement)) return false
-      field.focus()
-      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set?.call(
-        field,
-        said,
-      )
-      field.dispatchEvent(new Event('input', { bubbles: true }))
-      return document.activeElement === field
-    },
-    label,
-    text,
-  )
-  expect(typed).toBe(true)
-  await browser.pause(150)
-}
-
-/** Takes the caret out of the text of this label, which hands an edited text over. */
-export async function leave(label: string): Promise<void> {
-  const left = await browser.execute((name: string) => {
-    const field = document.querySelector(`textarea[aria-label="${name}"]`)
-    if (!(field instanceof HTMLTextAreaElement)) return false
-    field.blur()
-    return true
-  }, label)
-  expect(left).toBe(true)
-  await browser.pause(1200)
-}
-
-/** What the text of this label holds, or null when the page has none. */
-export async function textOf(label: string): Promise<string | null> {
-  return await browser.execute(
-    (name: string) =>
-      document.querySelector<HTMLTextAreaElement>(`textarea[aria-label="${name}"]`)?.value ?? null,
-    label,
   )
 }

@@ -363,6 +363,46 @@ export const AgentNotAvailableHere: Story = {
 }
 
 /**
+ * The machine has not said yet which agents it has: the room of the list says it is looking, with
+ * the indicator in the middle of it, and never shows an empty list in its place — an empty menu
+ * read as a machine with no agent at all. The box is the panel's own, the same as once they are
+ * listed.
+ */
+export const LookingForAgents: Story = {
+  args: { agents: [], listing: 'looking' },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await userEvent.click(canvas.getByRole('button', { name: 'Choose an agent' }))
+
+    const looking = await screen.findByRole('status', { name: 'Looking for agents…' })
+    // Waited out rather than read at once: the panel comes down from its trigger in opacity.
+    await waitFor(() => {
+      expect(looking).toBeVisible()
+    })
+    await expect(screen.queryByRole('listbox', { name: 'Agents' })).toBeNull()
+  },
+}
+
+/**
+ * The machine could not be asked which agents it has, even after the window asked again: the
+ * room of the list says so in words, and offers to ask once more.
+ */
+export const AgentsUnlisted: Story = {
+  args: { agents: [], listing: 'failed', onRetryAgents: fn() },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement)
+    await userEvent.click(canvas.getByRole('button', { name: 'Choose an agent' }))
+
+    const said = await screen.findByRole('alert')
+    await expect(said).toHaveTextContent('Hemera could not list the agents on this machine.')
+    await expect(screen.queryByRole('listbox', { name: 'Agents' })).toBeNull()
+
+    await userEvent.click(within(said).getByRole('button', { name: 'Retry' }))
+    await expect(args.onRetryAgents).toHaveBeenCalledOnce()
+  },
+}
+
+/**
  * The agent's options being read, beside the same panel once they have landed.
  *
  * The panel used to show a single line — "Reading what this agent offers…" — in place of the
@@ -726,6 +766,32 @@ export const Modes: Story = {
 }
 
 /**
+ * **An agent with no mode**: OpenCode, which Hemera runs bare with an agent of its own and its
+ * `build` and `plan` disabled (issue #128).
+ *
+ * The engine offers no mode for it, so there is no MODE section in the panel and the trigger
+ * names the model and the effort only: Hemera's own agent is never shown as if it were a feature.
+ */
+export const NoMode: Story = {
+  args: { agent: 'opencode', model: 'opencode-zen-kimi-k2-thinking', effort: 'low' },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const trigger = canvas.getByRole('button', { name: /Kimi K2 Thinking · Low/ })
+    // The summary ends on the effort: no mode is named, `hemera` or any other.
+    await expect(trigger.textContent?.split(' · ')).toHaveLength(2)
+    await userEvent.click(trigger)
+    await screen.findByRole('listbox', { name: 'Models of this agent' })
+    // The effort still stands in its column; nothing is under it.
+    await waitFor(() => {
+      expect(screen.getByRole('slider', { name: 'Effort' })).toBeVisible()
+    })
+    await expect(screen.queryByRole('listbox', { name: 'Mode' })).toBeNull()
+    await expect(screen.queryByText('Mode')).toBeNull()
+    await waitForAnimations()
+  },
+}
+
+/**
  * **The recommended level**, ruled on the scale, beside what the agent advises in the list.
  *
  * There is no `Default` anywhere here. The agent named the model its default resolves to, so
@@ -1052,9 +1118,17 @@ export const ReducedMotion: Story = {
     const agents = await screen.findByRole('listbox', { name: 'Agents' })
     await userEvent.click(within(agents).getByRole('option', { name: /Claude Code/ }))
 
-    // One panel to the left inside a frame, where the carousel would be a tenth of the way
-    // across it: the models are simply there.
-    await expect(travelledBy(rail)).toBeCloseTo(-panel, 0)
+    // One panel to the left, and never anywhere between: where the carousel would be a tenth
+    // of the way across, the models are simply there. The frames are watched rather than one
+    // read taken at once, since a loaded runner may not have committed the click yet.
+    const frames = await travelOf(rail, 40)
+    await expect(
+      frames.every((x) => Math.abs(x) < 0.5 || Math.abs(x + panel) < 0.5),
+      'the rail was carried across rather than set down',
+    ).toBe(true)
+    await waitFor(() => {
+      expect(travelledBy(rail)).toBeCloseTo(-panel, 0)
+    })
     await expect(screen.getByRole('listbox', { name: 'Models of this agent' })).toBeInTheDocument()
   },
 }

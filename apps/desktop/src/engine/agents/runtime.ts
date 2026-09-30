@@ -16,6 +16,7 @@
  * to answer a question nobody answered.
  */
 import {
+  Clock,
   Context,
   Data,
   Deferred,
@@ -43,10 +44,11 @@ import {
   hemeraToolNamed,
   internalText,
   nativePermissionMode,
+  type Mission,
   type Session,
   type SessionEntryOrigin,
 } from '@hemera/core'
-import { DEFAULT_DISPLAY_PREFERENCES, type ComposerChoice } from '@hemera/ipc'
+import { DEFAULT_DISPLAY_PREFERENCES, type ComposerChoice, type PromptIntent } from '@hemera/ipc'
 
 import {
   type AgentConnection,
@@ -66,18 +68,23 @@ import {
 import { AgentDirectories, bareModeOf, bareOptionsOf, writtenFiles } from './bare.ts'
 import { Discovery, type ResolvedAgent, type UnusableAgentError } from './discovery.ts'
 import { HeldWords } from './held.ts'
+import { SessionModes } from './modes.ts'
 import { AgentNotices } from './notices.ts'
 import { Pool, SWEEP_EVERY } from './pool.ts'
 import { rebuiltContext } from './resume.ts'
+import { provisionsOf } from './spec-request.ts'
 import { ProcessSupervisor, StderrSink, type SupervisedProcess } from './supervisor.ts'
+import { AcpTraces, type Heard, type RequestBook, requestBook, traceLine } from './trace.ts'
 import { type BuildDelivery, Builds } from '../build/build.ts'
-import { Commands } from '../commands/service.ts'
+import { Commands, type RunView } from '../commands/service.ts'
+import { runSaid, runText } from '../commands/told.ts'
 import { ClassifierSettings } from '../classifier/settings.ts'
-import { Context as AgentContext, fingerprintOf } from '../context/service.ts'
+import { Context as AgentContext, type QueuedResult, fingerprintOf } from '../context/service.ts'
 import { Preferences } from '../preferences.ts'
 import { Projects } from '../projects.ts'
 import { Sessions, type NativeRecord, type OptionChoice, type ThreadWrite } from '../sessions.ts'
 import { type SpecDelivery, briefFor, briefed, definedBy } from '../specs/brief.ts'
+import { rawInputShown } from '../setup/hidden.ts'
 import { Database } from '../storage/database.ts'
 import { ToolAccess } from '../tools/access.ts'
 import { ToolPermissions } from '../tools/permissions.ts'
@@ -111,6 +118,106 @@ const DRAIN_LIMIT = Duration.seconds(5)
  * (D6-08): an editor saves a file in several writes, and one change is one delivery.
  */
 export const INSTRUCTIONS_SETTLE = Duration.millis(300)
+
+/**
+ * How long a request of the agent's may wait for Hemera before the thread says it is (#131).
+ *
+ * Hemera answers what it can draw — a permission is a block of the thread, and the rest the SDK
+ * refuses at once — so a request still open after this is one the agent is waiting on and the
+ * reader cannot see. A few seconds, because a permission being written is a request open for the
+ * time of one write, and that one is drawn.
+ */
+export const UNANSWERED_AFTER = Duration.seconds(5)
+
+/** What the notes of one connection's requests are told by the runtime that keeps them. */
+export interface RequestNoteOptions {
+  /** Whether a block of the thread already draws this request: a permission being asked. */
+  readonly drawn: (heard: Heard) => boolean
+  /** The turn a note written now belongs to, or null outside a turn. */
+  readonly turnId: () => string | null
+  /** Writes a note into the Session's thread, over the one that carries its correlation. */
+  readonly write: (entry: ThreadWrite) => Effect.Effect<void>
+}
+
+/** The note a request of the agent's is said with, waiting or answered. */
+function requestNote(heard: Heard, answered: boolean, turnId: string | null): ThreadWrite {
+  return {
+    role: 'hemera',
+    kind: 'note',
+    body: answered
+      ? 'Hemera answered what the agent was waiting for'
+      : 'The agent is waiting for an answer Hemera cannot show',
+    payload: JSON.stringify({
+      reason: answered ? 'answered_request' : 'unanswered_request',
+      method: heard.method,
+    }),
+    correlationId: `request:${heard.id ?? ''}`,
+    turnId,
+  }
+}
+
+/**
+ * The agent's requests on one connection, said in the thread while Hemera leaves them waiting
+ * (#131), and said answered once Hemera's answer goes out (#170): a note that went on saying the
+ * agent waits after it was answered would be a thread lying about a turn that has moved on.
+ *
+ * The two writes take turns, so an answer that goes out while the note is being written closes
+ * it after it, never before.
+ */
+export function requestNotes(options: RequestNoteOptions) {
+  /** The requests a note was written for, with the turn that note belongs to. */
+  const noted = new Map<string, string | null>()
+  const writing = Semaphore.makeUnsafe(1)
+  return {
+    /**
+     * A request of the agent's: said after `UNANSWERED_AFTER` when Hemera has not answered it and
+     * no block of the thread draws it.
+     */
+    asked: (book: RequestBook, heard: Heard): Effect.Effect<void> =>
+      Effect.sleep(UNANSWERED_AFTER).pipe(
+        Effect.andThen(
+          writing.withPermits(1)(
+            Effect.gen(function* () {
+              if (heard.id === null || !book.waiting(heard.id) || options.drawn(heard)) return
+              const turnId = options.turnId()
+              noted.set(heard.id, turnId)
+              yield* options.write(requestNote(heard, false, turnId))
+            }),
+          ),
+        ),
+      ),
+    /** Hemera's answer to one of the agent's requests went out: its note, if any, says so. */
+    answered: (heard: Heard): Effect.Effect<void> =>
+      writing.withPermits(1)(
+        Effect.gen(function* () {
+          if (heard.id === null || !noted.has(heard.id)) return
+          const turnId = noted.get(heard.id) ?? null
+          noted.delete(heard.id)
+          yield* options.write(requestNote(heard, true, turnId))
+        }),
+      ),
+  }
+}
+
+/**
+ * What the agent writes on its standard error while a turn runs, as the thread says it (#131).
+ *
+ * A line that names a failure is what an agent says when its provider refuses it — OpenCode writes
+ * its 429 there and tells the protocol nothing — so it is shown as a quiet row under the turn. Not
+ * every line: an agent writes its progress there too, and a row claiming an error for a line that
+ * names none would be a row that lies.
+ */
+export const REPORTED_ERROR =
+  /error|fail|fatal|exception|refus|denied|invalid|timed? ?out|rate.?limit|too many requests|\b[45]\d\d\b|ECONN|EPIPE/i
+
+/** How far apart two of those rows are at least, so an agent retrying in a loop is one row. */
+export const REPORT_GAP = Duration.seconds(10)
+
+/** How many of those rows one turn shows at most. */
+export const REPORTS_PER_TURN = 5
+
+/** How much of a line of the agent's standard error a row keeps. */
+const REPORTED_LIMIT = 500
 
 /** Everything that can stop the engine from talking to an agent, as one thing to report. */
 export class AgentRuntimeError extends Data.TaggedError('AgentRuntimeError')<{
@@ -243,8 +350,17 @@ export interface AgentRuntimeService {
     optionId: string,
     value: string,
   ) => Effect.Effect<void, AgentRuntimeError>
-  /** Sends one turn and answers when the agent is done with it. */
-  readonly prompt: (sessionId: string, text: string) => Effect.Effect<TurnReport, AgentRuntimeError>
+  /**
+   * Sends one turn and answers when the agent is done with it.
+   *
+   * The intent is what the message was sent for: `spec`, the Home's New Spec, hands the agent in
+   * the same turn the request of the Spec the engine created from it (issues #128, #179).
+   */
+  readonly prompt: (
+    sessionId: string,
+    text: string,
+    intent?: PromptIntent,
+  ) => Effect.Effect<TurnReport, AgentRuntimeError>
   /** Stops the turn running in this Session, if one is: the user's Stop. */
   readonly stop: (sessionId: string) => Effect.Effect<void>
   /** Answers the question a block was drawn for; null is the end of the question. */
@@ -289,6 +405,12 @@ export interface AgentRuntimeService {
    */
   readonly specChanged: (specId: string) => Effect.Effect<void>
   /**
+   * Hands the Session's agent what waits for it, once it holds its session — started and
+   * resumed first when it is not running and something waits (issue #211). The Retry of a
+   * delivery the agent did not take. Returns at once, never waiting on a turn.
+   */
+  readonly handOver: (sessionId: string) => Effect.Effect<void>
+  /**
    * Queues a sub-agent's result for the Session's agent, handed over at its next safe point as
    * an `internal` delivery, never as a message of the user's (D7-14). Returns at once.
    */
@@ -298,9 +420,28 @@ export interface AgentRuntimeService {
 export { AgentNotices, NoNotices } from './notices.ts'
 export type { AgentNoticesService, Notice } from './notices.ts'
 
+/**
+ * Where an option is put back when an agent starts again: the model, then the effort it
+ * publishes, then the mode, then whatever else the agent offers.
+ */
+function rankOf(category: string | null): number {
+  switch (category) {
+    case 'model':
+      return 0
+    case 'thought_level':
+      return 1
+    case 'mode':
+      return 2
+    default:
+      return 3
+  }
+}
+
 /** One running agent, as the runtime keeps it. */
 interface Live {
   readonly connection: AgentConnection
+  /** Whose agent this is, which is what its modes are read against (#242). */
+  readonly provider: AgentProvider
   readonly process: SupervisedProcess
   /**
    * The agent's events, waiting to be written.
@@ -319,6 +460,11 @@ interface Live {
    * hand over the same address, and the grant behind it dies with this process.
    */
   readonly mcp: readonly McpServer[]
+  /**
+   * The mission the Session was on when this agent was started, which is what its token was
+   * minted with: the tools it lists are those, for as long as it runs (issue #198).
+   */
+  readonly mission: Mission
   /**
    * What the three ways into a session carry on `_meta` for this agent: its bare options, for the
    * agent that reads them there, and nothing for the two that take them from the environment.
@@ -347,6 +493,11 @@ interface Live {
    * session opened afresh or rebuilt from the thread, which leaves the brief out (D7-09).
    */
   unbriefed: boolean
+  /**
+   * Whether the agent was put back on what the Session chose. Until it is, what it stands on is
+   * its defaults, and an option it reports moving is not recorded over the Session's choices.
+   */
+  restored: boolean
   /** Why that context had to be rebuilt, in the agent's own terms; null when it did not. */
   why: string | null
   /**
@@ -578,6 +729,7 @@ export const runtimeLayer = Layer.effect(
     )
     const permissions = yield* ToolPermissions
     const heldWords = yield* HeldWords
+    const sessionModes = yield* SessionModes
     const pool = yield* Pool
     // The variables of a Session's Workspace, which its agent is started with (D8-06).
     const variables = yield* Variables
@@ -586,6 +738,8 @@ export const runtimeLayer = Layer.effect(
     // Where each agent's bare means is written: a directory of Hemera's, never the user's (D6-09).
     const directories = yield* AgentDirectories
     const database = yield* Database
+    // What a Session's agent and Hemera said to each other, written when the reader asked (#131).
+    const traces = yield* AcpTraces
 
     /**
      * The scope the engine gave this layer: the lifetime every fiber and process here lives in.
@@ -725,6 +879,19 @@ export const runtimeLayer = Layer.effect(
       }),
     )
 
+    // Hemera's own tools follow the mode the agent stands on (#242): what it last reported, which
+    // a `current_mode_update` and a choice in the composer both move, read at every call.
+    sessionModes.heldBy((sessionId) => {
+      const held = live.get(sessionId)
+      if (held === undefined) return null
+      const mode = held.connection
+        .options()
+        .find((option) => option.category === 'mode' || option.id === 'mode')
+      if (mode === undefined) return null
+      const name = mode.values.find((value) => value.id === mode.value)?.name ?? mode.value
+      return { agent: held.provider, mode: mode.value, name }
+    })
+
     /** One line, written as a `note`: what Hemera did that the agent did not say. */
     const note = (sessionId: string, turn: Turn | undefined, body: string, reason: string) =>
       write(sessionId, {
@@ -734,6 +901,107 @@ export const runtimeLayer = Layer.effect(
         payload: JSON.stringify({ reason }),
         turnId: turn?.id ?? null,
       })
+
+    /** Reads the preference, and writes the traces or stops writing them as it says (#131). */
+    const traceAsAsked = Effect.gen(function* () {
+      const read = yield* Effect.result(preferences.read)
+      traces.writing(Result.isSuccess(read) && read.success.acpTrace)
+    })
+
+    /** One line of a Session's trace that is not a message: a death, a line of standard error. */
+    const traced = (sessionId: string, said: string) => {
+      if (traces.on()) traces.write(sessionId, `${new Date().toISOString()} ${said}`)
+    }
+
+    /**
+     * What each turn has shown of the agent's standard error: the lines already shown, when the
+     * last one was, and how many. Kept beside the turn rather than in it, and gone with it.
+     */
+    const reported = new WeakMap<Turn, { lines: Set<string>; at: number | null; count: number }>()
+
+    /**
+     * A line the agent wrote on its standard error, shown under the running turn when it names a
+     * failure (#131): once per line, one row per `REPORT_GAP` at most, `REPORTS_PER_TURN` in all.
+     * Outside a turn it goes to the diagnostic alone, as it always did.
+     */
+    const reportedError = (sessionId: string, line: string) =>
+      Effect.gen(function* () {
+        const turn = turns.get(sessionId)
+        if (turn === undefined || turn.closed !== null) return
+        if (!REPORTED_ERROR.test(line)) return
+        const said = line.trim().slice(0, REPORTED_LIMIT)
+        // Two lines that differ only by a time or a count are the same complaint said again.
+        const known = said.replaceAll(/\d+/g, '#')
+        const now = yield* Clock.currentTimeMillis
+        const held = reported.get(turn) ?? { lines: new Set<string>(), at: null, count: 0 }
+        reported.set(turn, held)
+        if (held.lines.has(known) || held.count >= REPORTS_PER_TURN) return
+        if (held.at !== null && now - held.at < Duration.toMillis(REPORT_GAP)) return
+        held.lines.add(known)
+        held.at = now
+        held.count += 1
+        yield* write(sessionId, {
+          role: 'hemera',
+          kind: 'note',
+          body: 'The agent reported an error',
+          payload: JSON.stringify({ reason: 'agent_stderr', line: said }),
+          turnId: turn.id,
+        })
+      })
+
+    /**
+     * The notes of one Session's requests (#131, #170). A permission the thread is drawing is not
+     * one: its block is already what says the agent is waiting.
+     */
+    const notesOf = (sessionId: string) =>
+      requestNotes({
+        drawn: (heard) =>
+          heard.method === 'session/request_permission' &&
+          (turns.get(sessionId)?.permission ?? null) !== null,
+        turnId: () => turns.get(sessionId)?.id ?? null,
+        write: (entry) => write(sessionId, entry).pipe(Effect.asVoid, Effect.ignore),
+      })
+
+    /**
+     * A request of the agent's that Hemera refused, said once per method and agent (#131): the SDK
+     * answers a method Hemera does not implement with an error, and an agent that then waits on
+     * something else is an agent whose reader was never told what it asked for.
+     */
+    const refusedRequest = (sessionId: string, heard: Heard) =>
+      write(sessionId, {
+        role: 'hemera',
+        kind: 'note',
+        body: 'The agent asked for something Hemera cannot answer',
+        payload: JSON.stringify({
+          reason: 'refused_request',
+          method: heard.method,
+          line: heard.error ?? '',
+        }),
+        turnId: turns.get(sessionId)?.id ?? null,
+      })
+
+    /**
+     * What a Session's connection hears, both ways (#131): the trace when it is being written, and
+     * the agent's requests watched until Hemera has answered them.
+     */
+    const listening = (sessionId: string) => {
+      const book = requestBook()
+      const notes = notesOf(sessionId)
+      const refused = new Set<string>()
+      return (direction: 'in' | 'out', message: Parameters<RequestBook['heard']>[1]) => {
+        const heard = book.heard(direction, message)
+        if (traces.on()) traces.write(sessionId, traceLine(direction, heard, message, new Date()))
+        if (heard.askedBy !== 'agent') return
+        if (heard.kind === 'request') {
+          runOwned(notes.asked(book, heard)).catch(() => undefined)
+          return
+        }
+        runOwned(notes.answered(heard)).catch(() => undefined)
+        if (heard.error === null || refused.has(heard.method)) return
+        refused.add(heard.method)
+        runOwned(refusedRequest(sessionId, heard).pipe(Effect.ignore)).catch(() => undefined)
+      }
+    }
 
     /** What a load has replayed of this Session so far, made the first time it is asked. */
     const replayedOf = (sessionId: string): Map<string, string> => {
@@ -895,6 +1163,13 @@ export const runtimeLayer = Layer.effect(
           return
         }
 
+        if (event.type === 'options') {
+          // The agent moved an option by itself: the next start is put back where it moved to,
+          // not where the user last put it. A replay is the past, not where the agent stands.
+          if (!event.replay) yield* recordStanding(sessionId)
+          return
+        }
+
         const said = event.call
         const held = turn?.calls.get(said.id)
         // Every text of it is bounded here, where it lands, rather than where the entry is
@@ -910,7 +1185,16 @@ export const runtimeLayer = Layer.effect(
           locations: said.locations.length === 0 ? (held?.locations ?? []) : said.locations,
           content:
             said.content.length === 0 ? (held?.content ?? []) : said.content.map(boundedBlock),
-          rawInput: said.rawInput === null ? (held?.rawInput ?? null) : bounded(said.rawInput),
+          // A variable's value a proposal carries is never kept in the thread (Decided 2 of #218).
+          rawInput:
+            said.rawInput === null
+              ? (held?.rawInput ?? null)
+              : bounded(
+                  rawInputShown(
+                    said.title === '' ? (held?.title ?? '') : said.title,
+                    said.rawInput,
+                  ),
+                ),
           rawOutput: said.rawOutput === null ? (held?.rawOutput ?? null) : bounded(said.rawOutput),
         }
         if (turn !== undefined) turn.calls.set(said.id, call)
@@ -1444,6 +1728,7 @@ export const runtimeLayer = Layer.effect(
         Effect.gen(function* () {
           const observation = yield* held.process.exited
           held.death = { code: observation.code, signal: observation.signal }
+          traced(sessionId, `agent exited with ${String(observation.code ?? observation.signal)}`)
           if (live.get(sessionId) === held) live.delete(sessionId)
 
           const turn = turns.get(sessionId)
@@ -1514,8 +1799,18 @@ export const runtimeLayer = Layer.effect(
         // composer was drawn in this run of the application (D5-17).
         yield* seed
         const held = live.get(sessionId)
-        if (held !== undefined && held.death === null) return held
-        if (held !== undefined) live.delete(sessionId)
+        if (held !== undefined && held.death === null) {
+          // An agent lists its tools once, when it opens its session, and they are the mission's
+          // it was started on. One started while the Session was `free` — the page reads what it
+          // offers while New Spec's message is on its way — holds none of the define tools once
+          // the Session defines a Spec, so it is started again before a turn is handed to it. A
+          // turn running now keeps it: the catalogue already refuses what the mission no longer
+          // offers (D7-14), and a new start waits for that turn's end (issue #198).
+          if (turns.has(sessionId)) return held
+          const now = yield* attempt('reading the Session', sessions.one(sessionId))
+          if (now.session.mission === held.mission) return held
+          yield* stopped(sessionId, held)
+        } else if (held !== undefined) live.delete(sessionId)
 
         const { session, native, choices } = yield* attempt(
           'reading the Session',
@@ -1533,6 +1828,8 @@ export const runtimeLayer = Layer.effect(
 
         const resolved = yield* attempt('finding the agent', discovery.resolve(provider))
         const cwd = yield* workingDirectory(session, native)
+        // Whether this agent's conversation is written down is asked now, before its first word.
+        yield* traceAsAsked
 
         // Bare, or not at all (D6-02): an agent whose means leaves a tool of its own behind opens
         // no Session, and nothing is written or started for it. The reason shown is the adapter's.
@@ -1609,15 +1906,25 @@ export const runtimeLayer = Layer.effect(
               Queue.offerUnsafe(queue, event)
             },
             onPermission: (question) => runOwned(ask(sessionId, question)),
+            onMessage: listening(sessionId),
           }),
         )
+        // What the agent says on its standard error while a turn runs is said under the turn
+        // when it names a failure, and its size is written in the trace (#131): an agent whose
+        // provider refused it says so there, and nowhere the protocol carries.
+        process.onStderr((line) => {
+          traced(sessionId, `agent stderr ‹${String(line.length)} chars›`)
+          runOwned(reportedError(sessionId, line).pipe(Effect.ignore)).catch(() => undefined)
+        })
 
         const started: Live = {
           connection,
+          provider,
           process,
           queue,
           cwd,
           mcp,
+          mission: session.mission,
           meta: bare.meta,
           base: mode.base,
           nativeSessionId: '',
@@ -1625,6 +1932,7 @@ export const runtimeLayer = Layer.effect(
           context: null,
           provisions: [],
           unbriefed: false,
+          restored: false,
           why: null,
           window: null,
           pending: 0,
@@ -1677,22 +1985,39 @@ export const runtimeLayer = Layer.effect(
               ([optionId, value]) => ({ optionId, value }),
             )
           : choices
-        for (const choice of put) {
+        // The model first, then the effort, then the mode, whatever order they were chosen in: an
+        // effort is the model's own, and one put back before its model lands on the wrong one.
+        const categories = new Map(
+          connection.options().map((option) => [option.id, option.category] as const),
+        )
+        const ranked = put.toSorted(
+          (one, other) =>
+            rankOf(categories.get(one.optionId) ?? null) -
+            rankOf(categories.get(other.optionId) ?? null),
+        )
+        for (const choice of ranked) {
           if (yield* hemeraAuto) {
             const option = connection.options().find((one) => one.id === choice.optionId)
             if (option !== undefined && nativePermissionMode(option, choice.value)) continue
           }
-          const set = yield* Effect.result(
-            attempt('choosing an option', connection.setOption(choice.optionId, choice.value)),
-          )
           // A choice the agent will not take is not a Session that cannot start: it opens on
           // what the agent is on, and the composer shows what that is.
-          if (Result.isSuccess(set) && inherited) {
-            yield* attempt('recording a choice', sessions.recordChoice(sessionId, choice)).pipe(
-              Effect.ignore,
-            )
-          }
+          yield* attempt(
+            'choosing an option',
+            connection.setOption(choice.optionId, choice.value),
+          ).pipe(Effect.ignore)
         }
+        // What it stands on now is what the Session is recorded on, inherited choices included.
+        started.restored = true
+        yield* recordStanding(sessionId)
+        // A sub-agent's result a quit caught before its safe point does not wait for the user to
+        // type: the agent is back, and idle unless a prompt is starting it, which hands it over
+        // itself (issue #72).
+        const queued = yield* attempt(
+          'reading the results of sub-agents',
+          context.queuedInternal(sessionId),
+        ).pipe(Effect.orElseSucceed(() => []))
+        if (queued.length > 0) deliverSoon(sessionId, false)
         return started
       })
 
@@ -2217,14 +2542,6 @@ export const runtimeLayer = Layer.effect(
       }
     }
 
-    /**
-     * The results of sub-agents waiting for a Session's next safe point, oldest first (D7-14).
-     *
-     * Held in memory, as the sub-agent that produced one is: a result the quit catches before its
-     * safe point goes with it.
-     */
-    const results = new Map<string, readonly string[]>()
-
     /** Hemera's words waiting for a Session's next safe point, oldest first (issue #130). */
     const words = new Map<string, readonly { readonly text: string; readonly said: string }[]>()
 
@@ -2263,9 +2580,12 @@ export const runtimeLayer = Layer.effect(
           mimeType: 'text/markdown',
         })),
         announce: (turnId) => lines(turnId, true),
-        taken: Effect.sync(() => {
+        taken: Effect.gen(function* () {
           // Said meanwhile, a later word stays for the next safe point.
           words.set(sessionId, (words.get(sessionId) ?? []).slice(waiting.length))
+          for (const one of waiting) {
+            yield* attempt('recording the delivery', context.handed(sessionId, 'notice', one.text))
+          }
         }),
         missed: (turnId) => lines(turnId, false),
       }
@@ -2274,13 +2594,16 @@ export const runtimeLayer = Layer.effect(
     /**
      * A sub-agent's results (D7-14): each a resource said to be internal and a line of Hemera's,
      * never a message of the user's. Taken off the queue only once the agent took them.
+     *
+     * The queue is the database's, not this process's (issue #72): a result the quit catches
+     * before its safe point is handed over at the first one after the agent starts again.
      */
-    const internalParcel = (sessionId: string, waiting: readonly string[]): Parcel => {
+    const internalParcel = (sessionId: string, waiting: readonly QueuedResult[]): Parcel => {
       const correlation = crypto.randomUUID()
       const lines = (turnId: string | null, handed: boolean) =>
         Effect.forEach(
           waiting,
-          (text, index) =>
+          ({ text }, index) =>
             deliveryLine(
               sessionId,
               `delivery:${correlation}:${index}`,
@@ -2299,19 +2622,57 @@ export const runtimeLayer = Layer.effect(
           { discard: true },
         )
       return {
-        provisions: waiting.map((text) => ({
+        provisions: waiting.map(({ text }) => ({
           uri: contextUri('internal'),
           text: internalText(text),
           mimeType: 'text/markdown',
         })),
         announce: (turnId) => lines(turnId, true),
-        taken: Effect.gen(function* () {
-          // Queued meanwhile, a later result stays for the next safe point.
-          results.set(sessionId, (results.get(sessionId) ?? []).slice(waiting.length))
-          for (const text of waiting) {
-            yield* attempt('recording the delivery', context.handedInternal(sessionId, text))
-          }
-        }),
+        // Queued meanwhile, a later result stays for the next safe point.
+        taken: attempt('recording the delivery', context.handedInternal(sessionId, waiting)),
+        missed: (turnId) => lines(turnId, false),
+      }
+    }
+
+    /**
+     * The runs of the Session its agent was not told of as they now stand (issue #238): whoever
+     * started them — the user from the line or a chip, the agent in the background — each a
+     * resource in the order they happened, and a line of Hemera's. What the agent read in the
+     * answer of its own tool is not among them. Counted as told only once the agent took them.
+     */
+    const runsParcel = (sessionId: string, runs: readonly RunView[]): Parcel => {
+      const correlation = crypto.randomUUID()
+      const texts = runs.map((run, index) => runText(run, index === runs.length - 1))
+      const lines = (turnId: string | null, handed: boolean) =>
+        Effect.forEach(
+          runs,
+          (run, index) =>
+            deliveryLine(
+              sessionId,
+              `delivery:${correlation}:${index}`,
+              turnId,
+              handed
+                ? runSaid(run)
+                : `Not handed over, waiting for the next safe point: the run of ${run.name}.`,
+              handed ? null : 'failed',
+              {
+                kind: 'run',
+                runId: run.id,
+                fingerprint: fingerprintOf(texts[index] ?? ''),
+                deliveredAt: handed ? new Date().toISOString() : null,
+                reached: 'delivery_prompt',
+              },
+            ),
+          { discard: true },
+        )
+      return {
+        provisions: runs.map((run, index) => ({
+          uri: contextUri(`run/${run.id}`),
+          text: texts[index] ?? '',
+          mimeType: 'text/markdown',
+        })),
+        announce: (turnId) => lines(turnId, true),
+        taken: attempt('recording the runs handed over', commands.told(sessionId, runs)),
         missed: (turnId) => lines(turnId, false),
       }
     }
@@ -2391,7 +2752,7 @@ export const runtimeLayer = Layer.effect(
      * it to settle, which is the watcher's to know, and a safe point the Spec asked for does not
      * hand over a file an editor is still writing.
      */
-    const waitingOf = (sessionId: string, held: Live, instructions: boolean) =>
+    const waitingOf = (sessionId: string, held: Live, instructions: boolean, runsAlone: boolean) =>
       Effect.gen(function* () {
         const parcels: Parcel[] = []
         const changed = instructions
@@ -2411,8 +2772,18 @@ export const runtimeLayer = Layer.effect(
           builds.waiting(sessionId, held.unbriefed),
         )
         if (build !== null) parcels.push(buildParcel(sessionId, held, build))
-        const queued = results.get(sessionId) ?? []
+        const queued = yield* attempt(
+          'reading the results of sub-agents',
+          context.queuedInternal(sessionId),
+        )
         if (queued.length > 0) parcels.push(internalParcel(sessionId, queued))
+        // The runs go last, right before the prompt they are read with (issue #238). A run is no
+        // reason for a turn of its own: it goes with the next prompt, or with a delivery that
+        // goes anyway.
+        const runs = yield* attempt('reading the runs of the Session', commands.owed(sessionId))
+        if (runs.length > 0 && (runsAlone || parcels.length > 0)) {
+          parcels.push(runsParcel(sessionId, runs))
+        }
         return parcels
       })
 
@@ -2461,7 +2832,7 @@ export const runtimeLayer = Layer.effect(
      */
     const handOver = (sessionId: string, held: Live) =>
       Effect.gen(function* () {
-        const parcels = yield* waitingOf(sessionId, held, true)
+        const parcels = yield* waitingOf(sessionId, held, true, true)
         if (parcels.length === 0) return
         const sent = yield* sendDelivery(sessionId, held, parcels, null)
         if (Result.isFailure(sent)) {
@@ -2491,7 +2862,7 @@ export const runtimeLayer = Layer.effect(
           const held = live.get(sessionId)
           if (held === undefined || held.death !== null) return
           if (turns.has(sessionId) || starting.has(sessionId)) return
-          const parcels = yield* waitingOf(sessionId, held, instructions).pipe(
+          const parcels = yield* waitingOf(sessionId, held, instructions, false).pipe(
             Effect.orElseSucceed(() => []),
           )
           if (parcels.length === 0) return
@@ -2535,6 +2906,7 @@ export const runtimeLayer = Layer.effect(
               Effect.gen(function* () {
                 turns.delete(sessionId)
                 yield* pool.busy(sessionId, false).pipe(Effect.ignore)
+                yield* briefedIfDefining(sessionId)
                 yield* releasedIfDue(sessionId)
                 notices.changed(sessionId, 'turn_ended')
               }),
@@ -2586,14 +2958,36 @@ export const runtimeLayer = Layer.effect(
       ).catch(() => undefined)
     }
 
+    /**
+     * Hands a Session's agent what waits for it — an answer, an edit, a sub-agent's result — once
+     * that agent holds its own session again (issue #211). An agent still being started, as the
+     * page reading what it offers starts it after a restart, runs before it has resumed or loaded
+     * its session, and a prompt sent to it then is refused: the delivery waits for the start to
+     * end, through the same gate. One that is not running is started, and its session taken back
+     * as a prompt of the user's would, when something waits for it.
+     */
+    const handOverWhenReady = (sessionId: string) =>
+      Effect.gen(function* () {
+        if (!live.has(sessionId)) {
+          const spec = yield* briefFor(sessionId).pipe(
+            Effect.provideService(Database, database),
+            Effect.orElseSucceed(() => null),
+          )
+          const queued = yield* context
+            .queuedInternal(sessionId)
+            .pipe(Effect.orElseSucceed(() => []))
+          if (spec === null && queued.length === 0) return
+        }
+        wakeSoon(sessionId)
+      })
+
     const specChanged = (specId: string) =>
       definedBy(specId).pipe(
         Effect.provideService(Database, database),
-        Effect.map((defining) => {
-          // A Session whose agent is not running is handed it when its next prompt starts one.
-          for (const sessionId of defining) if (live.has(sessionId)) deliverSoon(sessionId, false)
-        }),
-        // Unread, it waits for that next prompt all the same.
+        Effect.flatMap((defining) =>
+          Effect.forEach(defining, handOverWhenReady, { discard: true }),
+        ),
+        // Unread, it waits for the next prompt, which hands it over itself.
         Effect.ignore,
       )
 
@@ -2660,6 +3054,24 @@ export const runtimeLayer = Layer.effect(
         return held.connection.options()
       })
 
+    /**
+     * Records every option the Session's agent stands on now, as the agent last reported them:
+     * after it was put back on the Session's choices, and whenever it moves one by itself. The
+     * next start of its agent is put back there (issue #133).
+     */
+    const recordStanding = (sessionId: string) =>
+      Effect.gen(function* () {
+        const held = live.get(sessionId)
+        if (held === undefined || !held.restored) return
+        const standing = held.connection
+          .options()
+          .map((option) => ({ optionId: option.id, value: option.value }))
+        if (standing.length === 0) return
+        yield* attempt('recording the choices', sessions.recordChoices(sessionId, standing)).pipe(
+          Effect.ignore,
+        )
+      })
+
     const setOption = (sessionId: string, optionId: string, value: string) =>
       Effect.gen(function* () {
         const held = yield* opened(sessionId)
@@ -2675,16 +3087,18 @@ export const runtimeLayer = Layer.effect(
           }
         }
         yield* attempt('choosing an option', held.connection.setOption(optionId, value))
-        // Written down once the agent took it: the next start of this Session's agent is put back
-        // on it, which no agent does by itself (issue #133).
-        yield* attempt(
-          'recording a choice',
-          sessions.recordChoice(sessionId, { optionId, value }),
-        ).pipe(Effect.ignore)
+        // Written down once the agent took it, with every other option as it answered them: a
+        // model chosen may have moved the effort. The next start of this Session's agent is put
+        // back on them, which no agent does by itself (issue #133).
+        yield* recordStanding(sessionId)
       })
 
-    const prompt = (sessionId: string, text: string) =>
+    const prompt = (sessionId: string, text: string, intent?: PromptIntent) =>
       Effect.gen(function* () {
+        // The trace follows the preference from the next message on, not from the next start of
+        // an agent the pool may keep for minutes (#131). Read before the turn is held, so nothing
+        // waits between the check below and the turn it registers.
+        yield* traceAsAsked
         if (turns.has(sessionId) || starting.has(sessionId)) {
           return yield* Effect.fail(
             new AgentRuntimeError({
@@ -2709,7 +3123,7 @@ export const runtimeLayer = Layer.effect(
         // goes back to work on it, and this very turn is the one handed the review brief.
         yield* attempt("taking the user's review", builds.review(sessionId))
 
-        return yield* announcedTurn(sessionId, text, turn).pipe(
+        return yield* announcedTurn(sessionId, text, turn, intent).pipe(
           Effect.ensuring(
             Effect.sync(() => {
               if (starting.get(sessionId) === turn) starting.delete(sessionId)
@@ -2719,7 +3133,7 @@ export const runtimeLayer = Layer.effect(
       })
 
     /** The turn itself, once it is the one this Session is running. */
-    const announcedTurn = (sessionId: string, text: string, turn: Turn) =>
+    const announcedTurn = (sessionId: string, text: string, turn: Turn, intent?: PromptIntent) =>
       Effect.gen(function* () {
         // The user's own message is written first, and by `append`: the thread shows what was
         // asked before what was answered, and it is what proposes the Session's title. It is
@@ -2758,7 +3172,7 @@ export const runtimeLayer = Layer.effect(
               // Stop pressed meanwhile marks this turn, and it closes as soon as it gets the gate.
               turns.set(sessionId, turn)
               starting.delete(sessionId)
-              return turnBodyOf(sessionId, text, turn, held)
+              return turnBodyOf(sessionId, text, turn, held, intent)
             }),
           )
 
@@ -2771,7 +3185,13 @@ export const runtimeLayer = Layer.effect(
      *
      * Run under the Session's turn gate by `announcedTurn`, once the turn is registered.
      */
-    const turnBodyOf = (sessionId: string, text: string, turn: Turn, held: Live) =>
+    const turnBodyOf = (
+      sessionId: string,
+      text: string,
+      turn: Turn,
+      held: Live,
+      intent?: PromptIntent,
+    ) =>
       Effect.gen(function* () {
         yield* pool.used(sessionId)
         yield* pool.busy(sessionId, true).pipe(Effect.ignore)
@@ -2799,9 +3219,21 @@ export const runtimeLayer = Layer.effect(
         // unless a delivery took it first, and the conversation rebuilt for an agent that lost
         // its own (D5-07).
         const sent = [held.context, text].filter((one) => one !== null).join('\n\n')
-        const provisions = held.provisions
+        // And what the message was sent for, when it was sent for something: the Home's New Spec
+        // hands over the request of the Spec created from it in the same turn (issue #179).
+        const provisions = [...held.provisions, ...provisionsOf(intent)]
         held.context = null
         held.provisions = []
+
+        // The New Spec request this turn carries is listed in the Context view. It is recorded as
+        // the turn goes out rather than once it is over: it is also what makes this a New Spec
+        // Session, whose Spec the agent proposes during this very turn (issue #205).
+        for (const request of provisionsOf(intent)) {
+          yield* attempt(
+            'recording the delivery',
+            context.handed(sessionId, 'request', request.text),
+          ).pipe(Effect.ignore)
+        }
 
         const outcome = yield* Effect.result(held.connection.prompt(sent, provisions))
         if (Result.isSuccess(outcome)) {
@@ -2862,6 +3294,7 @@ export const runtimeLayer = Layer.effect(
           Effect.gen(function* () {
             turns.delete(sessionId)
             yield* pool.busy(sessionId, false).pipe(Effect.ignore)
+            yield* briefedIfDefining(sessionId)
             yield* releasedIfDue(sessionId)
             // The idle time is counted from the end of the turn, not from its start: a sweep
             // that ran during a long turn found it busy and struck it out of the book.
@@ -3022,6 +3455,12 @@ export const runtimeLayer = Layer.effect(
         // Nor is the agent of a build whose checks are running (D10-07): it is kept, as used now,
         // and handed the verdict when it comes.
         if (builds.checking(sessionId)) return yield* kept(sessionId)
+        yield* stopped(sessionId, held)
+      })
+
+    /** Lets go of a Session's agent now: what `release` does once nothing holds it. */
+    const stopped = (sessionId: string, held: Live) =>
+      Effect.gen(function* () {
         // The last words of a turn are written before the connection is let go: the queue ending
         // is what ends the fiber that would have written them.
         yield* flush(sessionId, held, true).pipe(Effect.ignore)
@@ -3057,6 +3496,21 @@ export const runtimeLayer = Layer.effect(
       Effect.gen(function* () {
         waking.add(sessionId)
         yield* releaseWhenIdle(sessionId)
+      })
+
+    /**
+     * Called as a turn ends: a `free` Session that turned `define` during it — New Spec's Spec,
+     * created from the agent's own proposal with no card to press (issue #205) — has its agent
+     * started again with the define tools and handed the mission brief, as a proposal the user
+     * accepted does.
+     */
+    const briefedIfDefining = (sessionId: string) =>
+      Effect.gen(function* () {
+        const held = live.get(sessionId)
+        if (held === undefined || held.death !== null || held.mission !== 'free') return
+        const now = yield* Effect.result(sessions.one(sessionId))
+        if (Result.isFailure(now) || now.success.session.mission !== 'define') return
+        yield* briefWhenIdle(sessionId)
       })
 
     const tell = (sessionId: string, text: string, said: string) =>
@@ -3120,7 +3574,7 @@ export const runtimeLayer = Layer.effect(
       offerSet: (projectId, provider, optionId, value) =>
         owned(offerSet(projectId, provider, optionId, value)),
       setOption: (sessionId, optionId, value) => owned(setOption(sessionId, optionId, value)),
-      prompt: (sessionId, text) => owned(prompt(sessionId, text)),
+      prompt: (sessionId, text, intent) => owned(prompt(sessionId, text, intent)),
       stop: (sessionId) => owned(stop(sessionId)),
       decide: (sessionId, toolCallId, optionId) => owned(decide(sessionId, toolCallId, optionId)),
       resume: (sessionId) => owned(resume(sessionId)),
@@ -3143,12 +3597,16 @@ export const runtimeLayer = Layer.effect(
       alive: Effect.sync(() => [...live.keys()]),
       running: (sessionId) => turns.has(sessionId) || starting.has(sessionId),
       specChanged,
+      handOver: handOverWhenReady,
       deliverInternal: (sessionId, text) =>
-        Effect.sync(() => {
-          results.set(sessionId, [...(results.get(sessionId) ?? []), text])
-          // An agent that is not running is handed it when its next prompt starts one.
-          if (live.has(sessionId)) deliverSoon(sessionId, false)
-        }),
+        context.queueInternal(sessionId, text).pipe(
+          Effect.tap(() => handOverWhenReady(sessionId)),
+          Effect.catch((refusal) =>
+            diagnostic.write(
+              `agents: the result of a sub-agent for Session ${sessionId} could not be queued: ${describe(refusal)}`,
+            ),
+          ),
+        ),
     }
     return service
   }),

@@ -29,6 +29,9 @@ export {
   type SelectProps,
 } from './components/select/select.tsx'
 export { Loading, type LoadingProps } from './components/loading/loading.tsx'
+/** What an agent is doing, said by Hemera's face: its expression, its motion, its colour. */
+export { Face, type FaceProps, type FaceSize } from './components/face/face.tsx'
+export type { FaceState } from './components/face/states.ts'
 /** Where a piece of work stands, said as a dot: a tool call, a turn, a row of a list. */
 export {
   StatusDot,
@@ -202,6 +205,7 @@ export {
   type JournalProps,
 } from './journal/journal.tsx'
 export { Gutter, type GutterProps } from './shell/gutter.tsx'
+export { StartScreen } from './shell/start-screen.tsx'
 export {
   HOME_ENTRY,
   JOURNAL_ENTRY,
@@ -280,6 +284,7 @@ export {
   type ArchivedSession,
   type ArchivedSessionsProps,
   type SessionHeaderProps,
+  type SessionRenaming,
 } from './session/session.tsx'
 
 /** A turn with an agent, drawn as it happens: what it thought, what it called, what it ran, and
@@ -297,6 +302,12 @@ export {
 } from './activity/tool-call-card.tsx'
 export { TerminalOutput, type TerminalOutputProps } from './activity/terminal-output.tsx'
 export { DiffBlock, type DiffBlockProps } from './activity/diff-block.tsx'
+/** The calls of a turn between two things the agent said, folded into one row (issue #149). */
+export {
+  ActionGroup,
+  type ActionGroupProps,
+  type ActionGroupStatus,
+} from './activity/action-group.tsx'
 /** The tools Hemera lends the agent (HEM-18): the call it made, and the command it ran. A call
  * to one of Hemera's own tools is not the agent's business alone, so it says whose it is. */
 export {
@@ -307,12 +318,36 @@ export {
   type HemeraToolStatus,
 } from './activity/hemera-tool-call.tsx'
 export { CommandRun, type CommandRunProps, type CommandState } from './activity/command-run.tsx'
+export {
+  CallOutcome,
+  CallOutcomeDetails,
+  type CallOutcomeDetailsProps,
+  type CallOutcomeProps,
+  type CallPermission,
+} from './activity/call-outcome.tsx'
 /** A command the agent proposes for the catalogue, and the human's answer (D8-11). */
 export {
   CommandProposal,
+  CommandProposalRecord,
   type CommandProposalProps,
+  type CommandProposalRecordProps,
   type CommandProposalState,
 } from './activity/command-proposal.tsx'
+/** A change to the Project's setup the agent proposes, and what the thread keeps of it (#218). */
+export {
+  SetupProposal,
+  SetupProposalRecord,
+  type SetupProposalDetail,
+  type SetupProposalProps,
+  type SetupProposalRecordProps,
+  type SetupProposalState,
+} from './activity/setup-proposal.tsx'
+/** What stays in the thread of something that waited for a human (issue #237). */
+export {
+  NoticeRecord,
+  type NoticeAnswer,
+  type NoticeRecordProps,
+} from './activity/notice-record.tsx'
 /** The seven types of a command and the icon the design system fixes for each (D8-07). */
 export {
   COMMAND_SCOPES,
@@ -325,7 +360,10 @@ export {
 
 /** The gate a turn stops at, and the one line the answer leaves behind. */
 export {
+  PermissionRecord,
   PermissionRequest,
+  type PermissionRecordProps,
+  type PermissionStanding,
   type PermissionOption,
   type PermissionOptionKind,
   type PermissionParameter,
@@ -352,6 +390,7 @@ export {
   ModeSelector,
   UsageMeter,
   type AgentChoice,
+  type AgentListing,
   type AgentModelMenuProps,
   type BlockedBannerProps,
   type EffortChoice,
@@ -389,10 +428,15 @@ export {
   type TouchedFile,
 } from './session/session-details.tsx'
 export {
-  CommandsPanel,
-  type CommandPanelRun,
-  type CommandsPanelProps,
-} from './session/commands-panel.tsx'
+  type GoingOnAgent,
+  type GoingOnItem,
+  type GoingOnRun,
+  type GoingOnShell,
+  type GoingOnState,
+} from './session/going-on.ts'
+export { GoingOnLine, type GoingOnLineProps } from './session/going-on-line.tsx'
+export type { RunRepository } from './session/run-place.tsx'
+export { RunCommand, type RunCatalogueEntry, type RunCommandProps } from './session/run-command.tsx'
 export {
   ContextView,
   type ContextCommand,
@@ -407,8 +451,30 @@ export {
   type BareModeStateProps,
 } from './session/bare-mode-state.tsx'
 export { StoppedTurn, type StoppedTurnProps } from './session/stopped-turn.tsx'
+export { AgentReport, type AgentReportProps } from './session/agent-report.tsx'
 /** What the turn is doing right now, at the end of the thread while it runs. */
-export { ActivityRow, type ActivityRowProps, type ActivityState } from './session/activity-row.tsx'
+export {
+  ActivityRow,
+  QUIET_AFTER_MS,
+  STUCK_AFTER_MS,
+  type ActivityRowProps,
+  type ActivityState,
+} from './session/activity-row.tsx'
+/** The row above the box: what the turn is doing, and what it has spent. */
+export { TurnLine, type TurnLineProps } from './session/turn-line.tsx'
+export {
+  SessionHistory,
+  type HistoryItem,
+  type SessionHistoryProps,
+} from './session/session-history.tsx'
+export { SessionCatalogue, type SessionCatalogueProps } from './session/session-catalogue.tsx'
+export {
+  SessionNotices,
+  type NoticeGroup,
+  type NoticeItem,
+  type NoticeTone,
+  type SessionNoticesProps,
+} from './session/session-notices.tsx'
 export {
   ResumeFallbackBanner,
   type ResumeFallbackBannerProps,
@@ -451,78 +517,39 @@ export {
   type WorkspaceRepositoriesProps,
 } from './workspace/workspace-repositories.tsx'
 /**
- * The page of a Session (lot 5c, issue #115): the head across the top with the control that
- * minimises the chat at its end, the chat at the centre — covered and uncovered as the panel
- * grows over it — and, in a `define` or a `build`, the mission panel on its right. A `free`
- * Session is the chat alone.
+ * The Spec panel of a `define` Session (lot 19, issue #164): folded to a small frame of its three
+ * phases at the window's edge, and open one frame — the head, the Spec as one column under the
+ * headings of its phases, and one footer — the two trading places by a swap; the pieces a Session
+ * reading or reworking a Spec adds to it; and the three blocks of the thread — the thin Hemera line
+ * of what the agent was handed, a question of the Spec asked in the chat, and the agent proposing a
+ * Spec in a `free` Session. View types only: the domain arrives with phase 1.
  */
-export {
-  ChatButton,
-  type ChatButtonProps,
-  type ChatState,
-  SessionLayout,
-  type SessionLayoutProps,
-} from './session/session-layout.tsx'
-
-/**
- * The panel a Session's mission opens beside the chat, and the rail it is fed with: the fold, the
- * width that pushes the chat, the band; groups of items that say what needs attention. The Spec
- * panel stands in it; a `build` panel is the next.
- */
-export { MissionPanel, type MissionPanelProps } from './session/mission-panel.tsx'
-export {
-  MissionRail,
-  type MissionRailGroup,
-  type MissionRailItem,
-  type MissionRailProps,
-  type RailAttention,
-  type RailChoice,
-  type RailIcon,
-} from './session/mission-rail.tsx'
-
-/**
- * The Spec panel of a `define` Session (lot 19, brief revision 4): folded to a band beside the
- * chat, and unfolded a head over the rail — the readiness at its foot — and the stage that shows
- * one part, or one phase; the pieces a Session reading or reworking a Spec adds to it; and the
- * three blocks of the thread — the thin Hemera line of what the agent was handed, a question of
- * the Spec asked in the chat, and the agent proposing a Spec in a `free` Session. View types
- * only: the domain arrives with phase 1.
- */
-export {
-  SpecPanel,
-  SpecPart,
-  SpecStage,
-  type SpecPanelProps,
-  type SpecPartHandlers,
-  type SpecPartProps,
-  type SpecStageProps,
-} from './spec/spec-panel.tsx'
-export {
-  SpecRail,
-  type RailGroup,
-  type RailRow,
-  type SpecRailProps,
-  type StageChoice,
-} from './spec/spec-rail.tsx'
+export { SpecPanel, type SpecPanelProps } from './spec/spec-panel.tsx'
+export { SpecPart, type SpecPartProps } from './spec/spec-part.tsx'
 export { SpecHead, type SpecHeadProps } from './spec/spec-head.tsx'
 export { SectionPart, type SectionPartProps } from './spec/section-part.tsx'
 export { StoriesPart, type StoriesPartProps } from './spec/stories-part.tsx'
 export { TasksPart, type TasksPartProps } from './spec/tasks-part.tsx'
 export { QuestionsPart, type QuestionsPartProps } from './spec/questions-part.tsx'
-export { ConflictBanner, type ConflictBannerProps } from './spec/conflict-banner.tsx'
 export { ReaderBar, type ReaderBarProps } from './spec/reader-bar.tsx'
 export { ReworkDialog, type ReworkDialogProps } from './spec/rework-dialog.tsx'
 export { MissionBrief, type MissionBriefProps } from './spec/mission-brief.tsx'
-export { SpecQuestion, type SpecQuestionProps } from './spec/spec-question.tsx'
+export {
+  SpecQuestion,
+  SpecQuestionRecord,
+  type SpecQuestionProps,
+  type SpecQuestionRecordProps,
+} from './spec/spec-question.tsx'
 export { WorkspaceActions, type WorkspaceActionsProps } from './spec/workspace-actions.tsx'
 export {
   CreateSpecProposal,
+  SpecProposalRecord,
   type CreateSpecProposalProps,
   type ProposalState,
+  type SpecProposalRecordProps,
 } from './spec/create-spec-proposal.tsx'
 export type {
   Author,
-  ConflictView,
   Executor,
   GateCheck,
   GateCheckView,
@@ -546,18 +573,18 @@ export type {
   SpecTarget,
   SpecType,
   SpecView,
+  SpecWorkspace,
   StoryView,
   TaskView,
 } from './spec/model.ts'
 
 /**
- * The build view of a `build` Session (lot 22, D10-12): the build at the centre — its phase, its
- * actions, the approach, the tasks by state — the stage of one task with its tries,
- * their checks and the files they changed, and the blocks that hand a task to the user — a task
- * that is theirs, a blocker the agent raised — in the view and as a banner above the composer;
- * the frozen Spec, opened beside the view read only; and the page of a `build` Session, the view at
- * the centre and the chat narrow beside it. View types only, close to the engine's `BuildView`: the
- * renderer maps one onto the other.
+ * The build of a `build` Session (lot 22, D10-12): the panel it stands in beside the chat, and the
+ * build view in it — its phase, its actions, the approach, the stories and their tasks — the stage
+ * of one task with its tries, their checks and the files they changed, and the blocks that hand a
+ * task to the user — a task that is theirs, a blocker the agent raised, the review — in the view
+ * and as one kind of the Session's notices; and the frozen Spec, opened read only in the view's
+ * place. View types only, close to the engine's `BuildView`: the renderer maps one onto the other.
  */
 export { BuildView, type BuildViewProps } from './build/build-view.tsx'
 export { TaskStage, type TaskStageProps } from './build/task-stage.tsx'
@@ -565,8 +592,8 @@ export { YoursBlock, type YoursBlockProps } from './build/yours-block.tsx'
 export { BlockerBlock, type BlockerBlockProps } from './build/blocker-block.tsx'
 export { ReviewCard, type ReviewCardProps } from './build/review-card.tsx'
 export { BuildSpecPanel, type BuildSpecPanelProps } from './build/build-spec-panel.tsx'
-export { BuildSession, type BuildSessionProps } from './build/build-session.tsx'
-export { BuildBanner, type BuildBannerProps } from './build/build-banner.tsx'
+export { BuildPanel, type BuildPanelProps } from './build/build-panel.tsx'
+export { buildNotices, buildNoticeItems } from './build/build-notices.tsx'
 export { waitsOf, waitingOf } from './build/model.ts'
 export type {
   BuildAttemptResult,

@@ -2,6 +2,7 @@ import type { Meta, StoryObj } from '@storybook/react-vite'
 import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
 import { useState } from 'react'
 
+import { expectNeverBuried, watchThereAndBack } from '../../.storybook/sliding-mark.ts'
 import type { ThemeChoice } from '../window.ts'
 import {
   EVALUATION_ENGINES,
@@ -41,6 +42,8 @@ function Controlled({
   classifier,
   onThemeChange,
   onRestore,
+  acpTrace,
+  onAcpTraceChange,
   ...rest
 }: SettingsProps) {
   const [chosen, setChosen] = useState<ThemeChoice>(theme)
@@ -51,9 +54,15 @@ function Controlled({
     classifier?.credential ?? 'missing',
   )
   const [consent, setConsent] = useState(classifier?.consent ?? false)
+  const [tracing, setTracing] = useState(acpTrace ?? false)
   return (
     <Settings
       {...rest}
+      acpTrace={tracing}
+      onAcpTraceChange={(on) => {
+        setTracing(on)
+        onAcpTraceChange?.(on)
+      }}
       classifier={
         classifier === undefined
           ? undefined
@@ -191,6 +200,8 @@ const meta = {
     onOpenFolder: fn(),
     onOpenDiagnostic: fn(),
     onRestore: fn(),
+    acpTrace: false,
+    onAcpTraceChange: fn(),
   },
   argTypes: {
     subtitle: { control: 'text', description: 'The product, its version and its channel.' },
@@ -206,6 +217,11 @@ const meta = {
     onOpenFolder: { action: 'folder opened' },
     onOpenDiagnostic: { action: 'diagnostic opened' },
     onRestore: { action: 'restored' },
+    acpTrace: {
+      control: 'boolean',
+      description: 'Whether the ACP trace of each Session is written.',
+    },
+    onAcpTraceChange: { action: 'trace turned on or off' },
   },
 } satisfies Meta<typeof Settings>
 
@@ -471,5 +487,42 @@ export const ClassifierKeyboard: Story = {
     await waitFor(() => expect(canvas.getByRole('radio', { name: /Hemera Auto/ })).toBeChecked())
     expect(canvas.getByRole('radio', { name: /Hemera Auto/ })).toHaveFocus()
     expect(canvas.getByRole('radiogroup', { name: 'Evaluation engine' })).toBeVisible()
+  },
+}
+
+/**
+ * The ACP trace of each Session, off until the reader turns it on (issue #131), with the sentence
+ * that says what it keeps and what it does not.
+ */
+export const TurningTheTraceOn: Story = {
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement)
+    const box = canvas.getByRole('checkbox', { name: /Write an ACP trace of each Session/ })
+    expect(box).not.toBeChecked()
+    expect(canvas.getByText(/written as their size only/)).toBeInTheDocument()
+
+    await userEvent.click(box)
+    await waitFor(() => {
+      expect(box).toBeChecked()
+    })
+    expect(args.onAcpTraceChange).toHaveBeenCalledWith(true)
+  },
+}
+
+/**
+ * The fill of the theme's segment crossing it, from one end to the other and back: on every frame
+ * of the way it is drawn over the middle choice and never under it (issue #127).
+ */
+export const MarkCrossing: Story = {
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const segment = canvas.getByRole('radiogroup', { name: 'Theme' })
+    const watched = await watchThereAndBack(
+      segment,
+      () => userEvent.click(canvas.getByRole('radio', { name: 'System' })),
+      () => userEvent.click(canvas.getByRole('radio', { name: 'Dark' })),
+    )
+    expect(canvas.getByRole('radio', { name: 'Dark' })).toBeChecked()
+    expectNeverBuried(watched)
   },
 }

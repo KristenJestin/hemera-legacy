@@ -14,6 +14,7 @@ const meta = {
   args: { at: '14:07' },
   argTypes: {
     doing: { control: 'text', description: 'What the turn was doing when it stopped.' },
+    reason: { control: 'text', description: 'Why it stopped on its own, after a colon.' },
     at: { control: 'text', description: 'When it stopped, already written for the platform.' },
     byTheReader: { control: 'boolean', description: 'Whether the reader stopped it.' },
   },
@@ -49,5 +50,14 @@ export const StoppedOnItsOwn: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     await expect(canvas.getByText('Stopped')).toBeVisible()
+  },
+}
+
+/** The agent stopped on its own for a reason, said as a sentence rather than as what it did. */
+export const StoppedForAReason: Story = {
+  args: { byTheReader: false, reason: 'the agent could not answer.' },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await expect(canvas.getByText('Stopped: the agent could not answer.')).toBeVisible()
   },
 }

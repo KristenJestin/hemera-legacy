@@ -130,6 +130,14 @@ export function decidesARequest(decision: SessionEntry, thread: readonly Session
 }
 
 /**
+ * How a call stands that nobody was asked about: let through by the Session's mode (#242), or
+ * refused by Hemera Auto (#59), whose refusal chooses no option.
+ */
+export function unaskedStandingOf(decision: SessionEntry): 'unasked' | 'refused' {
+  return (read(decisionSchema, decision.payload)?.optionId ?? null) === null ? 'refused' : 'unasked'
+}
+
+/**
  * How a permission stands in the thread's record of it: still asked, allowed, refused, or left —
  * by a stop, or by an agent that died with the question open.
  */

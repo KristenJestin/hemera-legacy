@@ -8,10 +8,6 @@ import { TerminalOutput } from '../activity/terminal-output.tsx'
 import { ThoughtBlock } from '../activity/thought-block.tsx'
 import { ToolCallCard } from '../activity/tool-call-card.tsx'
 import { DecisionSummary } from '../approval/decision-summary.tsx'
-import {
-  ClassifierDecision,
-  type ClassifierDecisionState,
-} from '../approval/classifier-decision.tsx'
 import { PermissionRecord, PermissionRequest } from '../approval/permission-request.tsx'
 import {
   AgentModelMenu,
@@ -788,29 +784,20 @@ export const Empty: Story = {
   },
 }
 
-/** The complete Session surface with an effective classifier and one human fallback in its thread. */
+/**
+ * The complete Session surface under Hemera Auto: what it settled leaves the same quiet lines a
+ * mode leaves, "ran without asking" or a refusal, and the model menu says who decides.
+ */
 function AutoPermissionPage(): ReactNode {
-  const [state, setState] = useState<ClassifierDecisionState>('unavailable')
   const entries: ScrollerEntry[] = [
     ...THREAD.filter((entry) => entry.id !== 'permission' && entry.id !== 'decision'),
     {
-      id: 'auto-permission',
-      content: (
-        <ClassifierDecision
-          state={state}
-          call="Run command"
-          target="pnpm test --project=repository"
-          reason={
-            state === 'unavailable'
-              ? 'Jev could not be reached. Decide this call yourself.'
-              : 'You allowed this exact call.'
-          }
-          by={state === 'unavailable' ? undefined : 'user'}
-          policyVersion="hemera-auto-v1"
-          model="jev-1.13.0"
-          onDecide={(answer) => setState(answer === 'allow' ? 'allowed' : 'denied')}
-        />
-      ),
+      id: 'auto-allowed',
+      content: <DecisionSummary answer="ran without asking, Hemera Auto mode" at="10:42" />,
+    },
+    {
+      id: 'auto-refused',
+      content: <DecisionSummary answer="refused by Hemera Auto" at="10:43" refused />,
     },
   ]
   return (
@@ -825,13 +812,8 @@ export const HemeraAutoPermissionJourney: Story = {
   render: () => <AutoPermissionPage />,
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    const decision = await canvas.findByRole('region', {
-      name: 'Hemera Auto decision for Run command',
-    })
-    expect(within(decision).getByText('Evaluator unavailable')).toBeVisible()
-    expect(within(decision).queryByRole('button', { name: /always/i })).toBeNull()
-    await userEvent.click(within(decision).getByRole('button', { name: 'Allow once' }))
-    await waitFor(() => expect(within(decision).getByText('Allowed by you')).toBeVisible())
+    await expect(await canvas.findByText('ran without asking, Hemera Auto mode')).toBeVisible()
+    await expect(canvas.getByText('refused by Hemera Auto')).toBeVisible()
     await userEvent.click(canvas.getByRole('button', { name: /Hemera Auto/ }))
     await waitFor(() =>
       expect(

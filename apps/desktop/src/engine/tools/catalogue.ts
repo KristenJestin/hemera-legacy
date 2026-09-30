@@ -46,10 +46,11 @@ import { basename, dirname, join, relative } from 'node:path'
 import { HeldWords } from '../agents/held.ts'
 import { HEMERA_AUTO, SessionModes, modeAsks } from '../agents/modes.ts'
 import { AgentNotices } from '../agents/notices.ts'
+import { StderrSink } from '../agents/supervisor.ts'
 import { Builds } from '../build/build.ts'
 import { ClassifierSettings } from '../classifier/settings.ts'
 import { evaluateJev, type JevResult, JevTransportPort } from '../classifier/jev.ts'
-import { knownSecretValues } from '../classifier/redaction.ts'
+import { knownSecretValues, redactText } from '../classifier/redaction.ts'
 import { type Invocation, wordsOf } from '../commands/line.ts'
 import { Commands, Platform, type RunRequest } from '../commands/service.ts'
 import { Projects } from '../projects.ts'
@@ -177,6 +178,8 @@ interface Classified {
   /** Who settled it: the rules, the judge, nobody (unavailable), or its expiry (cancelled). */
   readonly source?: 'local' | 'jev' | 'unavailable' | 'cancelled'
   readonly model?: string
+  /** The call as the diagnostic log says it: its line or its path, masked, never its content. */
+  readonly said?: string
   readonly scores?:
     | {
         readonly risk: number
@@ -216,6 +219,9 @@ const BY = {
   unavailable: 'nobody',
   cancelled: 'expired',
 } as const
+
+/** A human's answer, as the diagnostic log says Hemera Auto's verdicts. */
+const HUMAN_VERDICT = { allowed: 'allow', refused: 'deny', cancelled: 'cancelled' } as const
 
 /** What changes files or starts a process: an allow of it leaves a line, even from the rules. */
 const ACTING_TOOLS: ReadonlySet<string> = new Set(['fs_write', 'fs_edit', 'commands_run'])
@@ -352,6 +358,7 @@ export const toolCatalogueLayer: Layer.Layer<
   | Builds
   | ClassifierSettings
   | SetupDesk
+  | StderrSink
 > = Layer.effect(
   ToolCatalogue,
   Effect.gen(function* () {
@@ -371,6 +378,8 @@ export const toolCatalogueLayer: Layer.Layer<
     const jevTransport = yield* JevTransportPort
     const platform = yield* Platform
     const desk = yield* SetupDesk
+    /** The engine's diagnostic log, where each Hemera Auto decision is told in one line. */
+    const diagnostic = yield* StderrSink
 
     /**
      * One entry of a call written into its Session's thread, below what the agent said before it.
@@ -721,6 +730,12 @@ export const toolCatalogueLayer: Layer.Layer<
           correlationId: `decision:${id}`,
           state: answer === 'allowed' ? 'completed' : answer,
         }).pipe(Effect.catch(() => Effect.void))
+        // A question Hemera Auto left to the human: their answer is its decision's last line.
+        if (classified !== undefined) {
+          yield* diagnostic.write(
+            `hemera-auto: ${asked.tool} ${classified.said ?? ''} by=human verdict=${HUMAN_VERDICT[answer]}`,
+          )
+        }
         const current = yield* answered(sessions.one(asked.sessionId))
         if (current !== undefined) {
           yield* withDatabase(
@@ -842,6 +857,10 @@ export const toolCatalogueLayer: Layer.Layer<
           })) ?? [],
         )
         let verdict: Classified['verdict'] = 'ask'
+        // What the diagnostic log says of the way to Jev: its round trip, and why it failed.
+        let jevMs: number | undefined
+        let failure: string | undefined =
+          snapshot.key === null ? 'no key' : snapshot.consent ? undefined : 'no consent'
         let source: NonNullable<Classified['source']> = 'unavailable'
         let model = ''
         let scores:
@@ -893,12 +912,17 @@ export const toolCatalogueLayer: Layer.Layer<
                 ),
               catch: () => 'unavailable',
             }).pipe(Effect.catch(() => Effect.succeed({ kind: 'unavailable' as const })))
+            jevMs = 'ms' in evaluated ? evaluated.ms : undefined
             if (evaluated.kind === 'evaluated') {
               verdict = evaluated.verdict
               source = 'jev'
               model = evaluated.model
               scores = evaluated.scores
               verdicts.set(judged, evaluated)
+            } else {
+              const why = 'reason' in evaluated ? evaluated.reason : 'network'
+              const status = 'status' in evaluated ? evaluated.status : undefined
+              failure = why === 'http' ? `http ${String(status ?? '')}` : why
             }
           }
         }
@@ -929,7 +953,29 @@ export const toolCatalogueLayer: Layer.Layer<
           Object.assign(decisionPayload, scores)
         }
         yield* journalled(asked, made, 'classifier.decision', decisionPayload)
+        // One line in the diagnostic log per decision, with what can be said safely: the call's
+        // line or path masked as it would be for Jev, never a file's content or a secret.
+        const said = redactText(detail.line ?? detail.resolvedTarget ?? detail.cwd ?? '', [
+          ...knownSecrets,
+          ...(snapshot.key === null ? [] : [snapshot.key]),
+        ]).slice(0, 200)
+        yield* diagnostic.write(
+          [
+            `hemera-auto: ${action.tool} ${said}`,
+            `by=${BY[source]} verdict=${verdict}`,
+            `policy=${CLASSIFIER_POLICY_VERSION} model=${model === '' ? '-' : model}`,
+            ...(scores === undefined
+              ? []
+              : [
+                  `risk=${String(scores.risk)} approval=${String(scores.approval)} userRequested=${String(scores.userRequested)}`,
+                ]),
+            ...(jevMs === undefined ? [] : [`jev=${String(jevMs)}ms`]),
+            ...(source === 'local' || failure === undefined ? [] : [`failure=${failure}`]),
+            ...(verdict === 'ask' ? ['fallback=ask'] : []),
+          ].join(' '),
+        )
         return {
+          said,
           verdict,
           generation: snapshot.generation,
           latestHumanSeq: context.latestHumanSeq,

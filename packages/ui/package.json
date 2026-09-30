@@ -12,6 +12,7 @@
     "./icons": "./src/icons.ts",
     "./window": "./src/window.ts",
     "./face": "./src/components/face/workbench.ts",
+    "./app-icon": "./src/components/app-icon/markup.ts",
     "./start-style": "./src/shell/start-style.ts"
   },
   "scripts": {

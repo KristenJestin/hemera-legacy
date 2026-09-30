@@ -7,7 +7,7 @@
  * tasks — T1 and T2 with no dependency, T3 depending on both — built in the Project's `main`.
  */
 
-import { existsSync, mkdtempSync, realpathSync, rmSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -22,6 +22,7 @@ import { Builds, PAUSED, recoveredBuilds } from '#engine/build/build.ts'
 import { OBSOLETE } from '#engine/build/tasks.ts'
 import { Sessions } from '#engine/sessions.ts'
 import { Specs } from '#engine/specs/specs.ts'
+import { ReviewRounds } from '#engine/review/round.ts'
 import { Launches } from '#engine/workspaces/launches.ts'
 import { recovered } from '#engine/workspaces/preparation.ts'
 
@@ -525,14 +526,15 @@ describe('A free Session is never made a build', () => {
         const free = yield* sessions.create(spec.projectId, 'claude')
         const building = yield* launched(spec.specId, spec.workspaceId)
         const builds = yield* Builds
-        // Nothing a build answers to reaches the free Session: no view, no build tool, no review.
+        // Nothing a build answers to reaches the free Session: no view, no build tool, no Fix.
         const view = yield* Effect.flip(builds.view(free.id))
         const signal = yield* builds.tool(free.id, {
           tool: 'task_finished',
           arguments: { task: 'T1' },
         })
-        yield* builds.review(free.id)
+        const fix = yield* Effect.flip(builds.fix(free.id))
         return {
+          fix,
           free: (yield* sessions.one(free.id)).session,
           building: (yield* sessions.one(building)).session,
           view,
@@ -546,9 +548,227 @@ describe('A free Session is never made a build', () => {
     expect(seen.free.mission).toBe('free')
     expect(seen.free.specId).toBeNull()
     expect(seen.view.message).toBe(`No build has anything named "${seen.free.id}".`)
+    expect(seen.fix.message).toBe(`No build has anything named "${seen.free.id}".`)
     expect(seen.signal).toMatchObject({ ok: false, refused: true })
     expect(seen.journal.filter((line) => line.type.startsWith('build.'))).toEqual([])
     // A free Session is offered no build tool, so none of its calls can ask for one (D10-13).
     expect(offeredTools('free')).not.toContain('task_finished')
+  })
+})
+
+/** The phases a build went through, in order, as its Journal says it. */
+const phasesOf = (sessionId: string) =>
+  journalOf(sessionId).pipe(
+    Effect.map((lines) =>
+      lines
+        .filter((line) => line.type === 'build.phase_started')
+        .map((line) => String(JSON.parse(line.payload).phase)),
+    ),
+  )
+
+/** The round of a build view that is not closed, by its number and state. */
+const roundsOf = (view: { rounds: readonly { number: number; kind: string; state: string }[] }) =>
+  view.rounds.map((round) => [round.number, round.kind, round.state])
+
+describe('Verify green goes to review, then a Spec review round', () => {
+  test('the review brief is handed, and once its turn is over round 1 opens for the user', async () => {
+    const { agent, handed } = buildAgent()
+    opened = await openWindow(dataFolder, agent)
+    const seen = await opened.running(
+      Effect.gen(function* () {
+        const spec = yield* aReadySpec(dataFolder, THREE)
+        const sessionId = yield* launched(spec.specId, spec.workspaceId)
+        const view = yield* eventually(buildOf(sessionId), (one) => one.rounds.length > 0)
+        const accepted = yield* (yield* Builds).accept(sessionId)
+        return { view, accepted, phases: yield* phasesOf(sessionId) }
+      }),
+    )
+    expect(seen.phases).toEqual(['prepare', 'execute', 'verify', 'review'])
+    expect(handed.some((text) => text.includes('# Phase: review'))).toBe(true)
+    expect(seen.view.phase).toBe('review')
+    expect(roundsOf(seen.view)).toEqual([[1, 'spec', 'open']])
+    expect(seen.view.canAccept).toBe(true)
+    // Accept closes the round with the build.
+    expect(seen.accepted.phase).toBe('accepted')
+    expect(roundsOf(seen.accepted)).toEqual([[1, 'spec', 'closed']])
+  })
+
+  test('without Git, review is skipped and the round opens as verify is green', async () => {
+    mkdirSync(join(dataFolder, 'main'), { recursive: true })
+    const { agent, handed } = buildAgent()
+    opened = await openWindow(dataFolder, agent)
+    const seen = await opened.running(
+      Effect.gen(function* () {
+        const spec = yield* aReadySpec(dataFolder, THREE, ['Export'], [])
+        const sessionId = yield* launched(spec.specId, spec.workspaceId)
+        const view = yield* eventually(buildOf(sessionId), (one) => one.rounds.length > 0)
+        return { view, phases: yield* phasesOf(sessionId) }
+      }),
+    )
+    expect(seen.phases).toEqual(['prepare', 'execute', 'verify', 'review'])
+    expect(handed.some((text) => text.includes('# Phase: review'))).toBe(false)
+    expect(roundsOf(seen.view)).toEqual([[1, 'spec', 'open']])
+    expect(seen.view.rounds[0]?.repositories).toEqual([])
+    expect(seen.view.canAccept).toBe(true)
+  })
+})
+
+describe('Fix goes to feedback, then execute, verify, review and a new round', () => {
+  test('the feedback is handed, the fix may write, and round 2 opens on the new result', async () => {
+    const { agent, handed } = buildAgent({
+      feedback: () => [written('header.ts'), { does: 'says', text: 'Added the header row.' }],
+    })
+    opened = await openWindow(dataFolder, agent)
+    const seen = await opened.running(
+      Effect.gen(function* () {
+        const spec = yield* aReadySpec(dataFolder, THREE)
+        const sessionId = yield* launched(spec.specId, spec.workspaceId)
+        yield* eventually(buildOf(sessionId), (one) => one.rounds.length > 0)
+        const rounds = yield* ReviewRounds
+        yield* rounds.addFeedback(sessionId, 'product', 'The export has no header row.', null)
+        const builds = yield* Builds
+        const waiting = yield* buildOf(sessionId)
+        const refused = yield* Effect.flip(builds.accept(sessionId))
+        const fixing = yield* builds.fix(sessionId)
+        const again = yield* eventually(buildOf(sessionId), (one) =>
+          one.rounds.some((round) => round.number === 2),
+        )
+        return { waiting, refused, fixing, again, phases: yield* phasesOf(sessionId) }
+      }),
+    )
+    expect(seen.waiting.canAccept).toBe(false)
+    expect(seen.refused.message).toBe('A feedback waits for a fix.')
+    expect(seen.fixing.phase).toBe('feedback')
+    expect(roundsOf(seen.fixing)).toEqual([[1, 'spec', 'fixing']])
+    const feedback = handed.find((text) => text.includes('# Phase: feedback'))
+    expect(feedback).toContain('# The feedback of Spec review · round 1')
+    expect(feedback).toContain('The export has no header row.')
+    // A round being fixed holds no write: the fix is written in the Workspace.
+    expect(agent.answers.used.find((one) => one.text.includes('header.ts'))?.isError).toBe(false)
+    expect(seen.phases).toEqual([
+      'prepare',
+      'execute',
+      'verify',
+      'review',
+      'feedback',
+      'execute',
+      'verify',
+      'review',
+    ])
+    expect(handed.filter((text) => text.includes('# Phase: review'))).toHaveLength(2)
+    expect(seen.again.phase).toBe('review')
+    expect(seen.again.endAttempts.map((attempt) => attempt.number)).toEqual([1, 2])
+    expect(roundsOf(seen.again)).toEqual([
+      [1, 'spec', 'closed'],
+      [2, 'spec', 'open'],
+    ])
+    expect(seen.again.rounds[1]?.repositories[0]?.files.map((file) => file.path)).toContain(
+      'header.ts',
+    )
+    expect(seen.again.canAccept).toBe(true)
+  })
+
+  test('Fix is refused with no round open, or with no feedback on it', async () => {
+    const { agent } = buildAgent()
+    opened = await openWindow(dataFolder, agent)
+    const seen = await opened.running(
+      Effect.gen(function* () {
+        const spec = yield* aReadySpec(dataFolder, THREE)
+        const sessionId = yield* launched(spec.specId, spec.workspaceId)
+        const builds = yield* Builds
+        const early = yield* Effect.flip(builds.fix(sessionId))
+        yield* eventually(buildOf(sessionId), (one) => one.rounds.length > 0)
+        const empty = yield* Effect.flip(builds.fix(sessionId))
+        return { early, empty }
+      }),
+    )
+    expect(seen.early.message).toBe('No review round is open.')
+    expect(seen.empty.message).toBe('The round has no feedback to fix.')
+  })
+
+  test('a restart in feedback hands the feedback again, in the resume brief', async () => {
+    // The fix asks the user before it writes outside the Workspace, which holds its turn open.
+    const first = buildAgent({
+      feedback: () => [
+        {
+          does: 'uses',
+          call: 'fs_write',
+          arguments: { path: '../outside.txt', content: 'x', key: 'outside' },
+        },
+      ],
+    })
+    opened = await openWindow(dataFolder, first.agent)
+    const sessionId = await opened.running(
+      Effect.gen(function* () {
+        const spec = yield* aReadySpec(dataFolder, THREE)
+        const launchedOn = yield* launched(spec.specId, spec.workspaceId)
+        yield* eventually(buildOf(launchedOn), (one) => one.rounds.length > 0)
+        yield* (yield* ReviewRounds).addFeedback(launchedOn, 'general', 'Name it by day.', null)
+        yield* (yield* Builds).fix(launchedOn)
+        yield* eventually(threadOf(launchedOn), (thread) =>
+          thread.some((entry) => entry.kind === 'permission_request' && entry.state === 'pending'),
+        )
+        return launchedOn
+      }),
+    )
+    await opened.close()
+
+    const second = buildAgent()
+    opened = await openWindow(dataFolder, second.agent)
+    const back = await opened.running(
+      Effect.gen(function* () {
+        yield* recovered
+        yield* recoveredBuilds
+        return yield* eventually(buildOf(sessionId), (view) =>
+          view.rounds.some((round) => round.number === 2),
+        )
+      }),
+    )
+    const [resume] = second.handed
+    expect(resume).toContain('# Before you continue')
+    expect(resume).toContain('# Phase: feedback')
+    expect(resume).toContain('Name it by day.')
+    expect(back.phase).toBe('review')
+    expect(roundsOf(back)).toEqual([
+      [1, 'spec', 'closed'],
+      [2, 'spec', 'open'],
+    ])
+  })
+})
+
+describe('Accept is refused on a stale round', () => {
+  test('a file changed outside Hemera while the round is open refuses Accept', async () => {
+    const { agent } = buildAgent()
+    opened = await openWindow(dataFolder, agent)
+    const seen = await opened.running(
+      Effect.gen(function* () {
+        const spec = yield* aReadySpec(dataFolder, THREE)
+        const sessionId = yield* launched(spec.specId, spec.workspaceId)
+        const before = yield* eventually(buildOf(sessionId), (one) => one.rounds.length > 0)
+        writeFileSync(join(spec.repository, 'edited.ts'), 'export const edited = 1\n')
+        const after = yield* eventually(buildOf(sessionId), (one) => one.rounds[0]?.stale === true)
+        const refused = yield* Effect.flip((yield* Builds).accept(sessionId))
+        return { before, after, refused }
+      }),
+    )
+    expect(seen.before.canAccept).toBe(true)
+    expect(seen.after.canAccept).toBe(false)
+    expect(seen.refused.message).toBe('The Workspace changed since the round opened.')
+  })
+
+  test('Accept is refused before the round opens, with its reason', async () => {
+    const gate = gated(0)
+    const { agent } = buildAgent({}, { between: gate.between })
+    opened = await openWindow(dataFolder, agent)
+    const seen = await opened.running(
+      Effect.gen(function* () {
+        const spec = yield* aReadySpec(dataFolder, THREE)
+        const sessionId = yield* launched(spec.specId, spec.workspaceId)
+        const refused = yield* Effect.flip((yield* Builds).accept(sessionId))
+        gate.carryOn()
+        return refused
+      }),
+    )
+    expect(seen.message).toBe('The build has not reached its review.')
   })
 })

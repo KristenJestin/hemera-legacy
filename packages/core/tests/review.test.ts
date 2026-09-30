@@ -13,8 +13,11 @@ import {
   TOOL_NAMES,
   anchorRefusal,
   feedbackRefusal,
+  roundAcceptRefusal,
   roundMoveRefusal,
+  roundName,
   roundToolRefusal,
+  waitsForFix,
 } from '#index.ts'
 
 describe('A write is refused while a round is open', () => {
@@ -125,5 +128,53 @@ describe('A feedback of a Spec review may point at a story or a criterion', () =
     expect(anchorRefusal('code', { ...line, lines: { start: 5, end: 3 } }, REVISION)).toMatch(
       /no range/,
     )
+  })
+})
+
+describe('A round is named after its kind and its number', () => {
+  test('Spec review · round n, and a code round the same way', () => {
+    expect(roundName('spec', 1)).toBe('Spec review · round 1')
+    expect(roundName('spec', 3)).toBe('Spec review · round 3')
+    expect(roundName('code', 2)).toBe('Code review · round 2')
+  })
+})
+
+describe('Accept is refused on a stale round', () => {
+  const round = { state: 'open' as const, stale: false, feedback: [] }
+  const product = { kind: 'product' as const, withdrawnAt: null }
+
+  test('an open round, not stale, with no feedback waiting for a fix, is accepted', () => {
+    expect(roundAcceptRefusal(round)).toBeNull()
+  })
+
+  test('no round open, a round being fixed, a stale round: each is refused with its reason', () => {
+    expect(roundAcceptRefusal(null)).toBe('No review round is open.')
+    expect(roundAcceptRefusal({ ...round, state: 'fixing' })).toBe(
+      'The feedback of the round is being fixed.',
+    )
+    expect(roundAcceptRefusal({ ...round, state: 'closed' })).toBe('No review round is open.')
+    expect(roundAcceptRefusal({ ...round, stale: true })).toBe(
+      'The Workspace changed since the round opened.',
+    )
+  })
+
+  test('a product or general feedback waits for a fix; a question or a withdrawn one does not', () => {
+    expect(roundAcceptRefusal({ ...round, feedback: [product] })).toBe(
+      'A feedback waits for a fix.',
+    )
+    expect(
+      roundAcceptRefusal({ ...round, feedback: [{ kind: 'general', withdrawnAt: null }] }),
+    ).toBe('A feedback waits for a fix.')
+    expect(
+      roundAcceptRefusal({
+        ...round,
+        feedback: [
+          { kind: 'question', withdrawnAt: null },
+          { kind: 'product', withdrawnAt: '2026-09-30T10:00:00.000Z' },
+        ],
+      }),
+    ).toBeNull()
+    expect(waitsForFix([product])).toBe(true)
+    expect(waitsForFix([{ kind: 'question', withdrawnAt: null }])).toBe(false)
   })
 })

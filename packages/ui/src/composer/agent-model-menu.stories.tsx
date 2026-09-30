@@ -212,6 +212,40 @@ export const HemeraAutoKeepsPlanning: Story = {
   },
 }
 
+/**
+ * Claude's plan under Hemera Auto: a way of working, not a permission, so it is left on and off
+ * again beside the agent's neutral mode, which Hemera Auto always lets it go back to.
+ */
+export const HemeraAutoLeavesAPlan: Story = {
+  args: {
+    agent: 'claude-code',
+    model: 'opus-4-5',
+    modes: [
+      { id: 'default', label: 'Default', permission: false },
+      { id: 'acceptEdits', label: 'Accept edits', permission: true },
+      { id: 'plan', label: 'Plan', permission: false },
+      { id: 'bypassPermissions', label: 'Bypass permissions', permission: true },
+    ],
+    mode: 'plan',
+    classifier: { mode: 'hemera-auto', status: 'ready', onOpenSettings: fn() },
+  },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement)
+    await userEvent.click(canvas.getByRole('button', { name: /Plan · Hemera Auto/ }))
+    const list = await screen.findByRole('listbox', { name: 'Mode' })
+    expect(
+      within(list)
+        .getAllByRole('option')
+        .map((one) => one.textContent),
+    ).toEqual(['Default', 'Plan'])
+    await userEvent.click(within(list).getByRole('option', { name: /Default/ }))
+    expect(args.onModeChange).toHaveBeenCalledWith('default')
+    await waitFor(() =>
+      expect(canvas.getByRole('button', { name: /Hemera Auto/ })).not.toHaveAccessibleName(/Plan/),
+    )
+  },
+}
+
 export const AgentDefaultWithoutNativeModes: Story = {
   args: {
     agents: [...AGENTS, { id: 'fixture', name: 'Fixture agent', available: true, signedIn: true }],

@@ -1382,12 +1382,18 @@ describe('One permission interaction across the three agents', () => {
         }
         const plan = yield* choose('plan')
         const auto = yield* choose('auto')
-        return { plan: Result.isSuccess(plan), auto: Result.isSuccess(auto) }
+        // The plan is left for the neutral mode, which Hemera Auto always lets it go back to.
+        const back = yield* choose('default')
+        return {
+          plan: Result.isSuccess(plan),
+          auto: Result.isSuccess(auto),
+          back: Result.isSuccess(back),
+        }
       }),
       agent,
     )
-    expect(outcome).toEqual({ plan: true, auto: false })
-    expect(agent.answers.choices).toEqual(['mode=plan'])
+    expect(outcome).toEqual({ plan: true, auto: false, back: true })
+    expect(agent.answers.choices).toEqual(['mode=plan', 'mode=default'])
   })
 })
 

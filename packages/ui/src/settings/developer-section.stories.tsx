@@ -6,6 +6,7 @@ import {
   type DecisionLine,
   DeveloperSection,
   type DeveloperSectionProps,
+  type FindingLine,
 } from './developer-section.tsx'
 
 /**
@@ -94,8 +95,63 @@ const EXPIRED: DecisionLine = {
 
 const DECISIONS = [ALLOWED_BY_RULES, ALLOWED_BY_JUDGE, REFUSED_BY_JUDGE, TIMED_OUT, EXPIRED]
 
-function Controlled({ acpTrace, onAcpTraceChange, ...rest }: DeveloperSectionProps) {
+/** A finding file's body, as the engine writes it. */
+const BODY = (number: number, title: string) =>
+  [
+    `# #${number} ${title}`,
+    '',
+    '## What happened',
+    '',
+    'The line ran without a shell.',
+    '',
+    '## Occurrences',
+    '',
+    '### Occurrence 1 · 2026-09-30T14:32:08.000+02:00',
+    '',
+    '- Session: Fix the parser (`s-parser`) · free',
+  ].join('\n')
+
+const REDIRECT: FindingLine = {
+  file: '0003-commands-run-cannot-redirect-output.md',
+  number: 3,
+  title: 'commands_run cannot redirect output',
+  kind: 'missing_capability',
+  place: 'commands_run',
+  severity: 'hurts',
+  occurrences: 2,
+  lastSeen: '15:02',
+  body: BODY(3, 'commands_run cannot redirect output'),
+}
+
+const LAST_LINE: FindingLine = {
+  file: '0002-fs-read-cuts-the-last-line.md',
+  number: 2,
+  title: 'fs_read cuts the last line of a file',
+  kind: 'hemera_bug',
+  place: 'fs_read',
+  severity: 'blocks',
+  occurrences: 1,
+  lastSeen: '14:40',
+  body: BODY(2, 'fs_read cuts the last line of a file'),
+}
+
+const WRONG_ALLOW: FindingLine = {
+  file: '0001-hemera-auto-allowed-a-deletion.md',
+  number: 1,
+  title: 'Hemera Auto allowed a deletion outside the task',
+  kind: 'auto_decision',
+  place: 'Hemera Auto',
+  severity: 'cosmetic',
+  occurrences: 4,
+  lastSeen: '11:12',
+  body: BODY(1, 'Hemera Auto allowed a deletion outside the task'),
+}
+
+const FINDINGS = [REDIRECT, LAST_LINE, WRONG_ALLOW]
+
+function Controlled({ acpTrace, onAcpTraceChange, tester, ...rest }: DeveloperSectionProps) {
   const [tracing, setTracing] = useState(acpTrace ?? false)
+  const [testing, setTesting] = useState(tester?.on ?? false)
   return (
     <DeveloperSection
       {...rest}
@@ -104,6 +160,18 @@ function Controlled({ acpTrace, onAcpTraceChange, ...rest }: DeveloperSectionPro
         setTracing(on)
         onAcpTraceChange?.(on)
       }}
+      tester={
+        tester === undefined
+          ? undefined
+          : {
+              ...tester,
+              on: testing,
+              onChange: (on) => {
+                setTesting(on)
+                tester.onChange(on)
+              },
+            }
+      }
     />
   )
 }
@@ -120,6 +188,13 @@ const meta = {
     acpTrace: false,
     onAcpTraceChange: fn(),
     onOpenDiagnostic: fn(),
+    tester: {
+      on: true,
+      onChange: fn(),
+      findings: FINDINGS,
+      onOpenFolder: fn(),
+      onOpenIndex: fn(),
+    },
   },
   argTypes: {
     decisions: { control: 'object', description: 'The latest decisions, newest first.' },
@@ -127,6 +202,10 @@ const meta = {
     acpTrace: { control: 'boolean', description: 'Whether the ACP trace is written.' },
     onAcpTraceChange: { action: 'trace turned on or off' },
     onOpenDiagnostic: { action: 'diagnostic opened' },
+    tester: {
+      control: 'object',
+      description: 'The app tester mode, its findings, and the folder they are files of.',
+    },
   },
 } satisfies Meta<typeof DeveloperSection>
 
@@ -256,5 +335,116 @@ export const Diagnostics: Story = {
     await expect(args.onAcpTraceChange).toHaveBeenCalledWith(true)
     await userEvent.click(canvas.getByRole('button', { name: 'Open diagnostic.log' }))
     await expect(args.onOpenDiagnostic).toHaveBeenCalled()
+  },
+}
+
+function findingsIn(canvasElement: HTMLElement) {
+  return within(within(canvasElement).getByRole('list', { name: 'Findings' }))
+}
+
+/**
+ * The app tester's findings, the latest seen first (#300): each on one row, its number, its kind
+ * as an icon, its title and where, how often it was seen, and its severity as a dot.
+ */
+export const AppTester: Story = {
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await expect(canvas.getByRole('checkbox', { name: 'App tester mode' })).toBeChecked()
+    await expect(canvas.getByText('3 findings · 7 occurrences')).toBeVisible()
+    const rows = findingsIn(canvasElement).getAllByRole('listitem')
+    await expect(rows).toHaveLength(3)
+    const first = within(rows[0]!)
+    await expect(first.getByText('#3')).toBeVisible()
+    await expect(first.getByText('commands_run cannot redirect output')).toBeVisible()
+    await expect(first.getByText('commands_run', { exact: true })).toBeVisible()
+    await expect(first.getByRole('img', { name: 'Missing capability' })).toBeVisible()
+    await expect(first.getByRole('img', { name: 'Hurts' })).toBeVisible()
+    await expect(first.getByLabelText('Seen 2 times')).toBeVisible()
+    await expect(within(rows[1]!).getByRole('img', { name: 'Blocks' })).toBeVisible()
+    await expect(within(rows[2]!).getByRole('img', { name: 'Hemera Auto decision' })).toBeVisible()
+    // Kinds and severities are icons and dots: no word badge says them.
+    for (const word of ['Hurts', 'Blocks', 'Cosmetic', 'Missing capability', 'Hemera bug']) {
+      expect(findingsIn(canvasElement).queryByText(word)).toBeNull()
+    }
+  },
+}
+
+/** A row opens on its file as the folder holds it. */
+export const FindingOpened: Story = {
+  play: async ({ canvasElement }) => {
+    const row = within(findingsIn(canvasElement).getAllByRole('listitem')[0]!)
+    const fold = row.getByRole('button', { name: /Details of the finding/ })
+    await expect(fold).toHaveAttribute('aria-expanded', 'false')
+    await userEvent.click(fold)
+    await expect(fold).toHaveAttribute('aria-expanded', 'true')
+    await expect(await within(canvasElement).findByLabelText('Finding file')).toHaveTextContent(
+      '### Occurrence 1',
+    )
+  },
+}
+
+/** The kind and the severity filter the list, and the count follows. */
+export const FindingFilters: Story = {
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const body = within(document.body)
+    await userEvent.click(canvas.getByLabelText('Kind'))
+    await userEvent.click(await body.findByRole('option', { name: 'Hemera bug' }))
+    await waitFor(() => expect(findingsIn(canvasElement).getAllByRole('listitem')).toHaveLength(1))
+    await expect(canvas.getByText('1 finding · 1 occurrence')).toBeVisible()
+
+    await userEvent.click(canvas.getByLabelText('Severity'))
+    await userEvent.click(await body.findByRole('option', { name: 'Cosmetic' }))
+    await waitFor(() => expect(canvas.getByText('No finding matches.')).toBeVisible())
+  },
+}
+
+/** The folder and its index open with the desktop: the findings are files. */
+export const FindingFiles: Story = {
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement)
+    await userEvent.click(canvas.getByRole('button', { name: 'Open the folder' }))
+    await expect(args.tester?.onOpenFolder).toHaveBeenCalled()
+    await userEvent.click(canvas.getByRole('button', { name: 'Open the index' }))
+    await expect(args.tester?.onOpenIndex).toHaveBeenCalled()
+  },
+}
+
+/** Off, with nothing reported yet: the switch turns it on, and the index has nothing to open. */
+export const AppTesterOff: Story = {
+  args: {
+    tester: {
+      on: false,
+      onChange: fn(),
+      findings: [],
+      onOpenFolder: fn(),
+      onOpenIndex: fn(),
+    },
+  },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement)
+    await expect(canvas.getByText('No finding yet.')).toBeVisible()
+    await expect(canvas.getByRole('button', { name: 'Open the index' })).toBeDisabled()
+    const box = canvas.getByRole('checkbox', { name: 'App tester mode' })
+    await expect(box).not.toBeChecked()
+    await userEvent.click(box)
+    await waitFor(() => expect(box).toBeChecked())
+    await expect(args.tester?.onChange).toHaveBeenCalledWith(true)
+  },
+}
+
+/** Before the folder was read, the panel says so rather than claiming there is nothing. */
+export const FindingsNotReadYet: Story = {
+  args: {
+    tester: {
+      on: true,
+      onChange: fn(),
+      findings: null,
+      onOpenFolder: fn(),
+      onOpenIndex: fn(),
+    },
+  },
+  play: async ({ canvasElement }) => {
+    await expect(within(canvasElement).getByText('Findings cannot be read yet.')).toBeVisible()
   },
 }

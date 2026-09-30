@@ -10,6 +10,7 @@ import {
   FINAL_CHECKS_RED,
   GETTING_READY,
   NOW,
+  NO_STORIES,
   PAUSED,
   READY_TO_ACCEPT,
   STOPPED,
@@ -150,6 +151,32 @@ export const Building: Story = {
     await expect(approach).toHaveAttribute('aria-expanded', 'false')
     await userEvent.click(approach)
     await expect(await canvas.findByText(/the invoice query of/)).toBeVisible()
+  },
+}
+
+/**
+ * A `bug` Spec with no story (issue #203): its tasks stand in a group of their own, each opening
+ * its stage, and the head counts the tasks done since there is no story to count.
+ */
+export const NoStories: Story = {
+  args: { build: NO_STORIES, stories: [] },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement)
+    await expect(canvas.queryByText(/No story of the Spec/)).toBeNull()
+    await expect(canvas.getByText('1 of 3 tasks done')).toBeVisible()
+    const tasks = within(canvas.getByRole('region', { name: 'Tasks of ATL-9' }))
+    // The user's task is on the stage from the start, with its Done and its Skip.
+    await expect(
+      tasks.getByRole('region', { name: 'The September total matches the ledger' }),
+    ).toBeVisible()
+    await userEvent.click(tasks.getByRole('button', { name: 'Done' }))
+    await expect(args.onTaskDone).toHaveBeenCalledWith('bt-4')
+    await expect(tasks.getByRole('button', { name: 'Skip…' })).toBeVisible()
+    // Any other task opens its own stage.
+    await userEvent.click(tasks.getByRole('button', { name: /^T1 / }))
+    await expect(
+      await tasks.findByRole('region', { name: 'The failing total, as a test' }),
+    ).toBeVisible()
   },
 }
 

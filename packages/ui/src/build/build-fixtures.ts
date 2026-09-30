@@ -562,3 +562,27 @@ export const STOPPED: BuildViewData = {
   detail: 'You stopped the build.',
   tasks: [T1_DONE, { ...T2_WORKING, attempts: [t2Red(1, 28, 13)] }, T3_SKIPPED, T4],
 }
+
+/**
+ * A `bug` Spec with no story, which the ready gate allows (issue #203): its three tasks cover none,
+ * T1 done, T2 being worked on, and T3 the user's: replaying the September import.
+ */
+export const NO_STORIES: BuildViewData = {
+  ...BASE,
+  specId: 'spec-atl-9',
+  specKey: 'ATL-9',
+  specTitle: 'The September total is off by one credit note',
+  note: null,
+  tasks: [
+    { ...T1_DONE, title: 'The failing total, as a test', storyIds: [] },
+    { ...T2_WORKING, title: 'Credit notes counted once', storyIds: [] },
+    {
+      ...T4_YOURS,
+      label: 'T3',
+      title: 'The September total matches the ledger',
+      dependsOn: ['T1', 'T2'],
+      storyIds: [],
+    },
+  ],
+  stories: [],
+}

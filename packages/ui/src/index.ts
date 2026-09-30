@@ -133,6 +133,7 @@ export {
   type ProfileFacts,
   type ProfileSectionProps,
   type SettingsProps,
+  type SettingsSection,
 } from './settings/settings.tsx'
 export {
   ClassifierSection,

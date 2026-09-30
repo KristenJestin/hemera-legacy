@@ -1,11 +1,17 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
-import { type FunctionComponent, type ReactNode, useState } from 'react'
+import { type ReactNode, useState } from 'react'
 import { expect, userEvent, waitFor, within } from 'storybook/test'
 
 import { StatusDot } from '../../components/status-dot/status-dot.tsx'
 import { TooltipProvider } from '../../components/tooltip/tooltip.tsx'
-import { IconBolt, IconDatabase, type IconProps, IconWorld } from '../../icons.ts'
-import { HelperIcon, type HelperIconName, type HelperIconSize, TiledIcon } from './helper-icons.tsx'
+import { IconBolt, IconDatabase, IconWorld } from '../../icons.ts'
+import {
+  HelperIcon,
+  type HelperIconLook,
+  type HelperIconName,
+  type HelperIconSize,
+  TiledIcon,
+} from './helper-icons.tsx'
 import type { CommandState } from '../../activity/command-run.tsx'
 import { GOING_ON } from '../../session/going-on-fixtures.ts'
 import type { GoingOnRun } from '../../session/going-on.ts'
@@ -250,80 +256,79 @@ const ICONS: readonly { icon: HelperIconName; name: string }[] = [
   { icon: 'prototyper', name: 'Prototyper' },
 ]
 
-/** Helpers not written yet, to show the rule: any icon of the catalogue in the same tile. */
-const NEW_HELPERS: readonly { glyph: FunctionComponent<IconProps>; name: string }[] = [
-  { glyph: IconDatabase, name: 'Migrator' },
-  { glyph: IconWorld, name: 'Translator' },
-  { glyph: IconBolt, name: 'Performance review' },
+const LOOKS: readonly { look: HelperIconLook; name: string }[] = [
+  { look: 'mark', name: 'A · the icon, and Hemera’s tile as a corner mark (recommended)' },
+  { look: 'tint', name: 'B · the icon on a tint of its role' },
+  { look: 'plain', name: 'C · the icon alone; the tile only at 40 px' },
 ]
 
+const SIZES: readonly HelperIconSize[] = ['sm', 'md', 'xl']
+
+const ROW = 'flex flex-wrap items-end gap-8'
+
+const CELL = 'flex flex-col items-start gap-2 text-xs text-muted-foreground'
+
 const SAMPLE_CHIP =
-  'inline-flex h-control-sm items-center gap-1.5 rounded-md border border-border bg-card px-2 text-xs'
-
-const ICON_CELL = 'flex w-menu-side flex-col items-start gap-3'
-
-const ICON_BIG =
-  'flex size-16 items-center justify-center rounded-xl border border-border bg-card text-foreground'
-
-/** One helper's icon, large and on a chip. */
-function IconCell({
-  icon,
-  name,
-}: {
-  icon: (size: HelperIconSize) => ReactNode
-  name: string
-}): ReactNode {
-  return (
-    <div className={ICON_CELL}>
-      <span className={ICON_BIG}>{icon('xl')}</span>
-      <span className={SAMPLE_CHIP}>
-        <span className="flex text-muted-foreground">{icon('md')}</span>
-        <StatusDot status="running" size="sm" />
-        {name}
-      </span>
-    </div>
-  )
-}
+  'inline-flex h-control-sm items-center gap-1.5 rounded-md border border-border bg-card px-2 text-xs text-foreground'
 
 /**
- * The helper icons, the maintainer's choice: Hemera's tile, holding one icon of the catalogue
- * that says what the helper is for — large, and at a chip's size. The last row is the rule: a new
- * defined helper picks an icon of the catalogue, and the tile makes it one of the family.
+ * The helper icons: the catalogue's icon for the role, and three ways to say it is a helper, each
+ * at 16, 20 and 40 px and on a chip. A keeps the icon at its full size and puts Hemera's tile as a
+ * mark on its corner, the same for every helper — what tells a helper's chip from a run's, since a
+ * test run is a flask too. B puts it on a tint of its role. C keeps the icon alone on a chip and the
+ * tile once there is room. A is recommended; the last row shows a new helper made by the rule.
  */
 export const HelperIcons: Story = {
   render: () => (
-    <div className="flex min-h-screen flex-col gap-8 bg-background p-8 text-foreground">
-      <section aria-label="The helpers" className="flex flex-col gap-3">
-        <h2 className="text-sm font-medium">The helpers</h2>
-        <div className="flex flex-wrap gap-6">
-          {ICONS.map(({ icon, name }) => (
-            <IconCell
-              key={icon}
-              name={name}
-              icon={(size) => <HelperIcon name={icon} size={size} />}
-            />
-          ))}
-        </div>
-      </section>
+    <div className="flex min-h-screen flex-col gap-10 bg-background p-8 text-foreground">
+      {LOOKS.map(({ look, name }) => (
+        <section key={look} aria-label={name} className="flex flex-col gap-3">
+          <h2 className="text-sm font-medium">{name}</h2>
+          <div className={ROW}>
+            {ICONS.map(({ icon, name: helper }) => (
+              <div key={icon} className={CELL}>
+                <span className="flex items-end gap-3 text-foreground">
+                  {SIZES.map((size) => (
+                    <HelperIcon key={size} name={icon} look={look} size={size} />
+                  ))}
+                </span>
+                <span className={SAMPLE_CHIP}>
+                  <HelperIcon name={icon} look={look} size="sm" />
+                  <StatusDot status="running" size="sm" />
+                  {helper}
+                </span>
+              </div>
+            ))}
+          </div>
+        </section>
+      ))}
       <section aria-label="A new helper" className="flex flex-col gap-3">
-        <h2 className="text-sm font-medium">
-          A new helper · any icon of the catalogue, in the tile
-        </h2>
-        <div className="flex flex-wrap gap-6">
-          {NEW_HELPERS.map(({ glyph, name }) => (
-            <IconCell
-              key={name}
-              name={name}
-              icon={(size) => <TiledIcon glyph={glyph} size={size} />}
-            />
+        <h2 className="text-sm font-medium">A new helper, by A · any icon of the catalogue</h2>
+        <div className={ROW}>
+          {[
+            { glyph: IconDatabase, name: 'Migrator' },
+            { glyph: IconWorld, name: 'Translator' },
+            { glyph: IconBolt, name: 'Performance review' },
+          ].map(({ glyph, name }) => (
+            <div key={name} className={CELL}>
+              <span className="flex items-end gap-3 text-foreground">
+                {SIZES.map((size) => (
+                  <TiledIcon key={size} glyph={glyph} size={size} />
+                ))}
+              </span>
+              <span className={SAMPLE_CHIP}>
+                <TiledIcon glyph={glyph} size="sm" />
+                <StatusDot status="running" size="sm" />
+                {name}
+              </span>
+            </div>
           ))}
         </div>
       </section>
     </div>
   ),
   play: async ({ canvasElement }) => {
-    const canvas = within(canvasElement)
-    await expect(canvas.getAllByRole('region')).toHaveLength(2)
+    await expect(within(canvasElement).getAllByRole('region')).toHaveLength(4)
   },
 }
 
@@ -374,10 +379,55 @@ function MarkBench(): ReactNode {
   )
 }
 
+const SHARES = [0, 0.1, 0.25, 0.5, 0.75, 0.9, 1] as const
+
+/** The arc at its shares, and one scrubbed by hand. */
+function ProgressBench(): ReactNode {
+  const [share, setShare] = useState(40)
+  return (
+    <section aria-label="Progress" className="flex flex-col gap-3">
+      <h2 className="text-sm font-medium">Progress, when it is known</h2>
+      <div className="flex flex-wrap gap-4">
+        {SHARES.map((one) => (
+          <span key={one} className={MARK_CELL}>
+            <StatusMark
+              state="progress"
+              progress={one}
+              label={`In progress · ${String(Math.round(one * 100))}%`}
+            />
+            {Math.round(one * 100)}%
+          </span>
+        ))}
+      </div>
+      <label className="flex items-center gap-3 text-sm">
+        <span className="flex size-10 items-center justify-center rounded-lg border border-border bg-card">
+          <StatusMark
+            state="progress"
+            progress={share / 100}
+            label={`In progress · ${String(share)}%`}
+          />
+        </span>
+        <input
+          type="range"
+          min={0}
+          max={100}
+          value={share}
+          aria-label="How far along"
+          className="w-menu accent-primary"
+          onChange={(event) => setShare(Number(event.target.value))}
+        />
+        <span className="w-10 font-mono tabular-nums">{share}%</span>
+      </label>
+    </section>
+  )
+}
+
 /**
  * The status mark: every state, then one mark driven by hand from any state to any other — the
  * ring closing, the tick and the cross drawing themselves, the arc turning or standing at its
- * share, the dot of what waits for you ringing.
+ * share, the dot of what waits for you ringing. Known, the progress stands on a faint track at 0,
+ * 10, 25, 50, 75, 90 and 100%, and a slider scrubs one mark: each new share is reached on the
+ * `morph` spring from wherever the arc stands, with no jump and no overshoot.
  */
 export const StatusMarks: Story = {
   render: () => (
@@ -393,6 +443,7 @@ export const StatusMarks: Story = {
           ))}
         </div>
       </section>
+      <ProgressBench />
       <MarkBench />
     </div>
   ),

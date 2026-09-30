@@ -92,7 +92,7 @@ export function HelperChips({
                   data-helper={helper.id}
                 >
                   <span className={ICON}>
-                    <HelperIcon name={helper.icon} size="md" />
+                    <HelperIcon name={helper.icon} size="sm" />
                   </span>
                   <StatusDot status={HELPER_TONES[helper.state]} size="sm" />
                   <span className={LABEL}>{helper.name}</span>
@@ -154,7 +154,7 @@ function Glance({
     <div className={GLANCE}>
       <div className={GLANCE_HEAD}>
         <span className={ICON}>
-          <HelperIcon name={helper.icon} size="md" />
+          <HelperIcon name={helper.icon} size="sm" />
         </span>
         <StatusDot status={HELPER_TONES[helper.state]} size="sm" />
         <span className={LABEL}>{helper.name}</span>

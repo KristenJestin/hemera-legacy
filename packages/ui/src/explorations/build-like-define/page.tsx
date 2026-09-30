@@ -1,58 +1,65 @@
 import { AnimatePresence, motion } from 'motion/react'
-import { type ReactNode, useState } from 'react'
+import { type ReactNode, useMemo, useRef, useState } from 'react'
 import { fn } from 'storybook/test'
 
 import { BuildSpecPanel } from '../../build/build-spec-panel.tsx'
-import { BUILDING, NOW } from '../../build/build-fixtures.ts'
-import { buildNotices } from '../../build/build-notices.tsx'
-import { BuildView } from '../../build/build-view.tsx'
-import { waitsOf } from '../../build/model.ts'
 import { Composer } from '../../composer/composer.tsx'
-import { IconShield } from '../../icons.ts'
-import { MessageScroller } from '../../message/scroller/scroller.tsx'
-import { CROSSFADE, crossfade, useTransition } from '../../motion.ts'
+import { IconButton } from '../../components/button/button.tsx'
+import { StatusDot } from '../../components/status-dot/status-dot.tsx'
+import { Tooltip } from '../../components/tooltip/tooltip.tsx'
+import { IconChevronLeft, IconHammer, IconShield } from '../../icons.ts'
+import { MessageScroller, type ScrollerEntry } from '../../message/scroller/scroller.tsx'
+import { CROSSFADE, crossfade, instant, swap, useTransition } from '../../motion.ts'
 import { GOING_ON } from '../../session/going-on-fixtures.ts'
 import { GoingOnLine } from '../../session/going-on-line.tsx'
 import { NoticeRow } from '../../session/notice-row.tsx'
 import { RunCommand } from '../../session/run-command.tsx'
 import { type NoticeGroup, SessionNotices } from '../../session/session-notices.tsx'
 import { SessionHeader } from '../../session/session.tsx'
-import { READY } from '../../spec/spec-fixtures.ts'
-import { BuildDock } from './build-dock.tsx'
-import { HELPERS, type Helper } from './fixtures.ts'
+import { SpecColumn } from '../../spec/spec-column.tsx'
+import { MID_PLAN, READY } from '../../spec/spec-fixtures.ts'
+import { SpecFrame } from '../../spec/spec-frame.tsx'
+import { phasesOf } from '../../spec/spec-phases.ts'
+import { BuildTasks, type Grouping } from './build-tasks.tsx'
+import { DEFINE_HELPERS, FREE_HELPERS, type Helper, STUCK } from './fixtures.ts'
 import { HelperChips } from './helper-chips.tsx'
 import { HelperIcon } from './helper-icons.tsx'
-import { HelperThread } from './helper-thread.tsx'
-import { MAIN_THREAD } from './threads.tsx'
+import { HelperViewer, type Opening } from './helper-viewer.tsx'
+import { PanelDock } from './panel-dock.tsx'
+import { BOARD } from './tasks-fixtures.ts'
+import { DEFINE_THREAD, FREE_THREAD, MAIN_THREAD } from './threads.tsx'
 
 /**
- * A `build` Session laid as a `define` Session is (issue #77, the maintainer's design of 30
- * September): the Session's head line across the whole page — the runs, the helper agents, Run,
- * ⓘ and `…` — and under it the row of `BuildDock`: the main agent's chat on the left, the build on
- * the right in the Spec panel's frame, which folds as the Spec does and lays itself over the chat.
+ * A Session of any kind as the exploration lays it (issue #77, maintainer's feedback of 30
+ * September): the head line, the chat, the side panel of `define` and `build` — one mechanism,
+ * `PanelDock` — and the helpers' threads opened from their chips by one mechanism too,
+ * `HelperViewer`, whatever the kind.
  *
- * A helper's thread opens from its chip, read only, in one of two places:
+ * The head line stands in one of two places, for the maintainer to choose:
  *
- * - `column` (recommended) · in the chat column, in the main agent's chat's place, with the way
- *   back to it and no composer. Pressed while the build covers the chat, the chip takes the build
- *   back to its place first, so the thread is seen beside the build.
- * - `panel` · in the build panel, in the build view's place, with the way back to the build. A
- *   folded panel unfolds to show it; a panel over the chat stays over it.
+ * - `page` (A) · across the whole page, over the chat and the panel;
+ * - `chat` (B) · over the chat only, as `define` has it today; it goes into the panel's head
+ *   while the panel covers the chat.
  */
 
-export type Placement = 'column' | 'panel'
+export type Kind = 'free' | 'define' | 'build'
 
-export interface BuildSessionProps {
-  placement: Placement
+export type HeadPlacement = 'page' | 'chat'
+
+export interface SessionPageProps {
+  kind: Kind
+  head?: HeadPlacement | undefined
+  opening?: Opening | undefined
   helpers?: readonly Helper[] | undefined
-  /** Whether the build covers the chat as the story opens. */
   defaultOver?: boolean | undefined
   defaultFolded?: boolean | undefined
-  /** The helper whose thread is open as the story opens. */
+  /** The helper whose thread is open as the page is drawn. */
   defaultHelper?: string | null | undefined
+  defaultGrouping?: Grouping | undefined
+  defaultTask?: string | null | undefined
 }
 
-/** The two runs of the build: its dev server and its tests. */
+/** The two runs of the Session: its dev server and its tests. */
 const RUNS = GOING_ON.few.slice(0, 2)
 
 const CATALOGUE = [
@@ -60,29 +67,262 @@ const CATALOGUE = [
   { name: 'test', command: 'pnpm test', type: 'test' as const, running: true },
 ]
 
-/** The actions the build view hands back, nothing of them wired. */
-const ACTIONS = {
-  onPause: fn(),
-  onResume: fn(),
-  onAccept: fn(),
-  onStop: fn(),
-  onTaskDone: fn(),
-  onTaskSkip: fn(),
-  onDismissBlocker: fn(),
-  onOpenChat: fn(),
+const HELPERS: Record<Kind, readonly Helper[]> = {
+  free: FREE_HELPERS,
+  define: DEFINE_HELPERS,
+  build: STUCK,
 }
 
-const HEAD = 'shrink-0 px-6 pt-4 pb-1'
+const THREADS: Record<Kind, ScrollerEntry[]> = {
+  free: FREE_THREAD,
+  define: DEFINE_THREAD,
+  build: MAIN_THREAD,
+}
 
-const PAGE = 'flex h-screen flex-col bg-background text-foreground'
+const TITLES: Record<Kind, string> = {
+  free: 'Rounding cent',
+  define: 'Spec CSV',
+  build: 'Build CSV export',
+}
 
-/** What cross-fades in place: nothing of it travels. */
+const PAGE = 'flex h-full min-h-0 flex-col bg-background text-foreground'
+
+const PAGE_HEAD = 'shrink-0 px-6 pt-4 pb-1'
+
+const CHAT_HEAD = 'mx-auto w-full max-w-3xl shrink-0 px-6 pt-4 pb-2'
+
+const STAGE = 'relative flex min-h-0 flex-1 flex-col'
+
 const LAYER = 'absolute inset-0 flex flex-col'
 
-const STACK = 'relative flex min-h-0 min-w-0 flex-1 flex-col'
+const PANEL_TITLE = 'flex min-w-0 items-center gap-2 text-sm'
 
-/** A permission a helper asked, among the main Session's notices and never in its own thread. */
-function helperPermission(): NoticeGroup {
+/** The small frame of the build, as the Spec's is drawn: its rim, the unfold, its body. */
+const RIM = 'flex w-spec-frame flex-col rounded-xl border border-border bg-surface-rim p-1.5'
+
+const RIM_TOP = 'flex shrink-0 justify-end pt-1.5 pr-1.5 pb-1.5'
+
+const RIM_BODY =
+  'flex flex-col items-center gap-2 rounded-lg border border-border bg-surface-body py-2 text-muted-foreground shadow-sm'
+
+export function SessionPage({
+  kind,
+  head = 'page',
+  opening = 'sheet',
+  helpers = HELPERS[kind],
+  defaultOver = false,
+  defaultFolded = false,
+  defaultHelper = null,
+  defaultGrouping = 'story',
+  defaultTask = null,
+}: SessionPageProps): ReactNode {
+  const [folded, setFolded] = useState(defaultFolded)
+  const [over, setOver] = useState(defaultOver)
+  const [open, setOpen] = useState<string | null>(defaultHelper)
+  const [answered, setAnswered] = useState(false)
+  const [specOpen, setSpecOpen] = useState(false)
+  const [value, setValue] = useState('')
+  const [files, setFiles] = useState<string[]>([])
+  const stage = useRef<HTMLDivElement>(null)
+  const asker = helpers.find((one) => one.icon === 'free') ?? helpers[0]
+  const groups: NoticeGroup[] =
+    answered || asker === undefined ? [] : [permissionOf(asker, () => setAnswered(true))]
+
+  function press(id: string): void {
+    if (open === id) close()
+    else setOpen(id)
+  }
+
+  function close(): void {
+    const was = open
+    setOpen(null)
+    if (was === null) return
+    // The keyboard goes back to the chip that opened it, the one of the line in view.
+    requestAnimationFrame(() => {
+      const chips = stage.current?.ownerDocument.querySelectorAll<HTMLElement>(
+        `[data-helper="${was}"]`,
+      )
+      const shown = [...(chips ?? [])].find((chip) => chip.closest('[inert]') === null)
+      shown?.focus()
+    })
+  }
+
+  function fold(next: boolean): void {
+    setFolded(next)
+    if (next) setOver(false)
+  }
+
+  const line = (
+    <SessionHeader title={TITLES[kind]} onRename={fn()} onOpenDetails={fn()}>
+      <GoingOnLine
+        items={kind === 'define' ? [] : RUNS}
+        onStop={fn()}
+        onOpenUrl={fn()}
+        onAddToCatalogue={fn()}
+        end={
+          <>
+            <HelperChips helpers={helpers} open={open} onPress={press} />
+            <RunCommand
+              catalogue={CATALOGUE}
+              workspace="csv-export"
+              onRunCommand={fn()}
+              onRunOnce={fn()}
+            />
+          </>
+        }
+      />
+    </SessionHeader>
+  )
+
+  const chat = (
+    <ChatColumn thread={THREADS[kind]} head={head === 'chat' ? line : null}>
+      <ChatFoot
+        value={value}
+        onValueChange={setValue}
+        files={files}
+        onFilesChange={setFiles}
+        notices={<SessionNotices groups={groups} />}
+      />
+    </ChatColumn>
+  )
+  const foot = (
+    <ChatFoot value={value} onValueChange={setValue} files={files} onFilesChange={setFiles} />
+  )
+
+  const notices = <SessionNotices groups={groups} />
+  const inPanel = head === 'chat' ? line : undefined
+
+  return (
+    <div className={PAGE}>
+      {head === 'page' && <div className={PAGE_HEAD}>{line}</div>}
+      <div ref={stage} className={STAGE}>
+        {kind === 'free' && <div className="flex min-h-0 flex-1 flex-col">{chat}</div>}
+        {kind === 'define' && (
+          <DefineDock
+            chat={chat}
+            line={inPanel}
+            notices={notices}
+            foot={foot}
+            folded={folded}
+            over={over}
+            onFold={fold}
+            onOver={setOver}
+          />
+        )}
+        {kind === 'build' && (
+          <PanelDock
+            label="Build ATL-7"
+            chat={chat}
+            line={inPanel}
+            notices={notices}
+            foot={foot}
+            folded={folded}
+            over={over}
+            onFold={fold}
+            onOver={setOver}
+            title={
+              <span className={PANEL_TITLE}>
+                <IconHammer size="sm" aria-hidden="true" />
+                <span className="font-medium">Build</span>
+              </span>
+            }
+            frame={<BuildFrame onUnfold={() => fold(false)} />}
+            body={
+              <Swapped showing={specOpen ? 'spec' : 'tasks'}>
+                {specOpen ? (
+                  <BuildSpecPanel spec={READY} onClose={() => setSpecOpen(false)} />
+                ) : (
+                  <BuildTasks
+                    specKey="ATL-7"
+                    title="CSV invoice export"
+                    tasks={BOARD}
+                    defaultGrouping={defaultGrouping}
+                    defaultOpen={defaultTask}
+                    onSpec={() => setSpecOpen(true)}
+                  />
+                )}
+              </Swapped>
+            }
+          />
+        )}
+        <HelperViewer
+          opening={opening}
+          helpers={helpers}
+          open={open}
+          onOpen={setOpen}
+          onClose={close}
+        />
+      </div>
+    </div>
+  )
+}
+
+interface DockProps {
+  chat: ReactNode
+  line: ReactNode
+  notices: ReactNode
+  foot: ReactNode
+  folded: boolean
+  over: boolean
+  onFold: (folded: boolean) => void
+  onOver: (over: boolean) => void
+}
+
+/** `define`'s Spec in the same panel: its key and title on the head, its column, its frame. */
+function DefineDock(props: DockProps): ReactNode {
+  const spec = MID_PLAN
+  const groups = useMemo(() => phasesOf(spec), [spec])
+  const column = useRef<HTMLDivElement>(null)
+  const still = useTransition(swap.move) === instant
+  return (
+    <PanelDock
+      {...props}
+      label={`Spec ${spec.key}`}
+      title={
+        <span className={PANEL_TITLE}>
+          <span className="font-mono text-xs text-muted-foreground">{spec.key}</span>
+          <span className="truncate font-semibold">{spec.title}</span>
+        </span>
+      }
+      frame={
+        <SpecFrame
+          specKey={spec.key}
+          groups={groups}
+          writing={spec.focus}
+          onUnfold={() => props.onFold(false)}
+        />
+      }
+      body={<SpecColumn spec={spec} groups={groups} column={column} still={still} />}
+    />
+  )
+}
+
+/** The build folded: the unfold, the hammer, and the dot of what waits for the hand. */
+function BuildFrame({ onUnfold }: { onUnfold: () => void }): ReactNode {
+  return (
+    <div className={RIM}>
+      <div className={RIM_TOP}>
+        <Tooltip label="Unfold the panel" side="left">
+          <IconButton
+            variant="ghost"
+            size="sm"
+            icon={<IconChevronLeft size="sm" />}
+            aria-label="Unfold the panel"
+            data-unfold
+            onClick={onUnfold}
+          />
+        </Tooltip>
+      </div>
+      <div className={RIM_BODY}>
+        <IconHammer size="md" aria-hidden="true" />
+        <StatusDot status="running" label="Something in the build waits for you" />
+      </div>
+    </div>
+  )
+}
+
+/** A permission a helper asked, among the Session's notices and never in its own thread. */
+function permissionOf(helper: Helper, onAnswer: () => void): NoticeGroup {
   return {
     kind: 'permission',
     label: 'Permissions',
@@ -92,119 +332,27 @@ function helperPermission(): NoticeGroup {
     tone: 'warning',
     items: [
       {
-        id: 'ask-credit',
+        id: 'ask-helper',
         content: (
           <NoticeRow
-            name="Credit notes asks to run a command"
+            name={`${helper.name} asks to run a command`}
             head="pnpm add -D csv-parse"
             mono
             title="Run command"
             line="pnpm add -D csv-parse"
             place={
               <span className="flex items-center gap-1.5">
-                <HelperIcon name="free" size="sm" />
-                Credit notes
+                <HelperIcon name={helper.icon} size="sm" />
+                {helper.name}
               </span>
             }
-            refuse={{ label: 'Refuse', onPress: fn() }}
-            accept={{ label: 'Run once', onPress: fn() }}
+            refuse={{ label: 'Refuse', onPress: onAnswer }}
+            accept={{ label: 'Run once', onPress: onAnswer }}
           />
         ),
       },
     ],
   }
-}
-
-export function BuildSession({
-  placement,
-  helpers = HELPERS,
-  defaultOver = false,
-  defaultFolded = false,
-  defaultHelper = null,
-}: BuildSessionProps): ReactNode {
-  const [folded, setFolded] = useState(defaultFolded)
-  const [over, setOver] = useState(defaultOver)
-  const [open, setOpen] = useState<string | null>(defaultHelper)
-  const [specOpen, setSpecOpen] = useState(false)
-  const [selected, setSelected] = useState<string | null>(null)
-  const helper = helpers.find((one) => one.id === open)
-  const view = { build: BUILDING, now: NOW, stories: READY.stories, selected, ...ACTIONS }
-  const groups = [helperPermission(), buildNotices({ ...view, onSelect: setSelected }, setSelected)]
-
-  function press(id: string): void {
-    const next = open === id ? null : id
-    setOpen(next)
-    if (next === null) return
-    if (placement === 'column') setOver(false)
-    else setFolded(false)
-  }
-
-  function fold(next: boolean): void {
-    setFolded(next)
-    // Folded from over the chat, it unfolds back beside it.
-    if (next) setOver(false)
-  }
-
-  const inColumn = placement === 'column' ? helper : undefined
-  const inPanel = placement === 'panel' ? helper : undefined
-  const showing = inPanel !== undefined ? `helper-${inPanel.id}` : specOpen ? 'spec' : 'build'
-
-  return (
-    <div className={PAGE}>
-      <div className={HEAD}>
-        <SessionHeader title="Build CSV export" onRename={fn()} onOpenDetails={fn()}>
-          <GoingOnLine
-            items={RUNS}
-            onStop={fn()}
-            onOpenUrl={fn()}
-            onAddToCatalogue={fn()}
-            end={
-              <>
-                <HelperChips helpers={helpers} open={open} onPress={press} />
-                <RunCommand
-                  catalogue={CATALOGUE}
-                  workspace="csv-export"
-                  onRunCommand={fn()}
-                  onRunOnce={fn()}
-                />
-              </>
-            }
-          />
-        </SessionHeader>
-      </div>
-      <BuildDock
-        folded={folded}
-        over={over}
-        waits={waitsOf(BUILDING)}
-        onFold={fold}
-        onOver={setOver}
-        chat={
-          <ChatColumn
-            helper={inColumn}
-            onBack={() => setOpen(null)}
-            notices={<SessionNotices groups={groups} />}
-          />
-        }
-        body={
-          <Swapped showing={showing}>
-            {inPanel !== undefined ? (
-              <HelperThread helper={inPanel} back="Build" onBack={() => setOpen(null)} />
-            ) : specOpen ? (
-              <BuildSpecPanel spec={READY} onClose={() => setSpecOpen(false)} />
-            ) : (
-              <BuildView
-                {...view}
-                onSelect={setSelected}
-                specOpen={false}
-                onToggleSpec={() => setSpecOpen(true)}
-              />
-            )}
-          </Swapped>
-        }
-        foot={<SessionNotices groups={groups} />}
-      />
-    </div>
-  )
 }
 
 /** What stands in one place, cross-faded when it changes; the place itself never moves. */
@@ -226,70 +374,55 @@ function Swapped({ showing, children }: { showing: string; children: ReactNode }
   )
 }
 
-/**
- * The chat column: the main agent's chat, the only one the user writes in, or a helper's thread in
- * its place. The chat stays drawn under the thread, so what was written in its box is still there
- * on the way back; it is out of reach meanwhile.
- */
+/** The chat column: the head line in placement B, the thread, and its foot. */
 function ChatColumn({
-  helper,
-  onBack,
+  thread,
+  head,
+  children,
+}: {
+  thread: ScrollerEntry[]
+  head: ReactNode
+  children: ReactNode
+}): ReactNode {
+  return (
+    <>
+      {head !== null && <div className={CHAT_HEAD}>{head}</div>}
+      <MessageScroller className="flex-1" label="The thread of this Session" entries={thread} />
+      {children}
+    </>
+  )
+}
+
+/** The chat's foot: the one composer, and the notices on its edge. */
+function ChatFoot({
+  value,
+  onValueChange,
+  files,
+  onFilesChange,
   notices,
 }: {
-  helper: Helper | undefined
-  onBack: () => void
-  notices: ReactNode
+  value: string
+  onValueChange: (value: string) => void
+  files: string[]
+  onFilesChange: (files: string[]) => void
+  notices?: ReactNode
 }): ReactNode {
-  const [value, setValue] = useState('')
-  const [files, setFiles] = useState<string[]>([])
-  const fade = useTransition(crossfade)
-  const away = helper !== undefined
   return (
-    <div className={STACK}>
-      <motion.div
-        inert={away}
-        aria-hidden={away ? true : undefined}
-        className={LAYER}
-        initial={false}
-        animate={away ? CROSSFADE.from : CROSSFADE.to}
-        transition={fade}
-      >
-        <MessageScroller
-          className="flex-1"
-          label="The thread of this Session"
-          entries={MAIN_THREAD}
-        />
-        <div className="mx-auto flex w-full max-w-3xl flex-col gap-2 px-6 pb-4">
-          <Composer
-            value={value}
-            onValueChange={setValue}
-            files={files}
-            onFilesChange={setFiles}
-            onSearchFiles={() => Promise.resolve([])}
-            variant="inline"
-            action="Send"
-            placeholder="Say something to the main agent…"
-            onSend={() => Promise.resolve(null)}
-            running
-            onStop={fn()}
-            notices={notices}
-          />
-        </div>
-      </motion.div>
-      <AnimatePresence initial={false}>
-        {helper !== undefined && (
-          <motion.div
-            key={helper.id}
-            className={LAYER}
-            initial={CROSSFADE.from}
-            animate={CROSSFADE.to}
-            exit={CROSSFADE.from}
-            transition={fade}
-          >
-            <HelperThread helper={helper} back="Main agent" onBack={onBack} />
-          </motion.div>
-        )}
-      </AnimatePresence>
+    <div className="mx-auto flex w-full max-w-3xl flex-col px-6 pb-4">
+      <Composer
+        value={value}
+        onValueChange={onValueChange}
+        files={files}
+        onFilesChange={onFilesChange}
+        onSearchFiles={() => Promise.resolve([])}
+        variant="inline"
+        action="Send"
+        placeholder="Say something to the agent…"
+        onSend={() => Promise.resolve(null)}
+        running
+        onStop={fn()}
+        notices={notices}
+      />
     </div>
   )
 }

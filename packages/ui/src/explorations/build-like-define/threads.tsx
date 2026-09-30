@@ -72,3 +72,30 @@ export function threadOf(helper: Helper): ScrollerEntry[] {
     says('last', helper.last),
   ]
 }
+
+/** A `free` Session's thread: a question, and the helpers the agent sent to answer it. */
+export const FREE_THREAD: ScrollerEntry[] = [
+  says(
+    'ask',
+    'Multi-currency invoices are off by a cent on the September close. I am looking for where the CSV rounds.',
+  ),
+  call('launch-explore', 'helper_launch', 'Launch helper', 'Explore', true),
+  call('read', 'fs_read', 'Read file', 'src/shared/csv.ts', true),
+  says(
+    'found',
+    'The VAT is cut to the cent on each line, then summed. Cutting the sum instead fixes the cent; a test review checked it.',
+  ),
+]
+
+/** A `define` Session's thread: the Spec being written, and a prototype asked for. */
+export const DEFINE_THREAD: ScrollerEntry[] = [
+  says(
+    'ask',
+    'Accountants need a month of invoices as one CSV they can import into their ledger, from the billing page.',
+  ),
+  says(
+    'plan',
+    'Shape is finished. For the plan, one question is open: a select or a calendar to pick the month. I asked the prototyper for both.',
+  ),
+  call('launch-proto', 'helper_launch', 'Launch helper', 'Prototyper', true),
+]

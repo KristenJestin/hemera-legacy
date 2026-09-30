@@ -89,3 +89,30 @@ export const STUCK: readonly Helper[] = [REVIEW, DOCUMENTER, { ...WORKER, state:
 export function helperName(helper: Helper): string {
   return `Helper ${helper.name}, ${HELPER_WORDS[helper.state]}`
 }
+
+/** A free Session's helpers: one reading the code for the agent, one reviewing what it wrote. */
+export const FREE_HELPERS: readonly Helper[] = [
+  {
+    id: 'helper-explore',
+    name: 'Explore',
+    icon: 'free',
+    state: 'running',
+    last: 'Three places build a CSV today; only shared/csv.ts escapes quotes.',
+    steps: ['Search csv in src/', 'Read src/shared/csv.ts', 'Read src/reports/export.ts'],
+    at: '09:12',
+  },
+  { ...REVIEW, state: 'finished', last: 'The rounding fix is proved by its test: green.' },
+]
+
+/** A `define` Session's helper: the prototyper, drawing a throwaway page to settle a question. */
+export const DEFINE_HELPERS: readonly Helper[] = [
+  {
+    id: 'helper-prototype',
+    name: 'Prototyper',
+    icon: 'prototyper',
+    state: 'running',
+    last: 'The month picker as a select and as a calendar, side by side on one page.',
+    steps: ['Read the Spec of ATL-7', 'Write scratch/month-picker.html', 'Serve scratch/'],
+    at: '10:52',
+  },
+]

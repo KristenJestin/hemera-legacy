@@ -3,49 +3,46 @@ import type { ReactNode } from 'react'
 import { expect, userEvent, waitFor, within } from 'storybook/test'
 
 import { TooltipProvider } from '../../components/tooltip/tooltip.tsx'
-import { STUCK } from './fixtures.ts'
-import { type BuildSessionProps, BuildSession } from './page.tsx'
+import { type SessionPageProps, SessionPage } from './page.tsx'
 
 /**
- * A `build` Session that looks like a `define` Session (design exploration of 30 September 2026,
+ * A Session laid as `define` lays it, for every kind (design exploration of 30 September 2026,
  * issue #77). Storybook only: nothing here is wired, and no component of the design system
- * changed for it.
+ * changed for it. `Playground`, beside these, is the page to try everything by hand; these are its
+ * moments, one each, for the tests.
  *
- * - The chat on the left, the build on the right in the Spec panel's own frame: its widths, its
- *   fold to a small frame at the window's edge, and its swap, which pushes the chat.
- * - One control on the panel's head, beside the fold, lays the build over the chat, the whole
- *   width of the row, and takes it back. The chat keeps its width under it; only the panel's edge
- *   moves. While it covers the chat, the Session's notices stand in the panel's foot.
- * - The head line spans the page: the runs, the helper agents, Run, ⓘ and `…`, reachable whether
- *   the build covers the chat or not. A helper's chip is its icon, its dot and its name; resting
- *   on it quotes its last line.
- * - A chip opens the helper's thread, read only: in the chat column (recommended), or in the
- *   build panel.
- *
- * The build is `ATL-7`'s, with two runs and three helpers: a test review and the documenter,
- * defined, with their own icons, and one free helper, `Credit notes`, with the common icon.
+ * - One side panel for `define` and `build` (`PanelDock`): the Spec panel's frame, widths, fold
+ *   and swap, and one toggle that lays the panel over the chat and back. While it covers the
+ *   chat, the notices float over the panel where they stood over the chat.
+ * - The head line — runs, helpers, Run, ⓘ and `…` — across the page (A) or over the chat only,
+ *   going into the panel's head while the panel covers the chat (B).
+ * - A helper's chip is its icon, its dot and its name. It opens the helper's live thread, read
+ *   only, the same way in every kind of Session (`HelperViewer`): a sheet under the head line
+ *   (recommended), a dialog, or a sheet from the right.
+ * - The build's tasks, almost empty at rest: how far the build is at a glance, the tasks grouped
+ *   by story, as one list or by state, and each task unfolding to its tries, files and returns.
  */
 
-function Screen(props: BuildSessionProps): ReactNode {
+function Screen(props: SessionPageProps): ReactNode {
   return (
     <TooltipProvider>
-      <BuildSession {...props} />
+      <div className="h-screen">
+        <SessionPage {...props} />
+      </div>
     </TooltipProvider>
   )
 }
 
 const meta = {
-  title: 'Explorations/Build like define',
+  title: 'Explorations/Build like define/Screens',
   component: Screen,
   tags: ['autodocs', 'new'],
   parameters: { layout: 'fullscreen' },
-  args: { placement: 'column', defaultOver: false, defaultFolded: false, defaultHelper: null },
+  args: { kind: 'build', head: 'page', opening: 'sheet' },
   argTypes: {
-    placement: { control: 'inline-radio', options: ['column', 'panel'] },
-    defaultHelper: {
-      control: 'select',
-      options: [null, 'helper-review', 'helper-docs', 'helper-credit'],
-    },
+    kind: { control: 'inline-radio', options: ['free', 'define', 'build'] },
+    head: { control: 'inline-radio', options: ['page', 'chat'] },
+    opening: { control: 'inline-radio', options: ['sheet', 'dialog', 'side'] },
   },
 } satisfies Meta<typeof Screen>
 
@@ -53,53 +50,44 @@ export default meta
 
 type Story = StoryObj<typeof meta>
 
-/** The head line: the two runs, then each helper as its chip names it. */
-async function seesTheLine(canvasElement: HTMLElement, credit = 'running'): Promise<void> {
-  const line = within(
-    within(canvasElement).getByRole('group', { name: 'What goes on in this Session' }),
-  )
-  await expect(line.getByRole('button', { name: /^dev/ })).toBeVisible()
-  await expect(line.getByRole('button', { name: /^test/ })).toBeVisible()
-  await expect(line.getByRole('button', { name: 'Helper Test review, running' })).toBeVisible()
-  await expect(line.getByRole('button', { name: 'Helper Documenter, running' })).toBeVisible()
-  await expect(line.getByRole('button', { name: `Helper Credit notes, ${credit}` })).toBeVisible()
+/** The head line in view: the one not under the panel. */
+function line(canvasElement: HTMLElement) {
+  const lines = within(canvasElement).getAllByRole('group', {
+    name: 'What goes on in this Session',
+  })
+  return within(lines.find((one) => one.closest('[inert]') === null) ?? lines[0]!)
 }
 
-function panelOf(canvasElement: HTMLElement): HTMLElement {
-  return within(canvasElement).getByRole('region', { name: 'Build ATL-7' })
+function panelOf(canvasElement: HTMLElement, name = 'Build ATL-7'): HTMLElement {
+  return within(canvasElement).getByRole('region', { name })
 }
 
-/** A build running: the chat beside the build, three helpers and two runs in the head line. */
-export const Running: Story = {
+/** A build: the chat beside the build, three helpers — one silent — and two runs. */
+export const Build: Story = {
   play: async ({ canvasElement }) => {
-    await seesTheLine(canvasElement)
-    const canvas = within(canvasElement)
-    await expect(canvas.getByRole('log', { name: 'The thread of this Session' })).toBeVisible()
-    await expect(canvas.getByRole('button', { name: 'Build over the chat' })).toHaveAttribute(
-      'aria-pressed',
-      'false',
-    )
+    const head = line(canvasElement)
+    await expect(head.getByRole('button', { name: /^dev/ })).toBeVisible()
+    await expect(head.getByRole('button', { name: /^test/ })).toBeVisible()
+    await expect(head.getByRole('button', { name: 'Helper Test review, running' })).toBeVisible()
+    await expect(head.getByRole('button', { name: 'Helper Documenter, running' })).toBeVisible()
+    await expect(head.getByRole('button', { name: 'Helper Credit notes, silent' })).toBeVisible()
   },
 }
 
-/** The build over the chat: the whole row, the chat out of reach under it, the line still there. */
-export const OverTheChat: Story = {
+/** The build over the chat; the notices float over it where they stood over the chat. */
+export const BuildOverTheChat: Story = {
   args: { defaultOver: true },
   play: async ({ canvasElement }) => {
-    await seesTheLine(canvasElement)
     const canvas = within(canvasElement)
     await expect(canvas.queryByRole('log', { name: 'The thread of this Session' })).toBeNull()
-    await expect(canvas.getByRole('button', { name: 'Build over the chat' })).toHaveAttribute(
-      'aria-pressed',
-      'true',
-    )
+    const floated = canvasElement.querySelector<HTMLElement>('[data-notices-over]')!
     await expect(
-      within(panelOf(canvasElement)).getByRole('button', { name: /Permissions/ }),
+      await within(floated).findByRole('button', { name: /Waiting for your answer/ }),
     ).toBeVisible()
   },
 }
 
-/** The toggle lays the build over the chat, and takes it back; the chat's width never changes. */
+/** The toggle lays the build over the chat and takes it back; the chat never changes width. */
 export const OverAndBack: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
@@ -107,7 +95,7 @@ export const OverAndBack: Story = {
     const chat = canvas.getByRole('log', { name: 'The thread of this Session' })
     const beside = panel.getBoundingClientRect().width
     const chatWidth = chat.getBoundingClientRect().width
-    const toggle = canvas.getByRole('button', { name: 'Build over the chat' })
+    const toggle = canvas.getByRole('button', { name: 'Over the chat' })
     await userEvent.click(toggle)
     await waitFor(() => expect(panel.getBoundingClientRect().width).toBeGreaterThan(beside * 1.5))
     await expect(chat.getBoundingClientRect().width).toBe(chatWidth)
@@ -116,91 +104,185 @@ export const OverAndBack: Story = {
   },
 }
 
-/** The build folded to its small frame, as the Spec folds: the chat has the row. */
+/** `define` beside the chat, by the same panel; its helper is the prototyper. */
+export const Define: Story = {
+  args: { kind: 'define' },
+  play: async ({ canvasElement }) => {
+    await expect(panelOf(canvasElement, 'Spec ATL-7')).toBeVisible()
+    await expect(
+      line(canvasElement).getByRole('button', { name: 'Helper Prototyper, running' }),
+    ).toBeVisible()
+  },
+}
+
+/** `define` with its Spec over the chat. */
+export const DefineOverTheChat: Story = {
+  args: { kind: 'define', defaultOver: true },
+  play: async ({ canvasElement }) => {
+    const panel = panelOf(canvasElement, 'Spec ATL-7')
+    await expect(within(panel).getByRole('button', { name: 'Over the chat' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    )
+  },
+}
+
+/** A `free` Session: no panel, the runs and two helpers in its head line. */
+export const Free: Story = {
+  args: { kind: 'free' },
+  play: async ({ canvasElement }) => {
+    await expect(
+      line(canvasElement).getByRole('button', { name: 'Helper Explore, running' }),
+    ).toBeVisible()
+    await expect(within(canvasElement).queryByRole('button', { name: 'Over the chat' })).toBeNull()
+  },
+}
+
+/** The build folded to its small frame, as the Spec folds. */
 export const Folded: Story = {
   args: { defaultFolded: true },
   play: async ({ canvasElement }) => {
-    const canvas = within(canvasElement)
-    await expect(canvas.getByRole('button', { name: 'Unfold the build' })).toBeVisible()
-  },
-}
-
-/** 1 · recommended · A helper's thread in the chat column, the way back to the main agent. */
-export const HelperInTheChat: Story = {
-  args: { defaultHelper: 'helper-credit' },
-  play: async ({ canvasElement }) => {
-    const canvas = within(canvasElement)
-    const thread = canvas.getByRole('region', { name: 'The thread of Credit notes' })
     await expect(
-      within(thread).getByRole('log', { name: 'What Credit notes is doing' }),
+      within(canvasElement).getByRole('button', { name: 'Unfold the panel' }),
     ).toBeVisible()
-    // Read only: no box to write in anywhere reachable.
-    await expect(canvas.queryAllByRole('textbox')).toHaveLength(0)
-    await expect(
-      canvas.getByRole('button', { name: 'Helper Credit notes, running' }),
-    ).toHaveAttribute('aria-pressed', 'true')
   },
 }
 
-/** 1 · The way back from a helper's thread gives the main agent's chat and its box back. */
-export const BackToTheMainAgent: Story = {
+/** B · The head line over the chat only, as `define` has it. */
+export const HeadOverTheChat: Story = {
+  args: { head: 'chat' },
+  play: async ({ canvasElement }) => {
+    const panel = within(panelOf(canvasElement))
+    await expect(panel.queryByRole('group', { name: 'What goes on in this Session' })).toBeNull()
+  },
+}
+
+/** B · The panel over the chat takes the head line into its own head. */
+export const HeadInThePanel: Story = {
+  args: { head: 'chat', defaultOver: true },
+  play: async ({ canvasElement }) => {
+    const panel = within(panelOf(canvasElement))
+    await expect(
+      await panel.findByRole('button', { name: 'Helper Documenter, running' }),
+    ).toBeVisible()
+  },
+}
+
+/** Helper · 1 · recommended · A sheet under the head line, over the page. */
+export const HelperSheet: Story = {
   args: { defaultHelper: 'helper-credit' },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    await userEvent.click(canvas.getByRole('button', { name: 'Main agent' }))
-    await expect(await canvas.findByRole('textbox')).toBeVisible()
+    const sheet = within(canvas.getByRole('region', { name: 'Helpers' }))
+    await expect(sheet.getByRole('log', { name: 'What Credit notes is doing' })).toBeVisible()
+    await expect(sheet.queryAllByRole('textbox')).toHaveLength(0)
   },
 }
 
-/** 1 · A chip pressed while the build covers the chat takes the build back beside the thread. */
-export const HelperFromOverTheChat: Story = {
-  args: { defaultOver: true },
+/** Helper · 2 · A dialog, as the Session details are one. */
+export const HelperDialog: Story = {
+  args: { opening: 'dialog', defaultHelper: 'helper-review' },
+  play: async ({ canvasElement }) => {
+    const body = within(canvasElement.ownerDocument.body)
+    await expect(await body.findByRole('log', { name: 'What Test review is doing' })).toBeVisible()
+  },
+}
+
+/** Helper · 3 · A sheet sliding over the page from the right. */
+export const HelperSide: Story = {
+  args: { opening: 'side', defaultHelper: 'helper-docs' },
+  play: async ({ canvasElement }) => {
+    const sheet = within(within(canvasElement).getByRole('region', { name: 'Helpers' }))
+    await expect(sheet.getByRole('log', { name: 'What Documenter is doing' })).toBeVisible()
+  },
+}
+
+/** Any opening · From inside, a press goes to another helper; Escape closes, back to the chip. */
+export const HelperSwitchAndClose: Story = {
+  args: { defaultHelper: 'helper-credit' },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    await userEvent.click(canvas.getByRole('button', { name: 'Helper Documenter, running' }))
-    await expect(await canvas.findByRole('log', { name: 'What Documenter is doing' })).toBeVisible()
-    await expect(canvas.getByRole('button', { name: 'Build over the chat' })).toHaveAttribute(
-      'aria-pressed',
-      'false',
-    )
-  },
-}
-
-/** 2 · A helper's thread in the build panel, in the build view's place. */
-export const HelperInThePanel: Story = {
-  args: { placement: 'panel', defaultHelper: 'helper-review' },
-  play: async ({ canvasElement }) => {
-    const panel = within(panelOf(canvasElement))
-    await expect(panel.getByRole('log', { name: 'What Test review is doing' })).toBeVisible()
-    await expect(within(canvasElement).getByRole('textbox')).toBeVisible()
-  },
-}
-
-/** 2 · The way back from a helper's thread in the panel gives the build view back. */
-export const BackToTheBuild: Story = {
-  args: { placement: 'panel', defaultHelper: 'helper-review' },
-  play: async ({ canvasElement }) => {
-    const panel = within(panelOf(canvasElement))
-    await userEvent.click(panel.getByRole('button', { name: 'Build' }))
+    const sheet = within(canvas.getByRole('region', { name: 'Helpers' }))
+    await userEvent.click(sheet.getByRole('button', { name: 'Helper Documenter, running' }))
+    await expect(await sheet.findByRole('log', { name: 'What Documenter is doing' })).toBeVisible()
+    await userEvent.keyboard('{Escape}')
+    await waitFor(() => expect(canvas.queryByRole('region', { name: 'Helpers' })).toBeNull())
     await waitFor(() =>
-      expect(panel.queryByRole('region', { name: 'The thread of Test review' })).toBeNull(),
+      expect(
+        line(canvasElement).getByRole('button', { name: 'Helper Documenter, running' }),
+      ).toHaveFocus(),
     )
   },
 }
 
-/** 2 · The same, with the build over the chat: the helper's thread has the whole row. */
-export const HelperInThePanelOver: Story = {
-  args: { placement: 'panel', defaultHelper: 'helper-docs', defaultOver: true },
+/** The same sheet in a `free` Session. */
+export const HelperInFree: Story = {
+  args: { kind: 'free', defaultHelper: 'helper-explore' },
   play: async ({ canvasElement }) => {
-    const panel = within(panelOf(canvasElement))
-    await expect(panel.getByRole('log', { name: 'What Documenter is doing' })).toBeVisible()
+    await expect(
+      within(canvasElement).getByRole('log', { name: 'What Explore is doing' }),
+    ).toBeVisible()
   },
 }
 
-/** A helper silent for seven minutes: its dot stops, grey, and its thread says where it stopped. */
-export const StuckHelper: Story = {
-  args: { helpers: STUCK, defaultHelper: 'helper-credit' },
+/** The build's tasks at rest: how far it is at a glance, nothing unfolded. */
+export const TasksAtAGlance: Story = {
   play: async ({ canvasElement }) => {
-    await seesTheLine(canvasElement, 'silent')
+    const tasks = within(within(canvasElement).getByRole('region', { name: 'Tasks of ATL-7' }))
+    await expect(tasks.getByLabelText('4 done')).toBeVisible()
+    await expect(tasks.getByLabelText('2 in progress')).toBeVisible()
+    await expect(tasks.queryAllByRole('button', { expanded: true })).toHaveLength(0)
+  },
+}
+
+/** The tasks by state: what waits for the user first. */
+export const TasksByState: Story = {
+  args: { defaultGrouping: 'state' },
+  play: async ({ canvasElement }) => {
+    const tasks = within(within(canvasElement).getByRole('region', { name: 'Tasks of ATL-7' }))
+    await expect(tasks.getByRole('group', { name: 'Waiting for you' })).toBeVisible()
+  },
+}
+
+/** The tasks as one list. */
+export const TasksAsAList: Story = {
+  args: { defaultGrouping: 'list' },
+  play: async ({ canvasElement }) => {
+    const tasks = within(within(canvasElement).getByRole('region', { name: 'Tasks of ATL-7' }))
+    await expect(tasks.getByRole('button', { name: 'One list' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    )
+  },
+}
+
+/** A task unfolded: its tries and checks, its files, what came back on it. */
+export const TaskOpened: Story = {
+  args: { defaultTask: 'story-export-a-month:bt-t2' },
+  play: async ({ canvasElement }) => {
+    const detail = within(within(canvasElement).getByRole('region', { name: 'T2 in detail' }))
+    await expect(detail.getByText(/ExportButton.tsx/)).toBeVisible()
+    await expect(detail.getByText('Main agent')).toBeVisible()
+  },
+}
+
+/** The same build over the chat: the tasks and an unfolded task use the whole width. */
+export const TaskOpenedOverTheChat: Story = {
+  args: { defaultOver: true, defaultTask: 'story-export-a-month:bt-t2' },
+  play: async ({ canvasElement }) => {
+    await expect(within(canvasElement).getByRole('region', { name: 'T2 in detail' })).toBeVisible()
+  },
+}
+
+/** The pill's permission answered: it goes, and the pill with it. */
+export const NoticeAnswered: Story = {
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const body = within(canvasElement.ownerDocument.body)
+    await userEvent.click(await canvas.findByRole('button', { name: /Waiting for your answer/ }))
+    await userEvent.click(await body.findByRole('button', { name: 'Run once' }))
+    await waitFor(() =>
+      expect(canvas.queryByRole('button', { name: /Waiting for your answer/ })).toBeNull(),
+    )
   },
 }

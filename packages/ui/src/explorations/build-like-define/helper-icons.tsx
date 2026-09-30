@@ -11,13 +11,14 @@ import type { ReactNode } from 'react'
  *
  * - the free helper · the face, with a second tile behind it: one more of Hemera, nothing else;
  * - the reviewer · its eyes are a pair of glasses: it reads, closely, with a fresh eye;
- * - the documenter · the tile is a page with its corner folded, the eyes on the work, a line under.
+ * - the documenter · the tile is a page with its corner folded, the eyes on the work, a line under;
+ * - the prototyper · the tile is drawn dashed, as a sketch is: nothing of it is final.
  *
  * Drawn on Tabler's grid and stroke (24, 2, round), so they stand beside the catalogue's icons in
  * a chip without looking borrowed. In the design system they would join `icons.ts`.
  */
 
-export type HelperIconName = 'free' | 'reviewer' | 'documenter'
+export type HelperIconName = 'free' | 'reviewer' | 'documenter' | 'prototyper'
 
 export type HelperIconSize = 'sm' | 'md' | 'lg' | 'xl'
 
@@ -66,6 +67,13 @@ const DRAWN: Record<HelperIconName, ReactNode> = {
       <path d="M14 3v4a3 3 0 0 0 3 3h4" />
       <path d="M7.5 12.5l1.5 0.6l1.5 -0.6M13.5 12.5l1.5 0.6l1.5 -0.6" />
       <path d="M8 16.5h7" />
+    </>
+  ),
+  prototyper: (
+    <>
+      <path d={TILE} strokeDasharray="3.2 2.6" />
+      <path d={eyes(12, 11.5)} />
+      <path d="M10 16.5l2 -1l2 1" />
     </>
   ),
 }

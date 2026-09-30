@@ -22,8 +22,9 @@ import {
  * utilities (`spec-slot`, `spec-panel-in`, `w-spec-panel`), so every panel of a Session is the
  * same panel.
  *
- * Beside the fold, a choice in two words — beside the chat, over the chat — lays the panel over
- * the chat, the whole width of the row, and takes it back. Over the chat and not pushing it: the chat keeps its width under the panel and nothing
+ * Beside the fold, one button lays the panel over the chat, the whole width of the row, and takes
+ * it back: arrows out while it is beside the chat, arrows in while it is over it, drawn as the
+ * catalogue's icons are, so it reads as the chevron's neighbour. Over the chat and not pushing it: the chat keeps its width under the panel and nothing
  * in it reflows, so what moves is the panel's own left edge, on the swap's spring. The chat is out
  * of reach while it is covered, and two things of it come up over the panel:
  *
@@ -65,15 +66,6 @@ const TITLE = 'flex min-w-0 shrink-0 items-center gap-2'
 
 /** Where the head line stands in the panel's head while the panel covers the chat. */
 const LINE = 'relative flex min-w-0 flex-1 items-center'
-
-/**
- * Where the panel stands, said in words and chosen by a press: beside the chat, or over it. Two
- * words rather than an icon, since an icon for "a panel over another" reads as nothing.
- */
-const PLACES = 'flex items-center gap-0.5 rounded-md border border-border p-0.5'
-
-const PLACE =
-  'rounded-sm px-2 py-0.5 text-xs text-muted-foreground outline-none hover:text-foreground focus-ring aria-pressed:bg-background aria-pressed:font-medium aria-pressed:text-foreground aria-pressed:shadow-sm'
 
 const END = 'ml-auto flex shrink-0 items-center gap-1.5'
 
@@ -249,26 +241,17 @@ export function PanelDock({
               </AnimatePresence>
             </span>
             <span className={END}>
-              <div role="group" aria-label="Where the panel stands" className={PLACES}>
-                <button
-                  type="button"
-                  className={PLACE}
-                  aria-pressed={!over}
-                  data-beside
-                  onClick={() => onOver(false)}
-                >
-                  Beside the chat
-                </button>
-                <button
-                  type="button"
-                  className={PLACE}
+              <Tooltip label={over ? 'Back beside the chat' : 'Over the chat'}>
+                <IconButton
+                  variant="ghost"
+                  size="sm"
+                  icon={<WidthIcon over={over} />}
+                  aria-label="Over the chat"
                   aria-pressed={over}
                   data-over-toggle
-                  onClick={() => onOver(true)}
-                >
-                  Over the chat
-                </button>
-              </div>
+                  onClick={() => onOver(!over)}
+                />
+              </Tooltip>
               <Tooltip label="Fold the panel">
                 <IconButton
                   variant="ghost"
@@ -306,5 +289,31 @@ export function PanelDock({
         </div>
       </div>
     </div>
+  )
+}
+
+/**
+ * The toggle's icon, on Tabler's grid and stroke (24, 2, round), which `icons.ts` does not carry
+ * yet: its `arrows-diagonal` while the panel is beside the chat, to lay it over, and its
+ * `arrows-diagonal-minimize-2` while it is over, to take it back.
+ */
+function WidthIcon({ over }: { over: boolean }): ReactNode {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      xmlns="http://www.w3.org/2000/svg"
+      aria-hidden="true"
+      fill="none"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className="size-icon-sm shrink-0 stroke-current"
+    >
+      {over ? (
+        <path d="M18 10h-4v-4M20 4l-6 6M6 14h4v4M10 14l-6 6" />
+      ) : (
+        <path d="M16 4h4v4M14 10l6 -6M8 20h-4v-4M4 20l6 -6" />
+      )}
+    </svg>
   )
 }

@@ -63,6 +63,7 @@ import { ToolCatalogue, toolCatalogueLayer } from '#engine/tools/catalogue.ts'
 import type { ToolArguments } from '#engine/tools/arguments.ts'
 import type { ToolOutcome } from '#engine/tools/catalogue.ts'
 import { ToolAccess, toolAccessLayer } from '#engine/tools/access.ts'
+import { approvalsLayer } from '#engine/tools/approvals.ts'
 import { ToolPermissions } from '#engine/tools/permissions.ts'
 import type { OutsideAnswer, OutsideRequest } from '#engine/tools/permissions.ts'
 import { Variables, variablesLayer } from '#engine/workspaces/variables.ts'
@@ -174,6 +175,7 @@ function engine(
     Layer.provideMerge(journalLayer),
     Layer.provideMerge(toolAccessLayer),
     Layer.provideMerge(Layer.succeed(ToolPermissions, human.service)),
+    Layer.provide(approvalsLayer),
     Layer.provideMerge(commandsLayer),
     Layer.provideMerge(variablesLayer),
     Layer.provide(setupPlaces(folder)),

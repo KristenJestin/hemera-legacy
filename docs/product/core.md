@@ -775,6 +775,18 @@ every Session, and recorded with each decision beside the policy version. A chan
 credential invalidates pending decisions. The thread and Journal distinguish the classifier's
 decision from the tool's outcome.
 
+A question one of Hemera's tools asks the human does not hold the agent. While Hemera's window is
+focused, the call waits for the answer a short grace — ten seconds by default, chosen in Hemera
+Auto's settings, none at all if the user prefers — and an answer in time is the call's own. Past
+it, or at once when the window is not focused, the agent is told the action waits for the user's
+approval under a request number and has not happened, and goes on with something else or ends its
+turn. The question stays in the Session's notices, whatever the turn does, until the user answers
+it or the Session's agent goes. The answer is acted on by Hemera itself — the command run, the
+file written — and what came of it, or the refusal, is handed to the agent as a run is: with the
+next prompt, or in a turn of its own when the agent is idle. The call's entry shows it pending,
+then done or refused. A question left open by an engine that stopped is withdrawn at the next
+start: nobody is left to act on its answer, and the notices never offer one the engine cannot take.
+
 The effort scale marks the level the agent recommends for the current model, and nothing where it
 recommends none. While the user has chosen no effort in the Session, a model change puts the
 agent on the level the new model recommends, so the scale stands on its recommended mark instead

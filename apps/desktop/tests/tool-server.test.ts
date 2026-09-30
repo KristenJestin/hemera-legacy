@@ -37,6 +37,7 @@ import { classifierSettingsLayer } from '#engine/classifier/settings.ts'
 import type { Database, SqliteClient } from '#engine/storage/database.ts'
 import { type GrantedAccess, ToolAccess, toolAccessLayer } from '#engine/tools/access.ts'
 import { toolCatalogueLayer, type ToolCatalogue } from '#engine/tools/catalogue.ts'
+import { approvalsLayer } from '#engine/tools/approvals.ts'
 import { ToolPermissions, type ToolPermissionsService } from '#engine/tools/permissions.ts'
 import { ToolServer, toolServerLayer } from '#engine/tools/server.ts'
 import { variablesLayer } from '#engine/workspaces/variables.ts'
@@ -152,6 +153,7 @@ function engine(
     Layer.provide(idleBuilds),
     Layer.provideMerge(offered === null ? toolAccessLayer : offering(offered)),
     Layer.provideMerge(Layer.succeed(ToolPermissions, permissions)),
+    Layer.provide(approvalsLayer),
     Layer.provideMerge(commandsLayer),
     Layer.provide(variablesLayer),
     Layer.provide(setupPlaces(folder)),

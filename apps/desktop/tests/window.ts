@@ -58,6 +58,7 @@ import { engineStatusLayer } from '#engine/status.ts'
 import { type Database, databaseLayer } from '#engine/storage/database.ts'
 import { toolAccessLayer } from '#engine/tools/access.ts'
 import { toolCatalogueLayer } from '#engine/tools/catalogue.ts'
+import { approvalsLayer } from '#engine/tools/approvals.ts'
 import { toolPermissionsLayer } from '#engine/tools/permissions.ts'
 import { toolServerLayer } from '#engine/tools/server.ts'
 import { gitLayer } from '#engine/git.ts'
@@ -186,6 +187,7 @@ async function openOver(
     Layer.provideMerge(builds),
     Layer.provideMerge(toolAccessLayer),
     Layer.provideMerge(toolPermissionsLayer),
+    Layer.provideMerge(approvalsLayer),
     Layer.provideMerge(commandsLayer),
     Layer.provideMerge(variablesLayer),
     // The Workspaces and the recipe, one instance the tools read and the window changes (#218).

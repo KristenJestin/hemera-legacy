@@ -35,6 +35,7 @@ import {
 import { type FSWatcher, existsSync, watch } from 'node:fs'
 
 import type { McpServer } from '@agentclientprotocol/sdk'
+import { and, eq, inArray } from 'drizzle-orm'
 
 import {
   AGENTS_FILE,
@@ -87,7 +88,9 @@ import { Sessions, type NativeRecord, type OptionChoice, type ThreadWrite } from
 import { type SpecDelivery, briefFor, briefed, definedBy } from '../specs/brief.ts'
 import { rawInputShown } from '../setup/hidden.ts'
 import { Database } from '../storage/database.ts'
+import { SESSION_ENTRY_ROLES, sessionEntries } from '../storage/schema.ts'
 import { ToolAccess } from '../tools/access.ts'
+import { Approvals, type LateAnswer, lateText } from '../tools/approvals.ts'
 import { ToolPermissions } from '../tools/permissions.ts'
 import { ToolServer } from '../tools/server.ts'
 import { Variables } from '../workspaces/variables.ts'
@@ -729,6 +732,8 @@ export const runtimeLayer = Layer.effect(
       Effect.catch(() => Effect.succeed(true)),
     )
     const permissions = yield* ToolPermissions
+    // The questions of Hemera's tools that no longer hold their turn, and their answers (#304).
+    const approvals = yield* Approvals
     const heldWords = yield* HeldWords
     const sessionModes = yield* SessionModes
     const pool = yield* Pool
@@ -2031,7 +2036,14 @@ export const runtimeLayer = Layer.effect(
      */
     const kept = (sessionId: string): Effect.Effect<void> =>
       Effect.gen(function* () {
-        yield* pool.held(sessionId, release(sessionId))
+        yield* pool.held(
+          sessionId,
+          // Nor is an agent idle while a request of its waits for the human (#304): the answer is
+          // handed to it, and letting it go would withdraw the request.
+          Effect.suspend(() =>
+            approvals.holding(sessionId) ? kept(sessionId) : release(sessionId),
+          ),
+        )
         yield* pool.used(sessionId)
       })
 
@@ -2639,6 +2651,47 @@ export const runtimeLayer = Layer.effect(
     }
 
     /**
+     * The answers the human gave to requests the agent was told to wait for (#304): what Hemera
+     * did, or that it did nothing, each a resource and a line of Hemera's. Unlike a run, an answer
+     * is a reason for a turn of its own: the agent may have ended its turn waiting for it.
+     */
+    const approvalsParcel = (sessionId: string, waiting: readonly LateAnswer[]): Parcel => {
+      const correlation = crypto.randomUUID()
+      const texts = waiting.map(lateText)
+      const lines = (turnId: string | null, handed: boolean) =>
+        Effect.forEach(
+          waiting,
+          (answer, index) =>
+            deliveryLine(
+              sessionId,
+              `delivery:${correlation}:${index}`,
+              turnId,
+              handed
+                ? `Hemera handed the agent the answer to request #${answer.request}.`
+                : `Not handed over, waiting for the next safe point: the answer to request #${answer.request}.`,
+              handed ? null : 'failed',
+              {
+                kind: 'approval',
+                fingerprint: fingerprintOf(texts[index] ?? ''),
+                deliveredAt: handed ? new Date().toISOString() : null,
+                reached: 'delivery_prompt',
+              },
+            ),
+          { discard: true },
+        )
+      return {
+        provisions: waiting.map((answer, index) => ({
+          uri: contextUri(`approval/${answer.request}`),
+          text: texts[index] ?? '',
+          mimeType: 'text/markdown',
+        })),
+        announce: (turnId) => lines(turnId, true),
+        taken: approvals.taken(sessionId, waiting),
+        missed: (turnId) => lines(turnId, false),
+      }
+    }
+
+    /**
      * The runs of the Session its agent was not told of as they now stand (issue #238): whoever
      * started them — the user from the line or a chip, the agent in the background — each a
      * resource in the order they happened, and a line of Hemera's. What the agent read in the
@@ -2781,6 +2834,8 @@ export const runtimeLayer = Layer.effect(
           context.queuedInternal(sessionId),
         )
         if (queued.length > 0) parcels.push(internalParcel(sessionId, queued))
+        const late = approvals.waiting(sessionId)
+        if (late.length > 0) parcels.push(approvalsParcel(sessionId, late))
         // The runs go last, right before the prompt they are read with (issue #238). A run is no
         // reason for a turn of its own: it goes with the next prompt, or with a delivery that
         // goes anyway.
@@ -3329,8 +3384,10 @@ export const runtimeLayer = Layer.effect(
         // A question one of Hemera's own tools is waiting on holds the turn just as still as the
         // agent's own, and the Stop ends it the way it ends that one: cancelled, so the call it
         // blocks answers rather than waiting for ever, and nothing acts (D6-05). Every one of
-        // them: an agent that ran two calls at once is waiting on two.
-        yield* permissions.withdrawn(sessionId)
+        // them: an agent that ran two calls at once is waiting on two. Not those that no longer
+        // hold the turn (#304): they wait for the human after the turn, and only the Session's end
+        // withdraws them.
+        yield* permissions.withdrawn(sessionId, approvals.questionsOf(sessionId))
 
         // A turn whose agent is still being started, or that waits on the gate behind a
         // delivery, has sent nothing to cancel: it is marked, and the prompt closes it as
@@ -3396,6 +3453,75 @@ export const runtimeLayer = Layer.effect(
         )
       })
 
+    /**
+     * The questions of the thread that are still open with nobody waiting on them — asked by a run
+     * of the engine that has since stopped, or whose waiter went — and that are no longer the
+     * turn's: `null` for every Session.
+     */
+    const leftOpen = (sessionId: string | null, toolCallId?: string) =>
+      database
+        .select()
+        .from(sessionEntries)
+        .where(
+          and(
+            inArray(sessionEntries.kind, ['permission_request', 'hemera_tool_call']),
+            eq(sessionEntries.state, 'pending'),
+            sessionId === null ? undefined : eq(sessionEntries.sessionId, sessionId),
+            toolCallId === undefined
+              ? undefined
+              : eq(sessionEntries.correlationId, `perm:${toolCallId}`),
+          ),
+        )
+
+    /**
+     * Closes what `leftOpen` found as a question the agent stopped waiting on is closed: the
+     * request cancelled, and a decision that says it was withdrawn, so it leaves the notices
+     * and the pill never offers an answer the engine cannot take. A call left waiting for such an
+     * answer ends as refused: nothing was done.
+     */
+    const withdrawnLeftOpen = (
+      rows: readonly (typeof sessionEntries.$inferSelect)[],
+      why: string,
+    ) =>
+      Effect.forEach(
+        rows,
+        (row) =>
+          Effect.gen(function* () {
+            if (row.kind === 'hemera_tool_call') {
+              yield* write(row.sessionId, {
+                role: 'agent',
+                kind: 'hemera_tool_call',
+                body: `${why}, so nothing was done`,
+                payload: row.payload.replace('"state":"pending"', '"state":"refused"'),
+                correlationId: row.correlationId,
+                turnId: row.turnId,
+                state: 'refused',
+              })
+              return
+            }
+            const toolCallId = (row.correlationId ?? '').replace(/^perm:/, '')
+            yield* write(row.sessionId, {
+              role: SESSION_ENTRY_ROLES.find((one) => one === row.role) ?? 'hemera',
+              kind: 'permission_request',
+              body: row.body,
+              payload: row.payload,
+              correlationId: row.correlationId,
+              turnId: row.turnId,
+              state: 'cancelled',
+            })
+            yield* write(row.sessionId, {
+              role: 'hemera',
+              kind: 'permission_decision',
+              body: `Withdrawn: ${why}`,
+              payload: JSON.stringify({ toolCallId, optionId: null, answer: 'withdrawn' }),
+              correlationId: `decision:${toolCallId}`,
+              turnId: row.turnId,
+              state: 'cancelled',
+            })
+          }),
+        { discard: true },
+      )
+
     const decide = (sessionId: string, toolCallId: string, optionId: string | null) =>
       Effect.gen(function* () {
         const turn = turns.get(sessionId)
@@ -3411,12 +3537,13 @@ export const runtimeLayer = Layer.effect(
             optionId === 'allowed' ? 'allowed' : 'refused',
           )
           if (answered) return
-          return yield* Effect.fail(
-            new AgentRuntimeError({
-              what: 'deciding',
-              cause: 'no permission is waiting in this Session',
-            }),
+          // Nobody waits on it any more — its engine restarted, its agent went, it was answered
+          // already: the notice closes quietly, and nothing errs (#304).
+          const open = yield* attempt('reading the question', leftOpen(sessionId, toolCallId))
+          yield* withdrawnLeftOpen(open, 'nobody was waiting for this answer any more').pipe(
+            Effect.ignore,
           )
+          return
         }
 
         turn.permission = null
@@ -3525,6 +3652,12 @@ export const runtimeLayer = Layer.effect(
         yield* briefWhenIdle(sessionId)
       })
 
+    // The human answered a request the agent was told to wait for (#304): handed over now when the
+    // agent is idle — started again if it was let go of — or once the running turn ends.
+    approvals.listen((sessionId) => {
+      if (!turns.has(sessionId) && !starting.has(sessionId)) wakeSoon(sessionId)
+    })
+
     const tell = (sessionId: string, text: string, said: string) =>
       Effect.sync(() => {
         words.set(sessionId, [...(words.get(sessionId) ?? []), { text, said }])
@@ -3572,6 +3705,18 @@ export const runtimeLayer = Layer.effect(
         }),
       stopTurn: (sessionId) => owned(stop(sessionId)),
     })
+
+    // What a previous run of the engine left open has nobody left to wait on it: its agents went
+    // with it. Closed before anything is asked, so the notices never offer an answer the engine
+    // cannot take (#304).
+    yield* attempt('reading the questions left open', leftOpen(null)).pipe(
+      Effect.flatMap((rows) =>
+        withdrawnLeftOpen(rows, 'Hemera restarted before this was answered'),
+      ),
+      Effect.catch((refusal) =>
+        diagnostic.write(`agents: the questions left open were not closed: ${refusal.message}`),
+      ),
+    )
 
     /**
      * What the engine sees.

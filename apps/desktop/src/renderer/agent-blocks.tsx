@@ -68,7 +68,7 @@ import {
   questionEntryOf,
 } from './spec-entries.ts'
 import type { CallLink } from './call-links.ts'
-import { decidesARequest, decisionOf, permissionStandingOf } from './notices.ts'
+import { decidesARequest, decisionOf, permissionStandingOf, unaskedStandingOf } from './notices.ts'
 
 /**
  * What each entry of a thread is drawn as (design D5-11, D5-14, D5-16).
@@ -681,7 +681,7 @@ function outcomeOf(link: CallLink | undefined, context: AgentContext): Outcome {
       ? permissionStandingOf(link.request, thread)
       : link.decision === undefined
         ? undefined
-        : 'unasked'
+        : unaskedStandingOf(link.decision)
   const run =
     link.run === undefined
       ? null

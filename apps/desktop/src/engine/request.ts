@@ -62,6 +62,7 @@ import { contextOf } from './context/view.ts'
 import { type InvalidCursorError, Journal } from './journal.ts'
 import { type PathOutsideBaseError, entriesUnder } from './paths.ts'
 import { Preferences } from './preferences.ts'
+import { ClassifierSettings } from './classifier/settings.ts'
 import {
   type InvalidBranchPrefixError,
   type InvalidWorkspacesRootError,
@@ -183,6 +184,7 @@ export function answer(
   EngineResponse<EngineRequestName>,
   Refusal,
   | Preferences
+  | ClassifierSettings
   | EngineStatus
   | Projects
   | Journal
@@ -204,6 +206,50 @@ export function answer(
   | Builds
 > {
   return Effect.gen(function* () {
+    if (decision.name === 'classifier.state') {
+      const current = yield* (yield* ClassifierSettings).current
+      return {
+        mode: current.mode,
+        hasKey: current.key !== null,
+        consent: current.consent,
+        generation: current.generation,
+      }
+    }
+    if (decision.name === 'classifier.mode.write') {
+      const settings = yield* ClassifierSettings
+      const previous = yield* settings.current
+      yield* settings.select(decision.argument.mode)
+      if (previous.mode !== decision.argument.mode) yield* (yield* AgentRuntime).classifierChanged
+      return
+    }
+    if (decision.name === 'classifier.consent.write') {
+      const settings = yield* ClassifierSettings
+      const previous = yield* settings.current
+      yield* settings.setConsent(decision.argument.consent)
+      if (previous.mode === 'hemera-auto' && previous.consent !== decision.argument.consent)
+        yield* (yield* AgentRuntime).classifierChanged
+      return
+    }
+    if (decision.name === 'classifier.ciphertext.read') {
+      return yield* (yield* ClassifierSettings).ciphertext
+    }
+    if (decision.name === 'classifier.key.replace') {
+      const settings = yield* ClassifierSettings
+      yield* settings.replaceKey(decision.argument.ciphertext, decision.argument.plaintext)
+      if ((yield* settings.current).mode === 'hemera-auto')
+        yield* (yield* AgentRuntime).classifierChanged
+      return
+    }
+    if (decision.name === 'classifier.key.restore') {
+      return yield* (yield* ClassifierSettings).restoreKey(decision.argument.plaintext)
+    }
+    if (decision.name === 'classifier.key.remove') {
+      const settings = yield* ClassifierSettings
+      yield* settings.removeKey
+      if ((yield* settings.current).mode === 'hemera-auto')
+        yield* (yield* AgentRuntime).classifierChanged
+      return
+    }
     if (decision.name === 'engine.status') return yield* (yield* EngineStatus).read
 
     if (decision.name === 'preferences.read') return yield* (yield* Preferences).read

@@ -38,8 +38,10 @@ import {
   StartScreen,
   type ArchivedProject,
   type CommandGroup,
+  type ClassifierSectionProps,
   type HomeSession,
   type JournalFilter,
+  type MenuClassifier,
   type OfferedAgent,
   type ProfileFacts,
   type ProjectSettingsDraft,
@@ -86,6 +88,7 @@ import {
   updateAgent,
 } from './agent-store.ts'
 import { bareRowOf, offeredOf } from './bare-mode.ts'
+import { menuStatus, settingsEvaluator } from './classifier-status.ts'
 import {
   acceptProposal,
   addToCatalogue,
@@ -382,6 +385,15 @@ export function Application() {
   const [commanding, setCommanding] = useState(false)
   const [creating, setCreating] = useState(false)
   const [facts, setFacts] = useState<ProfileFacts | null>(null)
+  const [classifier, setClassifier] = useState<{
+    mode: ClassifierSectionProps['mode']
+    credential: ClassifierSectionProps['credential']
+    consent: boolean
+    generation: number
+  } | null>(null)
+  const [classifierBusy, setClassifierBusy] = useState(false)
+  const [classifierError, setClassifierError] = useState<string | undefined>()
+  const [classifierUnread, setClassifierUnread] = useState(false)
   const [subtitle, setSubtitle] = useState('Hemera')
   // Kept as the engine answered them and not as the page draws them: restoring one is a change
   // like any other and carries the version it was read at, which a name and a date do not have.
@@ -766,6 +778,49 @@ export function Application() {
     if (place !== 'settings') return
     void checkAgents()
   }, [place])
+
+  const readClassifier = useCallback(async () => {
+    try {
+      setClassifier(await window.hemera.invoke('classifier.read', {}))
+      setClassifierUnread(false)
+    } catch {
+      setClassifierUnread(true)
+      setClassifierError('The classifier settings could not be read.')
+    }
+  }, [])
+
+  useEffect(() => {
+    void readClassifier()
+  }, [readClassifier])
+
+  useEffect(() => {
+    if (place === 'settings') void readClassifier()
+  }, [place, readClassifier])
+
+  const changeClassifier = (operation: () => Promise<void>) => {
+    setClassifierBusy(true)
+    setClassifierError(undefined)
+    void operation()
+      .then(readClassifier)
+      .catch(() => {
+        setClassifierError('The classifier change could not be saved.')
+      })
+      .finally(() => setClassifierBusy(false))
+  }
+
+  const menuClassifier: MenuClassifier | undefined =
+    classifier === null
+      ? undefined
+      : {
+          mode: classifier.mode,
+          status: menuStatus({
+            busy: classifierBusy,
+            failed: classifierUnread,
+            credential: classifier.credential,
+            consent: classifier.consent,
+          }),
+          onOpenSettings: () => setPlace('settings'),
+        }
 
   // Remembered for the next start, which is one Session per Project and not one in all. What
   // was written is kept here too: this is the answer the next opening of a Project is placed
@@ -1195,6 +1250,32 @@ export function Application() {
                 .finally(() => setUpdating(null))
             },
           }}
+          classifier={
+            classifier === null
+              ? undefined
+              : {
+                  mode: classifier.mode,
+                  onModeChange: (mode) =>
+                    changeClassifier(() => window.hemera.invoke('classifier.mode.write', { mode })),
+                  engine: 'jev',
+                  onEngineChange: () => undefined,
+                  credential: classifier.credential,
+                  credentialMessage: classifierError,
+                  evaluator: settingsEvaluator({
+                    busy: classifierBusy,
+                    failed: classifierUnread,
+                  }),
+                  consent: classifier.consent,
+                  onConsentChange: (consent) =>
+                    changeClassifier(() =>
+                      window.hemera.invoke('classifier.consent.write', { consent }),
+                    ),
+                  onSaveKey: (key) =>
+                    changeClassifier(() => window.hemera.invoke('classifier.key.save', { key })),
+                  onRemoveKey: () =>
+                    changeClassifier(() => window.hemera.invoke('classifier.key.remove', {})),
+                }
+          }
           archived={archived.map((project): ArchivedProject => ({
             id: project.id,
             name: project.name,
@@ -1381,6 +1462,7 @@ export function Application() {
           : workspaceRootOf(open.workspaceId, sessions.workspaces, current.mainPath)
       return (
         <SessionPage
+          classifier={menuClassifier}
           // Keyed on the Session: a draft of a title belongs to the Session it is about, and
           // carrying it to the next one would be renaming something nobody asked about.
           key={open.id}
@@ -1459,6 +1541,7 @@ export function Application() {
       // and carrying it over to the next one is carrying a question to somewhere it was never
       // asked. Changing Project starts a blank one, as opening the window does.
       <HomePage
+        classifier={menuClassifier}
         key={active.id}
         projectName={active.name}
         sessions={recent}

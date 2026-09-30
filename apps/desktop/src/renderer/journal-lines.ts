@@ -63,6 +63,8 @@ const PHASE_WORDS = new Map([
   ['prepare', 'Build getting ready'],
   ['execute', 'Building'],
   ['verify', 'Final checks'],
+  ['review', 'Build in review'],
+  ['feedback', 'Fixing the feedback of the review'],
 ])
 
 /** Where a check ran: the Workspace root, or the repository's path (D10-06). */

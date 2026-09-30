@@ -24,7 +24,6 @@ import {
   taskStateLabel,
   tasksProgressOf,
 } from './model.ts'
-import { ReviewCard } from './review-card.tsx'
 import { StopBuild } from './stop-build.tsx'
 import { BuildTries, TaskStage } from './task-stage.tsx'
 import { ago, taskTime, tryLabel } from './times.ts'
@@ -75,9 +74,6 @@ const BANDS = {
 } as const
 
 const APPROACH = 'border-b border-border px-5 py-2'
-
-/** The review card, first in the pane under the head: the decision the pane is opened for. */
-const REVIEW = 'mx-6 mt-3'
 
 const APPROACH_LINE = 'flex items-center gap-2 text-sm'
 
@@ -140,8 +136,8 @@ interface Standing {
 /** Where the build stands, as a dot and a word: paused wins over the phase it paused in. */
 function phaseOf(build: BuildViewData): Standing {
   if (build.pausedAt !== null && !closed(build)) return { word: 'Paused', tone: 'pending' }
-  // Everything is done and green, and nothing moves until the user accepts: the build is not
-  // building any more, it is waiting for the review it is owed (issue #116).
+  // A round is open on a result that is green, and nothing moves until the user accepts or asks
+  // for a fix: the build is waiting for the review it is owed (issues #116, #279).
   if (build.canAccept && !closed(build)) {
     return { word: 'Waiting for your review', tone: 'success' }
   }
@@ -149,11 +145,16 @@ function phaseOf(build: BuildViewData): Standing {
     prepare: 'running',
     execute: 'running',
     verify: 'running',
+    review: 'running',
+    feedback: 'running',
     accepted: 'success',
     stopped: 'cancelled',
   }
   return { word: PHASE_LABELS[build.phase], tone: tones[build.phase] }
 }
+
+/** The phases whose line says where the final checks stand: from `verify` on, until it closes. */
+const FINALS: readonly BuildViewData['phase'][] = ['verify', 'review', 'feedback']
 
 /** Whether the build is over: accepted or stopped, readable, and nothing runs in it any more. */
 function closed(build: BuildViewData): boolean {
@@ -225,7 +226,7 @@ function StateLine({
       {stories.length === 0 && tasks.of > 0 && (
         <span className={QUIET}>{`${String(tasks.done)} of ${String(tasks.of)} tasks done`}</span>
       )}
-      {build.phase === 'verify' && final !== undefined && (
+      {FINALS.includes(build.phase) && final !== undefined && (
         <span className={QUIET}>
           {final.result === 'green'
             ? 'final checks green'
@@ -324,8 +325,6 @@ export interface BuildViewProps {
   onTaskSkip: (taskId: string, reason: string, unblock: boolean) => void
   /** The Spec stands: the blocked task goes back to ready, with the note the user wrote. */
   onDismissBlocker: (blockerId: string, note: string | null) => void
-  /** The build waits for the user's review: the panel asks for it where it is written. */
-  onOpenChat: () => void
 }
 
 export function BuildView({
@@ -343,7 +342,6 @@ export function BuildView({
   onTaskDone,
   onTaskSkip,
   onDismissBlocker,
-  onOpenChat,
 }: BuildViewProps): ReactNode {
   const [chosen, setChosen] = useState<string | null>(() => firstShown(build))
   const [unfolded, setUnfolded] = useState<readonly string[]>([])
@@ -494,7 +492,6 @@ export function BuildView({
         <StateLine build={build} stories={rows} now={now} />
       </header>
       <Band build={build} />
-      {!over && build.canAccept && <ReviewCard className={REVIEW} onOpenChat={onOpenChat} />}
       <Approach build={build} />
       <div className={BODY} role="region" tabIndex={0} aria-label={`The build of ${build.specKey}`}>
         {rows.length === 0 && outside.length === 0 && (

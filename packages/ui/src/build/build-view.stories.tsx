@@ -10,7 +10,9 @@ import {
   BUILDING,
   FINAL_CHECKS,
   FINAL_CHECKS_RED,
+  FIXING,
   GETTING_READY,
+  IN_REVIEW,
   NOW,
   NO_STORIES,
   PAUSED,
@@ -32,7 +34,7 @@ import { BuildView } from './build-view.tsx'
 const meta = {
   title: 'Blocks/Build/BuildView',
   component: BuildView,
-  tags: ['autodocs'],
+  tags: ['autodocs', 'updated'],
   parameters: { layout: 'fullscreen' },
   decorators: [
     (Story) => (
@@ -55,7 +57,6 @@ const meta = {
     onTaskDone: fn(),
     onTaskSkip: fn(),
     onDismissBlocker: fn(),
-    onOpenChat: fn(),
     onSelect: fn(),
   },
   argTypes: {
@@ -75,7 +76,6 @@ const meta = {
     onTaskDone: { action: 'task done' },
     onTaskSkip: { action: 'task skipped' },
     onDismissBlocker: { action: 'blocker dismissed' },
-    onOpenChat: { action: 'chat opened' },
     onSelect: { action: 'task chosen' },
   },
 } satisfies Meta<typeof BuildView>
@@ -261,7 +261,29 @@ export const FinalChecksRed: Story = {
   },
 }
 
-/** Green and nothing waiting: Accept is offered, and it is the one thing to press. */
+/** In review: the final checks green, the result being reviewed before the user's round opens. */
+export const InReview: Story = {
+  args: { build: IN_REVIEW },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await expect(canvas.getByText('In review', { selector: 'span' })).toBeVisible()
+    await expect(canvas.getByText('final checks green')).toBeVisible()
+    await expect(canvas.queryByRole('button', { name: 'Accept' })).toBeNull()
+    await expect(canvas.getByRole('button', { name: 'Pause' })).toBeVisible()
+  },
+}
+
+/** Fixing the feedback of a round: no Accept until the next round opens. */
+export const FixingTheFeedback: Story = {
+  args: { build: FIXING },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await expect(canvas.getByText('Fixing the feedback', { selector: 'span' })).toBeVisible()
+    await expect(canvas.queryByRole('button', { name: 'Accept' })).toBeNull()
+  },
+}
+
+/** A round open on a green result: Accept is offered, and it is the one thing to press. */
 export const ReadyToAccept: Story = {
   args: { build: READY_TO_ACCEPT },
   play: async ({ canvasElement, args }) => {

@@ -147,7 +147,6 @@ const SURFACES = {
     'yours-block',
     'blocker-block',
     'build-spec-panel',
-    'review-card',
     'build-panel',
   ],
 }
@@ -266,7 +265,9 @@ const NAMED_STATES = new Map([
       'Paused',
       'FinalChecks',
       'FinalChecksRed',
+      'InReview',
       'ReadyToAccept',
+      'FixingTheFeedback',
       'Accepted',
       'Stopped',
       'Keyboard',
@@ -278,7 +279,6 @@ const NAMED_STATES = new Map([
     ['HumanTask', 'ThreeRedTries', 'Banner', 'BannerThreeRedTries', 'Skipping', 'Keyboard'],
   ],
   ['build/blocker-block', ['InTheView', 'Banner', 'Dismissed', 'Keyboard']],
-  ['build/review-card', ['WaitingForYourReview', 'OpeningTheChat']],
   ['build/build-spec-panel', ['ReadOnly', 'Tasks', 'Keyboard']],
   // Lot 22: the page of a `build` Session, `Complete` first for the UI gate, then one screen per
   // moment of the build, then the paths through it: the panel folded to its band and the chat it
@@ -300,7 +300,6 @@ const NAMED_STATES = new Map([
       'SpecTakesTheViewsPlace',
       'NoticeOpensTheTask',
       'YoursAmongTheNotices',
-      'ReviewAmongTheNotices',
       'Keyboard',
     ],
   ],
@@ -625,7 +624,6 @@ describe('Catalogue, coquille et surfaces, et rien d’autre', () => {
       'TaskStage',
       'YoursBlock',
       'BlockerBlock',
-      'ReviewCard',
       'BuildSpecPanel',
       'BuildPanel',
       'BuildChecks',

@@ -48,7 +48,7 @@ import {
 } from '@hemera/core'
 import { and, desc, eq } from 'drizzle-orm'
 import { Context, Deferred, Effect, Layer } from 'effect'
-import { mkdir, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, readdir, realpath, rename, rm, stat, writeFile } from 'node:fs/promises'
 import { homedir, userInfo } from 'node:os'
 import { basename, dirname, join, relative, resolve } from 'node:path'
 
@@ -80,7 +80,7 @@ import {
   type ParsedCall,
   parseCall,
 } from './arguments.ts'
-import { type RefusedPathError, resolveInside } from './paths.ts'
+import { type RefusedPathError, containedIn, resolveInside } from './paths.ts'
 import { type OutsideAnswer, ToolPermissions } from './permissions.ts'
 import { type Page, type ReadRange, numbered, readPage } from './read.ts'
 import { searchIn } from './search.ts'
@@ -425,16 +425,36 @@ export const toolCatalogueLayer: Layer.Layer<
       platform,
     }
     /**
+     * The sensitive place a path is in. Below the root, only what sits below it counts: Hemera
+     * assembles Workspaces in its own data folder, and a Workspace is not sensitive for being
+     * there — a `.env` in it is.
+     */
+    const sensitiveUnder = (roots: readonly string[], path: string) => {
+      const root = roots.find((one) => containedIn(one, path))
+      if (root === undefined) return sensitivePlace(path, placeContext)
+      const below = sensitivePlace(relative(root, path), placeContext)
+      return below === null ? null : shownFromHome(join(root, below), placeContext)
+    }
+    /** A root as it is spelled and as the disk has it, so a linked home is still the root. */
+    const rootsOf = (root: string) =>
+      Effect.promise(() =>
+        realpath(root).then(
+          (real) => [root, real],
+          () => [root],
+        ),
+      )
+    /**
      * What a place a call points at is: outside the root, sensitive, or neither. `written` is the
      * path as named, made absolute; `place` is where it leads once `..` and links are followed.
      */
     const pointed = (
+      roots: readonly string[],
       written: string,
       place: { readonly inside: boolean | null; readonly path?: string },
     ) => {
       const outside = place.inside !== true
       const where = place.path ?? written
-      const sensitive = sensitivePlace(written, placeContext) ?? sensitivePlace(where, placeContext)
+      const sensitive = sensitiveUnder(roots, written) ?? sensitiveUnder(roots, where)
       const shown = shownFromHome(where, placeContext)
       const concerns: PlaceConcern[] = []
       if (outside) concerns.push({ kind: 'outside', place: shown })
@@ -1522,17 +1542,18 @@ export const toolCatalogueLayer: Layer.Layer<
             // every spelling, and words that do not read taken for outside (#306).
             const [program = '', ...words] = wordsOf(commandLine)
             const base = entry === undefined ? root : home.path
+            const bases = yield* rootsOf(base)
             const namedPlaces =
               judged === null ? null : placesNamed([program, ...words], placeContext)
             const points =
               namedPlaces === null
                 ? []
                 : [
-                    pointed(resolvedPlace.path, resolvedPlace),
+                    pointed(bases, resolvedPlace.path, resolvedPlace),
                     ...(yield* Effect.forEach(namedPlaces.paths, (path) => {
                       const written = resolve(resolvedPlace.path, path)
                       return placeOf(base, written).pipe(
-                        Effect.map((place) => pointed(written, place)),
+                        Effect.map((place) => pointed(bases, written, place)),
                       )
                     })),
                   ]
@@ -2078,7 +2099,7 @@ export const toolCatalogueLayer: Layer.Layer<
                 (yield* answered(variables.givenFor(project.id, workspace.id))) ?? {}
               // Where the call points: outside the root, or at a sensitive place even inside it,
               // asks whatever the judge says (#306).
-              const points = pointed(resolve(root, namedTarget ?? '.'), place)
+              const points = pointed(yield* rootsOf(root), resolve(root, namedTarget ?? '.'), place)
               const classified = yield* classify(
                 asked,
                 made,

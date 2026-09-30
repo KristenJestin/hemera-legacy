@@ -39,6 +39,8 @@ const MARK_FACES: Readonly<Record<ToolMark, FaceState>> = {
   'read-build': 'reading',
   'finish-task': 'checking',
   'block-task': 'blocked',
+  // The replay of a bug's reproduction (issue #203): the agent checking what it built.
+  'replay-reproduction': 'checking',
 }
 
 /**

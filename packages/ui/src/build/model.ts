@@ -85,6 +85,17 @@ export interface BuildAttemptView {
   result: BuildAttemptResult | null
   checks: BuildCheckView[]
   files: BuildFileView[]
+  /**
+   * The final checks of a `bug`: the replay of its reproduction the agent reported before them;
+   * null when it reported none (issue #203).
+   */
+  reproduction?: BuildReproductionView | null | undefined
+}
+
+/** A replay of a bug's reproduction: what the agent observed, and whether the bug is gone. */
+export interface BuildReproductionView {
+  observed: string
+  gone: boolean
 }
 
 /** One contractual task of the build, with what Hemera kept about it. */
@@ -214,12 +225,29 @@ export function storyRowsOf(build: BuildViewData, stories: readonly StoryView[])
   })
 }
 
+/**
+ * The tasks no story of the build holds (issue #203): a Spec may have no story at all — a `bug` or a
+ * `maintenance` often has none — and a task may cover none of the stories it has. They are drawn in
+ * a group of their own, after the stories, so that every task of the build can be seen and opened.
+ */
+export function outsideOf(build: BuildViewData, rows: readonly BuildStoryRow[]): BuildTaskView[] {
+  return build.tasks.filter((task) => !rows.some((row) => row.tasks.includes(task)))
+}
+
+/** How many of the tasks are over — done, or skipped by the user — and of how many. */
+export function tasksProgressOf(tasks: readonly BuildTaskView[]) {
+  const done = tasks.filter((task) => task.state === 'done' || task.state === 'skipped').length
+  return { done, of: tasks.length }
+}
+
 /** Everything the build view draws, as the engine answers `build.read`. */
 export interface BuildViewData {
   sessionId: string
   specId: string
   specKey: string
   specTitle: string
+  /** What the Spec proves; a `bug`'s final checks wait for the replay of its reproduction. */
+  specType?: 'feature' | 'bug' | 'maintenance' | undefined
   phase: BuildPhase
   /** When the user paused it; null while it runs. */
   pausedAt: string | null

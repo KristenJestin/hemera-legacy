@@ -14,10 +14,13 @@ import { join } from 'node:path'
 import { Effect, Result } from 'effect'
 import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
 
+import { offeredTools } from '@hemera/core'
+
 import type { FakeStep } from '#engine/agents/fake.ts'
 import { AgentRuntime } from '#engine/agents/runtime.ts'
 import { Builds, PAUSED, recoveredBuilds } from '#engine/build/build.ts'
 import { OBSOLETE } from '#engine/build/tasks.ts'
+import { Sessions } from '#engine/sessions.ts'
 import { Specs } from '#engine/specs/specs.ts'
 import { Launches } from '#engine/workspaces/launches.ts'
 import { recovered } from '#engine/workspaces/preparation.ts'
@@ -508,5 +511,44 @@ describe('One build per Spec', () => {
     expect(seen.view.phase).toBe('stopped')
     expect(seen.view.detail).toBe(OBSOLETE)
     expect(statesOf(seen.view)).toEqual({ T1: 'ready', T2: 'ready', T3: 'waiting' })
+  })
+})
+
+describe('A free Session is never made a build', () => {
+  test('a build of a ready Spec is a Session of its own, and the free one stays free', async () => {
+    const { agent } = buildAgent({ execute: () => [] })
+    opened = await openWindow(dataFolder, agent, buildAgent().agent)
+    const seen = await opened.running(
+      Effect.gen(function* () {
+        const spec = yield* aReadySpec(dataFolder, THREE)
+        const sessions = yield* Sessions
+        const free = yield* sessions.create(spec.projectId, 'claude')
+        const building = yield* launched(spec.specId, spec.workspaceId)
+        const builds = yield* Builds
+        // Nothing a build answers to reaches the free Session: no view, no build tool, no review.
+        const view = yield* Effect.flip(builds.view(free.id))
+        const signal = yield* builds.tool(free.id, {
+          tool: 'task_finished',
+          arguments: { task: 'T1' },
+        })
+        yield* builds.review(free.id)
+        return {
+          free: (yield* sessions.one(free.id)).session,
+          building: (yield* sessions.one(building)).session,
+          view,
+          signal,
+          journal: yield* journalOf(free.id),
+        }
+      }),
+    )
+    expect(seen.building.id).not.toBe(seen.free.id)
+    expect(seen.building.mission).toBe('build')
+    expect(seen.free.mission).toBe('free')
+    expect(seen.free.specId).toBeNull()
+    expect(seen.view.message).toBe(`No build has anything named "${seen.free.id}".`)
+    expect(seen.signal).toMatchObject({ ok: false, refused: true })
+    expect(seen.journal.filter((line) => line.type.startsWith('build.'))).toEqual([])
+    // A free Session is offered no build tool, so none of its calls can ask for one (D10-13).
+    expect(offeredTools('free')).not.toContain('task_finished')
   })
 })

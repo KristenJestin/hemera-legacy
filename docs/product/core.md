@@ -772,17 +772,32 @@ a `build` Session can perform an intermediate code review.
 - A `define` Session keeps the chat in the centre and the live Spec beside it, in the place of
   the side column; its header reads its mission, its agent and the key of its Spec. A `free`
   Session offers no Spec of its own: one begins with its agent's proposal in the thread.
-- An active `build` Session puts task progress and execution activity in the centre: the
-  build view, with the agent's approach, the tasks grouped by state with their times, and a
-  task's stage with its tries, their checks and the files they changed. The chat stands narrow
-  on its side and folds to a band; it is never out of reach. What waits for the user — a task
-  that is theirs, a blocker the agent raised — is said in the view, as a banner above the
-  composer and by a notification of the system. A "Spec" control opens the frozen revision the
-  build works from, read only, beside the view, and folds the chat while it is open.
-- When a `build` is finished or requests an intervention, the chat can take back the
-  central place to explain the result and collect feedback.
-- During the automatic review then the user validation, the `build` Session highlights
-  the result, the diff and the proofs to verify.
+- A `build` Session is the page every Session has — its head, the chat in the centre, the
+  composer and the notices on its edge — with the build in a panel on its right, where a
+  `define` Session has its Spec. The panel opens unfolded, a share of the row, and folds to a
+  band beside the chat: the band keeps the build's mark, and a dot while something in the build
+  waits for the user. Folding and unfolding move its width, which pushes the chat; the chat is
+  never folded nor out of reach.
+- The panel holds the build view: the Spec's key and title, where the build stands as a dot and
+  a word, and the controls of the build — "Spec", Pause or Resume, Accept once it is offered, and
+  the one Stop build. Under them come the agent's approach, then the stories of the frozen Spec in
+  its order, each with its narrative, its criteria and a dot saying where it stands — to do, in
+  progress, done, blocked — read from its tasks and from nothing else. A story's tasks fold under
+  it; a task unfolds its stage, one at a time: its tries, their checks and the files they
+  changed. The tasks no story holds — a `bug` or a `maintenance` often has no story — stand after
+  the stories in a group of their own, and the head then counts the tasks done instead of the
+  stories. The final checks come last, once the build reaches them.
+- "Spec" opens the frozen revision the build works from, read only, in the view's place inside
+  the panel, and closing it gives the view back as it was; the chat does not move either way.
+- What waits for the user in a build — a task that is theirs, a blocker the agent raised, the
+  review — is said in the view, where it is read, and is one kind of the Session's notices, on
+  the composer's edge, where it is answered at a glance: `Skip…` and `Done` for a task, `The Spec
+  stands` and `Open` for a blocker, `Review` and `Accept` for the review. A permission the agent
+  asks is another kind of the same notices, so neither ever hides the other. A task that becomes
+  the user's and a blocker raised are also told by a notification of the system.
+- Once every story is done and the final checks are green, the view opens on the review: a card
+  that asks for the user's review, written in the chat, above the approach, and Accept in its
+  head (see "What the first build runs").
 
 When a Session has a mission, its interface shows the useful information about
 that mission. When it is linked to a Spec, it also shows the useful information
@@ -1054,7 +1069,7 @@ where it stood.
   in the same transaction. The agent never sets a state: it says `task_finished(T2)` or
   `task_blocked(T3, reason)`, reads the frozen Spec and the build through `build_read`, and
   Hemera decides. A build Session is offered the file, search, command, Project and Session
-  tools and these three, never a Spec write tool.
+  tools, these three and `reproduction_replayed` (below), never a Spec write tool.
 - **Checks and tries**: a finished task is checked; all green, or no check at all, makes it
   done — "done, not verified" when nothing judged it. A red check starts a new try, and the
   agent's next turn carries the red checks, where they ran and the last lines of their output.
@@ -1071,9 +1086,21 @@ where it stood.
   not paused, hands the agent a brief of what is done with its evidence and what was in
   progress with its tries, and asks it to check the real state before redoing anything; the
   checks of a task left checking run again.
-- **Accept**: once the end checks are green and nothing waits for the user, the build view
-  offers Accept; the build is accepted, the Spec stays `in_progress`, and the branch and the
-  files stay in the Workspace for delivery. Stop closes a build for good; a stopped build stays
+- **Review**: once the end checks are green and nothing waits for the user, the build waits for
+  the user's review. The user writes it in the chat, as they would say it; the message they send
+  then is the review: the build goes back to `execute`, the agent is handed a brief of the review
+  in front of the message, every task stands where it stood, and once that turn is over the end
+  checks of the whole Spec run again. Accept is refused while that work runs, and the build waits
+  for the user again once they are green. Nothing else the user writes in the chat moves a phase.
+- **A bug's reproduction**: in `verify`, and in a review, the agent of a `bug` replays the
+  reproduction scenario and reports it through `reproduction_replayed` — whether the incorrect
+  behaviour is gone, and what it observed. Hemera keeps the report with the end checks that follow
+  the turn, and shows it under the final checks with a dot. Each round of end checks needs a replay
+  of its own; while the last one carries none, Accept is refused, and a message the user writes
+  then is the review that asks for it.
+- **Accept**: once the end checks are green, a `bug`'s reproduction replayed, and nothing waits
+  for the user, the build view offers Accept; the build is accepted, the Spec stays `in_progress`,
+  and the branch and the files stay in the Workspace for delivery. Stop closes a build for good; a stopped build stays
   readable and frees its slot, but a Spec whose first task had started stays `in_progress` and is
   neither built again nor reworked: only a build stopped before its first task leaves the Spec
   `ready` for another.

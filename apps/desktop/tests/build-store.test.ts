@@ -65,6 +65,7 @@ function build(sessionId = 'build', more: Partial<BuildView> = {}): BuildView {
     specId: 'spec-7',
     specKey: 'ATL-7',
     specTitle: 'CSV invoice export',
+    specType: 'feature',
     revision: 2,
     phase: 'execute',
     pausedAt: null,
@@ -100,6 +101,7 @@ function build(sessionId = 'build', more: Partial<BuildView> = {}): BuildView {
             files: [
               { repository: 'api', path: 'src/query.ts', status: 'A', added: 40, removed: 0 },
             ],
+            reproduction: null,
           },
         ],
       }),

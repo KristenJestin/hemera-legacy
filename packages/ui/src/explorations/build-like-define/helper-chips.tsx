@@ -1,47 +1,35 @@
-import { AnimatePresence, motion } from 'motion/react'
 import { type ReactNode, useState } from 'react'
 
-import { Button, IconButton } from '../../components/button/button.tsx'
+import { Button } from '../../components/button/button.tsx'
 import { Dialog } from '../../components/dialog/dialog.tsx'
-import { Popover } from '../../components/popover/popover.tsx'
-import { StatusDot } from '../../components/status-dot/status-dot.tsx'
-import { Tooltip } from '../../components/tooltip/tooltip.tsx'
 import { IconInfoCircle, IconX } from '../../icons.ts'
 import { AgentText } from '../../message/agent-text.tsx'
-import { fold, useTransition } from '../../motion.ts'
-import { CHIP, ChipFace, type ChipState, durationOf, useLiveChip, useNow } from './live-chip.tsx'
-import { HELPER_TONES, type Helper, helperName } from './fixtures.ts'
-import { HelperMark } from './helper-icons.tsx'
+import { type Helper, helperName } from './fixtures.ts'
+import { HelperAvatar } from './helper-icons.tsx'
+import { type ChipState, ChipTool, LiveChip, durationOf, useNow } from './live-chip.tsx'
 
 /**
- * The helper agents in the Session's head line, after the runs (decisions of 30 September on
- * issue #77): one chip a helper that behaves exactly as a run's chip does — its own neutral
- * surface, no dot, a background that moves and never stays tinted, the helper's icon given way to a
- * plain tick or cross as it ends, its duration in seconds. Pressed, it opens its glance: the helper as its chip draws it, how long it has been at
- * it, the step it is in and its last line, and two tools, as a run's glance has them:
- *
- * - ⓘ opens its thread, live and read only, in a dialog;
- * - × stops it, once the reader has said so. The main agent is told, and decides what comes next.
+ * The helper agents in the Session's head line, after the runs (maintainer's decisions of 1
+ * October on issue #77): each the same `LiveChip` as a run, with the helper's letter avatar in its
+ * slot. Its glance's tools: ⓘ opens its thread, read only, in a dialog; × stops it once the reader
+ * has said so — the main agent is told, and decides what comes next.
  */
 
-const ICON = 'flex shrink-0 text-muted-foreground'
-
-const LABEL = 'min-w-0 truncate font-medium'
-
-const SLOT = 'flex shrink-0 overflow-hidden pr-1.5'
-
-const SHOWN = { width: 'auto', filter: 'opacity(1)' } as const
-
-const HIDDEN = { width: 0, filter: 'opacity(0)' } as const
-
-/** The glance, as a run's is laid: one line with its tools, and what it did under it. */
-const GLANCE = 'flex w-menu-panel flex-col gap-2'
-
-const GLANCE_HEAD = 'flex min-w-0 items-center gap-1.5 text-sm'
-
-const FOR = 'min-w-0 flex-1 truncate font-mono text-xs text-muted-foreground'
-
 const DOING = 'truncate font-mono text-xs text-muted-foreground'
+
+/** A helper's state as its chip says it: a stuck helper still works, and nothing breathes on it. */
+const CHIP_STATES: Record<Helper['state'], ChipState> = {
+  running: 'working',
+  stuck: 'still',
+  finished: 'finished',
+  failed: 'failed',
+  stopped: 'stopped',
+}
+
+/** How long a helper has been at it, in milliseconds, from the minutes its fixture says. */
+function runFor(helper: Helper): number {
+  return Number.parseInt(helper.for, 10) * 60_000
+}
 
 export interface HelperChipsProps {
   helpers: readonly Helper[]
@@ -59,40 +47,24 @@ export function HelperChips({
   onStop,
   defaultGlance = null,
 }: HelperChipsProps): ReactNode {
-  const transition = useTransition(fold)
-  const [glance, setGlance] = useState<string | null>(defaultGlance)
   // The helper whose stop is being asked about: held here, since the glance closes as it asks.
   const [asking, setAsking] = useState<Helper | null>(null)
   const [askOpen, setAskOpen] = useState(false)
   return (
     <>
-      <AnimatePresence initial={false}>
-        {helpers.map((helper) => (
-          <motion.span
-            key={helper.id}
-            className={SLOT}
-            initial={HIDDEN}
-            animate={SHOWN}
-            exit={HIDDEN}
-            transition={transition}
-          >
-            <HelperChip
-              helper={helper}
-              open={glance === helper.id}
-              onOpenChange={(next) => setGlance(next ? helper.id : null)}
-              onDetails={() => {
-                setGlance(null)
-                onDetails(helper.id)
-              }}
-              onStop={() => {
-                setGlance(null)
-                setAsking(helper)
-                setAskOpen(true)
-              }}
-            />
-          </motion.span>
-        ))}
-      </AnimatePresence>
+      {helpers.map((helper) => (
+        <HelperChip
+          key={helper.id}
+          helper={helper}
+          helpers={helpers}
+          defaultOpen={defaultGlance === helper.id}
+          onDetails={() => onDetails(helper.id)}
+          onStop={() => {
+            setAsking(helper)
+            setAskOpen(true)
+          }}
+        />
+      ))}
       <Dialog
         title={`Stop ${asking?.name ?? 'this helper'}?`}
         open={askOpen}
@@ -118,31 +90,16 @@ export function HelperChips({
   )
 }
 
-/** A helper's state as its chip says it: a stuck helper still works, and nothing moves on it. */
-const CHIP_STATES: Record<Helper['state'], ChipState> = {
-  running: 'working',
-  stuck: 'still',
-  finished: 'finished',
-  failed: 'failed',
-  stopped: 'stopped',
-}
-
-/** How long a helper has been at it, in milliseconds, from the minutes its fixture says. */
-function runFor(helper: Helper): number {
-  return Number.parseInt(helper.for, 10) * 60_000
-}
-
-/** One helper's chip: the run chip's logic, the helper's icon in the place of the command's type. */
 function HelperChip({
   helper,
-  open,
-  onOpenChange,
+  helpers,
+  defaultOpen,
   onDetails,
   onStop,
 }: {
   helper: Helper
-  open: boolean
-  onOpenChange: (open: boolean) => void
+  helpers: readonly Helper[]
+  defaultOpen: boolean
   onDetails: () => void
   onStop: () => void
 }): ReactNode {
@@ -150,82 +107,44 @@ function HelperChip({
   const working = state === 'working' || state === 'still'
   const [start] = useState(() => Date.now() - runFor(helper))
   const now = useNow(working)
-  const live = useLiveChip(state)
   return (
-    <span ref={live.chip} className="flex">
-      <Popover
-        side="bottom"
-        align="start"
-        label={helperName(helper)}
-        open={open}
-        onOpenChange={onOpenChange}
-        trigger={
-          <button
-            type="button"
-            className={CHIP}
-            aria-label={helperName(helper)}
-            data-helper={helper.id}
-          >
-            <ChipFace
-              live={live}
-              state={state}
-              icon={<HelperMark helper={helper} />}
-              name={helper.name}
-              time={durationOf(now - start)}
-            />
-          </button>
-        }
-      >
-        <Glance helper={helper} onDetails={onDetails} onStop={onStop} />
-      </Popover>
-    </span>
-  )
-}
-
-function Glance({
-  helper,
-  onDetails,
-  onStop,
-}: {
-  helper: Helper
-  onDetails: () => void
-  onStop: () => void
-}): ReactNode {
-  const working = helper.state === 'running' || helper.state === 'stuck'
-  return (
-    <div className={GLANCE}>
-      <div className={GLANCE_HEAD}>
-        <span className={ICON}>
-          <HelperMark helper={helper} />
-        </span>
-        <StatusDot status={HELPER_TONES[helper.state]} size="sm" />
-        <span className={LABEL}>{helper.name}</span>
-        <span className={FOR}>{helper.for}</span>
-        <span className="flex shrink-0 items-center">
-          <Tooltip label="Its thread">
-            <IconButton
-              variant="ghost"
-              size="sm"
-              icon={<IconInfoCircle size="sm" />}
-              aria-label={`The thread of ${helper.name}`}
-              onClick={onDetails}
-            />
-          </Tooltip>
+    <LiveChip
+      state={state}
+      icon={<HelperAvatar helper={helper} helpers={helpers} />}
+      name={helper.name}
+      label={helperName(helper)}
+      time={durationOf(now - start)}
+      defaultOpen={defaultOpen}
+      data={{ 'data-helper': helper.id }}
+      tools={(close) => (
+        <>
           {working && (
-            <Tooltip label="Stop">
-              <IconButton
-                variant="ghost"
-                size="sm"
-                icon={<IconX size="sm" />}
-                aria-label={`Stop ${helper.name}`}
-                onClick={onStop}
-              />
-            </Tooltip>
+            <ChipTool
+              label={`Stop ${helper.name}`}
+              tip="Stop"
+              onPress={() => {
+                close()
+                onStop()
+              }}
+            >
+              <IconX size="sm" />
+            </ChipTool>
           )}
-        </span>
-      </div>
+          <ChipTool
+            label={`The thread of ${helper.name}`}
+            tip="Its thread"
+            onPress={() => {
+              close()
+              onDetails()
+            }}
+          >
+            <IconInfoCircle size="sm" />
+          </ChipTool>
+        </>
+      )}
+    >
       <p className={DOING}>{helper.steps.at(-1)}</p>
       <AgentText text={helper.last} />
-    </div>
+    </LiveChip>
   )
 }

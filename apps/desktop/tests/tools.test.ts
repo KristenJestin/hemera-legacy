@@ -839,6 +839,67 @@ describe('New human instructions invalidate stale context', () => {
   })
 })
 
+describe('Concurrent calls keep independent decisions', () => {
+  it('evaluates calls of two Sessions together and gives each its own verdict', async () => {
+    // Jev answers nobody until both calls have reached it: calls queued behind one another
+    // would never get there.
+    const bodies: string[] = []
+    const both = Promise.withResolvers<void>()
+    const transport: JevTransport = {
+      send: async (body) => {
+        bodies.push(body)
+        if (bodies.length === 2) both.resolve()
+        await both.promise
+        return jevResponse(body.includes('refused.md') ? 2.5 : 1)
+      },
+    }
+    const human = humanSaying()
+    const seen = await engine(
+      human,
+      transport,
+    )(
+      Effect.gen(function* () {
+        const first = yield* opened
+        const sessions = yield* Sessions
+        const other = yield* sessions.create(first.projectId, 'codex')
+        yield* (yield* ToolAccess).granted(other.id, 'agent-2', 'free')
+        yield* sessions.write(first.sessionId, {
+          role: 'user',
+          kind: 'message',
+          body: 'first Session only',
+        })
+        const settings = yield* ClassifierSettings
+        yield* settings.replaceKey('ciphertext', 'private-key')
+        yield* settings.setConsent(true)
+        yield* settings.select('hemera-auto')
+        const [allowed, refused] = yield* Effect.all(
+          [
+            calling({
+              sessionId: first.sessionId,
+              tool: 'fs_write',
+              arguments: { path: 'allowed.md', content: 'yes', key: 'first' },
+            }),
+            calling({
+              sessionId: other.id,
+              tool: 'fs_write',
+              arguments: { path: 'refused.md', content: 'no', key: 'second' },
+            }),
+          ],
+          { concurrency: 'unbounded' },
+        ).pipe(Effect.timeout('5 seconds'))
+        return { allowed, refused }
+      }),
+    )
+    expect(seen.allowed.state).toBe('completed')
+    expect(seen.refused.state).toBe('refused')
+    expect(existsSync(join(root, 'refused.md'))).toBe(false)
+    expect(human.asked).toHaveLength(0)
+    // Context from another Session is never included.
+    const other = bodies.find((body) => body.includes('refused.md'))
+    expect(other).not.toContain('first Session only')
+  })
+})
+
 describe('Secrets are masked before any evaluation', () => {
   it('masks a Workspace credential in any tool, and keeps a plain variable readable', async () => {
     const sent: string[] = []

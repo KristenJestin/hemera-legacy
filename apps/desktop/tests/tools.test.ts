@@ -52,7 +52,7 @@ import {
 } from '#engine/classifier/jev.ts'
 import { Journal, journalLayer } from '#engine/journal.ts'
 import { Preferences, preferencesLayer } from '#engine/preferences.ts'
-import { TesterFindings, testerFindingsLayer } from '#engine/tester/findings.ts'
+import { type TesterFindings, testerFindingsLayer } from '#engine/tester/findings.ts'
 import { openProfile } from '#engine/migrate.ts'
 import { Projects, projectsLayer } from '#engine/projects.ts'
 import { Sessions, sessionsLayer } from '#engine/sessions.ts'

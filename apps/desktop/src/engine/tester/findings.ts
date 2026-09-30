@@ -180,12 +180,18 @@ export function readFindingFile(written: string): Finding | null {
   return { head, body: lines.slice(end + 5) }
 }
 
+/** A report and what Hemera knows beside it, as they are written. */
+interface MaskedReport {
+  readonly reported: ReportedFinding
+  readonly context: FindingContext
+}
+
 /** A report as it is written: every text masked by its shape and by the Workspace's secrets. */
-export function maskedReport(
+function maskedReport(
   reported: ReportedFinding,
   context: FindingContext,
   secrets: readonly string[],
-): { reported: ReportedFinding; context: FindingContext } {
+): MaskedReport {
   const mask = (value: string) => redactText(value, secrets)
   const maybe = (value: string | null) => (value === null ? null : mask(value))
   return {

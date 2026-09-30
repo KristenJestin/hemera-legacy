@@ -15,6 +15,7 @@ import { DIAGNOSTIC_FILE } from './diagnostic.ts'
 import { collectReport } from './environment.ts'
 import { handle } from './handle.ts'
 import { encryptClassifierKey, protectedStorageReady } from './classifier-key.ts'
+import { credentialStatus } from './classifier-storage.ts'
 import type { EngineConversation } from './engine-conversation.ts'
 import { wearPreference } from './window.ts'
 import {
@@ -39,25 +40,13 @@ export function registerChannels(
   handle('classifier.read', () =>
     Effect.gen(function* () {
       const state = yield* engine.ask('classifier.state', {})
-      if (!protectedStorageReady()) {
-        return {
-          mode: state.mode,
-          credential: 'storage-unavailable' as const,
-          consent: state.consent,
-          generation: state.generation,
-        }
-      }
-      if (state.hasKey)
-        return {
-          mode: state.mode,
-          credential: 'saved' as const,
-          consent: state.consent,
-          generation: state.generation,
-        }
-      const ciphertext = yield* engine.ask('classifier.ciphertext.read', {})
+      const ready = protectedStorageReady()
+      // The stored key is only looked at when it could be opened and was not.
+      const ciphertext =
+        ready && !state.hasKey ? yield* engine.ask('classifier.ciphertext.read', {}) : null
       return {
         mode: state.mode,
-        credential: ciphertext === null ? ('missing' as const) : ('invalid' as const),
+        credential: credentialStatus({ ready, hasKey: state.hasKey, ciphertext }),
         consent: state.consent,
         generation: state.generation,
       }

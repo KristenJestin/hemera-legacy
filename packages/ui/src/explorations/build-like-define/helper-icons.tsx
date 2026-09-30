@@ -1,5 +1,14 @@
 import { cn } from 'cn'
-import type { ReactNode } from 'react'
+import type { FunctionComponent, ReactNode } from 'react'
+
+import {
+  IconBulb,
+  IconFlask,
+  type IconProps,
+  IconRobot,
+  IconShield,
+  IconWriting,
+} from '../../icons.ts'
 
 /**
  * The icons of the helper agents (addition of 30 September to issue #77): one for each defined
@@ -18,7 +27,17 @@ import type { ReactNode } from 'react'
  * a chip without looking borrowed. In the design system they would join `icons.ts`.
  */
 
-export type HelperIconName = 'free' | 'reviewer' | 'documenter' | 'prototyper'
+export type HelperIconName = 'free' | 'reviewer' | 'security' | 'documenter' | 'prototyper'
+
+/**
+ * The three sets the exploration puts side by side (story `HelperIcons`):
+ *
+ * - `face` · the set so far, each helper a departure from Hemera's face;
+ * - `sign` · Hemera's tile for every helper, holding one sign that says the role — a tick, a
+ *   shield, lines of text, a plus on a dashed tile — and the face's eyes for a free helper;
+ * - `glyph` · the catalogue's own icons, one a role, and the robot for a free helper.
+ */
+export type HelperIconSet = 'face' | 'sign' | 'glyph'
 
 export type HelperIconSize = 'sm' | 'md' | 'lg' | 'xl'
 
@@ -61,6 +80,15 @@ const DRAWN: Record<HelperIconName, ReactNode> = {
       <path d="M9.5 16.5h5" />
     </>
   ),
+  security: (
+    <>
+      <path d={TILE} />
+      <circle cx="8.8" cy="10.5" r="2.2" />
+      <circle cx="15.2" cy="10.5" r="2.2" />
+      <path d="M11 10.5h2" />
+      <path d="M12 14l2.5 1v1.3c0 1.2 -1 2 -2.5 2.7c-1.5 -0.7 -2.5 -1.5 -2.5 -2.7v-1.3z" />
+    </>
+  ),
   documenter: (
     <>
       <path d="M14 3h-6a5 5 0 0 0 -5 5v8a5 5 0 0 0 5 5h8a5 5 0 0 0 5 -5v-6z" />
@@ -78,15 +106,69 @@ const DRAWN: Record<HelperIconName, ReactNode> = {
   ),
 }
 
+/** The `sign` set: the tile, and one sign inside it. */
+const SIGNED: Record<HelperIconName, ReactNode> = {
+  free: (
+    <>
+      <path d={TILE} />
+      <path d={eyes(12, 12)} />
+    </>
+  ),
+  reviewer: (
+    <>
+      <path d={TILE} />
+      <path d="M8.5 12.5l2.5 2.5l4.5 -5" />
+    </>
+  ),
+  security: (
+    <>
+      <path d={TILE} />
+      <path d="M12 7.5l4 1.5v3c0 2.5 -1.7 4 -4 5c-2.3 -1 -4 -2.5 -4 -5v-3z" />
+    </>
+  ),
+  documenter: (
+    <>
+      <path d={TILE} />
+      <path d="M8 9h8M8 12h8M8 15h5" />
+    </>
+  ),
+  prototyper: (
+    <>
+      <path d={TILE} strokeDasharray="3.2 2.6" />
+      <path d="M12 8.5v7M8.5 12h7" />
+    </>
+  ),
+}
+
+/** The `glyph` set: the catalogue's icons. */
+const GLYPHS: Record<HelperIconName, FunctionComponent<IconProps>> = {
+  free: IconRobot,
+  reviewer: IconFlask,
+  security: IconShield,
+  documenter: IconWriting,
+  prototyper: IconBulb,
+}
+
 export interface HelperIconProps {
   name: HelperIconName
+  /** Which set it is drawn from: the face, unless a story compares them. */
+  set?: HelperIconSet | undefined
   size?: HelperIconSize | undefined
   /** Where it sits; never how it looks. */
   className?: string | undefined
 }
 
 /** A helper agent's icon, in the colour of the text around it. */
-export function HelperIcon({ name, size = 'sm', className }: HelperIconProps): ReactNode {
+export function HelperIcon({
+  name,
+  set = 'face',
+  size = 'sm',
+  className,
+}: HelperIconProps): ReactNode {
+  if (set === 'glyph') {
+    const Glyph = GLYPHS[name]
+    return <Glyph size={size === 'xl' ? 'lg' : size} aria-hidden="true" className={className} />
+  }
   return (
     <svg
       viewBox="0 0 24 24"
@@ -98,7 +180,7 @@ export function HelperIcon({ name, size = 'sm', className }: HelperIconProps): R
       strokeLinejoin="round"
       className={cn(SVG, SIZES[size], className)}
     >
-      {DRAWN[name]}
+      {set === 'sign' ? SIGNED[name] : DRAWN[name]}
     </svg>
   )
 }

@@ -570,6 +570,7 @@ describe('Aucune suppression proposée', () => {
       'chooseAgent',
       'chooseWorkspace',
       'create',
+      'decisions',
       'humanMessages',
       'list',
       'mainOf',
@@ -897,5 +898,56 @@ describe('A write after release is dropped and said, never thrown', () => {
       }),
     )
     expect(thread.entries).toEqual([])
+  })
+})
+
+describe('Hemera Auto decisions across Sessions', () => {
+  test('the decisions of every Session are read newest first, masked, with their Session', async () => {
+    const read = await opened()(
+      Effect.gen(function* () {
+        const sessions = yield* Sessions
+        const project = yield* atlas
+        const first = yield* sessions.create(project.id, 'claude')
+        const second = yield* sessions.create(project.id, 'codex')
+        yield* sessions.rename(first.id, first.version, 'Parser')
+        const decided = (sessionId: string, payload: object, state = 'completed') =>
+          sessions.write(sessionId, {
+            role: 'hemera',
+            kind: 'permission_decision',
+            body: 'ran without asking, Hemera Auto mode',
+            payload: JSON.stringify(payload),
+            correlationId: `decision:${crypto.randomUUID()}`,
+            state,
+          })
+        yield* decided(first.id, { tool: 'fs_write', answer: 'allowed', by: 'rules' })
+        // An answer that is not Hemera Auto's — the agent's own permission — is not one.
+        yield* decided(first.id, { toolCallId: 'x', optionId: 'allow' })
+        // Written a moment later, so that newest first is a fact of the clock.
+        yield* Effect.sleep('5 millis')
+        yield* decided(
+          second.id,
+          {
+            tool: 'commands_run',
+            answer: 'refused',
+            by: 'judge',
+            line: 'curl -H "Authorization: Bearer abcdef123456" x',
+          },
+          'refused',
+        )
+        return {
+          all: yield* sessions.decisions(),
+          one: yield* sessions.decisions(1),
+          first,
+          second,
+        }
+      }),
+    )
+    expect(read.all.map((one) => one.session.id)).toEqual([read.second.id, read.first.id])
+    expect(read.all[1]?.session.title).toBe('Parser')
+    expect(JSON.parse(read.all[0]?.entry.payload ?? '{}')).toMatchObject({
+      by: 'judge',
+      line: 'curl -H "Authorization: [REDACTED]" x',
+    })
+    expect(read.one).toHaveLength(1)
   })
 })

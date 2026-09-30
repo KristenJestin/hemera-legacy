@@ -33,16 +33,16 @@ import { fakeWorkspace } from './agent/install.ts'
 import { AGENT, ANSWERS, COMPLETE, COMPLETED, MODELS, PROPOSAL, PROPOSE } from './agent/script.ts'
 import {
   addProject,
+  awaitsRecord,
   awaits,
   choose,
   control,
   fill,
-  leave,
+  openNotices,
   press,
   pressIn,
   pressTab,
   region,
-  showPart,
   unfoldSpec,
   write,
 } from './hand.ts'
@@ -158,6 +158,18 @@ async function workspaceOf(key: string) {
 }
 
 /** The build Sessions of a Spec: the engine's list, narrowed to the mission and the Spec. */
+/**
+ * The briefs the build Session of a Spec was handed, as its thread keeps them: the thread draws
+ * none of them (issue #205), and the Session details' Context tab lists them.
+ */
+async function briefsOf(key: string): Promise<string[]> {
+  const [build] = await buildsOf(key)
+  return await browser.execute(async (sessionId: string) => {
+    const read = await window.hemera.invoke('sessions.read', { sessionId })
+    return read.entries.filter((entry) => entry.kind === 'mission_brief').map((one) => one.body)
+  }, build?.id ?? '')
+}
+
 async function buildsOf(key: string) {
   const project = await projectId()
   const specId = await specIdOf(key)
@@ -196,67 +208,66 @@ async function writeSpec(asked: string, key: string): Promise<void> {
   await write(asked)
   await press('Start chat')
   await awaits(ANSWERS[0])
-  await awaits('Create the Spec')
-  await pressIn(PROPOSAL_CARD, 'Create')
-  await awaits(`Created ${key}`)
+  // The proposal waits among the Session's notices, closed until pressed (issue #237).
+  await openNotices('Spec proposed')
+  await pressIn(PROPOSAL_CARD, 'Start')
+  await awaitsRecord(`Spec proposed, ${key} `)
 
   await unfoldSpec(key)
   // The `shape` phase cannot finish without these two, and this fake agent writes neither: they
-  // are the human's, written in the panel as a human writes them.
-  await writeSection(key, 'Problem', PROBLEM)
-  await showPart(key, 'Scope')
-  await writeSection(key, 'Scope', SCOPE)
+  // go through the window's bridge, since nothing of the Spec is edited by hand (issue #135).
+  await writeSection(key, 'problem', PROBLEM)
+  await writeSection(key, 'scope', SCOPE)
 
   await write(COMPLETE)
   await press('Send')
   await awaits(COMPLETED, 60_000)
   await browser.pause(1500)
-  await readyOffered(key)
-  await pressIn(panelOf(key), 'Mark ready')
-  await browser.pause(1500)
+  await markedReady(key)
 }
 
 /**
- * Writes a section of the Spec from the panel, as the human's own edit. `typeIn` wants the field
- * focused afterwards, and the answer of the thread takes the caret back: here the text is set and
- * the blur commits it, which is what the panel listens to.
+ * Writes a section of the Spec through the window's bridge, on the version it is at, from the
+ * Session that writes the Spec: the panel edits nothing (issue #135), and this fake agent writes
+ * neither `problem` nor `scope`.
  */
-async function writeSection(key: string, title: string, body: string): Promise<void> {
-  const written = await browser.execute(
-    (label: string, said: string) => {
-      const field = document.querySelector(`textarea[aria-label="${label}"]`)
-      if (!(field instanceof HTMLTextAreaElement)) return 'no field'
-      field.focus()
-      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set?.call(
-        field,
-        said,
-      )
-      field.dispatchEvent(new Event('input', { bubbles: true }))
-      return 'written'
+async function writeSection(key: string, name: 'problem' | 'scope', body: string): Promise<void> {
+  const specId = await specIdOf(key)
+  await browser.execute(
+    async (id: string, section: 'problem' | 'scope', said: string) => {
+      const read = await window.hemera.invoke('specs.read', { specId: id })
+      await window.hemera.invoke('specs.writeSection', {
+        specId: id,
+        sessionId: read.spec.writerSessionId ?? '',
+        name: section,
+        body: said,
+        baseVersion: read.sections.find((one) => one.name === section)?.version ?? 0,
+      })
     },
-    title,
+    specId,
+    name,
     body,
   )
-  if (written !== 'written') {
-    throw new Error(`wrote ${title}: ${written}. Panel: ${await region(panelOf(key))}`)
-  }
-  await leave(title)
+  await browser.pause(600)
 }
 
 /**
- * Waits for the panel's `Mark ready`, and says what the panel and the thread hold when it never
- * comes: the gate is the engine's, and a write it refused is read in the thread.
+ * Presses the panel's `Mark ready` once it is offered, until the engine accepts it, and says what
+ * the panel and the thread hold when it never does: `Mark ready` is offered once the gate passes
+ * (issue #205), and a write the engine refused is read in the thread.
  */
-async function readyOffered(key: string): Promise<void> {
+async function markedReady(key: string): Promise<void> {
   const until = Date.now() + 30_000
   while (Date.now() < until) {
-    // oxlint-disable-next-line no-await-in-loop -- the panel is asked again until it offers the press
-    if ((await control('Mark ready')) !== null) return
-    // oxlint-disable-next-line no-await-in-loop -- the pause between two asks
-    await browser.pause(500)
+    // oxlint-disable-next-line no-await-in-loop -- pressed once offered, until the engine accepts it
+    if ((await control('Mark ready')) !== null) await pressIn(panelOf(key), 'Mark ready')
+    // oxlint-disable-next-line no-await-in-loop -- the pause the engine answers in
+    await browser.pause(1000)
+    // oxlint-disable-next-line no-await-in-loop -- read after each press
+    if ((await stateOf(key)).status === 'ready') return
   }
   throw new Error(
-    `no Mark ready for ${key}. Panel: ${await region(panelOf(key))} || Thread: ${await region(THREAD)}`,
+    `${key} never ready. Panel: ${await region(panelOf(key))} || Thread: ${await region(THREAD)}`,
   )
 }
 
@@ -384,15 +395,16 @@ describe('A Spec’s build waits for the Workspace prepared for it', () => {
     await browser.pause(1500)
 
     // The panel belongs to the Session that defines the Spec, and this one is the build's: it has
-    // none, its thread holds the brief alone, and not the words its writer was asked with.
+    // none, and its thread holds not the words its writer was asked with. Nor does it draw the
+    // brief (issue #205): the Session details list it.
     expect(await region(panelOf(BUILT))).toBe('')
-    expect(await region(THREAD)).toContain('What the agent was told')
+    expect(await region(THREAD)).not.toContain('What the agent was told')
     expect(await region(THREAD)).not.toContain(ASKED_BUILT)
 
     // The brief is the Spec as it stood on the revision the launch names.
-    await pressIn(THREAD, 'What the agent was told')
-    await browser.pause(600)
-    expect(await region(THREAD)).toContain(PROPOSAL.title)
+    const briefs = await briefsOf(BUILT)
+    expect(briefs).toHaveLength(1)
+    expect(briefs[0]).toContain(PROPOSAL.title)
   })
 
   it('keeps Open once a Rework takes the Spec on', async () => {
@@ -418,7 +430,7 @@ describe('A Spec’s build waits for the Workspace prepared for it', () => {
     await pressIn(BUILD_GROUP, 'Open')
     await browser.pause(1500)
     expect(await region(panelOf(BUILT))).toBe('')
-    expect(await region(THREAD)).toContain('What the agent was told')
+    expect(await briefsOf(BUILT)).toHaveLength(1)
   })
 })
 
@@ -469,5 +481,35 @@ describe('A Rework takes a launch back where it waits', () => {
     expect(await buildsOf(TAKEN)).toEqual([])
     expect((await stateOf(TAKEN)).launch?.state).toBe('cancelled')
     expect(await region(panelOf(TAKEN))).toContain('Cancelled by the Rework')
+  })
+})
+
+describe('A Spec whose launch a Rework cancelled is launched again by hand', () => {
+  it('marks the new revision ready, starts the build, and opens its Session', async () => {
+    // The new revision is attested and frozen as the first one was; the launch the Rework took
+    // back is still said, and the Workspace the Spec is set on is offered to start in.
+    await write(COMPLETE)
+    await press('Send')
+    await browser.pause(1500)
+    await markedReady(TAKEN)
+    await awaits('Cancelled by the Rework')
+    await pressIn(BUILD_GROUP, 'Start the build')
+    await awaits('Build started', 60_000)
+
+    const built = await stateOf(TAKEN)
+    expect(built.revision).toBe(2)
+    expect(built.launch?.state).toBe('started')
+    expect(built.launch?.revisionId).toBe(built.revisionId)
+    const sessions = await buildsOf(TAKEN)
+    expect(sessions).toHaveLength(1)
+    expect(sessions[0]?.id).toBe(built.launch?.sessionId)
+
+    await pressIn(BUILD_GROUP, 'Open')
+    await browser.pause(1500)
+    expect(await region(panelOf(TAKEN))).toBe('')
+    // Its brief is the Spec as it stood on the revision the new launch names.
+    const briefs = await briefsOf(TAKEN)
+    expect(briefs).toHaveLength(1)
+    expect(briefs[0]).toContain(PROPOSAL.title)
   })
 })

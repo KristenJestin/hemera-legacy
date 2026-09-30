@@ -1,15 +1,19 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
 import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
 
-import type { LaunchWorkspace } from './model.ts'
+import type { LaunchWorkspace, SpecWorkspace } from './model.ts'
 import { WorkspaceActions } from './workspace-actions.tsx'
 
 /** `main`, which every Project has, and a Workspace a hand made out of the repositories. */
 const MAIN: LaunchWorkspace = { id: 'ws-main', name: 'main' }
 const SPIKE: LaunchWorkspace = { id: 'ws-spike', name: 'spike' }
 
+/** `main`, the Workspace the Spec is set on, and ready. */
+const READY: SpecWorkspace = { ...MAIN, state: 'ready' }
+
 /**
- * The build of a frozen Spec: what it is launched in, and where the launch stands (D8-12, D8-13).
+ * The build of a ready Spec: what it is launched in, and where the launch stands (D8-12, D8-13),
+ * drawn at the end of the panel's footer that holds it, under the rail and the stage (issue #150).
  *
  * With no Workspace yet, the two ways in and the menu that holds the second one; with one ready,
  * the one thing left to do. Then the five states of a launch, each with the one thing it offers
@@ -28,6 +32,7 @@ const meta = {
     onPrepareOnly: fn(),
     onUseWorkspace: fn(),
     onStart: fn(),
+    onResume: fn(),
     onRetry: fn(),
     onOpen: fn(),
   },
@@ -39,6 +44,7 @@ const meta = {
     onPrepareOnly: { description: 'Prepares a Workspace and stops there.' },
     onUseWorkspace: { description: 'Starts the build in one of the existing Workspaces.' },
     onStart: { description: 'Starts the build in the Workspace the Spec is set on.' },
+    onResume: { description: 'Resumes the preparation of the Workspace, after it failed.' },
     onRetry: { description: 'Starts the agent again, after it refused to.' },
     onOpen: { description: 'Opens the build Session.' },
   },
@@ -53,6 +59,19 @@ export const NoWorkspace: Story = {
   play: async ({ canvasElement, args }) => {
     const canvas = within(canvasElement)
     const body = within(document.body)
+    // Side by side on one line, the primary one last, and neither cut.
+    const prepare = canvas.getByRole('button', { name: 'Prepare and start the build' })
+    const existing = canvas.getByRole('button', { name: 'Use an existing Workspace' })
+    await expect(existing.getBoundingClientRect().top).toBeCloseTo(
+      prepare.getBoundingClientRect().top,
+      0,
+    )
+    await expect(prepare.getBoundingClientRect().left).toBeGreaterThan(
+      existing.getBoundingClientRect().right - 1,
+    )
+    for (const button of [prepare, existing]) {
+      expect(button.scrollWidth).toBeLessThanOrEqual(button.clientWidth)
+    }
 
     await userEvent.click(canvas.getByRole('button', { name: 'Prepare and start the build' }))
     await expect(args.onPrepareAndStart).toHaveBeenCalled()
@@ -62,6 +81,11 @@ export const NoWorkspace: Story = {
       pointerEventsCheck: 0,
     })
     await expect(args.onPrepareOnly).toHaveBeenCalled()
+    // The menu is gone before it is opened again: still leaving, it is the menu the next look
+    // finds, and an item of it pressed on its way out chooses nothing.
+    await waitFor(() => {
+      expect(body.queryByRole('menu')).toBeNull()
+    })
 
     await userEvent.click(canvas.getByRole('button', { name: 'Use an existing Workspace' }))
     await userEvent.click(await body.findByRole('menuitem', { name: 'spike' }), {
@@ -73,7 +97,7 @@ export const NoWorkspace: Story = {
 
 /** A Workspace is ready: there is one thing left to do, and it is this. */
 export const WorkspaceReady: Story = {
-  args: { workspace: MAIN },
+  args: { workspace: READY },
   play: async ({ canvasElement, args }) => {
     const canvas = within(canvasElement)
     await userEvent.click(canvas.getByRole('button', { name: 'Start the build' }))
@@ -82,10 +106,42 @@ export const WorkspaceReady: Story = {
   },
 }
 
+/**
+ * The Workspace the Spec is set on failed its preparation (after `Prepare a Workspace only`):
+ * nothing can be started in it, so it is resumed — or another one is taken.
+ */
+export const WorkspaceFailed: Story = {
+  args: { workspace: { ...MAIN, name: 'hem-7-login-form', state: 'failed' } },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement)
+    const body = within(document.body)
+    await expect(canvas.queryByRole('button', { name: 'Start the build' })).toBeNull()
+    await userEvent.click(canvas.getByRole('button', { name: 'Resume the preparation' }))
+    await expect(args.onResume).toHaveBeenCalled()
+    await userEvent.click(canvas.getByRole('button', { name: 'Use an existing Workspace' }))
+    await userEvent.click(await body.findByRole('menuitem', { name: 'spike' }), {
+      pointerEventsCheck: 0,
+    })
+    await expect(args.onUseWorkspace).toHaveBeenCalledWith('ws-spike')
+  },
+}
+
+/** The Workspace the Spec was set on is cleaned up: the Spec is offered as one with none. */
+export const WorkspaceCleaned: Story = {
+  args: { workspace: { ...MAIN, name: 'hem-7-login-form', state: 'cleaned' } },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement)
+    await expect(canvas.queryByRole('button', { name: 'Start the build' })).toBeNull()
+    await expect(canvas.getByRole('button', { name: 'Use an existing Workspace' })).toBeVisible()
+    await userEvent.click(canvas.getByRole('button', { name: 'Prepare and start the build' }))
+    await expect(args.onPrepareAndStart).toHaveBeenCalled()
+  },
+}
+
 /** Waiting on the Workspace: the step being prepared is named, and the dot only runs. */
 export const Waiting: Story = {
   args: {
-    workspace: MAIN,
+    workspace: READY,
     launch: { state: 'waiting', step: 'installing the dependencies' },
   },
   play: async ({ canvasElement }) => {
@@ -99,7 +155,7 @@ export const Waiting: Story = {
 
 /** Waiting with no step to name, which is the Workspace itself that is not ready. */
 export const WaitingWithNoStep: Story = {
-  args: { workspace: MAIN, launch: { state: 'waiting' } },
+  args: { workspace: READY, launch: { state: 'waiting' } },
   play: async ({ canvasElement }) => {
     await expect(within(canvasElement).getByText('Preparing the Workspace')).toBeVisible()
   },
@@ -107,7 +163,7 @@ export const WaitingWithNoStep: Story = {
 
 /** Handed to the agent: one sentence, and nothing to press. */
 export const Starting: Story = {
-  args: { workspace: MAIN, launch: { state: 'starting' } },
+  args: { workspace: READY, launch: { state: 'starting' } },
   play: async ({ canvasElement }) => {
     await expect(within(canvasElement).getByText('Starting the agent…')).toBeVisible()
   },
@@ -115,7 +171,7 @@ export const Starting: Story = {
 
 /** Started: the Session it started is what is offered. */
 export const Started: Story = {
-  args: { workspace: MAIN, launch: { state: 'started' } },
+  args: { workspace: READY, launch: { state: 'started' } },
   play: async ({ canvasElement, args }) => {
     const canvas = within(canvasElement)
     await expect(canvas.getByText('Build started')).toBeVisible()
@@ -127,8 +183,8 @@ export const Started: Story = {
 /** Refused: the cause as the engine gave it, announced, and the one thing to do about it. */
 export const Failed: Story = {
   args: {
-    workspace: MAIN,
-    launch: { state: 'failed', cause: 'the agent SDK is not installed' },
+    workspace: READY,
+    launch: { state: 'failed', stage: 'agent', cause: 'the agent SDK is not installed' },
   },
   play: async ({ canvasElement, args }) => {
     const canvas = within(canvasElement)
@@ -141,13 +197,78 @@ export const Failed: Story = {
   },
 }
 
+/**
+ * Failed by the preparation of its Workspace, before any agent: there is no Session to start
+ * again, so the Workspace ready once more is started as a new build, with no `Retry`.
+ */
+export const PreparationFailed: Story = {
+  args: {
+    workspace: READY,
+    launch: { state: 'failed', stage: 'preparation', cause: 'fatal: invalid reference: main' },
+  },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement)
+    await expect(canvas.getByRole('alert')).toHaveTextContent(
+      'The Workspace could not be prepared: fatal: invalid reference: main',
+    )
+    await expect(canvas.queryByText(/The agent did not start/)).toBeNull()
+    await expect(canvas.queryByRole('button', { name: 'Retry' })).toBeNull()
+    await userEvent.click(canvas.getByRole('button', { name: 'Start the build' }))
+    await expect(args.onStart).toHaveBeenCalled()
+  },
+}
+
+/** Refused before any Session was made: said, and asked for again as a new build. */
+export const StartRefused: Story = {
+  args: {
+    workspace: READY,
+    launch: { state: 'failed', stage: 'start', cause: 'no agent has been chosen' },
+  },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement)
+    await expect(canvas.getByRole('alert')).toHaveTextContent(
+      'The build did not start: no agent has been chosen',
+    )
+    await expect(canvas.queryByRole('button', { name: 'Retry' })).toBeNull()
+    await userEvent.click(canvas.getByRole('button', { name: 'Start the build' }))
+    await expect(args.onStart).toHaveBeenCalled()
+  },
+}
+
 /** Taken back by a Rework: said, and nothing offered — the Spec is a draft again. */
 export const Cancelled: Story = {
-  args: { workspace: MAIN, launch: { state: 'cancelled' } },
+  args: { workspace: READY, launch: { state: 'cancelled', reason: 'rework', again: false } },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     await expect(canvas.getByText('Cancelled by the Rework')).toBeVisible()
     await expect(canvas.queryAllByRole('button')).toEqual([])
+  },
+}
+
+/**
+ * Taken back by a Rework, and the new revision made ready since: the reason is still said, and the
+ * build is asked for again by hand, from the actions of a Spec with no launch.
+ */
+export const CancelledThenReady: Story = {
+  args: { workspace: READY, launch: { state: 'cancelled', reason: 'rework', again: true } },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement)
+    await expect(canvas.getByText('Cancelled by the Rework')).toBeVisible()
+    await userEvent.click(canvas.getByRole('button', { name: 'Start the build' }))
+    await expect(args.onStart).toHaveBeenCalled()
+  },
+}
+
+/** Cancelled by the cleanup of its Workspace: said as that, and a new Workspace is offered. */
+export const WorkspaceRemoved: Story = {
+  args: { launch: { state: 'cancelled', reason: 'removed', again: true } },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement)
+    await expect(canvas.getByText('The Workspace was removed')).toBeVisible()
+    await expect(canvas.queryByText('Cancelled by the Rework')).toBeNull()
+    await expect(canvas.getByRole('button', { name: 'Use an existing Workspace' })).toBeVisible()
+    await userEvent.click(canvas.getByRole('button', { name: 'Prepare and start the build' }))
+    await expect(args.onPrepareAndStart).toHaveBeenCalled()
   },
 }
 
@@ -158,22 +279,32 @@ export const Keyboard: Story = {
     const canvas = within(canvasElement)
     const body = within(document.body)
 
-    await userEvent.tab()
-    await expect(canvas.getByRole('button', { name: 'Prepare and start the build' })).toHaveFocus()
-    await userEvent.keyboard('{Enter}')
-    await expect(args.onPrepareAndStart).toHaveBeenCalled()
-
+    // In the order they are read, left to right: the menu, then the primary action at the end.
     await userEvent.tab()
     const trigger = canvas.getByRole('button', { name: 'Use an existing Workspace' })
     await expect(trigger).toHaveFocus()
     await userEvent.keyboard('{ArrowDown}')
-    await waitFor(() => body.getByRole('menu'))
+    const menu = await waitFor(() => body.getByRole('menu'))
+    // Each key once the focus is where the last one put it: the menu hands the focus to its first
+    // item a moment after it is in the page, and an arrow pressed before then is spent on the
+    // trigger, leaving Enter on the wrong item.
+    await waitFor(() => {
+      expect(within(menu).getByRole('menuitem', { name: 'Prepare a Workspace only' })).toHaveFocus()
+    })
     await userEvent.keyboard('{ArrowDown}')
+    await waitFor(() => {
+      expect(within(menu).getByRole('menuitem', { name: 'main' })).toHaveFocus()
+    })
     await userEvent.keyboard('{Enter}')
     await expect(args.onUseWorkspace).toHaveBeenCalledWith('ws-main')
     await waitFor(() => {
       expect(body.queryByRole('menu')).toBeNull()
     })
     await expect(trigger).toHaveFocus()
+
+    await userEvent.tab()
+    await expect(canvas.getByRole('button', { name: 'Prepare and start the build' })).toHaveFocus()
+    await userEvent.keyboard('{Enter}')
+    await expect(args.onPrepareAndStart).toHaveBeenCalled()
   },
 }

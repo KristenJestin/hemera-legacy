@@ -25,6 +25,7 @@ export { WorkspacePill, type WorkspaceChoice, type WorkspacePillProps } from './
  */
 export {
   AgentModelMenu,
+  type AgentListing,
   type AgentModelMenuProps,
   type EffortChoice,
   type ModeChoice,

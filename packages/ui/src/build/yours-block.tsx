@@ -175,7 +175,7 @@ export function YoursBlock({
   )
 }
 
-interface SkipDialogProps {
+export interface SkipDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   /** The task skipped: `T4`. */
@@ -186,7 +186,13 @@ interface SkipDialogProps {
 }
 
 /** Why a task is skipped, and whether what depends on it goes on (D10-03). */
-function SkipDialog({ open, onOpenChange, label, dependants, onSkip }: SkipDialogProps): ReactNode {
+export function SkipDialog({
+  open,
+  onOpenChange,
+  label,
+  dependants,
+  onSkip,
+}: SkipDialogProps): ReactNode {
   const [reason, setReason] = useState('')
   const [unblock, setUnblock] = useState(false)
 

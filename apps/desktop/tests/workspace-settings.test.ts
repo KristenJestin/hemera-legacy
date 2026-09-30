@@ -251,6 +251,7 @@ describe('Cleanup is refused while a service runs or Git refuses', () => {
       scope: 'workspace',
       portless: false,
       portlessName: null,
+      runAtOpen: false,
       folderBase: null,
       folder: null,
     })
@@ -379,6 +380,7 @@ describe('A port conflict names its holder', () => {
         scope: 'workspace',
         portless: false,
         portlessName: null,
+        runAtOpen: false,
         folderBase: null,
         folder: null,
       })
@@ -444,6 +446,7 @@ describe('The steps follow the recipe in order', () => {
       scope: 'workspace',
       portless: false,
       portlessName: null,
+      runAtOpen: false,
       folderBase: null,
       folder: null,
     })
@@ -521,6 +524,7 @@ describe('A run step fails on a non-zero exit', () => {
       scope: 'workspace',
       portless: false,
       portlessName: null,
+      runAtOpen: false,
       folderBase: null,
       folder: null,
     })
@@ -586,6 +590,7 @@ describe('A dedicated Workspace is made from the settings with no Spec', () => {
       const branch = branchOfName(plan!.branchPrefix)('Spike one')
       const worktrees = worktreesOf({
         name: 'spike-one',
+        root: plan!.root,
         repositories: planLinesOf(plan!, reads).map((one) => ({
           path: one.path,
           base: one.read!.base!,

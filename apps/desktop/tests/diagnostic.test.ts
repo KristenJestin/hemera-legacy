@@ -68,7 +68,7 @@ describe('Un refus est tracé même sans console', () => {
   test('a refusal reaches the log of the data folder, not a console nobody is looking at', () => {
     writeDiagnosticTo(openDiagnosticLog(dataFolder, 'main'))
     try {
-      diagnostic('--data-dir: refused /home/someone/.local/share/hemera/prod')
+      diagnostic('--data-dir: refused /home/someone/.hemera')
       expect(written()).toContain('--data-dir: refused')
     } finally {
       // The next suite starts from a console again, as a process does before it knows its folder.

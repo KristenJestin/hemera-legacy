@@ -33,8 +33,13 @@ export type GitState =
 export interface WorkspaceRepositoryLine {
   /** Relative to the Workspace, as the Project declares it: `./sources/api`. */
   readonly path: string
-  /** Null while Git is being asked. */
+  /** Null while Git is being asked, and while its worktree is not made. */
   readonly git: GitState | null
+  /**
+   * The state of its worktree step while that step is not done (#217): what the row says in
+   * place of Git, which is not read in a folder the preparation has not made yet.
+   */
+  readonly step?: Exclude<StepState, 'done'> | undefined
 }
 
 export interface PreparationStepLine {
@@ -93,6 +98,8 @@ export interface PlanRepositoryLine {
 /** What the creation dialog hands over: the name, and the included repositories only. */
 export interface WorkspaceDraft {
   readonly name: string
+  /** The folder it is made under: the Project's, or one chosen for this Workspace alone (#136). */
+  readonly root: string
   readonly repositories: readonly {
     readonly path: string
     readonly base: string

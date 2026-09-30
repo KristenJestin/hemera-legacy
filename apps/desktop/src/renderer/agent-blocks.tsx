@@ -1,8 +1,13 @@
-import { hemeraToolNamed } from '@hemera/core'
+import { MAIN_WORKSPACE, hemeraToolNamed } from '@hemera/core'
 import type { CommandRun as Run, SessionEntry, SpecType } from '@hemera/ipc'
 import {
+  AgentReport,
   AgentText,
+  CallOutcome,
+  CallOutcomeDetails,
+  type CallPermission,
   CommandProposal,
+  CommandProposalRecord,
   CommandRun,
   CreateSpecProposal,
   DecisionSummary,
@@ -10,18 +15,24 @@ import {
   HemeraToolCall,
   type HemeraToolStatus,
   MessageGroup,
-  MissionBrief,
+  PermissionRecord,
   PermissionRequest,
+  SetupProposal,
+  SetupProposalRecord,
+  SpecProposalRecord,
   SpecQuestion,
+  SpecQuestionRecord,
   StoppedTurn,
   ThoughtBlock,
   ToolCallCard,
   toolKindLabel,
   type PermissionOption,
   type PermissionOptionKind,
+  type PermissionParameter,
   type PlanEntry,
   type PlanPriority,
   type PlanStatus,
+  type RunRepository,
   type SpecAnswer,
   type ToolKind,
   type ToolStatus,
@@ -32,25 +43,32 @@ import type { ReactNode } from 'react'
 import { z } from 'zod'
 
 import {
+  agentReportOf,
   commandProposalOf,
   commandRunOf,
   contextDeliveryOf,
   elsewhereOf,
+  failureNoteOf,
   hemeraPermissionOf,
+  hemeraPlaceOf,
   hemeraToolCallOf,
+  reportedFailureOf,
+  setupProposalOf,
+  stoppedTurnOf,
   hemeraToolLabelOf,
   nativeSubjectOf,
-  questionOpen,
   subjectOf,
 } from './agent-tool-payloads.ts'
 import {
   type DefinedSpec,
-  briefOf,
+  drawnInThread,
   proposalIdOf,
   proposalOf,
   questionAnchor,
   questionEntryOf,
 } from './spec-entries.ts'
+import type { CallLink } from './call-links.ts'
+import { decidesARequest, decisionOf, permissionStandingOf } from './notices.ts'
 
 /**
  * What each entry of a thread is drawn as (design D5-11, D5-14, D5-16).
@@ -143,14 +161,14 @@ const permissionSchema = z.object({
   resolved: z.string().optional(),
   root: z.string().optional(),
   line: z.string().nullable().optional(),
+  /** Whether the place is inside the Workspace, as the engine found it (issue #239). */
+  inside: z.boolean().optional(),
 })
 
 const decisionSchema = z.object({
   toolCallId: z.string(),
   optionId: z.string().nullable(),
 })
-
-const turnSchema = z.object({ stopReason: z.string() })
 
 const planSchema = z.object({ entries: z.array(planEntrySchema) })
 
@@ -320,10 +338,16 @@ export interface AgentContext {
   runs: readonly Run[]
   /** The name of the Session's Workspace, which a run elsewhere is told apart from (D8-08). */
   workspace: string | undefined
+  /** The Workspace root, which a run's folder is said relative to; null until known. */
+  root: string | null
+  /** The Project's repositories, which a place is said as rather than as a folder (#239). */
+  repositories: readonly RunRepository[]
   /** Opens the address a run published, in the browser: this window is not one. */
   onOpenUrl: (url: string) => void
-  /** Stops a run and everything it started. */
-  onStopRun: (runId: string) => void
+  /** Hands the agent again what waits for it, after a delivery it did not take (issue #211). */
+  onHandOver: () => void
+  /** What became of a call of Hemera's, by the entry it is drawn from (review of #250). */
+  callLink: (drawnId: string) => CallLink | undefined
   /**
    * The agent's report of a call, by the identifier the agent gave it: what a question about
    * that call is headed by — the label and the subject of its line (recette 3 of 23 September
@@ -334,8 +358,10 @@ export interface AgentContext {
   onAcceptProposal: (proposalId: string) => void
   /** Leaves it out of the catalogue, and says so on the proposal. */
   onDeclineProposal: (proposalId: string) => void
-  /** Keeps a one-off run in the catalogue, which is the human's to do (D8-11). */
-  onAddToCatalogue: (run: Run) => void
+  /** Applies a change to the Project's setup the agent proposed: the human's click (#218). */
+  onAcceptSetup: (proposalId: string) => void
+  /** Leaves the setup as it is, and says so on its record. */
+  onDeclineSetup: (proposalId: string) => void
   /** What the Spec entries of the thread are drawn with. */
   spec: SpecContext
 }
@@ -352,6 +378,8 @@ export interface SpecContext {
   asked: ReadonlySet<string> | null
   onAnswer: (questionId: string, answer: SpecAnswer) => void
   onCreate: (title: string, type: SpecType) => void
+  /** `Continue it`: this Session defines the existing Spec the agent pointed to (issue #198). */
+  onJoin: (proposalId: string) => void
   /** `Not now`: the engine keeps the proposal declined and tells the agent (issue #130). */
   onDecline: (proposalId: string) => void
 }
@@ -397,7 +425,10 @@ export function drawEntry(entry: SessionEntry, context: AgentContext): ReactNode
           subject={subjectOf(hemera, call.rawInput?.text ?? '', context.runs)}
           status={reportedStatus(call.status)}
           summary={call.title}
+          // What the agent was answered, when Hemera never was asked: the call's only reason.
+          error={reportedFailureOf(entry)}
           defaultOpen={false}
+          {...outcomeOf(context.callLink(entry.id), context)}
         />
       )
     }
@@ -420,7 +451,9 @@ export function drawEntry(entry: SessionEntry, context: AgentContext): ReactNode
         }))}
         input={boundedNode(input)}
         output={boundedNode(output)}
-        error={call.status === 'failed' ? entry.body : undefined}
+        // Why it failed, in words: its output already says it where there is one, and its name
+        // said nothing (issue #198).
+        error={call.status === 'failed' && output === null ? reportedFailureOf(entry) : undefined}
       />
     )
   }
@@ -444,138 +477,117 @@ export function drawEntry(entry: SessionEntry, context: AgentContext): ReactNode
   }
 
   if (entry.kind === 'permission_request') {
-    // A question already answered is drawn by the decision written after it, without buttons.
-    if (!questionOpen(entry)) return null
-    const read = readPayload(permissionSchema, entry.payload)
-    if (read === null) return null
-    // A question of Hemera's own tools (D6-05): the tool by its name, the place it would act on
-    // as the path resolves and the root it leaves, the line a one-off would run. Its two options
-    // are this call's only — nothing is remembered, so there is no "always" to offer.
-    if (read.tool !== undefined && read.resolved !== undefined) {
-      return (
-        <PermissionRequest
-          toolName={read.tool}
-          {...hemeraPermissionOf(read.tool, entry.body, read)}
-          parameters={[
-            { label: 'Resolved path', value: read.resolved },
-            { label: 'Outside', value: read.root ?? 'the Workspace root' },
-          ]}
-          command={read.line ?? read.resolved}
-          options={read.options.map((option) => ({
-            optionId: option.optionId,
-            name: option.name,
-            kind: among(PERMISSION_KINDS, option.kind, 'reject_once'),
-          }))}
-          onDecide={(option) => context.onDecide(read.toolCallId, option)}
-        />
-      )
-    }
-    // An agent's own question is headed by the line of the call it is about, where the thread
-    // holds the agent's report of it: the kind's label and what the call is about.
-    const asked = context.reportedCall(read.toolCallId)
-    const reported = asked === undefined ? null : readPayload(callPayloadSchema, asked.payload)
-    const head =
-      reported === null
-        ? { label: undefined, subject: undefined, intent: entry.body }
-        : {
-            label: toolKindLabel(
-              among(TOOL_KINDS, reported.call.kind, 'other'),
-              reported.call.title,
-            ),
-            subject: nativeSubjectOf(among(TOOL_KINDS, reported.call.kind, 'other'), reported.call)
-              ?.text,
-            intent: 'asks for your permission',
-          }
+    // The question is asked among the Session's notices (issue #237); the thread keeps its record
+    // where it was asked, answered or not, with the decision written after it folded into it.
+    const asked = permissionOf(entry, context)
+    if (asked === null) return null
+    const decision = decisionOf(entry, context.spec.thread)
     return (
-      <PermissionRequest
-        toolName={entry.body}
-        {...head}
-        options={read.options.map((option) => ({
-          optionId: option.optionId,
-          name: option.name,
-          kind: among(PERMISSION_KINDS, option.kind, 'reject_once'),
-        }))}
-        scope="For this Session"
-        onDecide={(option) => context.onDecide(read.toolCallId, option)}
+      <PermissionRecord
+        toolName={asked.toolName}
+        label={asked.label}
+        subject={asked.subject}
+        parameters={asked.parameters}
+        command={asked.command}
+        standing={permissionStandingOf(entry, context.spec.thread)}
+        decision={
+          decision === null ? undefined : { answer: decision.body, at: clockOf(decision.createdAt) }
+        }
       />
     )
   }
 
   if (entry.kind === 'permission_decision') {
+    // Said by the record of the request it answers; only a decision no question asked for — a
+    // one-off the Session's mode let through (#242) — keeps a line of its own.
+    if (decidesARequest(entry, context.spec.thread)) return null
     const read = readPayload(decisionSchema, entry.payload)
     const refused = (read?.optionId ?? null) === null
-    return (
-      <DecisionSummary
-        answer={entry.body}
-        at={new Date(entry.createdAt).toLocaleTimeString('en-GB', {
-          hour: '2-digit',
-          minute: '2-digit',
-        })}
-        refused={refused}
-      />
-    )
+    return <DecisionSummary answer={entry.body} at={clockOf(entry.createdAt)} refused={refused} />
   }
 
   if (entry.kind === 'turn') {
-    const read = readPayload(turnSchema, entry.payload)
     // A turn that simply ended is not news: the agent's answer above it is. What is worth a line
     // is a turn that stopped for a reason the reader has to know about (D5-13).
-    if (read === null || read.stopReason === 'end_turn') return null
+    const stopped = stoppedTurnOf(entry)
+    if (stopped === null) return null
     return (
       <StoppedTurn
-        doing={entry.body}
+        reason={stopped.reason}
         at={new Date(entry.createdAt).toLocaleTimeString('en-GB', {
           hour: '2-digit',
           minute: '2-digit',
         })}
-        byTheReader={read.stopReason === 'cancelled'}
+        byTheReader={stopped.byTheReader}
       />
     )
   }
 
-  // The brief a `define` turn rode on: Hemera's line, folded, never a message of yours (D7-09).
-  if (entry.kind === 'mission_brief') {
-    const { title, detail, brief } = briefOf(entry)
-    return <MissionBrief title={title} detail={detail} brief={brief} />
-  }
+  // The brief a `define` turn rode on is listed in the Session details' Context tab, and draws no
+  // row here (issue #205); an answer is drawn by its question's card, where it was given (#199).
+  if (!drawnInThread(entry)) return null
 
-  // A question of the Spec, asked here and answered here (D7-01). The answer written beside it is
-  // drawn by the question itself, folded to what was chosen, and has no block of its own.
+  // A question of the Spec, asked among the Session's notices (issue #237) and kept here as a
+  // quiet line: once answered, what was chosen (issue #199).
   if (entry.kind === 'spec_question') {
     const block = questionEntryOf(entry, context.spec.thread, context.spec.asked)
     if (block === null) return null
-    const { question, cancelled } = block
     return (
-      <div id={questionAnchor(question.id)}>
-        <SpecQuestion
-          question={question}
-          cancelled={cancelled}
-          onAnswer={(answer) => context.spec.onAnswer(question.id, answer)}
-        />
+      <div id={questionAnchor(block.question.id)}>
+        <SpecQuestionRecord question={block.question} cancelled={block.cancelled} />
       </div>
     )
   }
 
-  if (entry.kind === 'spec_answer') return null
-
-  // The Spec the agent of a `free` Session proposed, which `Create` accepts (D7-07).
+  // The Spec the agent of a `free` Session proposed (D7-07), or that Hemera created at once in a
+  // Session New Spec started (issue #205): its quiet line, with its key once it has one.
   if (entry.kind === 'spec_proposal') {
     const { thread, specId, defined } = context.spec
     const proposal = proposalOf(entry, thread, specId, defined)
     if (proposal === null) return null
     return (
-      <CreateSpecProposal
+      <SpecProposalRecord
         title={proposal.title}
         type={proposal.type}
         state={proposal.state}
-        createdKey={defined?.key}
-        onCreate={context.spec.onCreate}
-        onDecline={() => context.spec.onDecline(proposalIdOf(entry))}
+        specKey={
+          proposal.existing?.key ??
+          proposal.createdAtOnce ??
+          (proposal.state === 'created' ? defined?.key : undefined)
+        }
       />
     )
   }
 
   if (entry.kind === 'note') {
+    // An error a turn failed with is a row in words, never the raw error as a line of Hemera's.
+    const failure = failureNoteOf(entry)
+    if (failure !== null) {
+      return (
+        <AgentReport
+          title={failure.title}
+          detail={failure.detail}
+          at={new Date(entry.createdAt).toLocaleTimeString('en-GB', {
+            hour: '2-digit',
+            minute: '2-digit',
+          })}
+          onRetry={failure.retry ? context.onHandOver : undefined}
+        />
+      )
+    }
+    const report = agentReportOf(entry)
+    if (report !== null) {
+      return (
+        <AgentReport
+          title={report.title}
+          detail={report.detail}
+          at={new Date(entry.createdAt).toLocaleTimeString('en-GB', {
+            hour: '2-digit',
+            minute: '2-digit',
+          })}
+        />
+      )
+    }
     return (
       <MessageGroup author="hemera" name="Hemera" lines={[{ id: entry.id, body: entry.body }]} />
     )
@@ -584,40 +596,50 @@ export function drawEntry(entry: SessionEntry, context: AgentContext): ReactNode
   if (entry.kind === 'hemera_tool_call') {
     const drawn = hemeraToolCallOf(entry, context.runs)
     if (drawn === null) return null
-    return <HemeraToolCall {...drawn} />
+    return <HemeraToolCall {...drawn} {...outcomeOf(context.callLink(entry.id), context)} />
   }
 
   if (entry.kind === 'command_run') {
     // The run as the window last heard it, where it has: its address and what it printed arrive
-    // between the two writes of its entry, and the panel beside the thread reads the same run.
-    const drawn = commandRunOf(entry, context.runs)
+    // between the two writes of its entry, and the line in the head reads the same run. One quiet
+    // line of the thread (issue #237): what it offers — Stop, Run again, keep it — is its chip's.
+    const drawn = commandRunOf(entry, context.runs, context.root, context.repositories)
     if (drawn === null) return null
     const { runId, ...shown } = drawn
-    // What is kept is the run as it ran — its line and its folder — so only a run the window has
-    // heard of can be added; the block offers it on a one-off alone.
     const heard = context.runs.find((one) => one.id === runId)
     return (
       <CommandRun
         {...shown}
         onOpenUrl={context.onOpenUrl}
-        onStop={runId === null ? undefined : () => context.onStopRun(runId)}
         workspace={heard === undefined ? undefined : elsewhereOf(heard, context.workspace)}
-        onAddToCatalogue={heard === undefined ? undefined : () => context.onAddToCatalogue(heard)}
       />
     )
   }
 
   if (entry.kind === 'command_proposal') {
-    // A command the agent proposes, and nothing more until a human decides (D8-11): the decision
-    // comes back as this same entry in its outcome, which draws the block again without buttons.
+    // A command the agent proposes, answered among the Session's notices (D8-11, issue #237): the
+    // decision comes back as this same entry in its outcome, which its record says with its dot.
     const drawn = commandProposalOf(entry)
     if (drawn === null) return null
-    const { proposalId, ...shown } = drawn
+    const { proposalId: _, ...shown } = drawn
+    return <CommandProposalRecord {...shown} />
+  }
+
+  if (entry.kind === 'setup_proposal') {
+    // A change to the Project's setup the agent proposes, answered among the Session's notices
+    // (#218): the call that proposed it carries it, and this quiet line is drawn only when that
+    // call is not in the thread. The decision comes back as this same entry in its outcome.
+    const drawn = setupProposalOf(entry)
+    if (drawn === null) return null
     return (
-      <CommandProposal
-        {...shown}
-        onAccept={() => context.onAcceptProposal(proposalId)}
-        onDecline={() => context.onDeclineProposal(proposalId)}
+      <SetupProposalRecord
+        verb={drawn.verb}
+        subject={drawn.subject}
+        mono={drawn.mono}
+        line={drawn.line}
+        details={drawn.details}
+        why={drawn.why}
+        state={drawn.state}
       />
     )
   }
@@ -627,10 +649,247 @@ export function drawEntry(entry: SessionEntry, context: AgentContext): ReactNode
     const drawn = contextDeliveryOf(entry)
     if (drawn === null) return null
     return (
-      <MessageGroup author="hemera" name="Hemera" lines={[{ id: drawn.id, body: drawn.body }]} />
+      <MessageGroup
+        author="hemera"
+        name="Hemera"
+        // What still waits for the agent is a state of Hemera's, said as a quiet row (#211).
+        tone={drawn.waiting ? 'ghost' : undefined}
+        lines={[{ id: drawn.id, body: drawn.body }]}
+      />
     )
   }
 
+  return null
+}
+
+/**
+ * What became of a call, drawn with the call (review of #250): the shield of the permission it
+ * waited on, the run's dot and exit code, the bookmark of the command it proposed on its line;
+ * the answer, what the run printed and what was proposed once it is opened.
+ */
+/** What a call is drawn with of what became of it: marks on its line, details in its body. */
+interface Outcome {
+  outcome?: ReactNode
+  children?: ReactNode
+}
+
+function outcomeOf(link: CallLink | undefined, context: AgentContext): Outcome {
+  if (link === undefined) return {}
+  const thread = context.spec.thread
+  const permission: CallPermission | undefined =
+    link.request !== undefined
+      ? permissionStandingOf(link.request, thread)
+      : link.decision === undefined
+        ? undefined
+        : 'unasked'
+  const run =
+    link.run === undefined
+      ? null
+      : commandRunOf(link.run, context.runs, context.root, context.repositories)
+  const proposed = link.proposal === undefined ? null : commandProposalOf(link.proposal)
+  const setup = (link.setup ?? []).flatMap((entry) => {
+    const drawn = setupProposalOf(entry)
+    return drawn === null ? [] : [{ id: entry.id, ...drawn }]
+  })
+  const decision = link.decision
+  return {
+    outcome: (
+      <CallOutcome
+        permission={permission}
+        run={run === null ? undefined : { state: run.state, exitCode: run.exitCode }}
+        proposal={proposed?.state}
+        setup={setup.length === 0 ? undefined : setup.map((one) => one.state)}
+      />
+    ),
+    children: (
+      <CallOutcomeDetails
+        decision={
+          decision === undefined
+            ? undefined
+            : {
+                answer: decision.body,
+                at: clockOf(decision.createdAt),
+                refused: permission === 'refused' || permission === 'stopped',
+              }
+        }
+        output={
+          run === null
+            ? undefined
+            : {
+                id: run.runId ?? link.run?.id ?? '',
+                text: run.output,
+                released: run.state !== 'running',
+              }
+        }
+        proposal={
+          proposed === null
+            ? undefined
+            : { line: proposed.line, folder: proposed.folder, why: proposed.why }
+        }
+        setup={
+          setup.length === 0
+            ? undefined
+            : {
+                changes: setup.map((one) => ({
+                  id: one.id,
+                  verb: one.verb,
+                  subject: one.subject,
+                  state: one.state,
+                })),
+                why: setup[0]?.why ?? '',
+              }
+        }
+      />
+    ),
+  }
+}
+
+/** When something was written, `HH:MM`, as the thread's lines say it. */
+function clockOf(at: number): string {
+  return new Date(at).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })
+}
+
+/** What a permission question is drawn from, in the card that asks it and in its record. */
+interface Asked {
+  toolCallId: string
+  toolName: string
+  label: string | undefined
+  subject: string | undefined
+  intent: string | undefined
+  parameters: PermissionParameter[] | undefined
+  command: string | undefined
+  options: PermissionOption[]
+  /** How long an "always" is remembered: an agent's own question only. */
+  scope: string | undefined
+}
+
+/** A permission question read off its entry, or null when its payload does not parse. */
+function permissionOf(entry: SessionEntry, context: AgentContext): Asked | null {
+  const read = readPayload(permissionSchema, entry.payload)
+  if (read === null) return null
+  const options = read.options.map((option) => ({
+    optionId: option.optionId,
+    name: option.name,
+    kind: among(PERMISSION_KINDS, option.kind, 'reject_once'),
+  }))
+  // A question of Hemera's own tools (D6-05): the tool by its name, where it would act — in the
+  // Workspace or one of its repositories, or outside when the engine says so (#239) — and the
+  // line a one-off would run. Its two options are this call's only — nothing is remembered, so
+  // there is no "always" to offer.
+  if (read.tool !== undefined && read.resolved !== undefined) {
+    const head = hemeraPermissionOf(read.tool, entry.body, read)
+    return {
+      toolCallId: read.toolCallId,
+      toolName: read.tool,
+      ...head,
+      parameters: hemeraPlaceOf(
+        { ...read, resolved: read.resolved },
+        context.workspace ?? MAIN_WORKSPACE,
+        context.repositories,
+      ),
+      command: read.line ?? read.resolved,
+      options,
+      scope: undefined,
+    }
+  }
+  // An agent's own question is headed by the line of the call it is about, where the thread
+  // holds the agent's report of it: the kind's label and what the call is about.
+  const reportedEntry = context.reportedCall(read.toolCallId)
+  const reported =
+    reportedEntry === undefined ? null : readPayload(callPayloadSchema, reportedEntry.payload)
+  const kind = among(TOOL_KINDS, reported?.call.kind ?? null, 'other')
+  return {
+    toolCallId: read.toolCallId,
+    toolName: entry.body,
+    label: reported === null ? undefined : toolKindLabel(kind, reported.call.title),
+    subject: reported === null ? undefined : nativeSubjectOf(kind, reported.call)?.text,
+    intent: reported === null ? entry.body : undefined,
+    parameters: undefined,
+    command: undefined,
+    options,
+    scope: 'For this Session',
+  }
+}
+
+/**
+ * What answers an entry that waits for a human, drawn for the Session's notices (issue #237): the
+ * permission with its whole line and its two answers, a proposed command with its marks, the Spec
+ * the agent proposes, a question of the Spec with its choices, a change to the Project's setup. Null for any other entry.
+ */
+export function drawNotice(entry: SessionEntry, context: AgentContext): ReactNode | null {
+  if (entry.kind === 'permission_request') {
+    const asked = permissionOf(entry, context)
+    if (asked === null) return null
+    return (
+      <PermissionRequest
+        toolName={asked.toolName}
+        label={asked.label}
+        subject={asked.subject}
+        intent={asked.intent}
+        parameters={asked.parameters}
+        command={asked.command}
+        options={asked.options}
+        scope={asked.scope}
+        onDecide={(option) => context.onDecide(asked.toolCallId, option)}
+      />
+    )
+  }
+  if (entry.kind === 'command_proposal') {
+    const drawn = commandProposalOf(entry)
+    if (drawn === null) return null
+    const { proposalId, state: _, ...shown } = drawn
+    return (
+      <CommandProposal
+        {...shown}
+        onAccept={() => context.onAcceptProposal(proposalId)}
+        onDecline={() => context.onDeclineProposal(proposalId)}
+      />
+    )
+  }
+  if (entry.kind === 'setup_proposal') {
+    const drawn = setupProposalOf(entry)
+    if (drawn === null) return null
+    return (
+      <SetupProposal
+        verb={drawn.verb}
+        subject={drawn.subject}
+        mono={drawn.mono}
+        line={drawn.line}
+        details={drawn.details}
+        why={drawn.why}
+        onAccept={() => context.onAcceptSetup(drawn.proposalId)}
+        onDecline={() => context.onDeclineSetup(drawn.proposalId)}
+      />
+    )
+  }
+  if (entry.kind === 'spec_question') {
+    const block = questionEntryOf(entry, context.spec.thread, context.spec.asked)
+    if (block === null) return null
+    const { question } = block
+    return (
+      <SpecQuestion
+        question={question}
+        onAnswer={(answer) => context.spec.onAnswer(question.id, answer)}
+        bare
+      />
+    )
+  }
+  if (entry.kind === 'spec_proposal') {
+    const { thread, specId, defined } = context.spec
+    const proposal = proposalOf(entry, thread, specId, defined)
+    if (proposal === null) return null
+    return (
+      <CreateSpecProposal
+        title={proposal.title}
+        type={proposal.type}
+        state={proposal.state}
+        existingKey={proposal.existing?.key}
+        onContinue={() => context.spec.onJoin(proposalIdOf(entry))}
+        onCreate={context.spec.onCreate}
+        onDecline={() => context.spec.onDecline(proposalIdOf(entry))}
+      />
+    )
+  }
   return null
 }
 
@@ -699,34 +958,4 @@ export function touchedOf(entries: readonly SessionEntry[]): readonly TouchedFil
     }
   }
   return files
-}
-
-/**
- * The permission the agent is waiting on, when it is waiting.
- *
- * A request is answered by the decision written after it, and the two share the call they are
- * about: that is what says the question is closed, rather than the fact that something else has
- * happened since. A Session whose agent was stopped mid-question has a request and no decision —
- * and is not waiting, because no turn is running (D5-17).
- */
-export function waitingOf(entries: readonly SessionEntry[]): SessionEntry | null {
-  for (let at = entries.length - 1; at >= 0; at -= 1) {
-    const entry = entries[at]
-    if (entry === undefined) continue
-    if (entry.kind === 'permission_decision') return null
-    if (entry.kind === 'permission_request') {
-      // A question the engine closed — answered, stopped, or left by an agent that died — is not
-      // one the agent is waiting on, whatever follows it.
-      if (entry.state !== 'pending') return null
-      for (let after = at + 1; after < entries.length; after += 1) {
-        const later = entries[after]
-        if (later === undefined || later.kind !== 'permission_decision') continue
-        const read = readPayload(decisionSchema, later.payload)
-        const asked = readPayload(permissionSchema, entry.payload)
-        if (read !== null && asked !== null && read.toolCallId === asked.toolCallId) return null
-      }
-      return entry
-    }
-  }
-  return null
 }

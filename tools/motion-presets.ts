@@ -306,6 +306,7 @@ if (import.meta.main) {
   const refusals = [
     join(repository, 'apps', 'desktop', 'src', 'renderer'),
     join(repository, 'packages', 'ui', 'src'),
+    join(repository, 'apps', 'face-lab', 'src'),
   ].flatMap((root) => analyze(root, repository, kinds))
   for (const refusal of refusals) {
     console.error(`${refusal.file}: "${refusal.property}" ${refusal.problem}`)

@@ -1,5 +1,7 @@
 import type { AgentProvider, EngineEvent, Session, SessionEntry, Workspace } from '@hemera/ipc'
 
+import { patiently } from './patiently.ts'
+
 /**
  * The Sessions of the Project in front, and the thread of the one that is open (design D4b-02).
  *
@@ -79,7 +81,8 @@ function message(cause: unknown): string {
 
 /** The Sessions of a Project, archived ones left out. */
 async function listed(projectId: string): Promise<Session[]> {
-  return await window.hemera.invoke('sessions.list', { projectId })
+  // Asked again when it fails: the list the sidebar draws is read as the window opens.
+  return await patiently(async () => await window.hemera.invoke('sessions.list', { projectId }))
 }
 
 /** The whole thread of a Session, oldest first, read from the end backwards. */
@@ -146,7 +149,8 @@ export async function readSessions(projectId: string): Promise<void> {
 export async function openSession(sessionId: string): Promise<void> {
   replace({ ...state, open: sessionId, thread: [], loaded: false, refusal: null })
   try {
-    const thread = await threadOf(sessionId)
+    // Asked again when it fails: the Session the window reopens on is read at start too.
+    const thread = await patiently(async () => await threadOf(sessionId))
     if (state.open !== sessionId) return
     replace({ ...state, thread, loaded: true })
   } catch (cause) {
@@ -276,7 +280,10 @@ async function acting(projectId: string, act: () => Promise<Session[]>): Promise
 /** Reads the Workspaces of the Project on screen, which the composer's pill offers (D8-08). */
 export async function readWorkspaces(projectId: string): Promise<void> {
   try {
-    const workspaces = await window.hemera.invoke('workspaces.list', { projectId })
+    // Asked again when it fails: what the composer's pill offers is read as the Project opens.
+    const workspaces = await patiently(
+      async () => await window.hemera.invoke('workspaces.list', { projectId }),
+    )
     if (shown !== projectId) return
     replace({ ...state, workspaces })
   } catch (cause) {

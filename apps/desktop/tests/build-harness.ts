@@ -192,10 +192,21 @@ export const aReadySpec = (
     }
   })
 
-/** A build of that Spec asked for in `main`, which is ready: started at once (D8-13). */
+/**
+ * A build of that Spec asked for in `main`, which is ready: answered `waiting`, and started right
+ * after in the engine (D8-13, #132), which is waited for.
+ */
 export const launched = (specId: string, workspaceId: string) =>
   Effect.gen(function* () {
-    const launch = yield* (yield* Launches).request(specId, workspaceId)
+    const launches = yield* Launches
+    const asked = yield* launches.request(specId, workspaceId)
+    let launch = yield* launches.one(asked.id)
+    // Waited for on the machine's clock, not the suite's: the start runs in the engine.
+    for (let tries = 0; tries < 200; tries += 1) {
+      if (launch.state === 'started' || launch.state === 'failed') break
+      yield* Effect.promise(() => new Promise<void>((resolve) => setTimeout(resolve, 25)))
+      launch = yield* launches.one(asked.id)
+    }
     if (launch.sessionId === null) return yield* Effect.die('the build did not start')
     return launch.sessionId
   })

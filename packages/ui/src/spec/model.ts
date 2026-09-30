@@ -52,55 +52,30 @@ export type SectionName =
 export type SpecTarget = SectionName | 'stories' | 'tasks' | 'questions'
 
 /**
- * The mark in the margin of a part: nothing written yet, written by the agent, edited by you, out
- * of date after a rework, in conflict with an unsaved text of yours, or being written right now.
+ * The mark of a part: nothing written yet, written by the agent, written by you, out of date after
+ * a rework, or being written right now.
  */
-export type Mark = 'empty' | 'agent' | 'human' | 'stale' | 'conflict' | 'writing'
+export type Mark = 'empty' | 'agent' | 'human' | 'stale' | 'writing'
 
 /** Who wrote a section last. */
 export type Author = 'agent' | 'human'
-
-/**
- * A text of yours that could not be saved, because the section moved under it (D7-12).
- *
- * It is kept whole: the editor holds `mine`, and `current` is what the section says now, for
- * the comparison.
- */
-export interface ConflictView {
-  /** The version the human's text was written on. */
-  base: number
-  /** The version the section is at now. */
-  current: number
-  /** The human's text, never lost. */
-  mine: string
-  /** What the section says at `current`, written by whoever wrote it. */
-  theirs: string
-}
 
 export interface SectionView {
   name: SectionName
   /** The Markdown body; empty while nothing is written. */
   body: string
-  /** The section's own version, which a save is checked against. */
-  version: number
   /** Who wrote it last; `null` while nothing is written. */
   author: Author | null
   mark: Mark
-  /** A human edit not yet handed to the agent: it goes with the next turn. */
-  pendingForAgent?: boolean | undefined
   /** The revision it was copied from, after a rework, while its phase is stale. */
   copiedFrom?: number | undefined
-  conflict?: ConflictView | undefined
   /** A line under the text saying what the section is for, when the type says it. */
   note?: string | undefined
 }
 
 /** A story (core.md, "Spec"): one sentence of actor, need and benefit, and ordered criteria. */
 export interface StoryView {
-  /**
-   * The story itself, whatever its place: an edit is handed back on it, so a story added or moved
-   * while its text was being edited never receives another story's text.
-   */
+  /** The story itself, whatever its place. */
   id: string
   /** `S1`, `S2`: how tasks and questions point at it. */
   key: string
@@ -133,7 +108,7 @@ export interface SpecQuestionOption {
 }
 
 /**
- * The answer given: one of the options, or words of the reader's own — "Something else…".
+ * The answer given: one of the options, or words of the reader's own, given under `Other`.
  */
 export interface SpecAnswer {
   optionId?: string | undefined
@@ -207,14 +182,17 @@ export interface ReadinessItem {
   target?: SpecTarget | undefined
 }
 
+/**
+ * The ready gate as the panel is handed it. Since issue #135 the panel draws none of it but what
+ * `Mark ready` was refused with, which the application writes from the things left.
+ */
 export interface ReadinessView {
   checks: GateCheckView[]
   /** What is left, in the order the sentence says it. Empty when every check passes. */
   todo: ReadinessItem[]
   /**
-   * What the last `Mark ready` was refused with, in the engine's words: the Spec changed since
-   * the gate was shown, and the bar now shows it as it is (D7-10, "An obsolete request is
-   * refused").
+   * What the last `Mark ready` was refused with: what the draft still lacks, or that the Spec
+   * changed as it was pressed (D7-10, "An obsolete request is refused").
    */
   refused?: string | undefined
 }
@@ -222,7 +200,7 @@ export interface ReadinessView {
 /** A revision as the picker lists it. */
 export interface RevisionView {
   number: number
-  /** What the picker says of it, in plain words: `Latest · frozen`, `Frozen 22 Sep · read only`. */
+  /** What the picker says of it, in plain words: `Latest · ready`, `Marked ready 22 Sep · read only`. */
   detail: string
 }
 
@@ -249,8 +227,6 @@ export interface SpecView {
   revisions: RevisionView[]
   /** The state of each phase, which the group headings of the document wear. */
   phases: PhaseView[]
-  /** The one sentence under the head: `Plan · the agent is writing the plan`. */
-  now: string
   /** Where the agent is writing now, which the document highlights and scrolls to. */
   focus?: SpecTarget | undefined
   /** The sections of the revision; the document draws the ones the type's contract names. */
@@ -262,13 +238,17 @@ export interface SpecView {
   questions: SpecQuestionView[]
   questionsMark: Mark
   readiness: ReadinessView
-  /** When it was frozen, already written: `23 Sep`. Present on a `ready` Spec only. */
-  frozenOn?: string | undefined
   /**
    * The current revision, when the one shown is an older one (D7-05): it is read as it was
    * frozen, and it offers no Rework — only the current revision of a Spec can be reworked.
    */
   replacedBy?: number | undefined
+  /**
+   * Whether the Spec is only provisional (issue #198): New Spec's request, shown before the agent
+   * proposed it and the user created it. It is saved nowhere and has no key yet; its title is the
+   * request's, and nothing of it is written.
+   */
+  provisional?: boolean | undefined
 }
 
 /**
@@ -286,6 +266,14 @@ export interface LaunchWorkspace {
   name: string
 }
 
+/**
+ * The Workspace a Spec is set on, and where it stands (D8-12): being prepared, ready, failed —
+ * resumed rather than started in — or cleaned up, which leaves the Spec with none.
+ */
+export interface SpecWorkspace extends LaunchWorkspace {
+  state: 'preparing' | 'ready' | 'failed' | 'cleaned'
+}
+
 /** What a launch says of itself, and the one thing it offers from where it stands (D8-13). */
 export type LaunchView =
   | {
@@ -299,8 +287,24 @@ export type LaunchView =
       state: 'failed'
       /** What the start was refused with, in the engine's own words. */
       cause: string
+      /**
+       * What failed (D8-13): the agent of the Session the launch made, which `Retry` starts again
+       * on that Session; the preparation of its Workspace; or the start, refused before any
+       * Session was made. The last two have nothing to start again: a new build is asked for.
+       */
+      stage: 'agent' | 'preparation' | 'start'
     }
-  | { state: 'cancelled' }
+  | {
+      state: 'cancelled'
+      /** What took it back: a Rework of the Spec, or the cleanup that removed its Workspace. */
+      reason: 'rework' | 'removed'
+      /**
+       * Whether a build can be asked for again from here: the Spec is ready — on the revision a
+       * Rework made, for a launch a Rework took back — and the actions of a Spec with no launch
+       * are offered under the reason.
+       */
+      again: boolean
+    }
 
 /** How each section is named in the document. */
 export const SECTION_TITLES: Record<SectionName, string> = {

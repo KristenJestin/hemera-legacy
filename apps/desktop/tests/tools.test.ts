@@ -1006,6 +1006,86 @@ describe('Reflected provider errors cannot leak secrets', () => {
   })
 })
 
+describe('Cancellation makes late answers inert', () => {
+  const held = () => {
+    const started = Promise.withResolvers<void>()
+    const release = Promise.withResolvers<void>()
+    let aborted = false
+    const transport: JevTransport = {
+      send: async (_, __, signal) => {
+        signal.addEventListener('abort', () => {
+          aborted = true
+        })
+        started.resolve()
+        await release.promise
+        return jevResponse(0)
+      },
+    }
+    return { started, release, transport, aborted: () => aborted }
+  }
+
+  it('executes nothing when the Session ends while Jev evaluates', async () => {
+    const jev = held()
+    const seen = await engine(
+      humanSaying(),
+      jev.transport,
+    )(
+      Effect.gen(function* () {
+        const session = yield* opened
+        const settings = yield* ClassifierSettings
+        yield* settings.replaceKey('ciphertext', 'private-key')
+        yield* settings.setConsent(true)
+        yield* settings.select('hemera-auto')
+        const call = yield* Effect.forkScoped(
+          calling({
+            sessionId: session.sessionId,
+            tool: 'fs_write',
+            arguments: { path: 'ended.md', content: 'no', key: 'ended' },
+          }),
+        )
+        yield* Effect.promise(() => jev.started.promise)
+        yield* (yield* ToolAccess).revoked(session.sessionId)
+        jev.release.resolve()
+        return yield* Fiber.join(call)
+      }),
+    )
+    expect(seen.state).toBe('refused')
+    expect(existsSync(join(root, 'ended.md'))).toBe(false)
+  })
+
+  it('aborts the evaluation and executes nothing when the turn stops the call', async () => {
+    const jev = held()
+    const seen = await engine(
+      humanSaying(),
+      jev.transport,
+    )(
+      Effect.gen(function* () {
+        const session = yield* opened
+        const settings = yield* ClassifierSettings
+        yield* settings.replaceKey('ciphertext', 'private-key')
+        yield* settings.setConsent(true)
+        yield* settings.select('hemera-auto')
+        const call = yield* Effect.forkScoped(
+          calling({
+            sessionId: session.sessionId,
+            tool: 'fs_write',
+            arguments: { path: 'stopped.md', content: 'no', key: 'stopped' },
+          }),
+        )
+        yield* Effect.promise(() => jev.started.promise)
+        // A stopped turn interrupts the calls it was waiting on.
+        yield* Fiber.interrupt(call)
+        jev.release.resolve()
+        yield* Effect.sleep('50 millis')
+        return yield* threadEntries(session.sessionId)
+      }),
+    )
+    expect(jev.aborted()).toBe(true)
+    expect(existsSync(join(root, 'stopped.md'))).toBe(false)
+    expect(seen.find((entry) => entry.kind === 'classifier_decision')?.state).toBe('cancelled')
+  })
+})
+
 describe('Secrets are masked before any evaluation', () => {
   it('masks a Workspace credential in any tool, and keeps a plain variable readable', async () => {
     const sent: string[] = []

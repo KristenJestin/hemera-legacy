@@ -716,9 +716,10 @@ describe('Local rules settle only understood calls', () => {
       expect(result.listing.state).toBe('completed')
       expect(result.deletion.state).toBe('refused')
       expect(result.outside.state).toBe('completed')
-      // Only the listing that leaves the Workspace went to the judge; no question was asked.
+      // Only the listing that leaves the Workspace went to the judge, and it asked whatever the
+      // judge said: a path outside always asks (#306).
       expect(evaluated).toBe(1)
-      expect(human.asked).toHaveLength(0)
+      expect(human.asked).toHaveLength(1)
     },
   )
 })
@@ -2503,10 +2504,7 @@ describe('Hemera Auto: paths outside the Workspace and sensitive places always a
       expect(decisions).toHaveLength(2)
       for (const decision of decisions) {
         expect(decision).toMatchObject({ verdict: 'ask', source: 'jev', strictness })
-        expect(decision.asked).toEqual([
-          'outside the Workspace: ~/.ssh/config',
-          'sensitive place: ~/.ssh',
-        ])
+        expect(decision.why).toBe('outside the Workspace: ~/.ssh/config; sensitive place: ~/.ssh')
       }
       const questions = seen.entries.filter((entry) => entry.kind === 'permission_request')
       expect(questions).toHaveLength(2)

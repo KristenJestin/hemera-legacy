@@ -6,13 +6,14 @@ import { type BrowserWindow, dialog } from 'electron/main'
 import type { OpenDialogOptions } from 'electron'
 import { shell } from 'electron/common'
 import { existsSync } from 'node:fs'
+import { mkdir } from 'node:fs/promises'
 import { join } from 'node:path'
 
 import { Effect } from 'effect'
 
 import type { ApplicationIdentity } from './channel.ts'
 import { readSidecar, writeSidecar } from './display-sidecar.ts'
-import { DIAGNOSTIC_FILE, traceFileOf } from './diagnostic.ts'
+import { DIAGNOSTIC_FILE, TESTER_INDEX, testerFolderOf, traceFileOf } from './diagnostic.ts'
 import { collectReport } from './environment.ts'
 import { handle } from './handle.ts'
 import { encryptClassifierKey, protectedStorageReady } from './classifier-key.ts'
@@ -186,6 +187,14 @@ export function registerChannels(
    */
   handle('shell.open', ({ what }) =>
     Effect.promise(async () => {
+      if (what === 'tester' || what === 'tester-index') {
+        // The app tester's folder, made if no finding was written yet: an open that finds
+        // nothing opens nothing, and the reader asked to see where the findings go (#300).
+        const folder = testerFolderOf(directory)
+        await mkdir(folder, { recursive: true })
+        await shell.openPath(what === 'tester' ? folder : join(folder, TESTER_INDEX))
+        return
+      }
       await shell.openPath(what === 'folder' ? directory : join(directory, DIAGNOSTIC_FILE))
     }),
   )
@@ -226,6 +235,7 @@ export function registerChannels(
 const RELAYED = [
   'engine.status',
   'classifier.decisions',
+  'tester.findings',
   'projects.list',
   'projects.create',
   'projects.update',

@@ -55,6 +55,7 @@ import { type Preparation, hostLinks, preparationLayer } from '#engine/workspace
 import { type Launches, launchesLayer } from '#engine/workspaces/launches.ts'
 import { type Recipe, recipeLayer } from '#engine/workspaces/recipe.ts'
 import { type Variables, variablesLayer } from '#engine/workspaces/variables.ts'
+import { type TesterFindings, testerFindingsLayer } from '#engine/tester/findings.ts'
 import { type Workspaces, WorkspacesRoot, workspacesLayer } from '#engine/workspaces/workspaces.ts'
 
 import { threadOf, until } from './application.ts'
@@ -239,9 +240,11 @@ function running<A, E>(
     | Launches
     | ProjectChecks
     | Builds
+    | TesterFindings
     | Database
     | SqliteClient
   > = Layer.mergeAll(
+    testerFindingsLayer(dataFolder),
     preferencesLayer,
     classifierSettingsLayer,
     engineStatusLayer({ directory: dataFolder, channel: 'dev', version: '0.3.0' }),

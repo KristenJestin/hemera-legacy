@@ -77,6 +77,7 @@ import {
 } from './sessions.ts'
 import { Specs, type SpecRefusal, declinedNotice } from './specs/specs.ts'
 import { EngineStatus } from './status.ts'
+import { TesterFindings, type TesterFilesError } from './tester/findings.ts'
 import type { DatabaseError } from './storage/database.ts'
 import type { StaleVersionError } from './transaction.ts'
 import type { UnknownWorkspaceError } from './workspaces/described.ts'
@@ -204,6 +205,7 @@ export function answer(
   | Specs
   | ProjectChecks
   | Builds
+  | TesterFindings
 > {
   return Effect.gen(function* () {
     if (decision.name === 'classifier.state') {
@@ -252,6 +254,24 @@ export function answer(
     }
     if (decision.name === 'classifier.decisions') {
       return yield* (yield* Sessions).decisions(decision.argument.limit)
+    }
+    if (decision.name === 'tester.findings') {
+      const findings = yield* (yield* TesterFindings).list
+      return findings.map(({ file, head, body }) => ({
+        file,
+        number: head.number,
+        title: head.title,
+        kind: head.kind,
+        place: head.place,
+        severity: head.severity,
+        occurrences: head.occurrences,
+        firstSeen: head.firstSeen,
+        lastSeen: head.lastSeen,
+        sessions: [...head.sessions],
+        agent: head.agent,
+        version: head.version,
+        body,
+      }))
     }
     if (decision.name === 'engine.status') return yield* (yield* EngineStatus).read
 
@@ -738,6 +758,7 @@ export function answer(
  * something that happens by writing a service.
  */
 export type Refusal =
+  | TesterFilesError
   | SpecRefusal
   | LaunchRefusal
   | AgentRuntimeError

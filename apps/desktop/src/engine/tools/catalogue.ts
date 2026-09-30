@@ -805,6 +805,7 @@ export const toolCatalogueLayer: Layer.Layer<
           scores = undefined
         }
         const decisionPayload = {
+          agent: made.agent,
           verdict,
           source,
           model,
@@ -915,6 +916,8 @@ export const toolCatalogueLayer: Layer.Layer<
       projectName: string,
       repositories: readonly string[],
       call: ParsedCall,
+      made: Made,
+      mission: Mission,
       guard?: AuthorizedTarget,
     ): Effect.Effect<Answer> =>
       Effect.gen(function* () {
@@ -1223,8 +1226,8 @@ export const toolCatalogueLayer: Layer.Layer<
               judged !== null
                 ? yield* classify(
                     asked,
-                    { projectId, agent: 'agent', milliseconds: 0 },
-                    (yield* answered(sessions.one(asked.sessionId)))?.session.mission ?? 'free',
+                    made,
+                    mission,
                     {
                       tool: 'commands_run',
                       target: contained ? 'inside' : 'outside',
@@ -1714,6 +1717,8 @@ export const toolCatalogueLayer: Layer.Layer<
               project.name,
               project.repositories,
               parsed.call,
+              made,
+              session.mission,
               guard,
             )
           })

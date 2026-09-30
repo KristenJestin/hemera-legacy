@@ -36,6 +36,7 @@ export const ACTIVE_PROJECT_KEY = 'activeProjectId'
 export const ACTIVE_SESSIONS_KEY = 'activeSessions'
 export const COMPOSERS_KEY = 'composers'
 export const ACP_TRACE_KEY = 'acpTrace'
+export const APP_TESTER_KEY = 'appTester'
 
 function themeOf(value: string | undefined): ThemePreference | null {
   if (value === undefined) return null
@@ -132,6 +133,8 @@ export const preferencesLayer = Layer.effect(
             composersOf(stored.get(COMPOSERS_KEY)) ?? DEFAULT_DISPLAY_PREFERENCES.composers,
           // Anything but the word this version writes is off: a trace is never on by accident.
           acpTrace: stored.get(ACP_TRACE_KEY) === 'true',
+          // The same for the app tester (#300): never on by accident.
+          appTester: stored.get(APP_TESTER_KEY) === 'true',
         }
       }),
 
@@ -162,6 +165,9 @@ export const preferencesLayer = Layer.effect(
           }
           if (change.acpTrace !== undefined) {
             written.push({ key: ACP_TRACE_KEY, value: String(change.acpTrace) })
+          }
+          if (change.appTester !== undefined) {
+            written.push({ key: APP_TESTER_KEY, value: String(change.appTester) })
           }
           if (written.length === 0) return
 

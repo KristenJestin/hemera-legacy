@@ -48,6 +48,7 @@ import { type EngineStatus, engineStatusLayer } from '#engine/status.ts'
 import { DatabaseError, SqliteClient, databaseLayer } from '#engine/storage/database.ts'
 import type { Database } from '#engine/storage/database.ts'
 import { toolAccessLayer } from '#engine/tools/access.ts'
+import { Approvals, approvalsLayer } from '#engine/tools/approvals.ts'
 import { toolPermissionsLayer } from '#engine/tools/permissions.ts'
 import { ToolServer } from '#engine/tools/server.ts'
 import { gitLayer } from '#engine/git.ts'
@@ -55,6 +56,7 @@ import { type Preparation, hostLinks, preparationLayer } from '#engine/workspace
 import { type Launches, launchesLayer } from '#engine/workspaces/launches.ts'
 import { type Recipe, recipeLayer } from '#engine/workspaces/recipe.ts'
 import { type Variables, variablesLayer } from '#engine/workspaces/variables.ts'
+import { type TesterFindings, testerFindingsLayer } from '#engine/tester/findings.ts'
 import { type Workspaces, WorkspacesRoot, workspacesLayer } from '#engine/workspaces/workspaces.ts'
 
 import { threadOf, until } from './application.ts'
@@ -94,6 +96,7 @@ function running<A, E>(
     E,
     | Preferences
     | ClassifierSettings
+    | Approvals
     | EngineStatus
     | Projects
     | Journal
@@ -112,6 +115,7 @@ function running<A, E>(
     | Proposals
     | ProjectChecks
     | Builds
+    | TesterFindings
     | SetupProposals
     | Launches
   >,
@@ -153,6 +157,7 @@ function running<A, E>(
   const tools = Layer.mergeAll(
     toolAccessLayer,
     toolPermissionsLayer,
+    approvalsLayer,
     contextLayer.pipe(Layer.provide(gitLayer())),
     commandsLayer,
     variablesLayer,
@@ -220,6 +225,7 @@ function running<A, E>(
   const services: Layer.Layer<
     | Preferences
     | ClassifierSettings
+    | Approvals
     | EngineStatus
     | Projects
     | Journal
@@ -239,9 +245,11 @@ function running<A, E>(
     | Launches
     | ProjectChecks
     | Builds
+    | TesterFindings
     | Database
     | SqliteClient
   > = Layer.mergeAll(
+    testerFindingsLayer({ directory: dataFolder, version: '0.3.0', channel: 'dev' }),
     preferencesLayer,
     classifierSettingsLayer,
     engineStatusLayer({ directory: dataFolder, channel: 'dev', version: '0.3.0' }),
@@ -301,6 +309,7 @@ describe('Un argument refusé par son cas d’usage', () => {
     ['projects.create', { name: 'Atlas', tone: 'fuchsia', mainPath: '/tmp' }, 'tone'],
     ['projects.archive', { id: 'atlas' }, 'version'],
     ['repositories.add', { id: 'atlas', version: 1 }, 'relativePath'],
+    ['classifier.decisions', { limit: 500 }, 'limit'],
   ])('%s refuses %o, naming the field', (name, argument, field) => {
     const decision = decideRequest(name, argument)
 
@@ -310,6 +319,11 @@ describe('Un argument refusé par son cas d’usage', () => {
       expect(decision.reason).toContain(name)
       expect(decision.reason).toContain(field)
     }
+  })
+
+  test('Hemera Auto decisions are read with or without a limit', () => {
+    expect(decideRequest('classifier.decisions', {}).accepted).toBe(true)
+    expect(decideRequest('classifier.decisions', { limit: 50 }).accepted).toBe(true)
   })
 
   test('a cursor that is a whole number is accepted', () => {
@@ -365,7 +379,27 @@ describe('Un message conforme est traité', () => {
       activeSessions: {},
       composers: {},
       acpTrace: false,
+      appTester: false,
     })
+  })
+})
+
+describe('The app tester mode is a preference', () => {
+  test('off until it is turned on, and read back as it was written (#300)', async () => {
+    const before = await send('preferences.read', {})
+    expect(before).toMatchObject({ appTester: false })
+    const written = decideRequest('preferences.write', { appTester: true })
+    expect(written.accepted).toBe(true)
+    await running(
+      Effect.gen(function* () {
+        if (written.accepted) yield* answer(written)
+      }),
+    )
+    expect(await send('preferences.read', {})).toMatchObject({ appTester: true, acpTrace: false })
+  })
+
+  test('its findings are asked for by name, and none is an empty list', async () => {
+    expect(await send('tester.findings', {})).toEqual([])
   })
 })
 
@@ -1037,6 +1071,7 @@ describe('A key can be saved replaced and removed safely', () => {
     expect(first.before).toEqual({
       mode: 'agent-default',
       strictness: 'normal',
+      grace: 10,
       key: 'private-one',
       consent: false,
       generation: 1,
@@ -1044,6 +1079,7 @@ describe('A key can be saved replaced and removed safely', () => {
     expect(first.after).toEqual({
       mode: 'hemera-auto',
       strictness: 'normal',
+      grace: 10,
       key: 'private-one',
       consent: false,
       generation: 2,
@@ -1124,6 +1160,32 @@ describe('The strictness of Hemera Auto is kept in the Profile', () => {
     )
     expect(state.before).toHaveLength(1)
     expect(state.after).toEqual(state.before)
+  })
+})
+
+describe('The grace of an approval is kept in the Profile', () => {
+  test('it is ten seconds until chosen, and a choice holds', async () => {
+    expect(await send('classifier.state', {})).toMatchObject({ grace: 10 })
+    await send('classifier.grace.write', { grace: 30 })
+    expect(await send('classifier.state', {})).toMatchObject({ grace: 30 })
+    await send('classifier.grace.write', { grace: 0 })
+    expect(await send('classifier.state', {})).toMatchObject({ grace: 0 })
+    expect(decideRequest('classifier.grace.write', { grace: 61 }).accepted).toBe(false)
+    expect(decideRequest('classifier.grace.write', { grace: 1.5 }).accepted).toBe(false)
+  })
+
+  test('the window says whether it has the focus', async () => {
+    const focused = await running(
+      Effect.gen(function* () {
+        const approvals = yield* Approvals
+        const before = approvals.focused()
+        const decision = decideRequest('window.focus.write', { focused: false })
+        if (!decision.accepted) throw new Error(decision.reason)
+        yield* answer(decision)
+        return { before, after: approvals.focused() }
+      }),
+    )
+    expect(focused).toEqual({ before: true, after: false })
   })
 })
 

@@ -5,11 +5,14 @@ import { STORIES as SPEC_STORIES } from '../spec/spec-fixtures.ts'
 import {
   ACCEPTED,
   BLOCKED,
+  BUG_NOT_REPLAYED,
+  BUG_REPLAYED,
   BUILDING,
   FINAL_CHECKS,
   FINAL_CHECKS_RED,
   GETTING_READY,
   NOW,
+  NO_STORIES,
   PAUSED,
   READY_TO_ACCEPT,
   STOPPED,
@@ -153,6 +156,32 @@ export const Building: Story = {
   },
 }
 
+/**
+ * A `bug` Spec with no story (issue #203): its tasks stand in a group of their own, each opening
+ * its stage, and the head counts the tasks done since there is no story to count.
+ */
+export const NoStories: Story = {
+  args: { build: NO_STORIES, stories: [] },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement)
+    await expect(canvas.queryByText(/No story of the Spec/)).toBeNull()
+    await expect(canvas.getByText('1 of 3 tasks done')).toBeVisible()
+    const tasks = within(canvas.getByRole('region', { name: 'Tasks of ATL-9' }))
+    // The user's task is on the stage from the start, with its Done and its Skip.
+    await expect(
+      tasks.getByRole('region', { name: 'The September total matches the ledger' }),
+    ).toBeVisible()
+    await userEvent.click(tasks.getByRole('button', { name: 'Done' }))
+    await expect(args.onTaskDone).toHaveBeenCalledWith('bt-4')
+    await expect(tasks.getByRole('button', { name: 'Skip…' })).toBeVisible()
+    // Any other task opens its own stage.
+    await userEvent.click(tasks.getByRole('button', { name: /^T1 / }))
+    await expect(
+      await tasks.findByRole('region', { name: 'The failing total, as a test' }),
+    ).toBeVisible()
+  },
+}
+
 /** The human task is ready: it is Yours, its stage unfolded with Done and Skip. */
 export const Yours: Story = {
   args: { build: YOURS },
@@ -241,6 +270,33 @@ export const ReadyToAccept: Story = {
     await expect(canvas.queryByRole('button', { name: 'Pause' })).toBeNull()
     await userEvent.click(canvas.getByRole('button', { name: 'Accept' }))
     await expect(args.onAccept).toHaveBeenCalled()
+  },
+}
+
+/**
+ * A `bug` in its final checks (issue #203): the replay of its reproduction the agent reported
+ * stands under "Final checks", its dot saying the bug is gone, and Accept is offered.
+ */
+export const BugReplayed: Story = {
+  args: { build: BUG_REPLAYED },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const replay = within(canvas.getByRole('region', { name: 'Reproduction' }))
+    await expect(replay.getByRole('img', { name: 'Gone' })).toBeVisible()
+    await expect(replay.getByText(/the file totals 12 490.00/)).toBeVisible()
+    await expect(canvas.getByRole('button', { name: 'Accept' })).toBeVisible()
+  },
+}
+
+/** A `bug` whose final checks are green but whose reproduction was not replayed: no Accept. */
+export const BugNotReplayed: Story = {
+  args: { build: BUG_NOT_REPLAYED },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await expect(canvas.getByText('final checks green')).toBeVisible()
+    const replay = within(canvas.getByRole('region', { name: 'Reproduction' }))
+    await expect(replay.getByRole('img', { name: 'Not replayed' })).toBeVisible()
+    await expect(canvas.queryByRole('button', { name: 'Accept' })).toBeNull()
   },
 }
 

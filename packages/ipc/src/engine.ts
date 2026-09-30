@@ -22,6 +22,13 @@ export type ClassifierMode = z.infer<typeof classifierModeSchema>
 export const classifierStrictnessSchema = z.enum(['careful', 'normal', 'permissive'])
 export type ClassifierStrictness = z.infer<typeof classifierStrictnessSchema>
 
+/**
+ * How long, in seconds, a call that needs the human's answer waits for it while Hemera's window
+ * is focused, before the agent is told it waits and goes on (#304). Zero never waits.
+ */
+export const approvalGraceSchema = z.number().int().min(0).max(60)
+export const APPROVAL_GRACE_DEFAULT = 10
+
 import {
   agentAvailabilitySchema,
   agentOfferSchema,
@@ -135,6 +142,14 @@ export const composersSchema = z.record(z.string(), composerChoiceSchema)
  */
 export const acpTraceSchema = z.boolean()
 
+/**
+ * Whether every Session's agent also tests Hemera and reports its problems (#300).
+ *
+ * Off unless the reader turned it on in the Developer section; it reaches an agent started after
+ * it was turned on. A data folder, or a hint, written before it existed answers off.
+ */
+export const appTesterSchema = z.boolean()
+
 export const displayPreferencesSchema = z.object({
   theme: themePreferenceSchema,
   sidebar: sidebarPreferenceSchema,
@@ -142,6 +157,7 @@ export const displayPreferencesSchema = z.object({
   activeSessions: activeSessionsSchema,
   composers: composersSchema,
   acpTrace: acpTraceSchema.default(false),
+  appTester: appTesterSchema.default(false),
 })
 
 export type DisplayPreferences = z.infer<typeof displayPreferencesSchema>
@@ -154,6 +170,7 @@ export const DEFAULT_DISPLAY_PREFERENCES: DisplayPreferences = {
   activeSessions: {},
   composers: {},
   acpTrace: false,
+  appTester: false,
 }
 
 /** A change to what the window wears: what is absent is what the user did not touch. */
@@ -164,6 +181,7 @@ export const displayPreferencesChangeSchema = z.object({
   activeSessions: activeSessionsSchema.optional(),
   composers: composersSchema.optional(),
   acpTrace: acpTraceSchema.optional(),
+  appTester: appTesterSchema.optional(),
 })
 
 export type DisplayPreferencesChange = z.infer<typeof displayPreferencesChangeSchema>
@@ -286,6 +304,42 @@ const cursorSchema = z.number().int().nonnegative()
 
 /** How many entries a page may hold, so one call cannot ask for the whole Journal. */
 const limitSchema = z.number().int().positive().max(200)
+
+/** What an app tester finding is about (#300), as `@hemera/core` names it. */
+export const findingKindSchema = z.enum([
+  'hemera_bug',
+  'missing_capability',
+  'tool_error',
+  'auto_decision',
+  'mcp',
+  'interface',
+  'other',
+])
+
+/** How much an app tester finding gets in the way, worst first. */
+export const findingSeveritySchema = z.enum(['blocks', 'hurts', 'cosmetic'])
+
+/**
+ * One app tester finding as the Developer section lists it (#300): its front matter, the name of
+ * its file in `tester/findings`, and its body as the file holds it.
+ */
+export const testerFindingSchema = z.object({
+  file: z.string(),
+  number: z.number(),
+  title: z.string(),
+  kind: findingKindSchema,
+  place: z.string(),
+  severity: findingSeveritySchema,
+  occurrences: z.number(),
+  firstSeen: z.string(),
+  lastSeen: z.string(),
+  sessions: z.array(z.string()),
+  agent: z.string(),
+  version: z.string(),
+  body: z.string(),
+})
+
+export type TesterFinding = z.infer<typeof testerFindingSchema>
 
 /** What every change to an existing Project carries: which one, and the version it was read at. */
 const addressedSchema = z.object({ id: z.string(), version: z.number().int().nonnegative() })
@@ -430,6 +484,7 @@ export const ENGINE_REQUESTS = {
     response: z.object({
       mode: classifierModeSchema,
       strictness: classifierStrictnessSchema,
+      grace: approvalGraceSchema,
       hasKey: z.boolean(),
       consent: z.boolean(),
       generation: z.number().int(),
@@ -444,6 +499,15 @@ export const ENGINE_REQUESTS = {
     arguments: z.object({ strictness: classifierStrictnessSchema }),
     response: z.void(),
   },
+  'classifier.grace.write': {
+    arguments: z.object({ grace: approvalGraceSchema }),
+    response: z.void(),
+  },
+  /** The main process says whether Hemera's window has the focus (#304). */
+  'window.focus.write': {
+    arguments: z.object({ focused: z.boolean() }),
+    response: z.void(),
+  },
   'classifier.ciphertext.read': { arguments: nothingSchema, response: z.string().nullable() },
   'classifier.key.replace': {
     arguments: z.object({ ciphertext: z.string().min(1), plaintext: z.string().min(1) }),
@@ -454,6 +518,19 @@ export const ENGINE_REQUESTS = {
     response: z.void(),
   },
   'classifier.key.remove': { arguments: nothingSchema, response: z.void() },
+  // Hemera Auto's latest decisions across every Session, newest first, with the Session each was
+  // taken in (#294): read only, the stored entries masked, for the Developer section.
+  'classifier.decisions': {
+    arguments: z.object({ limit: limitSchema.optional() }),
+    response: z.array(
+      z.object({
+        entry: sessionEntrySchema,
+        session: z.object({ id: z.string(), title: z.string(), projectId: z.string() }),
+      }),
+    ),
+  },
+  // The app tester's findings as the folder holds them, the latest seen first (#300).
+  'tester.findings': { arguments: nothingSchema, response: z.array(testerFindingSchema) },
   'preferences.read': {
     arguments: nothingSchema,
     response: displayPreferencesSchema,
@@ -1138,11 +1215,16 @@ export const ENGINE_EVENTS = {
    * and nothing else, so it carries nothing: the window asks `agents.list` again.
    */
   agents_changed: z.object({ event: z.literal('agents.changed') }),
+  /**
+   * The app tester's findings changed (#300): a report was written. About the folder and nothing
+   * else, so it carries nothing: the Developer section asks `tester.findings` again.
+   */
+  tester_changed: z.object({ event: z.literal('tester.changed') }),
 } as const
 
 export type EngineEventName = keyof typeof ENGINE_EVENTS
 
-/** One pushed message, of whichever of the eleven names it carries. */
+/** One pushed message, of whichever of the thirteen names it carries. */
 export type EngineEvent = z.infer<(typeof ENGINE_EVENTS)[EngineEventName]>
 
 /**

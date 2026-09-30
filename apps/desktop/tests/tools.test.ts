@@ -17,6 +17,7 @@ import {
   linkSync,
   mkdirSync,
   readFileSync,
+  readdirSync,
   realpathSync,
   rmSync,
   symlinkSync,
@@ -50,6 +51,8 @@ import {
   typeSafeTransport,
 } from '#engine/classifier/jev.ts'
 import { Journal, journalLayer } from '#engine/journal.ts'
+import { Preferences, preferencesLayer } from '#engine/preferences.ts'
+import { type TesterFindings, testerFindingsLayer } from '#engine/tester/findings.ts'
 import { openProfile } from '#engine/migrate.ts'
 import { Projects, projectsLayer } from '#engine/projects.ts'
 import { Sessions, sessionsLayer } from '#engine/sessions.ts'
@@ -63,6 +66,7 @@ import { ToolCatalogue, toolCatalogueLayer } from '#engine/tools/catalogue.ts'
 import type { ToolArguments } from '#engine/tools/arguments.ts'
 import type { ToolOutcome } from '#engine/tools/catalogue.ts'
 import { ToolAccess, toolAccessLayer } from '#engine/tools/access.ts'
+import { approvalsLayer } from '#engine/tools/approvals.ts'
 import { ToolPermissions } from '#engine/tools/permissions.ts'
 import type { OutsideAnswer, OutsideRequest } from '#engine/tools/permissions.ts'
 import { Variables, variablesLayer } from '#engine/workspaces/variables.ts'
@@ -145,6 +149,8 @@ type Engine =
   | ToolAccess
   | ToolPermissions
   | SessionModes
+  | Preferences
+  | TesterFindings
   | Database
   | SqliteClient
   | Variables
@@ -174,13 +180,19 @@ function engine(
     Layer.provideMerge(journalLayer),
     Layer.provideMerge(toolAccessLayer),
     Layer.provideMerge(Layer.succeed(ToolPermissions, human.service)),
+    Layer.provide(approvalsLayer),
     Layer.provideMerge(commandsLayer),
     Layer.provideMerge(variablesLayer),
     Layer.provide(setupPlaces(folder)),
+    // The app tester's findings, files of the suite's data folder (#300).
+    Layer.provideMerge(
+      testerFindingsLayer({ directory: folder, version: VERSION, channel: 'dev' }),
+    ),
     Layer.provideMerge(
       Layer.mergeAll(
         projectsLayer,
         sessionsLayer,
+        preferencesLayer,
         specsLayer.pipe(Layer.provide(NoSpecNotices)),
       ).pipe(
         Layer.provideMerge(
@@ -236,6 +248,8 @@ const calling = (asked: {
   readonly arguments: ToolArguments
   readonly key?: string | undefined
   readonly offered?: readonly ToolName[] | undefined
+  /** The agent's own identifier of the call, when the suite plays an agent that sends one. */
+  readonly callId?: string | undefined
 }) =>
   Effect.gen(function* () {
     const catalogue = yield* ToolCatalogue
@@ -248,6 +262,7 @@ const calling = (asked: {
       key: asked.key ?? keySent(asked.arguments),
       offered: asked.offered ?? TOOL_NAMES,
       caller: 'a1b2c3d4e5f6',
+      callId: asked.callId ?? null,
     })
     return outcome
   })
@@ -394,6 +409,16 @@ describe('Hemera Auto classifies one admitted tool call before execution', () =>
         .filter((entry) => entry.kind === 'permission_decision')
         .map((entry) => entry.state),
     ).toEqual(['completed'])
+    // The human's answer is one of Hemera Auto's decisions too: it says who decided, what the
+    // classifier had settled before asking, and the decision it answers (#294).
+    const answered = result.entries.find((entry) => entry.kind === 'permission_decision')
+    expect(JSON.parse(answered?.payload ?? '{}')).toMatchObject({
+      tool: 'fs_write',
+      answer: 'allowed',
+      by: 'human',
+      judged: 'nobody',
+      classifier: userDecisions[0]?.payload.classifier,
+    })
   })
 
   it('refuses a destructive one-off before asking or starting it', async () => {
@@ -2675,5 +2700,131 @@ describe('Hemera Auto: paths outside the Workspace and sensitive places always a
     expect(seen.ok).toBe(true)
     expect(human.asked).toHaveLength(0)
     expect(sent).toHaveLength(0)
+  })
+})
+
+describe("The app tester reports Hemera's own problems (#300)", () => {
+  /** What the agent says of the problem: the human part, and nothing Hemera knows itself. */
+  const REPORTED = {
+    title: 'fs_read cuts the last line of a file',
+    kind: 'tool_error',
+    where: 'fs_read',
+    severity: 'hurts',
+    trying: 'Read notes.md to the end.',
+    happened: 'The last line was missing; the call carried Authorization: Bearer abc.def.',
+    expected: 'Every line of the file.',
+    steps: '1. Write a file of three lines.\n2. Read it with fs_read.',
+    files: 'notes.md, docs/other.md',
+  }
+
+  const testing = Effect.gen(function* () {
+    yield* (yield* Preferences).write({ appTester: true })
+  })
+
+  const findingsIn = () => join(folder, 'tester', 'findings')
+
+  it('a first report answers "new #1" and writes what Hemera knows beside it', async () => {
+    const seen = await engine(humanSaying())(
+      Effect.gen(function* () {
+        yield* testing
+        const session = yield* opened
+        fileInRoot('notes.md', 'one\ntwo\nthree\n')
+        yield* calling({
+          sessionId: session.sessionId,
+          tool: 'fs_read',
+          arguments: { path: 'notes.md' },
+          callId: 'toolu_read_1',
+        })
+        const outcome = yield* calling({
+          sessionId: session.sessionId,
+          tool: 'hemera_report',
+          arguments: { ...REPORTED, call_id: 'toolu_read_1', code: '0' },
+        })
+        return { outcome, session }
+      }),
+    )
+    expect(seen.outcome.ok).toBe(true)
+    expect(seen.outcome.text).toMatch(/^new #1\b/)
+    const [file] = readdirSync(findingsIn())
+    const written = readFileSync(join(findingsIn(), file ?? ''), 'utf8')
+    for (const part of [
+      'kind: "tool_error"',
+      `project_id: "${seen.session.projectId}"`,
+      'project: "Atlas"',
+      `workspace_path: "${root}"`,
+      'version: "0.4.0"',
+      'channel: "dev"',
+      `(\`${seen.session.sessionId}\`) · free`,
+      '`notes.md`, `docs/other.md`',
+      '`fs_read` `toolu_read_1` · completed',
+      '`{"path":"notes.md"}`',
+      'Code: 0',
+      'Thread entries:',
+      '1. Write a file of three lines.',
+    ]) {
+      expect(written).toContain(part)
+    }
+    expect(written).not.toContain('abc.def')
+    expect(existsSync(join(folder, 'tester', 'README.md'))).toBe(true)
+  })
+
+  it('the same problem again answers "added to #1", and hemera_reports lists it', async () => {
+    const seen = await engine(humanSaying())(
+      Effect.gen(function* () {
+        yield* testing
+        const session = yield* opened
+        yield* calling({ sessionId: session.sessionId, tool: 'hemera_report', arguments: REPORTED })
+        const again = yield* calling({
+          sessionId: session.sessionId,
+          tool: 'hemera_report',
+          arguments: { ...REPORTED, title: 'fs_read cuts the last line' },
+        })
+        const listed = yield* calling({
+          sessionId: session.sessionId,
+          tool: 'hemera_reports',
+          arguments: {},
+        })
+        return { again, listed }
+      }),
+    )
+    expect(seen.again.text).toMatch(/^added to #1\b/)
+    expect(seen.again.text).toContain('2 occurrences')
+    expect(readdirSync(findingsIn())).toHaveLength(1)
+    expect(seen.listed.ok).toBe(true)
+    expect(seen.listed.text).toContain(
+      '#1 tool_error · hurts · fs_read: fs_read cuts the last line of a file',
+    )
+  })
+
+  it('while the mode is off, a report is refused and nothing is written', async () => {
+    const outcome = await engine(humanSaying())(
+      Effect.gen(function* () {
+        const session = yield* opened
+        return yield* calling({
+          sessionId: session.sessionId,
+          tool: 'hemera_report',
+          arguments: REPORTED,
+        })
+      }),
+    )
+    expect(outcome.ok).toBe(false)
+    expect(outcome.text).toContain('app tester mode is off')
+    expect(existsSync(findingsIn())).toBe(false)
+  })
+
+  it('a report without what happened is refused, naming the field', async () => {
+    const outcome = await engine(humanSaying())(
+      Effect.gen(function* () {
+        yield* testing
+        const session = yield* opened
+        return yield* calling({
+          sessionId: session.sessionId,
+          tool: 'hemera_report',
+          arguments: { ...REPORTED, happened: '' },
+        })
+      }),
+    )
+    expect(outcome.ok).toBe(false)
+    expect(outcome.text).toContain('happened')
   })
 })

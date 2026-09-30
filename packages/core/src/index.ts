@@ -182,6 +182,32 @@ export {
 } from './domain/context.ts'
 export type { BaseReach, ContextReach, ContextSource } from './domain/context.ts'
 export {
+  APP_TESTER_BRIEF,
+  APP_TESTER_PATH,
+  FINDING_KINDS,
+  FINDING_KIND_TITLES,
+  FINDING_SEVERITIES,
+  FINDING_SEVERITY_TITLES,
+  SIMILAR_TITLE,
+  TESTER_TOOLS,
+  findingFileName,
+  findingsIndex,
+  matchingFinding,
+  newFinding,
+  recordOccurrence,
+  titleSimilarity,
+  writeFindingFile,
+} from './domain/tester.ts'
+export type {
+  Finding,
+  FindingCall,
+  FindingContext,
+  FindingHead,
+  FindingKind,
+  FindingSeverity,
+  ReportedFinding,
+} from './domain/tester.ts'
+export {
   InvalidVariableKeyError,
   InvalidWorkspaceNameError,
   LAUNCH_STATES,

@@ -175,4 +175,16 @@ describe('What waits is one list, closed with its turn (#250)', () => {
     // While its turn runs, it waits.
     expect(waitingAs(asked('pending'), [asked('pending')], null, null)).toBe('permission')
   })
+
+  test('a request the agent went on without waits after its turn, until it is answered (#304)', () => {
+    const late = entry(
+      'permission_request',
+      JSON.stringify({ toolCallId: 'q1', options: OPTIONS, late: true }),
+      'request',
+      'pending',
+    )
+    const ended = entry('turn', JSON.stringify({ stopReason: 'end_turn' }), 'end', 'end_turn')
+    expect(waitingAs(late, [late, ended], null, null)).toBe('permission')
+    expect(waitingAs(late, [late, ended, decided('allowed')], null, null)).toBe(null)
+  })
 })

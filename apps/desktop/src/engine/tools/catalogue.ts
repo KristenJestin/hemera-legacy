@@ -41,13 +41,14 @@ import {
   runsInMain,
   sensitivePlace,
   shownFromHome,
+  TESTER_TOOLS,
   verdictAtPlaces,
   type LocalAction,
   type Mission,
   type PlaceConcern,
 } from '@hemera/core'
 import { and, desc, eq } from 'drizzle-orm'
-import { Context, Deferred, Effect, Layer } from 'effect'
+import { Context, Deferred, Duration, Effect, Fiber, Layer } from 'effect'
 import { mkdir, readFile, readdir, realpath, rename, rm, stat, writeFile } from 'node:fs/promises'
 import { homedir, userInfo } from 'node:os'
 import { basename, dirname, join, relative, resolve } from 'node:path'
@@ -62,7 +63,9 @@ import { evaluateJev, type JevResult, JevTransportPort } from '../classifier/jev
 import { knownSecretValues, redactText } from '../classifier/redaction.ts'
 import { type Invocation, wordsOf } from '../commands/line.ts'
 import { Commands, Platform, type RunRequest } from '../commands/service.ts'
+import { Preferences } from '../preferences.ts'
 import { Projects } from '../projects.ts'
+import { TesterFindings } from '../tester/findings.ts'
 import { Sessions, type ThreadWrite } from '../sessions.ts'
 import { Specs } from '../specs/specs.ts'
 import type { DescribedWorkspace } from '../workspaces/described.ts'
@@ -72,6 +75,7 @@ import { Variables } from '../workspaces/variables.ts'
 import { SetupDesk } from '../setup/desk.ts'
 import { mutate } from '../transaction.ts'
 import { ToolAccess } from './access.ts'
+import { Approvals, waitingText } from './approvals.ts'
 import {
   OUTPUT_PAGE_LINES,
   RUN_WAIT_MS,
@@ -87,9 +91,13 @@ import { searchIn } from './search.ts'
 import { argumentsShown } from '../setup/hidden.ts'
 import { setupTools } from './setup.ts'
 import { specTools } from './spec.ts'
+import { testerTools } from './tester.ts'
 
 /** How much of an argument list is kept in the Journal, so a payload stays a payload. */
 const ARGUMENTS_KEPT = 400
+
+/** The app tester's tools (#300). */
+const TESTING: ReadonlySet<string> = new Set(TESTER_TOOLS)
 
 /** How many answered keys a Session keeps against a retry, the least recently asked let go of first. */
 const KEYS_KEPT = 256
@@ -168,6 +176,23 @@ interface Made {
   readonly projectId: string
   readonly agent: string
   readonly milliseconds: number
+}
+
+/**
+ * What a call that may outlast its request carries (#304): the question it asked, once it asked
+ * one, and the entry of the thread it is written under from its "waiting" to its end.
+ */
+interface Late {
+  /** What the human answered the question it asked, once they did. */
+  answer?: OutsideAnswer
+  /** Whether the agent was answered "waiting" and the call went on without it. */
+  detached?: boolean
+  readonly asking: Deferred.Deferred<{
+    readonly id: string
+    /** Rewrites the question as one that no longer holds the turn: the notices keep it. */
+    readonly detach: Effect.Effect<void>
+  }>
+  readonly entry: string
 }
 
 /** An answer kept against its key, with the arguments it was given for. */
@@ -394,6 +419,9 @@ export const toolCatalogueLayer: Layer.Layer<
   | ClassifierSettings
   | SetupDesk
   | StderrSink
+  | Approvals
+  | TesterFindings
+  | Preferences
 > = Layer.effect(
   ToolCatalogue,
   Effect.gen(function* () {
@@ -464,6 +492,14 @@ export const toolCatalogueLayer: Layer.Layer<
     const desk = yield* SetupDesk
     /** The engine's diagnostic log, where each Hemera Auto decision is told in one line. */
     const diagnostic = yield* StderrSink
+    const approvals = yield* Approvals
+    /** The engine's own scope: a call that answered "waiting" goes on in it, not in its request. */
+    const scope = yield* Effect.scope
+
+    /** The calls that may outlast their request, by the call as the catalogue was handed it. */
+    const lateOf = new WeakMap<ToolCall, Late>()
+    const findings = yield* TesterFindings
+    const preferences = yield* Preferences
 
     /**
      * One entry of a call written into its Session's thread, below what the agent said before it.
@@ -493,6 +529,23 @@ export const toolCatalogueLayer: Layer.Layer<
         )
 
     const spec = specTools({ specs, sessions, held, inThread, askedForSpec })
+
+    // What goes wrong on Hemera's side, reported by the agent while the app tester mode is on (#300).
+    const tester = testerTools({
+      findings,
+      sessions,
+      variables,
+      builds,
+      modes,
+      on: preferences.read.pipe(
+        Effect.map((read) => read.appTester),
+        Effect.orElseSucceed(() => false),
+      ),
+      auto: classifier.current.pipe(
+        Effect.map((settings) => settings.mode),
+        Effect.orElseSucceed(() => 'unknown'),
+      ),
+    })
 
     // The Project's setup, read freely and changed only by the human's acceptance (#218).
     const setup = setupTools({
@@ -583,7 +636,7 @@ export const toolCatalogueLayer: Layer.Layer<
       ).pipe(Effect.catch(() => Effect.void))
 
     /** The line and the event of one call, written together, in the thread and in the Journal. */
-    const note = (asked: ToolCall, state: ToolState, answer: Answer, made: Made) =>
+    const note = (asked: ToolCall, state: ToolState | 'pending', answer: Answer, made: Made) =>
       Effect.gen(function* () {
         const payload = JSON.stringify({
           tool: asked.tool,
@@ -615,13 +668,16 @@ export const toolCatalogueLayer: Layer.Layer<
           kind: 'hemera_tool_call',
           body: answer.summary,
           payload,
-          correlationId: `tool:${crypto.randomUUID()}`,
+          // A call that answered "waiting" is one entry from then to its end (#304).
+          correlationId: lateOf.get(asked)?.entry ?? `tool:${crypto.randomUUID()}`,
           state,
         }).pipe(
           // A thread that cannot be written is a Session that went away while the call was
           // running: the answer is still the answer, and losing the line is not losing it.
           Effect.catch(() => Effect.void),
         )
+        // Waiting is not an end: the Journal has its line once the call has one.
+        if (state === 'pending') return
         yield* journalled(asked, made, `tool.${state}`, {
           state,
           paths: answer.paths.length,
@@ -630,8 +686,12 @@ export const toolCatalogueLayer: Layer.Layer<
       })
 
     /** Writes the answer down and hands it to the caller. */
-    const settle = (asked: ToolCall, made: Made, answer: Answer, state: ToolState) =>
+    const settle = (asked: ToolCall, made: Made, answer: Answer, given: ToolState) =>
       Effect.gen(function* () {
+        // A request the human refused after the agent went on ends as refused, on the entry that
+        // showed it waiting (#304).
+        const late = lateOf.get(asked)
+        const state = late?.detached === true && late.answer === 'refused' ? 'refused' : given
         yield* note(asked, state, answer, made)
         const outcome: ToolOutcome = {
           ok: answer.ok,
@@ -736,7 +796,7 @@ export const toolCatalogueLayer: Layer.Layer<
         // read by: the same two options every time, because the question is always the same one
         // and nothing about it is remembered (D6-05). The request and the decision are two rows
         // under two correlations, so neither is written over the other.
-        const request = (state: string) =>
+        const request = (state: string, late = false) =>
           inThread(asked.sessionId, {
             role: 'hemera',
             kind: 'permission_request',
@@ -751,12 +811,19 @@ export const toolCatalogueLayer: Layer.Layer<
               inside: within,
               line,
               why: why.length === 0 ? undefined : why,
+              // No longer the turn's (#304): it waits among the notices after the turn ended.
+              late: late ? true : undefined,
             }),
             correlationId: `perm:${id}`,
             state,
           }).pipe(Effect.catch(() => Effect.void))
 
         yield* request('pending')
+        // The call is told its question is asked: the grace starts now (#304).
+        const late = lateOf.get(asked)
+        if (late !== undefined) {
+          yield* Deferred.succeed(late.asking, { id, detach: request('pending', true) })
+        }
         const answer = yield* permissions
           .askOutside({
             id,
@@ -789,6 +856,7 @@ export const toolCatalogueLayer: Layer.Layer<
               }),
             ),
           )
+        if (late !== undefined) late.answer = answer
         // A question nobody will answer — the turn was stopped, the Session ended — is closed as
         // the block of D5-09 closes one: cancelled, with no option chosen (D6-05).
         const closed: Record<OutsideAnswer, { state: string; said: string }> = {
@@ -808,6 +876,15 @@ export const toolCatalogueLayer: Layer.Layer<
             named,
             resolved: where,
             answer,
+            // Asked by Hemera Auto, the answer is one of its decisions (#294): who decided, what
+            // the classifier had settled before asking, and on what. Left out otherwise.
+            by: classified === undefined ? undefined : 'human',
+            judged: classified === undefined ? undefined : BY[classified.source ?? 'cancelled'],
+            line: classified === undefined ? undefined : (line ?? undefined),
+            policyVersion: classified === undefined ? undefined : CLASSIFIER_POLICY_VERSION,
+            model: classified?.model === '' ? undefined : classified?.model,
+            scores: classified?.scores,
+            classifier: classified?.correlationId,
           }),
           correlationId: `decision:${id}`,
           state: answer === 'allowed' ? 'completed' : answer,
@@ -1985,13 +2062,115 @@ export const toolCatalogueLayer: Layer.Layer<
           case 'build_read':
           case 'task_finished':
           case 'task_blocked':
+          case 'reproduction_replayed':
             return yield* builds.tool(asked.sessionId, call)
+
+          case 'hemera_report':
+            return yield* tester.report(
+              asked.sessionId,
+              { projectId, projectName, workspace },
+              call.arguments,
+            )
+
+          case 'hemera_reports':
+            return yield* tester.reports(call.arguments)
         }
+      })
+
+    /**
+     * A call that may wait for the human beyond its request (#304).
+     *
+     * The call runs in the engine's scope rather than in its request's. Until it asks the human,
+     * and for a grace after that while the window is focused, the request waits for it as it
+     * always did: an answer in time is the call's own answer, and an agent that gives up on its
+     * request stops the call as before. Past the grace — at once when the window is not
+     * focused — the agent is answered "waiting, request #n" and the call goes on without it: its
+     * entry says it is pending, its question stays among the notices, a Stop leaves it, and what
+     * it ends with is handed to the agent at its next safe point. A Session that ends withdraws
+     * the question, and then nothing is handed to anyone.
+     */
+    const detachable = (
+      asked: ToolCall,
+      made: Made,
+      run: Effect.Effect<ToolOutcome>,
+      ended: (outcome: ToolOutcome) => void,
+    ) =>
+      Effect.gen(function* () {
+        const late = lateOf.get(asked)
+        if (late === undefined) return yield* run
+        const began = performance.now()
+        const fiber = yield* Effect.forkIn(run, scope)
+        const graced = Deferred.await(late.asking).pipe(
+          Effect.tap(() =>
+            Effect.gen(function* () {
+              if (!approvals.focused()) return
+              const settings = yield* answered(classifier.current)
+              const grace = settings?.grace ?? 0
+              if (grace > 0) yield* Effect.sleep(Duration.seconds(grace))
+            }),
+          ),
+        )
+        const first = yield* Effect.raceFirst(
+          Fiber.join(fiber).pipe(Effect.map((outcome) => ({ done: true as const, outcome }))),
+          graced.pipe(Effect.map((asking) => ({ done: false as const, asking }))),
+        ).pipe(Effect.onInterrupt(() => Fiber.interrupt(fiber)))
+        if (first.done) return first.outcome
+
+        late.detached = true
+        const request = approvals.number(asked.sessionId)
+        const released = yield* approvals.detached(asked.sessionId, first.asking.id)
+        yield* first.asking.detach
+        const text = waitingText(request)
+        const summary = `waiting for the user's approval, request #${request}`
+        yield* note(
+          asked,
+          'pending',
+          { ok: true, summary, text, paths: [] },
+          { ...made, milliseconds: Math.round((performance.now() - began) * 1000) / 1000 },
+        )
+        // What the call ends with, whenever it does, goes to the agent: unless its Session ended,
+        // which withdrew the question and left nobody to hand it to.
+        yield* Effect.forkIn(
+          Fiber.join(fiber).pipe(
+            Effect.tap((outcome) =>
+              Effect.gen(function* () {
+                ended(outcome)
+                const answer = late.answer
+                if (answer === undefined || answer === 'cancelled') return
+                if (!(yield* access.live(asked.sessionId))) return
+                yield* approvals.answered(asked.sessionId, {
+                  request,
+                  tool: asked.tool,
+                  answer,
+                  state: outcome.state,
+                  text: outcome.text,
+                })
+              }),
+            ),
+            Effect.ensuring(Effect.sync(released)),
+          ),
+          scope,
+        )
+        return {
+          ok: true,
+          state: 'completed',
+          summary,
+          text,
+          paths: [],
+          repeated: false,
+          range: null,
+        } satisfies ToolOutcome
       })
 
     /** One call from the guard to the answer, or one already refused by the server, recorded. */
     const handled = (asked: ToolCall, rejected: string | null) =>
       Effect.gen(function* () {
+        if (rejected === null) {
+          lateOf.set(asked, {
+            asking: Deferred.makeUnsafe(),
+            entry: `tool:${crypto.randomUUID()}`,
+          })
+        }
         const named = TOOL_NAMES.find((one) => one === asked.tool)
         const read = yield* answered(sessions.one(asked.sessionId))
         if (read === undefined) {
@@ -2048,7 +2227,8 @@ export const toolCatalogueLayer: Layer.Layer<
         // What the token was minted with, and no more than the Session's mission offers now: a
         // `free` Session that turned `define` while its agent ran keeps none of the write tools it
         // was lent, from its very next call (D7-14).
-        const mission = offeredTools(session.mission)
+        // The app tester's tools belong to no mission: the grant alone says whether they were lent.
+        const mission = offeredTools(session.mission, true)
         const decision = admitTool(
           asked.offered.filter((name) => mission.includes(name)),
           named,
@@ -2212,14 +2392,26 @@ export const toolCatalogueLayer: Layer.Layer<
             ),
           ),
         )
-        const run = builds.admitted(asked.sessionId, named, measured, (reason) =>
-          refused(asked, made, reason),
-        )
-        if (asked.key === null) return yield* run
-
         const key = asked.key
-        const slot = `${named}|${key}`
+        const slot = `${named}|${key ?? ''}`
         const sent = argumentsSent(asked.arguments)
+        const run = detachable(
+          asked,
+          made,
+          // A report about Hemera is neither new work nor the start of a task: a paused build
+          // takes it, and it starts nothing (#300).
+          TESTING.has(named)
+            ? measured
+            : builds.admitted(asked.sessionId, named, measured, (reason) =>
+                refused(asked, made, reason),
+              ),
+          // A retry after the human answered is answered what the call ended with, not "waiting".
+          (outcome) => {
+            if (key !== null) remember(asked.sessionId, slot, { sent, outcome })
+          },
+        )
+        if (key === null) return yield* run
+
         /**
          * The answer an earlier call under this key was given, as this call's own: no second
          * entry in the thread, one Journal line that says the call was a repeat — unless the

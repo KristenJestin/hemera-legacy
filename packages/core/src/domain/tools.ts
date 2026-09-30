@@ -15,6 +15,7 @@
  */
 
 import type { Mission } from './session.ts'
+import { TESTER_TOOLS } from './tester.ts'
 
 /**
  * Everything Hemera can lend, named as the model sees it once it has gone through MCP.
@@ -44,6 +45,10 @@ export const TOOL_NAMES = [
   'build_read',
   'task_finished',
   'task_blocked',
+  'reproduction_replayed',
+  // The app tester's two (#300), offered only while the mode is on.
+  'hemera_report',
+  'hemera_reports',
 ] as const
 
 export type ToolName = (typeof TOOL_NAMES)[number]
@@ -74,6 +79,9 @@ export type ToolMark =
   | 'read-build'
   | 'finish-task'
   | 'block-task'
+  | 'replay-reproduction'
+  | 'report-finding'
+  | 'read-findings'
 
 /** What a reader calls a tool, the mark it wears, and what the turn is doing while it runs. */
 export interface ToolLabel {
@@ -126,6 +134,21 @@ export const TOOL_LABELS: Readonly<Record<ToolName, ToolLabel>> = {
   build_read: { label: 'Read build', mark: 'read-build', doing: 'Reading the build' },
   task_finished: { label: 'Task finished', mark: 'finish-task', doing: 'Finishing a task' },
   task_blocked: { label: 'Task blocked', mark: 'block-task', doing: 'Blocking a task' },
+  reproduction_replayed: {
+    label: 'Reproduction replayed',
+    mark: 'replay-reproduction',
+    doing: 'Replaying the reproduction',
+  },
+  hemera_report: {
+    label: 'Report to Hemera',
+    mark: 'report-finding',
+    doing: 'Reporting a problem with Hemera',
+  },
+  hemera_reports: {
+    label: 'Hemera reports',
+    mark: 'read-findings',
+    doing: 'Reading the problems reported to Hemera',
+  },
 }
 
 /** The most `fs_read` hands back in one call, and the page a long file is read in. */
@@ -175,8 +198,19 @@ export interface SearchResult {
 /** The Spec tools only a `define` Session writes its Spec with. */
 const SPEC_WRITING: ReadonlySet<ToolName> = new Set(['spec_read', 'spec_write'])
 
-/** The build's own three, which only a `build` Session is offered (D10-13). */
-const BUILDING: ReadonlySet<ToolName> = new Set(['build_read', 'task_finished', 'task_blocked'])
+/**
+ * The build's own, which only a `build` Session is offered (D10-13): its three, and the replay of a
+ * bug's reproduction its final checks wait for (issue #203).
+ */
+const BUILDING: ReadonlySet<ToolName> = new Set([
+  'build_read',
+  'task_finished',
+  'task_blocked',
+  'reproduction_replayed',
+])
+
+/** The app tester's own (#300), which no mission is offered unless the mode is on. */
+const TESTING: ReadonlySet<ToolName> = new Set<ToolName>(TESTER_TOOLS)
 
 /** What a `define` Session reads the code with: nothing that writes a file or runs a command. */
 const READ_ONLY_CODE_TOOLS = [
@@ -196,20 +230,30 @@ const READ_ONLY_CODE_TOOLS = [
  * `spec_propose`: it has no Spec to read or write, and proposes one to the human through it (D7-07). A `define` Session
  * produces a Spec and not code (D7-14): it reads the Workspace, never writes to it nor runs
  * anything, and writes its Spec through the three Spec tools. A `build` Session executes a frozen
- * Spec (D10-13): the code tools, the setup tools, and the build's three — `build_read` reads the frozen Spec and
+ * Spec (D10-13): the code tools, the setup tools, and the build's own — `build_read` reads the frozen Spec and
  * where the build stands, `task_finished` and `task_blocked` are the agent's only words about a
- * task, and Hemera decides its state. No Spec tool: the contract does not move during a build.
+ * task, and Hemera decides its state; `reproduction_replayed` says what the replay of a bug's
+ * reproduction showed (issue #203). No Spec tool: the contract does not move during a build.
  * Neither of the other two missions is offered a build tool.
+ *
+ * While the app tester mode is on (#300), every mission is offered its two tools besides its own.
  */
-export function offeredTools(mission: Mission): readonly ToolName[] {
-  switch (mission) {
-    case 'free':
-      return TOOL_NAMES.filter((name) => !SPEC_WRITING.has(name) && !BUILDING.has(name))
-    case 'define':
-      return [...READ_ONLY_CODE_TOOLS, 'spec_read', 'spec_write', 'spec_propose']
-    case 'build':
-      return TOOL_NAMES.filter((name) => !SPEC_WRITING.has(name) && name !== 'spec_propose')
-  }
+export function offeredTools(mission: Mission, tester = false): readonly ToolName[] {
+  const own = ((): readonly ToolName[] => {
+    switch (mission) {
+      case 'free':
+        return TOOL_NAMES.filter(
+          (name) => !SPEC_WRITING.has(name) && !BUILDING.has(name) && !TESTING.has(name),
+        )
+      case 'define':
+        return [...READ_ONLY_CODE_TOOLS, 'spec_read', 'spec_write', 'spec_propose']
+      case 'build':
+        return TOOL_NAMES.filter(
+          (name) => !SPEC_WRITING.has(name) && name !== 'spec_propose' && !TESTING.has(name),
+        )
+    }
+  })()
+  return tester ? [...own, ...TESTER_TOOLS] : own
 }
 
 /**
@@ -218,14 +262,15 @@ export function offeredTools(mission: Mission): readonly ToolName[] {
  *
  * Every agent reports the calls it makes, Hemera's included, as its own: the name is the tool's
  * under the agent's prefix — `mcp__hemera__fs_read` on Claude Code and Codex, `hemera_fs_read`
- * on OpenCode — or the bare name.
+ * on OpenCode — or the bare name. A tool whose own name starts with `hemera_` (#300) is itself
+ * once the prefix is gone, and read as it stands when taking one more off names nothing.
  */
 export function hemeraToolNamed(title: string): ToolName | null {
-  const bare = title
-    .replace(/^mcp__hemera__/i, '')
-    .replace(/^hemera_/i, '')
-    .toLowerCase()
-  return TOOL_NAMES.find((name) => name === bare) ?? null
+  const once = title.replace(/^mcp__hemera__/i, '').toLowerCase()
+  const bare = once.replace(/^hemera_/, '')
+  return (
+    TOOL_NAMES.find((name) => name === bare) ?? TOOL_NAMES.find((name) => name === once) ?? null
+  )
 }
 
 /** What the guard answers: the call goes through, or it does not and says why. */

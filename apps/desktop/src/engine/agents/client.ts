@@ -205,6 +205,8 @@ export interface AgentHandshake {
   readonly authenticated: boolean
   /** Whether this agent can be asked to continue a session it handed back (D5-06). */
   readonly continues: boolean
+  /** The version the agent gave of itself at `initialize`, when it gave one (#300). */
+  readonly version?: string | null | undefined
   /**
    * Whether it can carry that session on without streaming it back first (D5-07).
    *
@@ -870,6 +872,7 @@ export function connect(
         authenticated: adapter.isAuthenticated(methods),
         continues: handshake.agentCapabilities?.loadSession === true,
         resumes: handshake.agentCapabilities?.sessionCapabilities?.resume != null,
+        version: handshake.agentInfo?.version ?? null,
       },
 
       options: () => offered(adapter, announced),

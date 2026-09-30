@@ -72,6 +72,7 @@ import {
   taken,
 } from './brief.ts'
 import { BuildChecks, type CheckOutcome } from './checks.ts'
+import { BuildNotices } from './notices.ts'
 import { changedFiles, snapshotTree } from './snapshots.ts'
 import {
   type AttemptRow,
@@ -245,17 +246,7 @@ export interface BuildAgent {
   readonly stopTurn: (sessionId: string) => Effect.Effect<void>
 }
 
-/** Who hears that a build changed: the window, which reads its view again (`build.changed`). */
-export interface BuildNoticesService {
-  readonly changed: (sessionId: string) => void
-}
-
-export class BuildNotices extends Context.Service<BuildNotices, BuildNoticesService>()(
-  'BuildNotices',
-) {}
-
-/** Nobody watching. */
-export const NoBuildNotices = Layer.succeed(BuildNotices, { changed: () => undefined })
+export { BuildNotices, type BuildNoticesService, NoBuildNotices } from './notices.ts'
 
 /** What the user asked of a build is refused, with the sentence the window shows. */
 export class BuildRefusedError extends Data.TaggedError('BuildRefusedError')<{

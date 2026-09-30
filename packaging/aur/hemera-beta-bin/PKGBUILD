@@ -1,16 +1,17 @@
 # Maintainer: Kristen Jestin <kristen.jestin@pm.me>
 #
-# The latest beta of Hemera, the pre-release built from every push to `dev`. It installs where
-# `hemera-bin` does — /opt/hemera, /usr/bin/hemera, hemera.desktop and the hemera icon — and
-# conflicts with it, so installing one replaces the other: the two share one data folder.
+# The latest beta of Hemera, the `vX.Y.Z-beta.N` pre-release semantic-release tags on `dev`.
+# It installs where `hemera-bin` does — /opt/hemera, /usr/bin/hemera, hemera.desktop and the
+# hemera icon — and conflicts with it, so installing one replaces the other: the two share one
+# data folder.
 pkgname=hemera-beta-bin
 _app=hemera
 # What the beta's deb names its folder, its executable, its entry and its icon.
 _deb=hemera-beta
 _product='Hemera Beta'
 _asset=Hemera.Beta
-_version=0.1.1-26-g8394bab
-pkgver=0.1.1.r26.g8394bab
+_version=0.5.0-beta.1
+pkgver=0.5.0beta1
 pkgrel=1
 pkgdesc='Desktop cockpit for ACP agents (beta)'
 arch=('x86_64')
@@ -25,8 +26,8 @@ depends=('alsa-lib' 'at-spi2-core' 'cairo' 'dbus' 'expat' 'glib2' 'glibc' 'gtk3'
 provides=("$_app")
 conflicts=("$_app")
 options=('!strip' '!debug')
-source=("$_deb-$_version.deb::$url/releases/download/beta-$_version/$_asset-$_version.deb")
-sha256sums=('b82a33d4d421deae0c6e6ce492947619796872ca20fc61e0d00ff833f32b84a7')
+source=("$_deb-$_version.deb::$url/releases/download/v$_version/$_asset-$_version.deb")
+sha256sums=('SKIP')
 
 package() {
   bsdtar -xf data.tar.xz -C "$srcdir"

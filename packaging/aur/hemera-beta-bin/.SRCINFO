@@ -1,6 +1,6 @@
 pkgbase = hemera-beta-bin
 	pkgdesc = Desktop cockpit for ACP agents (beta)
-	pkgver = 0.1.1.r26.g8394bab
+	pkgver = 0.5.0beta1
 	pkgrel = 1
 	url = https://github.com/KristenJestin/hemera
 	arch = x86_64
@@ -35,7 +35,7 @@ pkgbase = hemera-beta-bin
 	conflicts = hemera
 	options = !strip
 	options = !debug
-	source = hemera-beta-0.1.1-26-g8394bab.deb::https://github.com/KristenJestin/hemera/releases/download/beta-0.1.1-26-g8394bab/Hemera.Beta-0.1.1-26-g8394bab.deb
-	sha256sums = b82a33d4d421deae0c6e6ce492947619796872ca20fc61e0d00ff833f32b84a7
+	source = hemera-beta-0.5.0-beta.1.deb::https://github.com/KristenJestin/hemera/releases/download/v0.5.0-beta.1/Hemera.Beta-0.5.0-beta.1.deb
+	sha256sums = SKIP
 
 pkgname = hemera-beta-bin

@@ -1,5 +1,5 @@
 import type { ComposerChoice, ConfigOption } from '@hemera/ipc'
-import { permissionMode } from '@hemera/core'
+import { neutralMode, permissionMode } from '@hemera/core'
 import type { EffortChoice, ModeChoice, ModelChoice } from '@hemera/ui'
 
 /**
@@ -105,9 +105,9 @@ export function effortStage(options: readonly ConfigOption[]): Stage<EffortChoic
 }
 
 /**
- * The mode row, each choice marked when it is a permission mode of that agent — which Hemera Auto
- * takes the place of — as the table in `@hemera/core` declares it: Claude's plan and OpenCode's
- * agents are not (D59-11).
+ * The mode row, each choice marked when Hemera Auto takes its place: a permission mode of that
+ * agent as the table in `@hemera/core` declares it, other than its neutral one. Claude's plan and
+ * OpenCode's agents are not, and neither is the neutral mode a plan is left for (D59-11).
  */
 export function modeStage(
   options: readonly ConfigOption[],
@@ -120,7 +120,10 @@ export function modeStage(
     choices: option.values.map((value) => ({
       id: value.value,
       label: value.name,
-      permission: provider !== null && permissionMode(provider, value.value),
+      permission:
+        provider !== null &&
+        permissionMode(provider, value.value) &&
+        value.value !== neutralMode(provider),
     })),
     current: currentOf(option),
   }

@@ -114,6 +114,10 @@ describe('One permission interaction across the three agents', () => {
     const option = { id: 'mode', category: 'mode' }
     expect(autoGoverns('claude', option, 'auto')).toBe(true)
     expect(autoGoverns('claude', option, 'plan')).toBe(false)
+    // The neutral mode is where Hemera Auto puts an agent: going back to it is always allowed,
+    // which is how a plan is left.
+    expect(autoGoverns('claude', option, 'default')).toBe(false)
+    expect(autoGoverns('codex', option, 'read-only')).toBe(false)
     expect(autoGoverns('codex', option, 'agent')).toBe(true)
     expect(autoGoverns('opencode', option, 'build')).toBe(false)
     expect(autoGoverns('claude', { id: 'effort', category: 'thought_level' }, 'default')).toBe(

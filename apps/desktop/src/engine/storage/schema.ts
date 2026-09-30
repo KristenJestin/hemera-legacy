@@ -319,7 +319,8 @@ export const SESSION_ENTRY_ROLES = ['user', 'agent', 'hemera'] as const
  * agent back on them, or the Session would go on with the agent's defaults (issue #133).
  *
  * The build columns are a `build` Session's and null on every other (D10-01): `build_phase` is
- * where its protocol stands, a row rather than a memory so that a restart resumes exactly;
+ * where its protocol stands (v2 since issue #279, which added `review` and `feedback`; a build of
+ * 0.5 keeps its phase), a row rather than a memory so that a restart resumes exactly;
  * `build_paused_at` is when the user paused it, null while it runs (D10-09); `build_detail` says
  * why it stopped, as the user is told; `approach_note` is the agent's answer to the `prepare`
  * brief, shown before `execute` starts (D10-02). `build_reproduction` and `build_reproduction_gone`
@@ -354,7 +355,10 @@ export const sessions = sqliteTable(
     version: integer('version').notNull().default(1),
     buildPhase: text('build_phase'),
     buildPausedAt: text('build_paused_at'),
-    /** When the user's review came and the build went back to work on it (issue #117). */
+    /**
+     * When the user's review written in the chat sent the build back to work (issue #117). Unused
+     * since the review rounds replaced that path (issue #279); the column stays for the rows of 0.5.
+     */
     buildReviewAt: text('build_review_at'),
     buildDetail: text('build_detail'),
     approachNote: text('approach_note'),

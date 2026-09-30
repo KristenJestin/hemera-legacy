@@ -672,9 +672,15 @@ describe('Local rules settle only understood calls', () => {
             tool: 'commands_run',
             arguments: { line: 'ls ..', key: 'outside' },
           })
-          return { listing, deletion, outside }
+          return { listing, deletion, outside, lines: yield* journalLines(session.projectId) }
         }),
       )
+      // Each decision names the Session's agent, the same for a command as for any other tool.
+      expect(
+        result.lines
+          .filter((line) => line.type === 'classifier.decision')
+          .map((line) => line.payload.agent),
+      ).toEqual(['claude', 'claude', 'claude'])
       expect(result.listing.state).toBe('completed')
       expect(result.deletion.state).toBe('refused')
       expect(result.outside.state).toBe('completed')

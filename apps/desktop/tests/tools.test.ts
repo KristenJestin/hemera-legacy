@@ -691,6 +691,32 @@ describe('Local rules settle only understood calls', () => {
   )
 })
 
+describe("Hemera's own workflow tools are not judged again", () => {
+  it('writes a proposal without a permission question or a classifier decision', async () => {
+    const human = humanSaying('allowed')
+    const seen = await engine(human)(
+      Effect.gen(function* () {
+        const session = yield* opened
+        yield* (yield* ClassifierSettings).select('hemera-auto')
+        const proposed = yield* calling({
+          sessionId: session.sessionId,
+          tool: 'commands_propose',
+          arguments: { name: 'lint', line: 'pnpm lint', type: 'script', why: 'to lint' },
+        })
+        return {
+          proposed,
+          entries: yield* threadEntries(session.sessionId),
+          lines: yield* journalLines(session.projectId),
+        }
+      }),
+    )
+    expect(seen.proposed.state).toBe('completed')
+    expect(human.asked).toHaveLength(0)
+    expect(seen.entries.some((entry) => entry.kind === 'classifier_decision')).toBe(false)
+    expect(seen.lines.some((line) => line.type === 'classifier.decision')).toBe(false)
+  })
+})
+
 describe('Secrets are masked before any evaluation', () => {
   it('masks a Workspace credential in any tool, and keeps a plain variable readable', async () => {
     const sent: string[] = []

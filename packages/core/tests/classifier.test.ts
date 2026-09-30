@@ -2,6 +2,7 @@ import { describe, expect, test } from 'vite-plus/test'
 
 import {
   classifierVerdictFromScores,
+  judgedByClassifier,
   localClassifierVerdict,
   nativePermissionMode,
 } from '#index.ts'
@@ -126,5 +127,32 @@ describe('Risk and authorization thresholds are applied in order', () => {
     expect(decide(0, Number.POSITIVE_INFINITY, 0)).toBe('ask')
     expect(decide(0, 0, -0.1)).toBe('ask')
     expect(decide(3.1, 0, 0)).toBe('ask')
+  })
+})
+
+describe("Hemera's own workflow tools are not judged again", () => {
+  test('reports, proposals, stops and Spec edits keep their own interaction', () => {
+    for (const tool of [
+      'task_finished',
+      'task_blocked',
+      'spec_propose',
+      'spec_write',
+      'commands_propose',
+      'commands_stop',
+      'project_get',
+      'session_get',
+      'spec_read',
+      'build_read',
+      'commands_list',
+      'commands_output',
+    ]) {
+      expect(judgedByClassifier(tool)).toBe(false)
+    }
+  })
+
+  test('what touches files or starts a process is judged', () => {
+    for (const tool of ['fs_read', 'fs_list', 'search', 'fs_write', 'fs_edit', 'commands_run']) {
+      expect(judgedByClassifier(tool)).toBe(true)
+    }
   })
 })

@@ -3,6 +3,7 @@
 export {
   CLASSIFIER_POLICY_VERSION,
   classifierVerdictFromScores,
+  judgedByClassifier,
   localClassifierVerdict,
   nativePermissionMode,
 } from './domain/classifier.ts'

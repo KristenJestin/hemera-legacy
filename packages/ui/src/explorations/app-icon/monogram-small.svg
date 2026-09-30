@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <!-- C · Monogram, drawn for 16 to 32 px: the stems move out to the edge of the tile and the eyes
+       grow into the room it leaves, or the counter closes over them. -->
+  <defs>
+    <linearGradient id="tile" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset="1" stop-color="#ececf1"/>
+    </linearGradient>
+  </defs>
+  <rect x="32" y="32" width="960" height="960" rx="224" fill="url(#tile)"/>
+  <rect x="44" y="44" width="936" height="936" rx="212" fill="none" stroke="#111118" stroke-opacity="0.16" stroke-width="24"/>
+  <g fill="none" stroke="#111118" stroke-linecap="round">
+    <path d="M226 240V784M798 240V784" stroke-width="120"/>
+    <path d="M226 640H798" stroke-width="96"/>
+  </g>
+  <g transform="translate(512 420) scale(16) translate(-16 -12.55)" fill="none" stroke="#c026d3" stroke-linecap="round" stroke-linejoin="round" stroke-width="3.4">
+    <path d="M4.8 10.4L9.2 14.7L13.6 10.4"/>
+    <path d="M18.4 10.4L22.8 14.7L27.2 10.4"/>
+  </g>
+</svg>

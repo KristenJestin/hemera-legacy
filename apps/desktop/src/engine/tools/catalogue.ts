@@ -1557,9 +1557,10 @@ export const toolCatalogueLayer: Layer.Layer<
                       )
                     })),
                   ]
-            // Words that do not read with confidence could name anything: outside by default.
+            // Words that do not read with confidence could name anything: outside by default —
+            // in a line the agent wrote. A catalogue line is the user's own, its variables theirs.
             const unread: PlaceConcern[] =
-              namedPlaces?.unreadable == null
+              namedPlaces?.unreadable == null || entry !== undefined
                 ? []
                 : [{ kind: 'outside', place: `words that do not read (${namedPlaces.unreadable})` }]
             const concerns = distinctConcerns([...points.flatMap((one) => one.concerns), ...unread])

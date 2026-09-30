@@ -303,13 +303,13 @@ export function DeveloperSection({
   onOpenDiagnostic,
 }: DeveloperSectionProps): ReactNode {
   return (
-    <>
+    <div className="flex flex-col gap-4">
       <DecisionsPanel decisions={decisions} onOpenSession={onOpenSession} />
       <DiagnosticsPanel
         acpTrace={acpTrace}
         onAcpTraceChange={onAcpTraceChange}
         onOpenDiagnostic={onOpenDiagnostic}
       />
-    </>
+    </div>
   )
 }

@@ -19,7 +19,7 @@ import { HemeraToolCall, type HemeraToolMark } from './hemera-tool-call.tsx'
  */
 
 const meta = {
-  tags: ['autodocs'],
+  tags: ['autodocs', 'updated'],
   title: 'Blocks/Activity/HemeraToolCall',
   component: HemeraToolCall,
   parameters: { layout: 'padded' },
@@ -546,11 +546,13 @@ const CATALOGUE: readonly (readonly [string, string, HemeraToolMark, string | nu
     null,
     'The bug is gone',
   ],
+  ['hemera_report', 'Report to Hemera', 'report-finding', 'fs_read', 'new #3'],
+  ['hemera_reports', 'Hemera reports', 'read-findings', null, 'Read 3 findings'],
 ]
 
 /**
- * The catalogue as the thread reads it (recette 3 of 23 September 2026): twenty-one tools since
- * the replay of a bug's reproduction (issue #203), twenty-one marks and twenty-one labels, and what each call is about where it
+ * The catalogue as the thread reads it (recette 3 of 23 September 2026): twenty-three tools since
+ * the app tester's two (#300), twenty-three marks and twenty-three labels, and what each call is about where it
  * is about something. A mark per kind of tool drew `fs_list` as `fs_read` and the four commands
  * as one.
  */

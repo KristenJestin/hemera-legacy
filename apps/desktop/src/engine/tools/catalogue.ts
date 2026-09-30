@@ -37,6 +37,7 @@ import {
   localClassifierVerdict,
   offeredTools,
   runsInMain,
+  TESTER_TOOLS,
   type LocalAction,
   type Mission,
 } from '@hemera/core'
@@ -55,7 +56,9 @@ import { evaluateJev, type JevResult, JevTransportPort } from '../classifier/jev
 import { knownSecretValues, redactText } from '../classifier/redaction.ts'
 import { type Invocation, wordsOf } from '../commands/line.ts'
 import { Commands, Platform, type RunRequest } from '../commands/service.ts'
+import { Preferences } from '../preferences.ts'
 import { Projects } from '../projects.ts'
+import { TesterFindings } from '../tester/findings.ts'
 import { Sessions, type ThreadWrite } from '../sessions.ts'
 import { Specs } from '../specs/specs.ts'
 import type { DescribedWorkspace } from '../workspaces/described.ts'
@@ -81,9 +84,13 @@ import { searchIn } from './search.ts'
 import { argumentsShown } from '../setup/hidden.ts'
 import { setupTools } from './setup.ts'
 import { specTools } from './spec.ts'
+import { testerTools } from './tester.ts'
 
 /** How much of an argument list is kept in the Journal, so a payload stays a payload. */
 const ARGUMENTS_KEPT = 400
+
+/** The app tester's tools (#300). */
+const TESTING: ReadonlySet<string> = new Set(TESTER_TOOLS)
 
 /** How many answered keys a Session keeps against a retry, the least recently asked let go of first. */
 const KEYS_KEPT = 256
@@ -384,6 +391,8 @@ export const toolCatalogueLayer: Layer.Layer<
   | SetupDesk
   | StderrSink
   | Approvals
+  | TesterFindings
+  | Preferences
 > = Layer.effect(
   ToolCatalogue,
   Effect.gen(function* () {
@@ -411,6 +420,8 @@ export const toolCatalogueLayer: Layer.Layer<
 
     /** The calls that may outlast their request, by the call as the catalogue was handed it. */
     const lateOf = new WeakMap<ToolCall, Late>()
+    const findings = yield* TesterFindings
+    const preferences = yield* Preferences
 
     /**
      * One entry of a call written into its Session's thread, below what the agent said before it.
@@ -440,6 +451,23 @@ export const toolCatalogueLayer: Layer.Layer<
         )
 
     const spec = specTools({ specs, sessions, held, inThread, askedForSpec })
+
+    // What goes wrong on Hemera's side, reported by the agent while the app tester mode is on (#300).
+    const tester = testerTools({
+      findings,
+      sessions,
+      variables,
+      builds,
+      modes,
+      on: preferences.read.pipe(
+        Effect.map((read) => read.appTester),
+        Effect.orElseSucceed(() => false),
+      ),
+      auto: classifier.current.pipe(
+        Effect.map((settings) => settings.mode),
+        Effect.orElseSucceed(() => 'unknown'),
+      ),
+    })
 
     // The Project's setup, read freely and changed only by the human's acceptance (#218).
     const setup = setupTools({
@@ -1911,6 +1939,16 @@ export const toolCatalogueLayer: Layer.Layer<
           case 'task_blocked':
           case 'reproduction_replayed':
             return yield* builds.tool(asked.sessionId, call)
+
+          case 'hemera_report':
+            return yield* tester.report(
+              asked.sessionId,
+              { projectId, projectName, workspace },
+              call.arguments,
+            )
+
+          case 'hemera_reports':
+            return yield* tester.reports(call.arguments)
         }
       })
 
@@ -2064,7 +2102,8 @@ export const toolCatalogueLayer: Layer.Layer<
         // What the token was minted with, and no more than the Session's mission offers now: a
         // `free` Session that turned `define` while its agent ran keeps none of the write tools it
         // was lent, from its very next call (D7-14).
-        const mission = offeredTools(session.mission)
+        // The app tester's tools belong to no mission: the grant alone says whether they were lent.
+        const mission = offeredTools(session.mission, true)
         const decision = admitTool(
           asked.offered.filter((name) => mission.includes(name)),
           named,
@@ -2223,9 +2262,13 @@ export const toolCatalogueLayer: Layer.Layer<
         const run = detachable(
           asked,
           made,
-          builds.admitted(asked.sessionId, named, measured, (reason) =>
-            refused(asked, made, reason),
-          ),
+          // A report about Hemera is neither new work nor the start of a task: a paused build
+          // takes it, and it starts nothing (#300).
+          TESTING.has(named)
+            ? measured
+            : builds.admitted(asked.sessionId, named, measured, (reason) =>
+                refused(asked, made, reason),
+              ),
           // A retry after the human answered is answered what the call ended with, not "waiting".
           (outcome) => {
             if (key !== null) remember(asked.sessionId, slot, { sent, outcome })

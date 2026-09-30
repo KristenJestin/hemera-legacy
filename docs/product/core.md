@@ -700,6 +700,21 @@ to a later minor version and does not condition Hemera's first delivery. Its
 scope, its storage, its feeding and its value in use remain to be studied; neither an
 automatic publication of discoveries nor a Mnemon integration is decided.
 
+The app tester mode (issue #300), off unless turned on in Settings → Developer and present in every
+channel, makes every Session's agent a tester of Hemera as well. An agent started while it is on
+is given a short standing brief as a resource of its first prompt, which the Context view lists,
+and is lent two more tools: `hemera_report` records a problem with Hemera itself, never with the
+user's project, and `hemera_reports` lists what was already recorded. The agent tells the human
+part — what it tried, what happened, what it expected, the steps to reproduce it, the severity —
+and Hemera adds what it knows itself: its version, channel, commit and platform, the agent and
+what it stands on, Hemera Auto's level, the Project, the Workspace, the Session and its build, the
+call the finding is about as the thread holds it, and where in the thread it happened. Findings
+are files and never rows: one Markdown file each under `tester/findings/` of the data folder,
+with an index, `tester/README.md`, written again after every change. A report of the same kind,
+the same place and a similar title is one more occurrence of an existing finding. Everything is
+masked as Hemera Auto masks what it sends, nothing of a file is kept beyond its path, and nothing
+is sent anywhere.
+
 All sub-agents receive a context targeted on the work entrusted to them: Hemera
 base, relevant Project instructions and information needed for their intervention.
 They do not automatically inherit the whole conversation of the main Session.

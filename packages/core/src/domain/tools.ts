@@ -15,6 +15,7 @@
  */
 
 import type { Mission } from './session.ts'
+import { TESTER_TOOLS } from './tester.ts'
 
 /**
  * Everything Hemera can lend, named as the model sees it once it has gone through MCP.
@@ -45,6 +46,9 @@ export const TOOL_NAMES = [
   'task_finished',
   'task_blocked',
   'reproduction_replayed',
+  // The app tester's two (#300), offered only while the mode is on.
+  'hemera_report',
+  'hemera_reports',
 ] as const
 
 export type ToolName = (typeof TOOL_NAMES)[number]
@@ -76,6 +80,8 @@ export type ToolMark =
   | 'finish-task'
   | 'block-task'
   | 'replay-reproduction'
+  | 'report-finding'
+  | 'read-findings'
 
 /** What a reader calls a tool, the mark it wears, and what the turn is doing while it runs. */
 export interface ToolLabel {
@@ -132,6 +138,16 @@ export const TOOL_LABELS: Readonly<Record<ToolName, ToolLabel>> = {
     label: 'Reproduction replayed',
     mark: 'replay-reproduction',
     doing: 'Replaying the reproduction',
+  },
+  hemera_report: {
+    label: 'Report to Hemera',
+    mark: 'report-finding',
+    doing: 'Reporting a problem with Hemera',
+  },
+  hemera_reports: {
+    label: 'Hemera reports',
+    mark: 'read-findings',
+    doing: 'Reading the problems reported to Hemera',
   },
 }
 
@@ -193,6 +209,9 @@ const BUILDING: ReadonlySet<ToolName> = new Set([
   'reproduction_replayed',
 ])
 
+/** The app tester's own (#300), which no mission is offered unless the mode is on. */
+const TESTING: ReadonlySet<ToolName> = new Set<ToolName>(TESTER_TOOLS)
+
 /** What a `define` Session reads the code with: nothing that writes a file or runs a command. */
 const READ_ONLY_CODE_TOOLS = [
   'fs_read',
@@ -216,16 +235,25 @@ const READ_ONLY_CODE_TOOLS = [
  * task, and Hemera decides its state; `reproduction_replayed` says what the replay of a bug's
  * reproduction showed (issue #203). No Spec tool: the contract does not move during a build.
  * Neither of the other two missions is offered a build tool.
+ *
+ * While the app tester mode is on (#300), every mission is offered its two tools besides its own.
  */
-export function offeredTools(mission: Mission): readonly ToolName[] {
-  switch (mission) {
-    case 'free':
-      return TOOL_NAMES.filter((name) => !SPEC_WRITING.has(name) && !BUILDING.has(name))
-    case 'define':
-      return [...READ_ONLY_CODE_TOOLS, 'spec_read', 'spec_write', 'spec_propose']
-    case 'build':
-      return TOOL_NAMES.filter((name) => !SPEC_WRITING.has(name) && name !== 'spec_propose')
-  }
+export function offeredTools(mission: Mission, tester = false): readonly ToolName[] {
+  const own = ((): readonly ToolName[] => {
+    switch (mission) {
+      case 'free':
+        return TOOL_NAMES.filter(
+          (name) => !SPEC_WRITING.has(name) && !BUILDING.has(name) && !TESTING.has(name),
+        )
+      case 'define':
+        return [...READ_ONLY_CODE_TOOLS, 'spec_read', 'spec_write', 'spec_propose']
+      case 'build':
+        return TOOL_NAMES.filter(
+          (name) => !SPEC_WRITING.has(name) && name !== 'spec_propose' && !TESTING.has(name),
+        )
+    }
+  })()
+  return tester ? [...own, ...TESTER_TOOLS] : own
 }
 
 /**
@@ -234,14 +262,15 @@ export function offeredTools(mission: Mission): readonly ToolName[] {
  *
  * Every agent reports the calls it makes, Hemera's included, as its own: the name is the tool's
  * under the agent's prefix — `mcp__hemera__fs_read` on Claude Code and Codex, `hemera_fs_read`
- * on OpenCode — or the bare name.
+ * on OpenCode — or the bare name. A tool whose own name starts with `hemera_` (#300) is itself
+ * once the prefix is gone, and read as it stands when taking one more off names nothing.
  */
 export function hemeraToolNamed(title: string): ToolName | null {
-  const bare = title
-    .replace(/^mcp__hemera__/i, '')
-    .replace(/^hemera_/i, '')
-    .toLowerCase()
-  return TOOL_NAMES.find((name) => name === bare) ?? null
+  const once = title.replace(/^mcp__hemera__/i, '').toLowerCase()
+  const bare = once.replace(/^hemera_/, '')
+  return (
+    TOOL_NAMES.find((name) => name === bare) ?? TOOL_NAMES.find((name) => name === once) ?? null
+  )
 }
 
 /** What the guard answers: the call goes through, or it does not and says why. */

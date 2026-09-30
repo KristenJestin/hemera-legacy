@@ -38,6 +38,8 @@ import type { Database, SqliteClient } from '#engine/storage/database.ts'
 import { type GrantedAccess, ToolAccess, toolAccessLayer } from '#engine/tools/access.ts'
 import { toolCatalogueLayer, type ToolCatalogue } from '#engine/tools/catalogue.ts'
 import { approvalsLayer } from '#engine/tools/approvals.ts'
+import { testerFindingsLayer } from '#engine/tester/findings.ts'
+import { preferencesLayer } from '#engine/preferences.ts'
 import { ToolPermissions, type ToolPermissionsService } from '#engine/tools/permissions.ts'
 import { ToolServer, toolServerLayer } from '#engine/tools/server.ts'
 import { variablesLayer } from '#engine/workspaces/variables.ts'
@@ -148,6 +150,7 @@ function engine(
   )
   const services: Layer.Layer<Engine> = toolServerLayer.pipe(
     Layer.provideMerge(toolCatalogueLayer),
+    Layer.provide(testerFindingsLayer({ directory: folder, version: VERSION, channel: 'dev' })),
     Layer.provideMerge(classifierSettingsLayer),
     // No build runs here: a Session that is none passes through the builds untouched.
     Layer.provide(idleBuilds),
@@ -161,6 +164,7 @@ function engine(
       Layer.mergeAll(
         projectsLayer,
         sessionsLayer,
+        preferencesLayer,
         specsLayer.pipe(Layer.provide(NoSpecNotices)),
       ).pipe(
         Layer.provideMerge(

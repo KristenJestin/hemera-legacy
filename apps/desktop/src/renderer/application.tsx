@@ -22,6 +22,7 @@ import type {
   ComposerChoice,
   EngineEvent,
   EngineStatus,
+  TesterFinding,
   MotionMeasure,
   PathEntryKind,
   Project,
@@ -228,6 +229,7 @@ import {
 } from './theme.ts'
 import { measureFrames } from './witness.ts'
 import { decisionLineOf, isDecision, type StoredDecision } from './decision-lines.ts'
+import { findingLineOf, findingsChanged } from './finding-lines.ts'
 
 /** How many of the most recent entries the Home shows, which is a glance and not a page. */
 const ACTIVITY = 4
@@ -428,6 +430,10 @@ export function Application() {
   const [composers, setComposers] = useState<Record<string, ComposerChoice>>({})
   /** Whether the ACP trace of each Session is written, as the settings last said (#131). */
   const [acpTrace, setAcpTrace] = useState(false)
+  /** Whether every Session's agent also tests Hemera, as the settings last said (#300). */
+  const [appTester, setAppTester] = useState(false)
+  /** The app tester's findings, read while the Developer section is open (#300). */
+  const [findings, setFindings] = useState<TesterFinding[] | null>(null)
   /**
    * Which agent is being updated, and what its own tool last said about it (design D5-18).
    *
@@ -546,6 +552,7 @@ export function Application() {
         // without it: what a window does then is open on no choice at all, not fall over.
         setComposers(worn.composers ?? {})
         setAcpTrace(worn.acpTrace)
+        setAppTester(worn.appTester)
       })
     void patiently(async () => await window.hemera.invoke('engine.status', {}))
       .then((status) => {
@@ -951,6 +958,22 @@ export function Application() {
     })
   }, [watchingDecisions])
 
+  // The app tester's findings, read when the Developer section is opened and again whenever a
+  // report is written, for as long as it stays open: the files of the tester folder (#300).
+  useEffect(() => {
+    if (!watchingDecisions) return
+    const readFindings = () => {
+      void window.hemera
+        .invoke('tester.findings', {})
+        .then(setFindings)
+        .catch(unanswered('tester.findings'))
+    }
+    readFindings()
+    return window.hemera.on((event: EngineEvent) => {
+      if (findingsChanged(event)) readFindings()
+    })
+  }, [watchingDecisions])
+
   /** Opens the Session a decision was taken in, in its own Project. */
   const openDecisionSession = (sessionId: string) => {
     const projectId = decisions?.find((one) => one.session.id === sessionId)?.session.projectId
@@ -1275,6 +1298,29 @@ export function Application() {
             void window.hemera
               .invoke('preferences.write', { acpTrace: on })
               .catch(unanswered('preferences.write'))
+          }}
+          tester={{
+            on: appTester,
+            onChange: (on) => {
+              setAppTester(on)
+              void window.hemera
+                .invoke('preferences.write', { appTester: on })
+                .catch(unanswered('preferences.write'))
+            },
+            findings:
+              findings === null
+                ? null
+                : findings.map((one) => findingLineOf(one, (ms) => new Date(ms).toLocaleString())),
+            onOpenFolder: () => {
+              void window.hemera
+                .invoke('shell.open', { what: 'tester' })
+                .catch(unanswered('shell.open'))
+            },
+            onOpenIndex: () => {
+              void window.hemera
+                .invoke('shell.open', { what: 'tester-index' })
+                .catch(unanswered('shell.open'))
+            },
           }}
           agents={{
             agents: agents.agents.map((one) => ({

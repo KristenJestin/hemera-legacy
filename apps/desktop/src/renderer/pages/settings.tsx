@@ -8,6 +8,7 @@ import {
   type DecisionLine,
   type ProfileFacts,
   type SettingsSection,
+  type TesterPanelProps,
 } from '@hemera/ui'
 import type { ThemeChoice } from '@hemera/ui/window'
 
@@ -29,6 +30,7 @@ export function SettingsPage({
   onAcpTraceChange,
   decisions,
   onOpenSession,
+  tester,
 }: {
   /** The section on screen, kept by the application so that a link to a setting opens it. */
   section: SettingsSection
@@ -50,6 +52,8 @@ export function SettingsPage({
   /** Hemera Auto's latest decisions, newest first; null while not read (#294). */
   decisions: readonly DecisionLine[] | null
   onOpenSession: (sessionId: string) => void
+  /** The app tester: its switch, its findings and its folder (#300). */
+  tester: TesterPanelProps
 }): ReactNode {
   return (
     <Settings
@@ -69,6 +73,7 @@ export function SettingsPage({
       onAcpTraceChange={onAcpTraceChange}
       decisions={decisions}
       onOpenSession={onOpenSession}
+      tester={tester}
     />
   )
 }

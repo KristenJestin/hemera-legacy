@@ -6,7 +6,7 @@ import { type FunctionComponent, type ReactNode, useState } from 'react'
 
 import { AgentsSection, type AgentsSectionProps } from './agents-section.tsx'
 import { ClassifierSection, type ClassifierSectionProps } from './classifier-section.tsx'
-import { type DecisionLine, DeveloperSection } from './developer-section.tsx'
+import { type DecisionLine, DeveloperSection, type TesterPanelProps } from './developer-section.tsx'
 import { Button } from '../components/button/button.tsx'
 import { Card } from '../components/card/card.tsx'
 import { List, ListItem } from '../components/list/list.tsx'
@@ -277,6 +277,8 @@ export interface SettingsProps {
   decisions?: readonly DecisionLine[] | null | undefined
   /** Opens the Session a decision was taken in. */
   onOpenSession?: ((sessionId: string) => void) | undefined
+  /** The app tester of the Developer section (#300); absent, its card is not drawn. */
+  tester?: TesterPanelProps | undefined
   /** The section shown first; Appearance unless said otherwise. */
   defaultSection?: SettingsSection | undefined
   /** The section shown, for a caller that keeps it: a link to a setting opens its section. */
@@ -299,6 +301,7 @@ export function Settings({
   onAcpTraceChange,
   decisions = null,
   onOpenSession = () => undefined,
+  tester,
   defaultSection = 'appearance',
   section,
   onSectionChange,
@@ -324,6 +327,7 @@ export function Settings({
         acpTrace={acpTrace}
         onAcpTraceChange={onAcpTraceChange}
         onOpenDiagnostic={onOpenDiagnostic}
+        tester={tester}
       />
     ),
   }

@@ -8,12 +8,20 @@ import { Checkbox } from '../components/checkbox/checkbox.tsx'
 import { Select, type SelectItem } from '../components/select/select.tsx'
 import { StatusDot, type StatusTone } from '../components/status-dot/status-dot.tsx'
 import {
+  IconBrandHemeraAuto,
   IconBrandTypeSafe,
+  IconBrowser,
+  IconBug,
   IconCircleDashed,
   IconClock,
+  IconDots,
   IconFileText,
+  IconFolder,
   type IconProps,
   IconListCheck,
+  IconPuzzle,
+  IconServer,
+  IconTool,
   IconUser,
 } from '../icons.ts'
 import { collapse, expand, fold, useTransition } from '../motion.ts'
@@ -255,6 +263,217 @@ function DecisionRow({
   )
 }
 
+/** What an app tester finding is about (#300). */
+export type FindingKind =
+  | 'hemera_bug'
+  | 'missing_capability'
+  | 'tool_error'
+  | 'auto_decision'
+  | 'mcp'
+  | 'interface'
+  | 'other'
+
+/** How much a finding gets in the way. */
+export type FindingSeverity = 'blocks' | 'hurts' | 'cosmetic'
+
+/** One app tester finding, as a row shows it: its file's front matter and its body. */
+export interface FindingLine {
+  /** Its file in the tester folder, which is what a row is keyed by. */
+  file: string
+  number: number
+  title: string
+  kind: FindingKind
+  /** Where: the tool, the screen or the feature. */
+  place: string
+  severity: FindingSeverity
+  occurrences: number
+  /** When it was last seen, already written. */
+  lastSeen: string
+  /** The body of its file, as the folder holds it. */
+  body: string
+}
+
+const KIND: Record<FindingKind, { icon: FunctionComponent<IconProps>; word: string }> = {
+  hemera_bug: { icon: IconBug, word: 'Hemera bug' },
+  missing_capability: { icon: IconPuzzle, word: 'Missing capability' },
+  tool_error: { icon: IconTool, word: 'Tool error' },
+  auto_decision: { icon: IconBrandHemeraAuto, word: 'Hemera Auto decision' },
+  mcp: { icon: IconServer, word: 'MCP' },
+  interface: { icon: IconBrowser, word: 'Interface' },
+  other: { icon: IconDots, word: 'Other' },
+}
+
+const SEVERITY: Record<FindingSeverity, { tone: StatusTone; word: string }> = {
+  blocks: { tone: 'failure', word: 'Blocks' },
+  hurts: { tone: 'pending', word: 'Hurts' },
+  cosmetic: { tone: 'cancelled', word: 'Cosmetic' },
+}
+
+const KINDS: SelectItem<FindingKind | Any>[] = [
+  { value: 'any', label: 'Any kind' },
+  ...(
+    [
+      'hemera_bug',
+      'missing_capability',
+      'tool_error',
+      'auto_decision',
+      'mcp',
+      'interface',
+      'other',
+    ] as const
+  ).map((kind) => {
+    const Icon = KIND[kind].icon
+    return { value: kind, label: KIND[kind].word, icon: <Icon size="sm" aria-hidden="true" /> }
+  }),
+]
+
+const SEVERITIES: SelectItem<FindingSeverity | Any>[] = [
+  { value: 'any', label: 'Any severity' },
+  ...(['blocks', 'hurts', 'cosmetic'] as const).map((severity) => ({
+    value: severity,
+    label: SEVERITY[severity].word,
+    icon: <StatusDot status={SEVERITY[severity].tone} />,
+  })),
+]
+
+/** How many findings and occurrences a list holds, in words. */
+function countOf(findings: readonly FindingLine[]): string {
+  const seen = findings.reduce((sum, one) => sum + one.occurrences, 0)
+  return `${findings.length} ${findings.length === 1 ? 'finding' : 'findings'} · ${seen} ${seen === 1 ? 'occurrence' : 'occurrences'}`
+}
+
+/** The count beside the filters, pushed to the end of their line. */
+const COUNT = 'ml-auto self-center text-sm text-muted-foreground'
+
+const NUMBER = 'shrink-0 font-mono text-xs text-muted-foreground'
+
+const TITLE = 'min-w-0 flex-1 truncate text-sm text-foreground'
+
+export interface TesterPanelProps {
+  /** Whether every Session's agent also tests Hemera (#300). */
+  on: boolean
+  onChange: (on: boolean) => void
+  /** The findings, the latest seen first; null while the folder was not read. */
+  findings: readonly FindingLine[] | null
+  /** Opens the tester folder, one file a finding. */
+  onOpenFolder: () => void
+  /** Opens the index of the findings. */
+  onOpenIndex: () => void
+}
+
+/**
+ * The app tester (#300): the switch, the findings the agents reported, filtered by kind and
+ * severity, and the folder they are files of. Nothing is sent anywhere: the folder is the list.
+ */
+export function TesterPanel({
+  on,
+  onChange,
+  findings,
+  onOpenFolder,
+  onOpenIndex,
+}: TesterPanelProps): ReactNode {
+  const [kind, setKind] = useState<FindingKind | Any>('any')
+  const [severity, setSeverity] = useState<FindingSeverity | Any>('any')
+  const folding = useTransition(fold)
+  const shown = (findings ?? []).filter(
+    (one) =>
+      (kind === 'any' || one.kind === kind) && (severity === 'any' || one.severity === severity),
+  )
+  return (
+    <Card title="App tester">
+      <Checkbox checked={on} onCheckedChange={onChange} label="App tester mode" />
+      {findings === null ? (
+        <p className={NOTE}>Findings cannot be read yet.</p>
+      ) : findings.length === 0 ? (
+        <p className={NOTE}>No finding yet.</p>
+      ) : (
+        <>
+          <div className={FILTERS}>
+            <Select label="Kind" items={KINDS} value={kind} onValueChange={setKind} />
+            <Select
+              label="Severity"
+              items={SEVERITIES}
+              value={severity}
+              onValueChange={setSeverity}
+            />
+            <span className={COUNT}>{countOf(shown)}</span>
+          </div>
+          {shown.length === 0 && <p className={NOTE}>No finding matches.</p>}
+          <ul aria-label="Findings" className={LIST}>
+            <AnimatePresence initial={false}>
+              {shown.map((line) => (
+                <motion.li
+                  key={line.file}
+                  className="overflow-hidden"
+                  initial={collapse}
+                  animate={expand}
+                  exit={collapse}
+                  transition={folding}
+                >
+                  <FindingRow line={line} />
+                </motion.li>
+              ))}
+            </AnimatePresence>
+          </ul>
+        </>
+      )}
+      <div className="flex flex-wrap gap-2">
+        <Button variant="secondary" size="sm" onClick={onOpenFolder}>
+          <IconFolder size="sm" />
+          Open the folder
+        </Button>
+        <Button
+          variant="secondary"
+          size="sm"
+          onClick={onOpenIndex}
+          disabled={findings === null || findings.length === 0}
+        >
+          <IconFileText size="sm" />
+          Open the index
+        </Button>
+      </div>
+    </Card>
+  )
+}
+
+/** One finding: its line, folded on its file. */
+function FindingRow({ line }: { line: FindingLine }): ReactNode {
+  const Kind = KIND[line.kind].icon
+  const severity = SEVERITY[line.severity]
+  const seen = `Seen ${line.occurrences} ${line.occurrences === 1 ? 'time' : 'times'}`
+  return (
+    <Disclosure
+      summary={
+        <span className={HEAD}>
+          <span className="sr-only">Details of the finding: </span>
+          <span className={NUMBER}>#{line.number}</span>
+          <span
+            role="img"
+            aria-label={KIND[line.kind].word}
+            title={KIND[line.kind].word}
+            className="inline-flex shrink-0 text-muted-foreground"
+          >
+            <Kind size="sm" aria-hidden="true" />
+          </span>
+          <span className={TITLE}>{line.title}</span>
+          <span className={TOOL}>{line.place}</span>
+          <span className={MARKS}>
+            <span aria-label={seen} title={seen} className={TIME}>
+              ×{line.occurrences}
+            </span>
+            <span className={TIME}>{line.lastSeen}</span>
+            <StatusDot status={severity.tone} label={severity.word} title={severity.word} />
+          </span>
+        </span>
+      }
+    >
+      <pre aria-label="Finding file" className={RECORD}>
+        {line.body}
+      </pre>
+    </Disclosure>
+  )
+}
+
 export interface DiagnosticsPanelProps {
   /** Whether the ACP trace of each Session is written (issue #131). */
   acpTrace?: boolean | undefined
@@ -292,7 +511,10 @@ export function DiagnosticsPanel({
   )
 }
 
-export interface DeveloperSectionProps extends DecisionsPanelProps, DiagnosticsPanelProps {}
+export interface DeveloperSectionProps extends DecisionsPanelProps, DiagnosticsPanelProps {
+  /** The app tester (#300); absent, its card is not drawn. */
+  tester?: TesterPanelProps | undefined
+}
 
 /** The Developer section: one card per panel, in the order they are read. */
 export function DeveloperSection({
@@ -301,10 +523,12 @@ export function DeveloperSection({
   acpTrace,
   onAcpTraceChange,
   onOpenDiagnostic,
+  tester,
 }: DeveloperSectionProps): ReactNode {
   return (
     <div className="flex flex-col gap-4">
       <DecisionsPanel decisions={decisions} onOpenSession={onOpenSession} />
+      {tester !== undefined && <TesterPanel {...tester} />}
       <DiagnosticsPanel
         acpTrace={acpTrace}
         onAcpTraceChange={onAcpTraceChange}

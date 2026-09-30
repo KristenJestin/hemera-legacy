@@ -59,6 +59,7 @@ export const CHANNELS = {
   },
   'classifier.key.remove': { arguments: nothingSchema, response: z.void() },
   'classifier.decisions': ENGINE_REQUESTS['classifier.decisions'],
+  'tester.findings': ENGINE_REQUESTS['tester.findings'],
   'env.report': {
     arguments: nothingSchema,
     response: environmentReportSchema,
@@ -241,7 +242,8 @@ export const CHANNELS = {
     response: z.array(z.string()),
   },
   /**
-   * Opens one of the two things the settings offer, with the desktop.
+   * Opens one of the things the settings offer, with the desktop: the data folder, the
+   * diagnostic, and the app tester's folder and its index (#300).
    *
    * A choice and never a path: the page has no business knowing where the data folder is or
    * what the diagnostic is called, and a channel that took a path would be a channel a page
@@ -249,7 +251,7 @@ export const CHANNELS = {
    * process's, which is the one that was started on the folder.
    */
   'shell.open': {
-    arguments: z.object({ what: z.enum(['folder', 'diagnostic']) }),
+    arguments: z.object({ what: z.enum(['folder', 'diagnostic', 'tester', 'tester-index']) }),
     response: z.void(),
   },
   /**

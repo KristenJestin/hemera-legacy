@@ -44,12 +44,17 @@ export interface GrantedAccess extends AccessGrant {
 }
 
 export interface ToolAccessService {
-  /** Mints the token of one Session for one agent process, and revokes what came before it. */
+  /**
+   * Mints the token of one Session for one agent process, and revokes what came before it. The
+   * app tester's tools are lent with the mission's own when the mode is on as the agent starts
+   * (#300).
+   */
   readonly granted: (
     sessionId: string,
     agentProcess: string,
     mission: Mission,
     tokenInQuery?: boolean,
+    tester?: boolean,
   ) => Effect.Effect<GrantedAccess>
   /** The grant a token belongs to, and null for anything else — a foreign or a revoked one. */
   readonly byToken: (token: string | null) => Effect.Effect<AccessGrant | null>
@@ -130,7 +135,7 @@ export const toolAccessLayer: Layer.Layer<ToolAccess, never, StderrSink> = Layer
       })
 
     return {
-      granted: (sessionId, agentProcess, mission, tokenInQuery = false) =>
+      granted: (sessionId, agentProcess, mission, tokenInQuery = false, tester = false) =>
         Effect.gen(function* () {
           yield* forget(sessionId)
           const token = randomBytes(32).toString('base64url')
@@ -139,7 +144,7 @@ export const toolAccessLayer: Layer.Layer<ToolAccess, never, StderrSink> = Layer
             id,
             sessionId,
             agentProcess,
-            offered: offeredTools(mission),
+            offered: offeredTools(mission, tester),
             tokenInQuery,
           }
           byToken.set(token, grant)

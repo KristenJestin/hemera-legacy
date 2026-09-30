@@ -66,6 +66,7 @@ import { engineStatusLayer } from './status.ts'
 import type { EngineStatus } from './status.ts'
 import { databaseLayer } from './storage/database.ts'
 import { gitLayer } from './git.ts'
+import { type TesterFindings, testerFindingsLayer } from './tester/findings.ts'
 import {
   type Preparation,
   hostLinks,
@@ -101,6 +102,7 @@ export const PUSHED: Record<
     | 'workspace'
     | 'build_changed'
     | 'agents_changed'
+    | 'tester_changed'
   >
 > = {
   permission_requested: 'permission',
@@ -249,6 +251,7 @@ export type EngineServices =
   | BuildChecks
   | Builds
   | DomainEvents
+  | TesterFindings
   | Database
   | SqliteClient
 
@@ -258,6 +261,18 @@ function servicesOf(
   log: (line: string) => void,
 ): Layer.Layer<EngineServices> {
   const channel = channelSchema.parse(start.channel)
+  // The app tester's findings, files of the data folder and never rows (#300): the tools write
+  // them, the Developer section reads them, and the window is told of each change.
+  const findings = testerFindingsLayer(
+    { directory: start.directory, channel, version: start.version },
+    () => {
+      try {
+        port.postMessage({ event: 'tester.changed' })
+      } catch (died) {
+        log(`pushing tester.changed failed: ${named(died)}`)
+      }
+    },
+  )
   // The engine's diagnostic log, which a child's `stderr` and a write dropped at the quit go to.
   const diagnostic = Layer.succeed(StderrSink, {
     write: (line: string) => Effect.sync(() => log(line)),
@@ -326,6 +341,9 @@ function servicesOf(
   // rather than minting a second one, and a token of one book means nothing to the other.
   const tools = toolServerLayer.pipe(
     Layer.provideMerge(toolCatalogueLayer),
+    // Where the app tester's reports are written, and whether the mode is on (#300).
+    Layer.provide(findings),
+    Layer.provide(preferencesLayer),
     Layer.provideMerge(classifierSettingsLayer),
     Layer.provideMerge(builds),
     Layer.provideMerge(toolAccessLayer),
@@ -405,6 +423,7 @@ function servicesOf(
   )
 
   return Layer.mergeAll(
+    findings,
     preferencesLayer,
     classifierSettingsLayer,
     engineStatusLayer({ directory: start.directory, channel, version: start.version }),

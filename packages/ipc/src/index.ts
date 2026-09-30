@@ -51,9 +51,11 @@ export {
   sessionSchema,
   sessionTitleSourceSchema,
   sidebarPreferenceSchema,
+  testerFindingSchema,
   themePreferenceSchema,
 } from './engine.ts'
 export type {
+  TesterFinding,
   ClassifierMode,
   ClassifierStrictness,
   Channel,

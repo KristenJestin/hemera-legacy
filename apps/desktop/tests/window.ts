@@ -59,6 +59,7 @@ import { type Database, databaseLayer } from '#engine/storage/database.ts'
 import { toolAccessLayer } from '#engine/tools/access.ts'
 import { toolCatalogueLayer } from '#engine/tools/catalogue.ts'
 import { approvalsLayer } from '#engine/tools/approvals.ts'
+import { testerFindingsLayer } from '#engine/tester/findings.ts'
 import { toolPermissionsLayer } from '#engine/tools/permissions.ts'
 import { toolServerLayer } from '#engine/tools/server.ts'
 import { gitLayer } from '#engine/git.ts'
@@ -183,6 +184,9 @@ async function openOver(
   )
   const tools = toolServerLayer.pipe(
     Layer.provideMerge(toolCatalogueLayer),
+    Layer.provideMerge(
+      testerFindingsLayer({ directory: dataFolder, version: VERSION, channel: 'dev' }),
+    ),
     Layer.provideMerge(classifierSettingsLayer),
     Layer.provideMerge(builds),
     Layer.provideMerge(toolAccessLayer),

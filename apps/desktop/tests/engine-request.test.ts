@@ -371,7 +371,27 @@ describe('Un message conforme est traité', () => {
       activeSessions: {},
       composers: {},
       acpTrace: false,
+      appTester: false,
     })
+  })
+})
+
+describe('The app tester mode is a preference', () => {
+  test('off until it is turned on, and read back as it was written (#300)', async () => {
+    const before = await send('preferences.read', {})
+    expect(before).toMatchObject({ appTester: false })
+    const written = decideRequest('preferences.write', { appTester: true })
+    expect(written.accepted).toBe(true)
+    await running(
+      Effect.gen(function* () {
+        if (written.accepted) yield* answer(written)
+      }),
+    )
+    expect(await send('preferences.read', {})).toMatchObject({ appTester: true, acpTrace: false })
+  })
+
+  test('its findings are asked for by name, and none is an empty list', async () => {
+    expect(await send('tester.findings', {})).toEqual([])
   })
 })
 

@@ -698,7 +698,10 @@ export const ClassifierKeyboard: Story = {
  * until the reader chooses another. The level is part of Hemera Auto and shows with it.
  */
 export const Strictness: Story = {
-  args: { classifier: { ...CLASSIFIER, mode: 'hemera-auto', consent: true, credential: 'saved' } },
+  args: {
+    defaultSection: 'hemera-auto',
+    classifier: { ...CLASSIFIER, mode: 'hemera-auto', consent: true, credential: 'saved' },
+  },
   play: async ({ canvasElement, args }) => {
     const canvas = within(canvasElement)
     const group = canvas.getByRole('radiogroup', { name: 'Strictness' })
@@ -719,6 +722,7 @@ export const Strictness: Story = {
 
 /** Under Agent default there is no level to choose: it belongs to Hemera Auto. */
 export const StrictnessHidden: Story = {
+  args: { defaultSection: 'hemera-auto' },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     expect(canvas.queryByRole('radiogroup', { name: 'Strictness' })).toBeNull()
@@ -727,7 +731,7 @@ export const StrictnessHidden: Story = {
 
 /** The arrows move the level, as they move the theme. */
 export const StrictnessKeyboard: Story = {
-  args: { classifier: { ...CLASSIFIER, mode: 'hemera-auto' } },
+  args: { defaultSection: 'hemera-auto', classifier: { ...CLASSIFIER, mode: 'hemera-auto' } },
   play: async ({ canvasElement, args }) => {
     const canvas = within(canvasElement)
     const group = canvas.getByRole('radiogroup', { name: 'Strictness' })
@@ -745,7 +749,7 @@ export const StrictnessKeyboard: Story = {
  * frame of the way it is drawn over the middle level and never under it (issue #127).
  */
 export const StrictnessMarkCrossing: Story = {
-  args: { classifier: { ...CLASSIFIER, mode: 'hemera-auto' } },
+  args: { defaultSection: 'hemera-auto', classifier: { ...CLASSIFIER, mode: 'hemera-auto' } },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     const segment = canvas.getByRole('radiogroup', { name: 'Strictness' })

@@ -528,7 +528,11 @@ function shellOf(name: string): Shell | null {
     return { dialect: 'posix', code: posixCode, missing: 'a shell string that is missing' }
   }
   if (POWERSHELLS.has(name)) {
-    return { dialect: 'powershell', code: powershellCode, missing: 'a PowerShell command that does not read' }
+    return {
+      dialect: 'powershell',
+      code: powershellCode,
+      missing: 'a PowerShell command that does not read',
+    }
   }
   if (name === 'cmd') {
     return { dialect: 'cmd', code: cmdCode, missing: 'a shell string that is missing' }

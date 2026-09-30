@@ -16,7 +16,6 @@ import type {
 import {
   ActionGroup,
   AgentModelMenu,
-  BuildBanner,
   BuildPanel,
   Button,
   Composer,
@@ -49,7 +48,7 @@ import {
   type RunRepository,
   type ScrollerEntry,
   type UsageMeterProps,
-  waitsOf,
+  buildNotices,
 } from '@hemera/ui'
 import {
   IconBookmarkPlus,
@@ -727,7 +726,28 @@ export function SessionPage({
       setRefused(null)
     })()
   }
+  // The build's data and its handlers, which both readings of it need: the panel's view, and the
+  // Session's notices, whose Open puts a task on the view's stage (D10-12).
+  const buildView: Omit<BuildViewProps, 'specOpen' | 'onToggleSpec'> | null =
+    session.mission !== 'build' || build === null
+      ? null
+      : {
+          build: buildViewDataOf(build),
+          now: new Date(now).toISOString(),
+          onPause: () => void pauseBuild(),
+          onResume: () => void resumeBuild(),
+          onAccept: () => void acceptBuild(),
+          onStop: () => void stopBuild(),
+          onTaskDone: (taskId) => void doneTask(taskId),
+          onTaskSkip: (taskId, reason, unblock) => void skipTask(taskId, reason, unblock),
+          onDismissBlocker: (blockerId, note) => void dismissBlocker(blockerId, note),
+          // The review is written in the composer, which takes the keyboard (issue #117).
+          onOpenChat: () => setComposing(true),
+        }
+
   const itemsOf = (kind: NoticeKind): NoticeItem[] => waitingByKind.get(kind) ?? []
+  // What the build waits for the user on: a kind of the notices of its own.
+  const building = buildView === null ? null : buildNotices(buildView, setOpenBuildTask)
   const notices: NoticeGroup[] = [
     {
       kind: 'permission',
@@ -782,14 +802,15 @@ export function SessionPage({
           </Button>
         ) : undefined,
     },
+    ...(building === null ? [] : [building]),
   ]
   /**
    * The first kind that waits for the reader, in the notices' order, or null: the row above the box
    * says it waits as long as anything does, and its face says what for (issue #140).
    */
   const waitsFor = NOTICE_KINDS.find((kind) => itemsOf(kind).length > 0) ?? null
-  /** Whether anything waits for the reader. */
-  const waitsForYou = waitsFor !== null
+  /** Whether anything waits for the reader, the build among it. */
+  const waitsForYou = waitsFor !== null || (building?.items.length ?? 0) > 0
 
   const scroller: ScrollerEntry[] = []
   /**
@@ -910,25 +931,6 @@ export function SessionPage({
   const usage = usageOf(thread)
   // Which tabs have something to show, which is what the details open on.
   const tabs = detailsTabsOf(plan.length, touched.length, context)
-
-  // The build's data and its handlers, which both readings of it need: the panel's view, and the
-  // banner above the composer, which opens a task on the view's stage (D10-12).
-  const buildView: Omit<BuildViewProps, 'specOpen' | 'onToggleSpec'> | null =
-    session.mission !== 'build' || build === null
-      ? null
-      : {
-          build: buildViewDataOf(build),
-          now: new Date(now).toISOString(),
-          onPause: () => void pauseBuild(),
-          onResume: () => void resumeBuild(),
-          onAccept: () => void acceptBuild(),
-          onStop: () => void stopBuild(),
-          onTaskDone: (taskId) => void doneTask(taskId),
-          onTaskSkip: (taskId, reason, unblock) => void skipTask(taskId, reason, unblock),
-          onDismissBlocker: (blockerId, note) => void dismissBlocker(blockerId, note),
-          // The review is written in the composer, which takes the keyboard (issue #117).
-          onOpenChat: () => setComposing(true),
-        }
 
   /**
    * The panel beside the chat, chosen by the Session's mission here and nowhere else. A `define`
@@ -1167,13 +1169,6 @@ export function SessionPage({
             // Everything that waits for the reader, on the box's edge (issue #237): it rises from
             // behind the box when something starts waiting, and goes back there when nothing does.
             notices={<SessionNotices groups={notices} />}
-            // What waits for the user in the build, above the box: the first task that is theirs,
-            // or the first blocker the agent raised; Open puts it on the build view's stage.
-            blocked={
-              buildView !== null && waitsOf(buildView.build) ? (
-                <BuildBanner view={buildView} onOpen={setOpenBuildTask} />
-              ) : undefined
-            }
             takeFocus={composing}
             onFocusTaken={() => setComposing(false)}
           />

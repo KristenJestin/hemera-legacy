@@ -565,9 +565,9 @@ export type {
  * The build of a `build` Session (lot 22, D10-12): the panel it stands in beside the chat, and the
  * build view in it — its phase, its actions, the approach, the stories and their tasks — the stage
  * of one task with its tries, their checks and the files they changed, and the blocks that hand a
- * task to the user — a task that is theirs, a blocker the agent raised — in the view and as a
- * banner above the composer; and the frozen Spec, opened read only in the view's place. View types
- * only, close to the engine's `BuildView`: the renderer maps one onto the other.
+ * task to the user — a task that is theirs, a blocker the agent raised, the review — in the view
+ * and as one kind of the Session's notices; and the frozen Spec, opened read only in the view's
+ * place. View types only, close to the engine's `BuildView`: the renderer maps one onto the other.
  */
 export { BuildView, type BuildViewProps } from './build/build-view.tsx'
 export { TaskStage, type TaskStageProps } from './build/task-stage.tsx'
@@ -576,7 +576,7 @@ export { BlockerBlock, type BlockerBlockProps } from './build/blocker-block.tsx'
 export { ReviewCard, type ReviewCardProps } from './build/review-card.tsx'
 export { BuildSpecPanel, type BuildSpecPanelProps } from './build/build-spec-panel.tsx'
 export { BuildPanel, type BuildPanelProps } from './build/build-panel.tsx'
-export { BuildBanner, type BuildBannerProps } from './build/build-banner.tsx'
+export { buildNotices, buildNoticeItems } from './build/build-notices.tsx'
 export { waitsOf, waitingOf } from './build/model.ts'
 export type {
   BuildAttemptResult,

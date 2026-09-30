@@ -9,6 +9,7 @@ import { Composer } from '../composer/composer.tsx'
 import { TooltipProvider } from '../components/tooltip/tooltip.tsx'
 import { AgentText } from '../message/agent-text.tsx'
 import { MessageScroller, type ScrollerEntry } from '../message/scroller/scroller.tsx'
+import { SessionNotices } from '../session/session-notices.tsx'
 import { SessionHeader } from '../session/session.tsx'
 import { MissionBrief } from '../spec/mission-brief.tsx'
 import { READY } from '../spec/spec-fixtures.ts'
@@ -20,9 +21,11 @@ import {
   GETTING_READY,
   NOW,
   PAUSED,
+  READY_TO_ACCEPT,
+  T4_YOURS,
   YOURS,
 } from './build-fixtures.ts'
-import { BuildBanner } from './build-banner.tsx'
+import { buildNotices } from './build-notices.tsx'
 import { BuildPanel } from './build-panel.tsx'
 import { type BuildViewProps } from './build-view.tsx'
 import { type BuildViewData } from './model.ts'
@@ -33,13 +36,13 @@ import { type BuildViewData } from './model.ts'
  * or the frozen Spec in its place while "Spec" is pressed. The panel opens unfolded and folds to a
  * band beside the chat, which it pushes as it moves.
  *
- * What waits for the user in the build — a task that is theirs, a blocker the agent raised —
- * stands in the view and above the composer. A permission the agent asks stands in the thread,
+ * What waits for the user in the build — a task that is theirs, a blocker the agent raised, the
+ * review — stands in the view and among the Session's notices, on the composer's edge. A permission the agent asks stands in the thread,
  * the composer saying the turn waits.
  *
  * Every screen is the build of `ATL-7` at one moment, left as it opens: its play asserts and
  * changes nothing. The paths through it — the Spec opening in the view's place, the fold, a
- * banner opening its task, the keyboard — are stories of their own.
+ * notice opening its task, the keyboard — are stories of their own.
  */
 
 /** A Hemera line of the thread. */
@@ -107,8 +110,16 @@ const PERMISSION: ScrollerEntry = {
   ),
 }
 
-/** The chat of the Session: its head, its thread and its composer, what waits above the box. */
-function Chat({ thread, blocked }: { thread: ScrollerEntry[]; blocked: ReactNode }): ReactNode {
+/** The chat of the Session: its head, its thread, its composer and the notices on its edge. */
+function Chat({
+  thread,
+  blocked,
+  notices,
+}: {
+  thread: ScrollerEntry[]
+  blocked: ReactNode
+  notices: ReactNode
+}): ReactNode {
   const [value, setValue] = useState('')
   const [files, setFiles] = useState<string[]>([])
   return (
@@ -131,6 +142,7 @@ function Chat({ thread, blocked }: { thread: ScrollerEntry[]; blocked: ReactNode
           running
           onStop={fn()}
           blocked={blocked}
+          notices={notices}
         />
       </div>
     </div>
@@ -145,6 +157,7 @@ const SCREENS = {
   blocked: BLOCKED,
   paused: PAUSED,
   finalChecks: FINAL_CHECKS_RED,
+  readyToAccept: READY_TO_ACCEPT,
   accepted: ACCEPTED,
 } satisfies Record<string, BuildViewData>
 
@@ -179,8 +192,8 @@ function Screen({
   onOpenChat: () => void
 }): ReactNode {
   const thread = asking ? [...THREAD, PERMISSION] : THREAD
-  // The task the banner opens is held here, since the banner and the view's stage are two
-  // readings of one build.
+  // The task a notice opens is held here, since the notices and the view's stage are two readings
+  // of one build.
   const [selected, setSelected] = useState<string | null>(null)
   const view: Omit<BuildViewProps, 'specOpen' | 'onToggleSpec'> = {
     build: SCREENS[screen],
@@ -194,20 +207,17 @@ function Screen({
     onDismissBlocker,
     onOpenChat,
   }
-  const banner = <BuildBanner view={view} onOpen={setSelected} />
   return (
     <TooltipProvider>
       <div className="@container flex h-screen min-h-0 bg-background text-foreground">
         <Chat
           thread={thread}
           blocked={
-            view.build.tasks.some((task) => task.state === 'yours') ||
-            view.build.blockers.some((one) => one.dismissedAt === null) ? (
-              banner
-            ) : asking ? (
+            asking ? (
               <BlockedBanner waiting="The agent is asking to go on." onStop={fn()} />
             ) : undefined
           }
+          notices={<SessionNotices groups={[buildNotices(view, setSelected)]} />}
         />
         <BuildPanel
           {...view}
@@ -315,8 +325,8 @@ export const Building: Story = {
 }
 
 /**
- * The human task is ready: Yours in the view, on the stage with Done and Skip, and the banner
- * above the composer.
+ * The human task is ready: Yours in the view, on the stage with Done and Skip, and the notices on
+ * the composer's edge say one thing of the build waits.
  */
 export const Yours: Story = {
   args: { screen: 'yours' },
@@ -326,12 +336,15 @@ export const Yours: Story = {
       canvas.getByRole('region', { name: 'The file imports into the ledger' }),
     ).toBeVisible()
     await expect(
-      canvas.getByRole('group', { name: 'Yours: T4 · The file imports into the ledger' }),
+      canvas.getByRole('group', { name: 'Yours: the agent does not do this task' }),
+    ).toBeVisible()
+    await expect(
+      await canvas.findByRole('button', { name: 'Waiting for your answer: Build 1' }),
     ).toBeVisible()
   },
 }
 
-/** The agent says T3 contradicts the Spec: the blocker in the view, and its banner in the chat. */
+/** The agent says T3 contradicts the Spec: the blocker in the view, and among the notices. */
 export const Blocked: Story = {
   args: { screen: 'blocked' },
   play: async ({ canvasElement }) => {
@@ -340,7 +353,10 @@ export const Blocked: Story = {
       canvas.getByRole('region', { name: 'Credit notes as negative rows' }),
     ).toBeVisible()
     await expect(
-      canvas.getByRole('group', { name: 'T3: the agent says this task contradicts the Spec' }),
+      canvas.getByRole('group', { name: 'The agent says this task contradicts the Spec' }),
+    ).toBeVisible()
+    await expect(
+      await canvas.findByRole('button', { name: 'Waiting for your answer: Build 1' }),
     ).toBeVisible()
   },
 }
@@ -442,8 +458,8 @@ export const SpecTakesTheViewsPlace: Story = {
   },
 }
 
-/** The banner's Open puts its task on the view's stage, wherever the view was. */
-export const BannerOpensTheTask: Story = {
+/** A notice's Open puts its task on the view's stage, wherever the view was. */
+export const NoticeOpensTheTask: Story = {
   args: { screen: 'blocked' },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
@@ -453,13 +469,52 @@ export const BannerOpensTheTask: Story = {
     await expect(
       canvas.getByRole('region', { name: 'A CSV in the column order of the ledger' }),
     ).toBeVisible()
-    const banner = within(
-      canvas.getByRole('group', { name: 'T3: the agent says this task contradicts the Spec' }),
+    await userEvent.click(
+      await canvas.findByRole('button', { name: 'Waiting for your answer: Build 1' }),
     )
-    await userEvent.click(banner.getByRole('button', { name: 'Open' }))
-    await expect(
-      canvas.getByRole('region', { name: 'Credit notes as negative rows' }),
-    ).toBeVisible()
+    const notice = within(
+      await within(document.body).findByRole('group', { name: 'Blocker on T3' }),
+    )
+    await userEvent.click(notice.getByRole('button', { name: 'Open' }))
+    await waitFor(() =>
+      expect(canvas.getByRole('region', { name: 'Credit notes as negative rows' })).toBeVisible(),
+    )
+  },
+}
+
+/** The user's task answered from the notices: Done, as the view's own Done would. */
+export const YoursAmongTheNotices: Story = {
+  args: { screen: 'yours' },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement)
+    await userEvent.click(
+      await canvas.findByRole('button', { name: 'Waiting for your answer: Build 1' }),
+    )
+    const notice = within(await within(document.body).findByRole('group', { name: 'T4 is yours' }))
+    await expect(notice.getByRole('button', { name: 'Skip…' })).toBeInTheDocument()
+    await userEvent.click(notice.getByRole('button', { name: 'Done' }))
+    await expect(args.onTaskDone).toHaveBeenCalledWith(T4_YOURS.id)
+  },
+}
+
+/**
+ * Every story done and the final checks green: the review waits among the notices, `Review` hands
+ * the keyboard to the composer it is written in, and `Accept` ends the build.
+ */
+export const ReviewAmongTheNotices: Story = {
+  args: { screen: 'readyToAccept' },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement)
+    await userEvent.click(
+      await canvas.findByRole('button', { name: 'Waiting for your answer: Build 1' }),
+    )
+    const notice = within(
+      await within(document.body).findByRole('group', { name: 'Review of ATL-7' }),
+    )
+    await userEvent.click(notice.getByRole('button', { name: 'Review' }))
+    await expect(args.onOpenChat).toHaveBeenCalled()
+    await userEvent.click(notice.getByRole('button', { name: 'Accept' }))
+    await expect(args.onAccept).toHaveBeenCalled()
   },
 }
 

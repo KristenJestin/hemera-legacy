@@ -23,7 +23,7 @@ import { BuildWide } from './build-wide.tsx'
 import { DefineWide } from './define-wide.tsx'
 import { DEFINE_HELPERS, FREE_HELPERS, type Helper, STUCK } from './fixtures.ts'
 import { HelperChips } from './helper-chips.tsx'
-import { HelperIcon } from './helper-icons.tsx'
+import { HelperMark } from './helper-icons.tsx'
 import { HelperViewer } from './helper-viewer.tsx'
 import { useLiveSession } from './live.ts'
 import { PanelDock } from './panel-dock.tsx'
@@ -373,7 +373,7 @@ function permissionOf(helper: Helper, onAnswer: () => void): NoticeGroup {
             line="pnpm add -D csv-parse"
             place={
               <span className="flex items-center gap-1.5">
-                <HelperIcon name={helper.icon} size="sm" />
+                <HelperMark helper={helper} />
                 {helper.name}
               </span>
             }

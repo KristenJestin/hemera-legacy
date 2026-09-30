@@ -11,7 +11,7 @@ import { AgentText } from '../../message/agent-text.tsx'
 import { fold, useTransition } from '../../motion.ts'
 import { CHIP, ChipFace, type ChipState, durationOf, useLiveChip, useNow } from './live-chip.tsx'
 import { HELPER_TONES, type Helper, helperName } from './fixtures.ts'
-import { HelperIcon } from './helper-icons.tsx'
+import { HelperMark } from './helper-icons.tsx'
 
 /**
  * The helper agents in the Session's head line, after the runs (decisions of 30 September on
@@ -169,7 +169,7 @@ function HelperChip({
             <ChipFace
               live={live}
               state={state}
-              icon={<HelperIcon name={helper.icon} size="sm" />}
+              icon={<HelperMark helper={helper} />}
               name={helper.name}
               time={durationOf(now - start)}
             />
@@ -196,7 +196,7 @@ function Glance({
     <div className={GLANCE}>
       <div className={GLANCE_HEAD}>
         <span className={ICON}>
-          <HelperIcon name={helper.icon} size="sm" />
+          <HelperMark helper={helper} />
         </span>
         <StatusDot status={HELPER_TONES[helper.state]} size="sm" />
         <span className={LABEL}>{helper.name}</span>

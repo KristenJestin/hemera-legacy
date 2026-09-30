@@ -2,20 +2,14 @@ import type { Meta, StoryObj } from '@storybook/react-vite'
 import { type ReactNode, useState } from 'react'
 import { expect, userEvent, waitFor, within } from 'storybook/test'
 
-import { StatusDot } from '../../components/status-dot/status-dot.tsx'
 import { TooltipProvider } from '../../components/tooltip/tooltip.tsx'
-import { IconBolt, IconDatabase, IconWorld } from '../../icons.ts'
-import {
-  HelperIcon,
-  type HelperIconLook,
-  type HelperIconName,
-  type HelperIconSize,
-  HelperGlyphs,
-} from './helper-icons.tsx'
+import { type HelperLook, HelperMark, type HelperMarkSize } from './helper-icons.tsx'
+import { DEFINE_HELPERS, FREE_HELPERS, type Helper, STUCK } from './fixtures.ts'
 import type { CommandState } from '../../activity/command-run.tsx'
 import { GOING_ON } from '../../session/going-on-fixtures.ts'
 import type { GoingOnRun } from '../../session/going-on.ts'
 import { type SessionPageProps, SessionPage } from './page.tsx'
+import type { WorkingLook } from './live-chip.tsx'
 import { type LiveRun, RunChips as Chips } from './run-chips.tsx'
 import { type MarkState, StatusMark } from './status-mark.tsx'
 
@@ -248,89 +242,58 @@ export const HelperInFree: Story = {
   },
 }
 
-const ICONS: readonly { icon: HelperIconName; name: string }[] = [
-  { icon: 'free', name: 'Free helper' },
-  { icon: 'reviewer', name: 'Test review' },
-  { icon: 'security', name: 'Security review' },
-  { icon: 'documenter', name: 'Documenter' },
-  { icon: 'prototyper', name: 'Prototyper' },
+const MARK_LOOKS: readonly { look: HelperLook; name: string }[] = [
+  { look: 'face', name: 'A · the agent’s live face, the same for every helper (recommended)' },
+  { look: 'monogram', name: 'B · a tile with the role’s initial' },
 ]
 
-const LOOKS: readonly { look: HelperIconLook; name: string }[] = [
-  { look: 'pair', name: 'A · the bot and its role, side by side (recommended)' },
-  { look: 'badge', name: 'B · the bot, its role on a disc over its corner' },
-  { look: 'role', name: 'C · the role, the bot on a disc over its corner' },
-]
+const MARK_SIZES: readonly HelperMarkSize[] = ['sm', 'md', 'xl']
 
-const SIZES: readonly HelperIconSize[] = ['sm', 'md', 'xl']
+const ICON_ROW = 'flex flex-wrap items-end gap-8'
 
-const ROW = 'flex flex-wrap items-end gap-8'
-
-const CELL = 'flex flex-col items-start gap-2 text-xs text-muted-foreground'
+const ICON_CELL = 'flex flex-col items-start gap-2'
 
 const SAMPLE_CHIP =
   'inline-flex h-control-sm items-center gap-1.5 rounded-md border border-border bg-card px-2 text-xs text-foreground'
 
+/** Helpers in several states, so the faces show what each is doing. */
+const SAMPLES: readonly Helper[] = [...STUCK, FREE_HELPERS[1]!, DEFINE_HELPERS[0]!]
+
 /**
- * The helper icons: the bot says "a helper", a second icon of the catalogue says its role, and a
- * free helper is the bot alone. Three ways to put the two together, each at 16, 20 and 40 px and on
- * a chip. A sets them side by side, both at full size, and is the one that reads at 16 px: nothing
- * in it is shrunk. B and C put one of the two on a small disc, which is too small at a chip's size
- * to say what it is. The last row shows a new helper made by A's rule.
+ * What a helper wears on its chip. A: helpers are agents, so they wear the agent's face — the same
+ * for every helper, live, its expression saying what it does (reading, writing, running, silent,
+ * done) — and the role is the chip's name; commands keep their type icons, so agents are faces and
+ * commands are icons. B: a tile with the role's initial. Each at the face's steps (18, 24, 40 px)
+ * or the tile's (16, 20, 40 px), and on a chip.
  */
 export const HelperIcons: Story = {
   render: () => (
     <div className="flex min-h-screen flex-col gap-10 bg-background p-8 text-foreground">
-      {LOOKS.map(({ look, name }) => (
+      {MARK_LOOKS.map(({ look, name }) => (
         <section key={look} aria-label={name} className="flex flex-col gap-3">
           <h2 className="text-sm font-medium">{name}</h2>
-          <div className={ROW}>
-            {ICONS.map(({ icon, name: helper }) => (
-              <div key={icon} className={CELL}>
-                <span className="flex items-end gap-3 text-foreground">
-                  {SIZES.map((size) => (
-                    <HelperIcon key={size} name={icon} look={look} size={size} />
+          <div className={ICON_ROW}>
+            {SAMPLES.map((helper) => (
+              <div key={helper.id} className={ICON_CELL}>
+                <span className="flex items-end gap-3">
+                  {MARK_SIZES.map((size) => (
+                    <HelperMark key={size} helper={helper} look={look} size={size} />
                   ))}
                 </span>
                 <span className={SAMPLE_CHIP}>
-                  <HelperIcon name={icon} look={look} size="sm" />
-                  <StatusDot status="running" size="sm" />
-                  {helper}
+                  <HelperMark helper={helper} look={look} />
+                  {helper.name}
+                  <span className="font-mono text-muted-foreground tabular-nums">42s</span>
                 </span>
               </div>
             ))}
           </div>
         </section>
       ))}
-      <section aria-label="A new helper" className="flex flex-col gap-3">
-        <h2 className="text-sm font-medium">
-          A new helper, by A · the bot and any icon of the catalogue
-        </h2>
-        <div className={ROW}>
-          {[
-            { glyph: IconDatabase, name: 'Migrator' },
-            { glyph: IconWorld, name: 'Translator' },
-            { glyph: IconBolt, name: 'Performance review' },
-          ].map(({ glyph, name }) => (
-            <div key={name} className={CELL}>
-              <span className="flex items-end gap-3 text-foreground">
-                {SIZES.map((size) => (
-                  <HelperGlyphs key={size} role={glyph} size={size} />
-                ))}
-              </span>
-              <span className={SAMPLE_CHIP}>
-                <HelperGlyphs role={glyph} size="sm" />
-                <StatusDot status="running" size="sm" />
-                {name}
-              </span>
-            </div>
-          ))}
-        </div>
-      </section>
     </div>
   ),
   play: async ({ canvasElement }) => {
-    await expect(within(canvasElement).getAllByRole('region')).toHaveLength(4)
+    await expect(within(canvasElement).getAllByRole('region')).toHaveLength(2)
   },
 }
 
@@ -459,6 +422,11 @@ export const StatusMarks: Story = {
   },
 }
 
+const WORKING_LOOKS: readonly { look: WorkingLook; name: string }[] = [
+  { look: 'line', name: 'A · a still line along the foot while it works (recommended)' },
+  { look: 'faint', name: 'B · a faint tint breathing on the running dot’s beat' },
+]
+
 /** Runs in each state, driven by hand: running, done, failed, and run again. */
 function RunBench(): ReactNode {
   const now = Date.now()
@@ -488,17 +456,19 @@ function RunBench(): ReactNode {
   const driven = runs.find((run) => run.item.id === 'run-test-running')
   return (
     <div className={BENCH}>
-      <div
-        role="group"
-        aria-label="What goes on in this Session"
-        className="flex flex-wrap gap-y-2"
-      >
-        <Chips
-          runs={runs}
-          onStop={(id) => set(id, 'stopped')}
-          onRetry={(id) => set(id, 'running')}
-        />
-      </div>
+      {WORKING_LOOKS.map(({ look, name }) => (
+        <section key={look} aria-label={name} className="flex flex-col gap-2">
+          <h2 className="text-sm font-medium">{name}</h2>
+          <div role="group" aria-label={`Runs · ${look}`} className="flex flex-wrap gap-y-2">
+            <Chips
+              runs={runs}
+              working={look}
+              onStop={(id) => set(id, 'stopped')}
+              onRetry={(id) => set(id, 'running')}
+            />
+          </div>
+        </section>
+      ))}
       <div role="group" aria-label="Drive the tests" className="flex gap-1.5">
         <button type="button" className={PICK} onClick={() => set('run-test-running', 'finished')}>
           Finish the tests
@@ -521,9 +491,9 @@ function runOf(item: GoingOnRun, id: string, state: CommandState): GoingOnRun {
 }
 
 /**
- * The run chips: running (a tint wiping across, the duration ticking), done (one wash of the
- * success tint), failed (the failure's tint, one short shake, the retry glyph beside it), and
- * the tests driven by hand from one to another.
+ * The run chips: running (a calm sign, the seconds ticking), done (one wipe of the success tint,
+ * a plain tick), failed (one wipe of the failure's tint, one shake, a plain cross), the tests driven
+ * by hand; two calm signs of working side by side. Running again is in the glance.
  */
 export const RunChips: Story = {
   render: () => (
@@ -533,12 +503,13 @@ export const RunChips: Story = {
   ),
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    await userEvent.click(canvas.getByRole('button', { name: 'Run test again' }))
-    await expect(canvas.getAllByRole('button', { name: 'test, running' })).toHaveLength(2)
+    const calm = within(canvas.getByRole('group', { name: 'Runs · line' }))
+    await expect(calm.queryByRole('button', { name: 'Run test again' })).toBeNull()
     await userEvent.click(canvas.getByRole('button', { name: 'Fail the tests' }))
     await waitFor(() =>
-      expect(canvas.getAllByRole('button', { name: 'Run test again' })).toHaveLength(1),
+      expect(calm.getAllByRole('button', { name: 'test, failed' })).toHaveLength(2),
     )
+    await expect(calm.getAllByText(/^\d+s$/).length).toBeGreaterThan(0)
   },
 }
 

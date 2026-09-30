@@ -1,123 +1,92 @@
-import type { FunctionComponent, ReactNode } from 'react'
+import type { ReactNode } from 'react'
 
-import {
-  IconBook,
-  IconFlask,
-  IconPencil,
-  type IconProps,
-  IconRobot,
-  IconShield,
-} from '../../icons.ts'
+import { Face, type FaceSize } from '../../components/face/face.tsx'
+import type { FaceState } from '../../components/face/states.ts'
+import type { Helper } from './fixtures.ts'
 
 /**
- * The icons of the helper agents (issue #77, the maintainer's direction of 30 September): the bot
- * says "a helper", and a second icon of the catalogue says its role — the flask, the shield, the
- * book, the pencil. A free helper is the bot alone. Three ways to put the two together, each at
- * 16, 20 and 40 px (story `HelperIcons`):
+ * What a helper wears (issue #77, the maintainer's direction of 30 September): helpers are agents,
+ * so they wear the agent's face and not an icon — agents are faces, commands are icons. The same
+ * face for every helper, live: its expression says what the helper is doing, as in its dialog.
+ * The role is the chip's name alone. At the end the face gives way to a plain tick or cross, as a
+ * run's icon does. Recommended.
  *
- * - `pair` · the bot and the role side by side, both at full size: nothing is shrunk, so both
- *   read at 16 px. Recommended, and what the chips, the glance and the dialog draw.
- * - `badge` · the bot at full size, the role on a small disc over its lower corner;
- * - `role` · the role at full size, the bot on the small disc instead.
- *
- * A new defined helper needs no drawing: it picks one icon of the catalogue for its role.
+ * The alternative, for comparison (story `HelperIcons`): a small tile with the role's initial.
  */
 
+/** The roles a defined helper can have, kept on the fixtures; a free helper has none. */
 export type HelperIconName = 'free' | 'reviewer' | 'security' | 'documenter' | 'prototyper'
 
-export type HelperIconLook = 'pair' | 'badge' | 'role'
+export type HelperLook = 'face' | 'monogram'
 
-/** The role's icon; a free helper has none. */
-export const HELPER_ROLES: Record<HelperIconName, FunctionComponent<IconProps> | null> = {
-  free: null,
-  reviewer: IconFlask,
-  security: IconShield,
-  documenter: IconBook,
-  prototyper: IconPencil,
+/** On a chip, in a head, on its own. */
+export type HelperMarkSize = 'sm' | 'md' | 'xl'
+
+/** The face's own steps: 18, 24 and 40 px. */
+const FACE_SIZES: Record<HelperMarkSize, FaceSize> = { sm: 'icon', md: 'sm', xl: 'md' }
+
+/** The monogram's tile: 16, 20 and 40 px. */
+const TILE: Record<HelperMarkSize, string> = {
+  sm: 'inline-flex size-icon-sm shrink-0 items-center justify-center rounded-sm bg-muted font-mono text-xs font-semibold text-foreground',
+  md: 'inline-flex size-5 shrink-0 items-center justify-center rounded-sm bg-muted font-mono text-xs font-semibold text-foreground',
+  xl: 'inline-flex size-10 shrink-0 items-center justify-center rounded-lg bg-muted font-mono text-lg font-semibold text-foreground',
 }
 
-/** 16 px on a chip, 20 px in a head, 40 px on its own. */
-export type HelperIconSize = 'sm' | 'md' | 'xl'
-
-/** The catalogue's step each icon is drawn at. */
-const STEP: Record<HelperIconSize, 'sm' | 'md' | 'lg'> = { sm: 'sm', md: 'md', xl: 'lg' }
-
-const BOX: Record<HelperIconSize, string> = {
-  sm: 'relative inline-flex size-icon-sm shrink-0 items-center justify-center',
-  md: 'relative inline-flex size-5 shrink-0 items-center justify-center',
-  xl: 'relative inline-flex size-10 shrink-0 items-center justify-center',
+/** What the face says to a screen reader. */
+export const FACE_WORDS: Record<FaceState, string> = {
+  loading: 'starting',
+  thinking: 'thinking',
+  reading: 'reading',
+  writing: 'writing',
+  running: 'running a command',
+  checking: 'checking',
+  question: 'asking',
+  permission: 'asking for permission',
+  blocked: 'silent, waiting',
+  done: 'done',
+  error: 'failed',
+  asleep: 'stopped',
 }
 
-const PAIR: Record<HelperIconSize, string> = {
-  sm: 'inline-flex shrink-0 items-center gap-0',
-  md: 'inline-flex shrink-0 items-center gap-0.5',
-  xl: 'inline-flex shrink-0 items-center gap-1',
+/** The face a helper wears: what its step does while it works, where it ended once it has. */
+export function faceOf(helper: Helper): FaceState {
+  if (helper.state === 'finished') return 'done'
+  if (helper.state === 'failed') return 'error'
+  if (helper.state === 'stopped') return 'asleep'
+  if (helper.state === 'stuck') return 'blocked'
+  const step = helper.steps.at(-1) ?? ''
+  if (step.startsWith('Read') || step.startsWith('Search')) return 'reading'
+  if (step.startsWith('Edit') || step.startsWith('Write')) return 'writing'
+  if (step.startsWith('Run') || step.startsWith('Serve')) return 'running'
+  return 'thinking'
 }
 
-/** The small disc over the lower corner, cut out of what is behind it. */
-const DISC: Record<HelperIconSize, string> = {
-  sm: 'absolute -right-1 -bottom-1 flex size-2.5 items-center justify-center rounded-full bg-card ring-1 ring-card',
-  md: 'absolute -right-1 -bottom-1 flex size-3 items-center justify-center rounded-full bg-card ring-1 ring-card',
-  xl: 'absolute -right-1 -bottom-1 flex size-5 items-center justify-center rounded-full bg-card ring-2 ring-card',
+/** A seed of its own for each helper, so two faces side by side never move in step. */
+function seedOf(helper: Helper): number {
+  return [...helper.id].reduce((sum, letter) => sum + letter.charCodeAt(0), 0)
 }
 
-/** The icon on the disc, drawn at the catalogue's smallest step and scaled down to it. */
-const ON_DISC: Record<HelperIconSize, string> = {
-  sm: 'flex scale-50',
-  md: 'flex scale-60',
-  xl: 'flex scale-90',
+export interface HelperMarkProps {
+  helper: Helper
+  look?: HelperLook | undefined
+  size?: HelperMarkSize | undefined
 }
 
-export interface HelperGlyphsProps {
-  /** The role's icon, or none for a free helper. */
-  role: FunctionComponent<IconProps> | null
-  look?: HelperIconLook | undefined
-  size?: HelperIconSize | undefined
-}
-
-/** The bot and a role's icon put together: how every helper's icon is made. */
-export function HelperGlyphs({
-  role: Role,
-  look = 'pair',
-  size = 'sm',
-}: HelperGlyphsProps): ReactNode {
-  const step = STEP[size]
-  if (Role === null) {
+/** A helper's mark: its live face, or its role's initial on a tile. */
+export function HelperMark({ helper, look = 'face', size = 'sm' }: HelperMarkProps): ReactNode {
+  if (look === 'monogram') {
     return (
-      <span aria-hidden="true" className={BOX[size]}>
-        <IconRobot size={step} aria-hidden="true" />
+      <span aria-hidden="true" className={TILE[size]}>
+        {helper.name.charAt(0)}
       </span>
     )
   }
-  if (look === 'pair') {
-    return (
-      <span aria-hidden="true" className={PAIR[size]}>
-        <IconRobot size={step} aria-hidden="true" />
-        <Role size={step} aria-hidden="true" />
-      </span>
-    )
-  }
-  const Big = look === 'badge' ? IconRobot : Role
-  const Small = look === 'badge' ? Role : IconRobot
   return (
-    <span aria-hidden="true" className={BOX[size]}>
-      <Big size={step} aria-hidden="true" />
-      <span className={DISC[size]}>
-        <span className={ON_DISC[size]}>
-          <Small size="sm" aria-hidden="true" />
-        </span>
-      </span>
-    </span>
+    <Face
+      state={faceOf(helper)}
+      size={FACE_SIZES[size]}
+      seed={seedOf(helper)}
+      label={`${helper.name}, ${FACE_WORDS[faceOf(helper)]}`}
+    />
   )
-}
-
-export interface HelperIconProps {
-  name: HelperIconName
-  look?: HelperIconLook | undefined
-  size?: HelperIconSize | undefined
-}
-
-/** A helper agent's icon, in the colour of the text around it. */
-export function HelperIcon({ name, look = 'pair', size = 'sm' }: HelperIconProps): ReactNode {
-  return <HelperGlyphs role={HELPER_ROLES[name]} look={look} size={size} />
 }

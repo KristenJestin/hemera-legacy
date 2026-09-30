@@ -2,10 +2,9 @@ import type { ReactNode } from 'react'
 
 import { Dialog } from '../../components/dialog/dialog.tsx'
 import { Face } from '../../components/face/face.tsx'
-import type { FaceState } from '../../components/face/states.ts'
 import { MessageScroller } from '../../message/scroller/scroller.tsx'
 import type { Helper } from './fixtures.ts'
-import { HelperIcon } from './helper-icons.tsx'
+import { FACE_WORDS, faceOf } from './helper-icons.tsx'
 import { threadOf } from './threads.tsx'
 
 /**
@@ -25,35 +24,6 @@ const HEAD = 'flex shrink-0 items-center gap-3'
 const DOING = 'flex min-w-0 items-center gap-1.5 text-sm'
 
 const SINCE = 'text-xs text-muted-foreground'
-
-/** What the face says to a screen reader. */
-const FACE_WORDS: Record<FaceState, string> = {
-  loading: 'starting',
-  thinking: 'thinking',
-  reading: 'reading',
-  writing: 'writing',
-  running: 'running a command',
-  checking: 'checking',
-  question: 'asking',
-  permission: 'asking for permission',
-  blocked: 'silent, waiting',
-  done: 'done',
-  error: 'failed',
-  asleep: 'stopped',
-}
-
-/** The face a helper wears: what its step does while it works, where it ended once it has. */
-function faceOf(helper: Helper): FaceState {
-  if (helper.state === 'finished') return 'done'
-  if (helper.state === 'failed') return 'error'
-  if (helper.state === 'stopped') return 'asleep'
-  if (helper.state === 'stuck') return 'blocked'
-  const step = helper.steps.at(-1) ?? ''
-  if (step.startsWith('Read') || step.startsWith('Search')) return 'reading'
-  if (step.startsWith('Edit') || step.startsWith('Write')) return 'writing'
-  if (step.startsWith('Run') || step.startsWith('Serve')) return 'running'
-  return 'thinking'
-}
 
 export interface HelperViewerProps {
   helpers: readonly Helper[]
@@ -84,7 +54,6 @@ export function HelperViewer({ helpers, open, onClose }: HelperViewerProps): Rea
             />
             <span className="flex min-w-0 flex-col gap-0.5">
               <span className={DOING}>
-                <HelperIcon name={helper.icon} size="sm" />
                 <span className="truncate font-mono text-xs">{helper.steps.at(-1)}</span>
               </span>
               <span className={SINCE}>

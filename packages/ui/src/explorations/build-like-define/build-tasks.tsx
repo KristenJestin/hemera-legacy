@@ -23,7 +23,7 @@ import {
   IconUser,
 } from '../../icons.ts'
 import { check as checkKind, collapse, expand, fold, useTransition } from '../../motion.ts'
-import { HelperIcon } from './helper-icons.tsx'
+import { Face } from '../../components/face/face.tsx'
 import { type MarkState, StatusMark } from './status-mark.tsx'
 import { type BoardTask, type TaskReturn, TASK_STORIES } from './tasks-fixtures.ts'
 
@@ -592,7 +592,8 @@ export function TaskDetail({
 function ReturnIcon({ icon }: { icon: TaskReturn['icon'] }): ReactNode {
   if (icon === 'you') return <IconUser size="sm" aria-hidden="true" />
   if (icon === 'agent') return <IconRobot size="sm" aria-hidden="true" />
-  return <HelperIcon name={icon} size="sm" />
+  // A helper's return: an agent, so its face, at rest now it has returned.
+  return <Face state="done" size="icon" label={icon} />
 }
 
 /** The tasks in the order the view lists what needs the user first, then what moves. */

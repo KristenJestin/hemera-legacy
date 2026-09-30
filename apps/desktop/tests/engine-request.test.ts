@@ -244,7 +244,7 @@ function running<A, E>(
     | Database
     | SqliteClient
   > = Layer.mergeAll(
-    testerFindingsLayer(dataFolder),
+    testerFindingsLayer({ directory: dataFolder, version: '0.3.0', channel: 'dev' }),
     preferencesLayer,
     classifierSettingsLayer,
     engineStatusLayer({ directory: dataFolder, channel: 'dev', version: '0.3.0' }),

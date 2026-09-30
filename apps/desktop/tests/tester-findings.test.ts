@@ -75,7 +75,13 @@ const CONTEXT: FindingContext = {
 
 /** Runs a program against the findings of the test's data folder. */
 function withFindings<A, E>(program: Effect.Effect<A, E, TesterFindings>, told = () => undefined) {
-  return Effect.runPromise(program.pipe(Effect.provide(testerFindingsLayer(folder, told))))
+  return Effect.runPromise(
+    program.pipe(
+      Effect.provide(
+        testerFindingsLayer({ directory: folder, version: '0.5.0', channel: 'dev' }, told),
+      ),
+    ),
+  )
 }
 
 const report = (reported: ReportedFinding, context = CONTEXT, secrets: readonly string[] = []) =>

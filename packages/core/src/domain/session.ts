@@ -85,7 +85,6 @@ export const SESSION_ENTRY_KINDS = [
   'turn',
   'note',
   'hemera_tool_call',
-  'classifier_decision',
   'command_run',
   'context_delivery',
   'mission_brief',

@@ -338,7 +338,6 @@ export const sessionEntryKindSchema = z.enum([
   'turn',
   'note',
   'hemera_tool_call',
-  'classifier_decision',
   'command_run',
   'context_delivery',
   'mission_brief',

@@ -9,7 +9,6 @@ import {
   CommandProposal,
   CommandProposalRecord,
   CommandRun,
-  ClassifierDecision,
   CreateSpecProposal,
   DecisionSummary,
   DiffBlock,
@@ -69,7 +68,7 @@ import {
   questionEntryOf,
 } from './spec-entries.ts'
 import type { CallLink } from './call-links.ts'
-import { decidesARequest, decisionOf, permissionStandingOf } from './notices.ts'
+import { decidesARequest, decisionOf, permissionStandingOf, unaskedStandingOf } from './notices.ts'
 
 /**
  * What each entry of a thread is drawn as (design D5-11, D5-14, D5-16).
@@ -187,17 +186,6 @@ const usageSchema = z.object({
 })
 
 const callPayloadSchema = z.object({ call: callSchema })
-
-const classifierDecisionSchema = z.object({
-  call: z.string(),
-  target: z.string(),
-  state: z.enum(['evaluating', 'allowed', 'ask', 'denied', 'unavailable', 'cancelled']),
-  reason: z.string(),
-  by: z.enum(['rules', 'judge', 'user']).optional(),
-  policyVersion: z.string().optional(),
-  model: z.string().optional(),
-  scores: z.string().optional(),
-})
 
 /** What the agent's own vocabulary is when it names something this window does not know. */
 const TOOL_KINDS: readonly ToolKind[] = [
@@ -406,10 +394,6 @@ export interface SpecContext {
  * as the call it belongs to rather than opening an empty box.
  */
 export function drawEntry(entry: SessionEntry, context: AgentContext): ReactNode | null {
-  if (entry.kind === 'classifier_decision') {
-    const decision = readPayload(classifierDecisionSchema, entry.payload)
-    return decision === null ? null : <ClassifierDecision {...decision} />
-  }
   if (entry.kind === 'message') {
     return entry.role === 'user' ? null : <AgentText text={entry.body} />
   }
@@ -697,7 +681,7 @@ function outcomeOf(link: CallLink | undefined, context: AgentContext): Outcome {
       ? permissionStandingOf(link.request, thread)
       : link.decision === undefined
         ? undefined
-        : 'unasked'
+        : unaskedStandingOf(link.decision)
   const run =
     link.run === undefined
       ? null

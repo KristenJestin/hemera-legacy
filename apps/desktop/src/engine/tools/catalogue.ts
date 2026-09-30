@@ -44,11 +44,11 @@ import { mkdir, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/p
 import { basename, dirname, join, relative } from 'node:path'
 
 import { HeldWords } from '../agents/held.ts'
-import { SessionModes, modeAsks } from '../agents/modes.ts'
+import { HEMERA_AUTO, SessionModes, modeAsks } from '../agents/modes.ts'
 import { AgentNotices } from '../agents/notices.ts'
 import { Builds } from '../build/build.ts'
 import { ClassifierSettings } from '../classifier/settings.ts'
-import { evaluateJev, JEV_MODEL, type JevResult, JevTransportPort } from '../classifier/jev.ts'
+import { evaluateJev, type JevResult, JevTransportPort } from '../classifier/jev.ts'
 import { knownSecretValues } from '../classifier/redaction.ts'
 import { type Invocation, wordsOf } from '../commands/line.ts'
 import { Commands, Platform, type RunRequest } from '../commands/service.ts'
@@ -174,6 +174,16 @@ interface Classified {
   readonly generation: number
   readonly latestHumanSeq: number
   readonly correlationId?: string
+  /** Who settled it: the rules, the judge, nobody (unavailable), or its expiry (cancelled). */
+  readonly source?: 'local' | 'jev' | 'unavailable' | 'cancelled'
+  readonly model?: string
+  readonly scores?:
+    | {
+        readonly risk: number
+        readonly approval: number
+        readonly userRequested: number
+      }
+    | undefined
 }
 
 interface AuthorizedTarget {
@@ -198,6 +208,17 @@ interface ClassifierDetail {
 function argumentsSent(sent: ToolArguments): string {
   return JSON.stringify(Object.entries(sent).sort(([left], [right]) => (left < right ? -1 : 1)))
 }
+
+/** Who settled a call of Hemera Auto's, as its line's details say. */
+const BY = {
+  local: 'rules',
+  jev: 'judge',
+  unavailable: 'nobody',
+  cancelled: 'expired',
+} as const
+
+/** What changes files or starts a process: an allow of it leaves a line, even from the rules. */
+const ACTING_TOOLS: ReadonlySet<string> = new Set(['fs_write', 'fs_edit', 'commands_run'])
 
 function targetName(call: ParsedCall): string | null {
   switch (call.tool) {
@@ -812,13 +833,12 @@ export const toolCatalogueLayer: Layer.Layer<
           })) ?? [],
         )
         let verdict: Classified['verdict'] = 'ask'
-        let source = 'unavailable'
+        let source: NonNullable<Classified['source']> = 'unavailable'
         let model = ''
         let scores:
           | { readonly risk: number; readonly approval: number; readonly userRequested: number }
           | undefined
         const correlationId = `classifier:${crypto.randomUUID()}`
-        const target = detail.resolvedTarget ?? detail.cwd ?? action.target
         const local = localClassifierVerdict(action)
         if (local !== 'defer') {
           verdict = local
@@ -850,21 +870,6 @@ export const toolCatalogueLayer: Layer.Layer<
             scores = reused.scores
           }
           if (reused === undefined) {
-            yield* inThread(asked.sessionId, {
-              role: 'hemera',
-              kind: 'classifier_decision',
-              body: `Hemera Auto evaluating ${action.tool}`,
-              payload: JSON.stringify({
-                call: action.tool,
-                target,
-                state: 'evaluating',
-                reason: 'Jev is evaluating this call.',
-                policyVersion: CLASSIFIER_POLICY_VERSION,
-                model: JEV_MODEL,
-              }),
-              correlationId,
-              state: 'evaluating',
-            }).pipe(Effect.catch(() => Effect.void))
             const evaluated = yield* Effect.tryPromise({
               try: (signal) =>
                 evaluateJev(
@@ -878,25 +883,7 @@ export const toolCatalogueLayer: Layer.Layer<
                   knownSecrets,
                 ),
               catch: () => 'unavailable',
-            }).pipe(
-              Effect.catch(() => Effect.succeed({ kind: 'unavailable' as const })),
-              Effect.onInterrupt(() =>
-                inThread(asked.sessionId, {
-                  role: 'hemera',
-                  kind: 'classifier_decision',
-                  body: `Hemera Auto cancelled ${action.tool}`,
-                  payload: JSON.stringify({
-                    call: action.tool,
-                    target,
-                    state: 'cancelled',
-                    reason: 'The call stopped before evaluation finished.',
-                    policyVersion: CLASSIFIER_POLICY_VERSION,
-                  }),
-                  correlationId,
-                  state: 'cancelled',
-                }).pipe(Effect.catch(() => Effect.void)),
-              ),
-            )
+            }).pipe(Effect.catch(() => Effect.succeed({ kind: 'unavailable' as const })))
             if (evaluated.kind === 'evaluated') {
               verdict = evaluated.verdict
               source = 'jev'
@@ -933,46 +920,65 @@ export const toolCatalogueLayer: Layer.Layer<
           Object.assign(decisionPayload, scores)
         }
         yield* journalled(asked, made, 'classifier.decision', decisionPayload)
-        let state = 'ask'
-        if (source === 'cancelled') state = 'cancelled'
-        else if (source === 'unavailable') state = 'unavailable'
-        else if (verdict === 'deny') state = 'denied'
-        else if (verdict === 'allow') state = 'allowed'
-        let reason = 'No usable evaluator result; your confirmation is required.'
-        if (source === 'local') reason = 'Local policy'
-        else if (source === 'jev') reason = 'Jev evaluation'
-        else if (source === 'cancelled')
-          reason = 'The call or its context changed before execution.'
-        let by: 'rules' | 'judge' | undefined
-        if (source === 'local') by = 'rules'
-        else if (source === 'jev') by = 'judge'
-        yield* inThread(asked.sessionId, {
-          role: 'hemera',
-          kind: 'classifier_decision',
-          body: `Hemera Auto ${state} ${action.tool}`,
-          payload: JSON.stringify({
-            call: action.tool,
-            target,
-            state,
-            reason,
-            by,
-            policyVersion: CLASSIFIER_POLICY_VERSION,
-            model: model || undefined,
-            scores:
-              scores === undefined
-                ? undefined
-                : `risk ${scores.risk} · approval ${scores.approval} · user requested ${scores.userRequested}`,
-          }),
-          correlationId,
-          state,
-        }).pipe(Effect.catch(() => Effect.void))
         return {
           verdict,
           generation: snapshot.generation,
           latestHumanSeq: context.latestHumanSeq,
           correlationId,
+          source,
+          model,
+          scores,
         }
       })
+
+    /**
+     * The quiet line Hemera Auto leaves where it settled a call on its own (#59): "ran without
+     * asking", as a mode that runs leaves one (#242), or a refusal. Who decided and on what — the
+     * rules or the judge, the policy, the model and its scores — is in its details. A contained
+     * read the rules let through leaves none, as it leaves none under Agent default; a call Hemera
+     * Auto could not settle leaves the permission block instead, which the notices list.
+     */
+    const settledByAuto = (
+      asked: ToolCall,
+      tool: string,
+      root: string,
+      where: string,
+      line: string | null,
+      decision: Classified,
+    ) => {
+      if (decision.verdict === 'ask') return Effect.void
+      const ran = decision.verdict === 'allow'
+      if (ran && decision.source === 'local' && !ACTING_TOOLS.has(tool)) return Effect.void
+      const id = crypto.randomUUID()
+      return inThread(asked.sessionId, {
+        role: 'hemera',
+        kind: 'permission_decision',
+        body: ran
+          ? `ran without asking, ${HEMERA_AUTO.name} mode`
+          : `refused by ${HEMERA_AUTO.name}`,
+        payload: JSON.stringify({
+          toolCallId: id,
+          optionId: ran ? 'allowed' : null,
+          tool,
+          named: where,
+          resolved: where,
+          root,
+          inside: true,
+          line,
+          mode: HEMERA_AUTO.name,
+          // No question was asked, so this answers none (#242).
+          unasked: true,
+          answer: ran ? 'allowed' : 'refused',
+          by: BY[decision.source ?? 'cancelled'],
+          policyVersion: CLASSIFIER_POLICY_VERSION,
+          model: decision.model === '' ? undefined : decision.model,
+          scores: decision.scores,
+          classifier: decision.correlationId,
+        }),
+        correlationId: `decision:${id}`,
+        state: ran ? 'completed' : 'refused',
+      }).pipe(Effect.catch(() => Effect.void))
+    }
 
     /**
      * Whether a decision still holds right before dispatch: same classifier, same settings, a
@@ -1414,6 +1420,14 @@ export const toolCatalogueLayer: Layer.Layer<
               }
             }
             if (auto?.verdict === 'deny') {
+              yield* settledByAuto(
+                asked,
+                'commands_run',
+                root,
+                resolvedPlace.path,
+                commandLine,
+                auto,
+              )
               return {
                 ...failed(
                   'Hemera Auto refused this command',
@@ -1508,6 +1522,13 @@ export const toolCatalogueLayer: Layer.Layer<
                 auto.verdict !== 'allow' || !resolvedPlace.inside,
               ))
             ) {
+              if (auto.verdict === 'allow' && resolvedPlace.inside) {
+                yield* settledByAuto(asked, 'commands_run', root, resolvedPlace.path, commandLine, {
+                  ...auto,
+                  verdict: 'deny',
+                  source: 'cancelled',
+                })
+              }
               return {
                 ...failed(
                   'the classifier decision expired',
@@ -1523,6 +1544,17 @@ export const toolCatalogueLayer: Layer.Layer<
               return failed(
                 'the Session ended before the command started',
                 'this Session no longer has an agent, so nothing was started',
+              )
+            }
+            // Hemera Auto let it through without asking anyone: its line, as a mode's (#242).
+            if (auto?.verdict === 'allow' && resolvedPlace.inside) {
+              yield* settledByAuto(
+                asked,
+                'commands_run',
+                root,
+                resolvedPlace.path,
+                commandLine,
+                auto,
               )
             }
             const started = yield* answered(
@@ -1892,6 +1924,7 @@ export const toolCatalogueLayer: Layer.Layer<
                 }
               }
               if (classified.verdict === 'deny') {
+                yield* settledByAuto(asked, named, root, place.path, null, classified)
                 return {
                   ...failed(
                     'Hemera Auto refused this action',
@@ -1921,6 +1954,14 @@ export const toolCatalogueLayer: Layer.Layer<
                   classified.verdict === 'ask' && place.inside,
                 ))
               ) {
+                // An allow of its own that expired before it ran says so where it would have run.
+                if (classified.verdict === 'allow' && place.inside) {
+                  yield* settledByAuto(asked, named, root, place.path, null, {
+                    ...classified,
+                    verdict: 'deny',
+                    source: 'cancelled',
+                  })
+                }
                 return {
                   ...failed(
                     'the classifier decision expired',
@@ -1928,6 +1969,10 @@ export const toolCatalogueLayer: Layer.Layer<
                   ),
                   refused: true,
                 }
+              }
+              // Hemera Auto let it through without asking anyone: its line, as a mode's (#242).
+              if (classified.verdict === 'allow' && place.inside) {
+                yield* settledByAuto(asked, named, root, place.path, null, classified)
               }
               guard = { path: place.path, decision: classified }
             }

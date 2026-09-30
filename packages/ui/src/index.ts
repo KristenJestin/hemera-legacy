@@ -370,11 +370,6 @@ export {
   type PermissionRequestProps,
 } from './approval/permission-request.tsx'
 export { DecisionSummary, type DecisionSummaryProps } from './approval/decision-summary.tsx'
-export {
-  ClassifierDecision,
-  type ClassifierDecisionProps,
-  type ClassifierDecisionState,
-} from './approval/classifier-decision.tsx'
 
 /**
  * What an agent advertises, what the reader sets, and what the session has spent.

@@ -68,6 +68,9 @@ import type { OutsideAnswer, OutsideRequest } from '#engine/tools/permissions.ts
 import { Variables, variablesLayer } from '#engine/workspaces/variables.ts'
 import { setupPlaces } from './application.ts'
 
+import { answersAQuestion } from '#renderer/agent-store.ts'
+import { waitingAs } from '#renderer/notices.ts'
+
 import { idleBuilds } from './build-harness.ts'
 
 const SHIPPED = join(import.meta.dirname, '..', 'drizzle')
@@ -377,13 +380,14 @@ describe('Hemera Auto classifies one admitted tool call before execution', () =>
         payload: { from: 'agent-default', to: 'hemera-auto' },
       },
     ])
-    const decisions = result.entries.filter((entry) => entry.kind === 'classifier_decision')
-    expect(decisions.map((entry) => entry.state)).toEqual(['allowed', 'unavailable'])
-    expect(JSON.parse(decisions[1]?.payload ?? '{}')).toMatchObject({
-      call: 'fs_write',
-      policyVersion: '1',
-      state: 'unavailable',
-    })
+    // The read leaves no record, as under Agent default; the write Hemera Auto could not
+    // judge asked the human once, through the permission block the notices list.
+    expect(result.entries.filter((entry) => entry.kind === 'permission_request')).toHaveLength(1)
+    expect(
+      result.entries
+        .filter((entry) => entry.kind === 'permission_decision')
+        .map((entry) => entry.state),
+    ).toEqual(['completed'])
   })
 
   it('refuses a destructive one-off before asking or starting it', async () => {
@@ -449,12 +453,17 @@ describe('Hemera Auto classifies one admitted tool call before execution', () =>
         model: JEV_MODEL,
       },
     )
-    expect(
-      JSON.parse(
-        result.entries.find((entry) => entry.kind === 'classifier_decision')?.payload ?? '{}',
-      ),
-    ).toMatchObject({
-      scores: 'risk 1 · approval 0.2 · user requested 0.9',
+    // One quiet record, as a mode that runs leaves one, with who decided and on what.
+    const record = result.entries.find((entry) => entry.kind === 'permission_decision')
+    expect(record?.body).toBe('ran without asking, Hemera Auto mode')
+    expect(JSON.parse(record?.payload ?? '{}')).toMatchObject({
+      tool: 'fs_write',
+      unasked: true,
+      answer: 'allowed',
+      mode: 'Hemera Auto',
+      by: 'judge',
+      model: JEV_MODEL,
+      scores: { risk: 1, approval: 0.2, userRequested: 0.9 },
     })
   })
 
@@ -540,12 +549,11 @@ describe('Hemera Auto classifies one admitted tool call before execution', () =>
       }),
     )
     expect(result.answer.state).toBe('refused')
-    expect(result.evaluating.find((entry) => entry.kind === 'classifier_decision')?.state).toBe(
-      'evaluating',
-    )
-    expect(result.entries.find((entry) => entry.kind === 'classifier_decision')?.state).toBe(
-      'cancelled',
-    )
+    // Nothing is said while Jev judges; the stale allow leaves a refusal, never a run.
+    expect(result.evaluating.some((entry) => entry.kind === 'permission_decision')).toBe(false)
+    const record = result.entries.find((entry) => entry.kind === 'permission_decision')
+    expect(record?.state).toBe('refused')
+    expect(JSON.parse(record?.payload ?? '{}')).toMatchObject({ unasked: true, optionId: null })
     expect(existsSync(join(root, 'late.md'))).toBe(false)
     expect(human.asked).toHaveLength(0)
   })
@@ -726,7 +734,11 @@ describe("Hemera's own workflow tools are not judged again", () => {
     )
     expect(seen.proposed.state).toBe('completed')
     expect(human.asked).toHaveLength(0)
-    expect(seen.entries.some((entry) => entry.kind === 'classifier_decision')).toBe(false)
+    expect(
+      seen.entries.some(
+        (entry) => entry.kind === 'permission_decision' || entry.kind === 'permission_request',
+      ),
+    ).toBe(false)
     expect(seen.lines.some((line) => line.type === 'classifier.decision')).toBe(false)
   })
 })
@@ -1094,7 +1106,8 @@ describe('Cancellation makes late answers inert', () => {
     )
     expect(jev.aborted()).toBe(true)
     expect(existsSync(join(root, 'stopped.md'))).toBe(false)
-    expect(seen.find((entry) => entry.kind === 'classifier_decision')?.state).toBe('cancelled')
+    // The call was stopped: no decision is recorded for what never ran.
+    expect(seen.some((entry) => entry.kind === 'permission_decision')).toBe(false)
   })
 })
 
@@ -1172,6 +1185,69 @@ describe('A build does not wait on Jev more than it must', () => {
     expect(seen.states).toEqual(['completed', 'completed', 'completed', 'completed'])
     expect(seen.inTurn).toBe(2)
     expect(evaluated).toBe(3)
+  })
+})
+
+describe("Hemera Auto's decisions are quiet records, and what it cannot decide waits in the notices", () => {
+  it('records an allow and a refusal where they happened, and lists a question in the notices', async () => {
+    const human: Human = {
+      asked: [],
+      service: {
+        // Nobody answers while the thread is read: the question stays open, as in the window.
+        askOutside: (question) =>
+          Effect.sync(() => human.asked.push(question)).pipe(Effect.andThen(Effect.never)),
+        answer: () => Effect.succeed(false),
+        withdrawn: () => Effect.void,
+      },
+    }
+    const transport: JevTransport = {
+      send: async (body) =>
+        body.includes('asked.md')
+          ? Response.json({ model: JEV_MODEL, answers: {} })
+          : jevResponse(body.includes('refused.md') ? 2.5 : 1),
+    }
+    const seen = await engine(
+      human,
+      transport,
+    )(
+      Effect.gen(function* () {
+        const session = yield* opened
+        const settings = yield* ClassifierSettings
+        yield* settings.replaceKey('ciphertext', 'private-key')
+        yield* settings.setConsent(true)
+        yield* settings.select('hemera-auto')
+        const write = (path: string) =>
+          calling({
+            sessionId: session.sessionId,
+            tool: 'fs_write',
+            arguments: { path, content: 'x', key: path },
+          })
+        const allowed = yield* write('allowed.md')
+        const refused = yield* write('refused.md')
+        yield* Effect.forkScoped(write('asked.md'))
+        yield* Effect.promise(async () => {
+          for (let tries = 0; tries < 100 && human.asked.length === 0; tries += 1) {
+            // oxlint-disable-next-line no-await-in-loop -- waiting for the question to be asked
+            await new Promise((resolve) => setTimeout(resolve, 10))
+          }
+        })
+        return { allowed, refused, entries: yield* threadEntries(session.sessionId) }
+      }),
+    )
+    expect(seen.allowed.state).toBe('completed')
+    expect(seen.refused.state).toBe('refused')
+    const records = seen.entries.filter((entry) => entry.kind === 'permission_decision')
+    expect(records.map((entry) => [entry.state, entry.body])).toEqual([
+      ['completed', 'ran without asking, Hemera Auto mode'],
+      ['refused', 'refused by Hemera Auto'],
+    ])
+    for (const record of records) {
+      expect(answersAQuestion(record)).toBe(false)
+    }
+    const question = seen.entries.find((entry) => entry.kind === 'permission_request')
+    expect(question === undefined ? null : waitingAs(question, seen.entries, null, null)).toBe(
+      'permission',
+    )
   })
 })
 

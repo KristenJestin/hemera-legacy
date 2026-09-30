@@ -2298,8 +2298,8 @@ export const runtimeLayer = Layer.effect(
       readonly taken: Effect.Effect<void, AgentRuntimeError>
       readonly missed: (turnId: string | null) => Effect.Effect<void, AgentRuntimeError>
       /**
-       * What follows once the delivery turn it went out in ended, for the build's parcel (D10-02,
-       * D10-07).
+       * What follows once the turn it went out in ended, for the build's parcel (D10-02, D10-07):
+       * a delivery turn of its own, or the turn the user started that it went out inside.
        */
       readonly ended?: (turnId: string) => Effect.Effect<void>
     }
@@ -2755,11 +2755,12 @@ export const runtimeLayer = Layer.effect(
     /**
      * Hands over what waits, if anything does, right before the prompt of a turn the user
      * started: it goes out inside that turn, and whatever the agent answers it lands there.
+     * Answers what went out, whose `ended` is that turn's to call once it is over.
      */
     const handOver = (sessionId: string, held: Live) =>
       Effect.gen(function* () {
         const parcels = yield* waitingOf(sessionId, held, true, true)
-        if (parcels.length === 0) return
+        if (parcels.length === 0) return parcels
         const sent = yield* sendDelivery(sessionId, held, parcels, null)
         if (Result.isFailure(sent)) {
           return yield* Effect.fail(
@@ -2769,6 +2770,7 @@ export const runtimeLayer = Layer.effect(
             }),
           )
         }
+        return parcels
       })
 
     /**
@@ -3124,7 +3126,7 @@ export const runtimeLayer = Layer.effect(
         // this one has not started. What the watcher or the Spec has not handed over yet — it
         // was made while the agent was not running — goes now, the mission brief of a `define`
         // Session's first turn with it (D7-09), and never as a message of the user's.
-        yield* handOver(sessionId, held)
+        const handed = yield* handOver(sessionId, held)
         // One Stop covers the whole turn: pressed while the delivery was out, it cancelled the
         // delivery, and the user's prompt is not sent after it.
         if (turn.closed !== null) return yield* stoppedBefore(turn.closed)
@@ -3182,6 +3184,14 @@ export const runtimeLayer = Layer.effect(
             })
           }
           yield* closeTurn(sessionId, turn, turn.closed ?? answered.stopReason)
+          // What went out inside this turn is over with it, as it would be with a delivery turn
+          // of its own: the brief of the user's review, above all, whose end is what checks the
+          // whole Spec again (issue #117). Which of the two carries it is a race between the
+          // build waking its agent and the user's own prompt; left uncalled here, a review that
+          // lost it left the build in `execute` for good.
+          if (turn.closed === null && answered.stopReason !== 'cancelled') {
+            for (const parcel of handed) yield* parcel.ended?.(turn.id) ?? Effect.void
+          }
           // The end of this turn is the next safe point: what it made wait — the brief of a
           // phase its agent finished, a human edit made while it ran — goes once it is over. A
           // turn the user stopped is left stopped.

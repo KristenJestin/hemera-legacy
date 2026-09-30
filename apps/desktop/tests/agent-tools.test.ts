@@ -640,7 +640,8 @@ describe('An agent that gives up on a call withdraws the question it asked', () 
       const call = seen.entries.find((entry) => entry.kind === 'hemera_tool_call')
       expect(call?.state).toBe('failed')
       expect(call?.body).toBe('the agent stopped waiting for this call')
-      expect(Exit.isFailure(seen.late)).toBe(true)
+      // Too late, and quietly so: nothing errs, and nothing acts (#304).
+      expect(Exit.isSuccess(seen.late)).toBe(true)
       expect(existsSync(target)).toBe(false)
     } finally {
       rmSync(outside, { recursive: true, force: true })

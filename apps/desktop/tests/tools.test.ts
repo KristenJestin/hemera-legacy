@@ -1086,6 +1086,37 @@ describe('Cancellation makes late answers inert', () => {
   })
 })
 
+describe('Audit distinguishes a verdict from execution', () => {
+  it('keeps an allow verdict apart from the failed call it let through', async () => {
+    fileInRoot('edited.md', 'before')
+    const seen = await engine(humanSaying(), { send: async () => jevResponse(1) })(
+      Effect.gen(function* () {
+        const session = yield* opened
+        const settings = yield* ClassifierSettings
+        yield* settings.replaceKey('ciphertext', 'private-key')
+        yield* settings.setConsent(true)
+        yield* settings.select('hemera-auto')
+        const edit = yield* calling({
+          sessionId: session.sessionId,
+          tool: 'fs_edit',
+          arguments: { path: 'edited.md', old: 'absent', new: 'after', key: 'edit' },
+        })
+        return { edit, lines: yield* journalLines(session.projectId) }
+      }),
+    )
+    expect(seen.edit.state).toBe('failed')
+    const types = seen.lines.map((line) => line.type)
+    expect(seen.lines.find((line) => line.type === 'classifier.decision')?.payload).toMatchObject({
+      verdict: 'allow',
+      source: 'jev',
+      policy: '1',
+      model: JEV_MODEL,
+    })
+    expect(types).toContain('tool.failed')
+    expect(types).not.toContain('tool.completed')
+  })
+})
+
 describe('Secrets are masked before any evaluation', () => {
   it('masks a Workspace credential in any tool, and keeps a plain variable readable', async () => {
     const sent: string[] = []

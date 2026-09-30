@@ -1,14 +1,18 @@
-import { existsSync, readFileSync } from 'node:fs'
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { describe, expect, test } from 'vite-plus/test'
 
+import { APP_ICON_TONES, appIconMarkup, drawingFor, roleIn } from '@hemera/ui/app-icon'
+
 import {
+  GENERATED,
   ICO_SIZES,
   LINUX_SIZES,
-  VARIANTS,
-  drawnFrom,
+  SOURCE_SIZE,
+  iconChannelOf,
+  iconFiles,
   icoOf,
   linuxFileOf,
-  masterOf,
   sizeOfPng,
 } from './app-icons.ts'
 
@@ -21,6 +25,13 @@ function fakePng(size: number, body = 'pixels'): Buffer {
   header.writeUInt32BE(size, 16)
   header.writeUInt32BE(size, 20)
   return Buffer.concat([header, Buffer.from(body)])
+}
+
+/** The sizes an `.ico` declares in its directory, with 256 read back from its 0. */
+function sizesOfIco(ico: Buffer): number[] {
+  return Array.from({ length: ico.readUInt16LE(4) }, (_, index) =>
+    ico.readUInt8(6 + index * 16),
+  ).map((size) => (size === 0 ? 256 : size))
 }
 
 describe("L'icône .ico de Windows", () => {
@@ -44,39 +55,77 @@ describe("L'icône .ico de Windows", () => {
     })
   })
 
-  test('the Windows shell finds the sizes it asks for, up to 256', () => {
-    expect(ICO_SIZES).toEqual([16, 24, 32, 48, 64, 128, 256])
-  })
-
   test('an image that is not a PNG is refused rather than written', () => {
     expect(() => icoOf([Buffer.from('not a png at all, and long enough')])).toThrow('PNG')
   })
-
-  test('a PNG says its own size', () => {
-    expect(sizeOfPng(fakePng(48))).toBe(48)
-  })
 })
 
-describe('Les tailles Linux', () => {
-  test('the set is named as electron-builder reads it, and the deb installs under hicolor', () => {
-    expect(LINUX_SIZES).toEqual([16, 24, 32, 48, 64, 128, 256, 512])
-    expect(linuxFileOf(48)).toBe('icons/48x48.png')
-  })
-})
+describe("L'icône suit le composant", () => {
+  test.each(['prod', 'beta'] as const)(
+    'the %s icon is drawn from AppIcon into every file a package needs, at its size',
+    (channel) => {
+      const files = new Map(iconFiles(channel))
+      expect([...files.keys()]).toEqual(['icon.png', ...LINUX_SIZES.map(linuxFileOf), 'icon.ico'])
+      expect(sizeOfPng(files.get('icon.png')!)).toBe(SOURCE_SIZE)
+      for (const size of LINUX_SIZES) {
+        expect(sizeOfPng(files.get(linuxFileOf(size))!), linuxFileOf(size)).toBe(size)
+      }
+      expect(sizesOfIco(files.get('icon.ico')!)).toEqual([...ICO_SIZES])
+    },
+  )
 
-describe('Les maîtres de chaque variante', () => {
-  test('up to 32 px an icon is drawn from its small master, above from its full one', () => {
-    expect(drawnFrom(16)).toBe('small')
-    expect(drawnFrom(32)).toBe('small')
-    expect(drawnFrom(48)).toBe('master')
-    expect(drawnFrom(1024)).toBe('master')
-  })
-
-  test.each(VARIANTS)('%s has both masters, on a square of 1024', (variant) => {
-    for (const kind of ['master', 'small'] as const) {
-      const file = masterOf(variant, kind)
-      expect(existsSync(file), `${variant} has no ${kind} master`).toBe(true)
-      expect(readFileSync(file, 'utf8')).toContain('viewBox="0 0 1024 1024"')
+  test('the two channels wear two different icons, down to 16 px', () => {
+    for (const size of [16, 48, SOURCE_SIZE]) {
+      expect(appIconMarkup('beta', size)).not.toBe(appIconMarkup('prod', size))
     }
+  })
+
+  test("a release package wears the stable icon, and a beta's or a dev's the beta", () => {
+    expect(iconChannelOf('prod')).toBe('prod')
+    expect(iconChannelOf('beta')).toBe('beta')
+    expect(iconChannelOf('dev')).toBe('beta')
+  })
+
+  test('up to 32 px the icon is its small drawing, above its master', () => {
+    expect(drawingFor(16)).toBe('small')
+    expect(drawingFor(32)).toBe('small')
+    expect(drawingFor(48)).toBe('master')
+    expect(appIconMarkup('prod', 16)).toContain('data-drawing="small"')
+    expect(appIconMarkup('prod', 256)).toContain('data-drawing="master"')
+  })
+
+  test("every colour of the icon is the theme's own", () => {
+    const theme = readFileSync(
+      join(import.meta.dirname, '..', 'packages', 'ui', 'src', 'theme.css'),
+      'utf8',
+    )
+    for (const [name, tone] of Object.entries(APP_ICON_TONES)) {
+      expect(roleIn(theme, tone.role, tone.theme).toLowerCase(), name).toBe(tone.value)
+    }
+  })
+})
+
+describe("L'icône générée à l'empaquetage", () => {
+  const repository = join(import.meta.dirname, '..')
+  const read = (...path: string[]): string => readFileSync(join(repository, ...path), 'utf8')
+
+  test('electron-builder takes every icon from the folder the tool writes', () => {
+    const config = read('apps', 'desktop', 'electron-builder.yml')
+    expect(GENERATED).toBe(join(repository, 'apps', 'desktop', 'build', 'generated'))
+    expect(config).toContain('icon: build/generated/icon.png')
+    expect(config).toContain('icon: build/generated/icon.ico')
+    expect(config).toContain('icon: build/generated/icons')
+  })
+
+  test('no icon is committed: Git ignores the folder they are drawn into', () => {
+    expect(read('.gitignore').split('\n')).toContain('apps/desktop/build/generated/')
+  })
+
+  test('a package draws its icon before electron-builder runs, for its own channel', () => {
+    const packaging = read('tools', 'package-desktop.ts')
+    const drawn = packaging.indexOf("'app-icons.ts'")
+    expect(drawn).toBeGreaterThan(-1)
+    expect(packaging.slice(drawn, packaging.indexOf('\n', drawn))).toContain('--channel ${channel}')
+    expect(drawn).toBeLessThan(packaging.indexOf('pnpm exec electron-builder'))
   })
 })

@@ -215,6 +215,7 @@ describe('Archivé puis restauré', () => {
     expect(await hasTab('Atlas II')).toBe(true)
 
     await openSettings()
+    await pressTab('Archive')
     await press('Restore')
     await browser.pause(800)
 
@@ -234,6 +235,7 @@ describe('Archiver le seul Projet', () => {
     expect(await hasTab('Notes')).toBe(false)
 
     await openSettings()
+    await pressTab('Archive')
     expect(await shows('Atlas II')).toBe(true)
     expect(await shows('Notes')).toBe(true)
   })
@@ -248,6 +250,7 @@ describe('Ouvrir le dossier', () => {
     const opened = await browser.electron.mock('shell', 'openPath')
 
     await openSettings()
+    await pressTab('Profile')
     await press('Open the folder')
     await browser.pause(400)
 

@@ -910,7 +910,11 @@ describe('Hemera Auto decisions across Sessions', () => {
         const first = yield* sessions.create(project.id, 'claude')
         const second = yield* sessions.create(project.id, 'codex')
         yield* sessions.rename(first.id, first.version, 'Parser')
-        const decided = (sessionId: string, payload: object, state = 'completed') =>
+        const decided = (
+          sessionId: string,
+          payload: Readonly<Record<string, string>>,
+          state = 'completed',
+        ) =>
           sessions.write(sessionId, {
             role: 'hemera',
             kind: 'permission_decision',

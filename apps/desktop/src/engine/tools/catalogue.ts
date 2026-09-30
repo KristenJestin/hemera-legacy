@@ -33,17 +33,24 @@ import {
   classifierVerdictFromScores,
   type ClassifierStrictness,
   commandPlace,
+  concernSaid,
   judgedByClassifier,
   localClassifierVerdict,
   offeredTools,
+  placesNamed,
   runsInMain,
+  sensitivePlace,
+  shownFromHome,
+  verdictAtPlaces,
   type LocalAction,
   type Mission,
+  type PlaceConcern,
 } from '@hemera/core'
 import { and, desc, eq } from 'drizzle-orm'
 import { Context, Deferred, Effect, Layer } from 'effect'
 import { mkdir, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises'
-import { basename, dirname, join, relative } from 'node:path'
+import { homedir, userInfo } from 'node:os'
+import { basename, dirname, join, relative, resolve } from 'node:path'
 
 import { HeldWords } from '../agents/held.ts'
 import { HEMERA_AUTO, SessionModes, modeAsks } from '../agents/modes.ts'
@@ -186,6 +193,8 @@ interface Classified {
   readonly said?: string
   /** How long Jev took to answer this call, when it was asked. */
   readonly roundTripMs?: number | undefined
+  /** Why it asks whatever the judge said: where the call points (#306). */
+  readonly concerns?: readonly PlaceConcern[]
   readonly scores?:
     | {
         readonly risk: number
@@ -208,6 +217,26 @@ interface ClassifierDetail {
   readonly invocation?: Invocation
   readonly portless?: boolean
   readonly environmentNames?: readonly string[]
+  /** Where the call points, as the judge is told it: each place, outside or sensitive (#306). */
+  readonly places?: readonly PointedPlace[]
+}
+
+/** One place a call points at, from the home, and why it is a concern if it is one. */
+interface PointedPlace {
+  readonly path: string
+  readonly outside: boolean
+  readonly sensitive: string | null
+}
+
+/** Each concern once, in the order it was found. */
+function distinctConcerns(concerns: readonly PlaceConcern[]): PlaceConcern[] {
+  const said = new Set<string>()
+  return concerns.filter((concern) => {
+    const one = concernSaid(concern)
+    if (said.has(one)) return false
+    said.add(one)
+    return true
+  })
 }
 
 /**
@@ -383,6 +412,35 @@ export const toolCatalogueLayer: Layer.Layer<
     const classifier = yield* ClassifierSettings
     const jevTransport = yield* JevTransportPort
     const platform = yield* Platform
+    /** Whose home `~` is, as the words of a command are read (#306). */
+    const placeContext = {
+      home: homedir(),
+      user: (() => {
+        try {
+          return userInfo().username
+        } catch {
+          return ''
+        }
+      })(),
+      platform,
+    }
+    /**
+     * What a place a call points at is: outside the root, sensitive, or neither. `written` is the
+     * path as named, made absolute; `place` is where it leads once `..` and links are followed.
+     */
+    const pointed = (
+      written: string,
+      place: { readonly inside: boolean | null; readonly path?: string },
+    ) => {
+      const outside = place.inside !== true
+      const where = place.path ?? written
+      const sensitive = sensitivePlace(written, placeContext) ?? sensitivePlace(where, placeContext)
+      const shown = shownFromHome(where, placeContext)
+      const concerns: PlaceConcern[] = []
+      if (outside) concerns.push({ kind: 'outside', place: shown })
+      if (sensitive !== null) concerns.push({ kind: 'sensitive', place: sensitive })
+      return { place: { path: shown, outside, sensitive } satisfies PointedPlace, concerns }
+    }
     const desk = yield* SetupDesk
     /** The engine's diagnostic log, where each Hemera Auto decision is told in one line. */
     const diagnostic = yield* StderrSink
@@ -648,6 +706,12 @@ export const toolCatalogueLayer: Layer.Layer<
     ) =>
       Effect.gen(function* () {
         const id = crypto.randomUUID()
+        // Why Hemera Auto asked whatever its judge said, where it did (#306): the question says it,
+        // and a call that points outside is not said to be inside because it runs from there.
+        const concerns = classified?.concerns ?? []
+        const why = concerns.map(concernSaid)
+        const said = why.length === 0 ? body : `${body} — ${why.join('; ')}`
+        const within = inside && !concerns.some((concern) => concern.kind === 'outside')
         // The block the window already draws for an agent's own permission is the one this is
         // read by: the same two options every time, because the question is always the same one
         // and nothing about it is remembered (D6-05). The request and the decision are two rows
@@ -656,7 +720,7 @@ export const toolCatalogueLayer: Layer.Layer<
           inThread(asked.sessionId, {
             role: 'hemera',
             kind: 'permission_request',
-            body,
+            body: said,
             payload: JSON.stringify({
               toolCallId: id,
               options: OUTSIDE_OPTIONS,
@@ -664,8 +728,9 @@ export const toolCatalogueLayer: Layer.Layer<
               named,
               resolved: where,
               root,
-              inside,
+              inside: within,
               line,
+              why: why.length === 0 ? undefined : why,
             }),
             correlationId: `perm:${id}`,
             state,
@@ -929,6 +994,11 @@ export const toolCatalogueLayer: Layer.Layer<
             }
           }
         }
+        // What points outside the Workspace or at a sensitive place asks, whatever the judge said
+        // and at every strictness: only a refusal of the rules stands above it (#306).
+        const concerns = action.concerns ?? []
+        verdict = verdictAtPlaces(verdict, concerns)
+        const why = concerns.map(concernSaid)
         const [currentSettings, currentMessages] = yield* Effect.all([
           answered(classifier.current),
           answered(sessions.humanMessages(asked.sessionId)),
@@ -956,6 +1026,8 @@ export const toolCatalogueLayer: Layer.Layer<
         if (scores !== undefined) {
           Object.assign(decisionPayload, scores)
         }
+        // A Journal payload is flat: the reasons are one line, as the diagnostic log says them.
+        if (why.length > 0) Object.assign(decisionPayload, { why: why.join('; ') })
         yield* journalled(asked, made, 'classifier.decision', decisionPayload)
         // One line in the diagnostic log per decision, with what can be said safely: the call's
         // line or path masked as it would be for Jev, never a file's content or a secret.
@@ -975,6 +1047,14 @@ export const toolCatalogueLayer: Layer.Layer<
                   `risk=${String(scores.risk)} approval=${String(scores.approval)} userRequested=${String(scores.userRequested)}`,
                 ]),
             ...(jevMs === undefined ? [] : [`jev=${String(jevMs)}ms`]),
+            ...(why.length === 0
+              ? []
+              : [
+                  `why="${redactText(why.join('; '), [
+                    ...knownSecrets,
+                    ...(snapshot.key === null ? [] : [snapshot.key]),
+                  ]).slice(0, 300)}"`,
+                ]),
             ...(source === 'local' || failure === undefined ? [] : [`failure=${failure}`]),
             ...(verdict === 'ask' ? ['fallback=ask'] : []),
           ].join(' '),
@@ -990,6 +1070,7 @@ export const toolCatalogueLayer: Layer.Layer<
           strictness: snapshot.strictness,
           model,
           scores,
+          concerns,
         }
       })
 
@@ -1436,15 +1517,35 @@ export const toolCatalogueLayer: Layer.Layer<
                 : null
             const commandLine = prepared?.line ?? runRequest.line
             // What the local rules read: the words of the line as the runner splits them, the file
-            // the runner starts, and whether the folder and every path the line names stay inside.
+            // the runner starts, and whether the folder and every path the line names stay inside
+            // the root — the paths inside the strings it hands to a shell included, the home in
+            // every spelling, and words that do not read taken for outside (#306).
             const [program = '', ...words] = wordsOf(commandLine)
+            const base = entry === undefined ? root : home.path
+            const namedPlaces =
+              judged === null ? null : placesNamed([program, ...words], placeContext)
+            const points =
+              namedPlaces === null
+                ? []
+                : [
+                    pointed(resolvedPlace.path, resolvedPlace),
+                    ...(yield* Effect.forEach(namedPlaces.paths, (path) => {
+                      const written = resolve(resolvedPlace.path, path)
+                      return placeOf(base, written).pipe(
+                        Effect.map((place) => pointed(written, place)),
+                      )
+                    })),
+                  ]
+            // Words that do not read with confidence could name anything: outside by default.
+            const unread: PlaceConcern[] =
+              namedPlaces?.unreadable == null
+                ? []
+                : [{ kind: 'outside', place: `words that do not read (${namedPlaces.unreadable})` }]
+            const concerns = distinctConcerns([...points.flatMap((one) => one.concerns), ...unread])
             const contained =
               judged !== null &&
               resolvedPlace.inside &&
-              (yield* Effect.forEach(
-                words.filter((word) => !word.startsWith('-')),
-                (word) => placeOf(resolvedPlace.path, word),
-              )).every((place) => place.inside === true)
+              !concerns.some((concern) => concern.kind === 'outside')
             // A program the Workspace itself holds is the Workspace's code, whatever it is named.
             const programPlace =
               judged?.prepared.resolved == null
@@ -1459,6 +1560,7 @@ export const toolCatalogueLayer: Layer.Layer<
                     {
                       tool: 'commands_run',
                       target: contained ? 'inside' : 'outside',
+                      concerns,
                       command: {
                         program,
                         args: words,
@@ -1473,6 +1575,7 @@ export const toolCatalogueLayer: Layer.Layer<
                       invocation: judged.invocation,
                       portless: entry?.portless ?? false,
                       environmentNames: Object.keys(environment),
+                      places: points.slice(1).map((one) => one.place),
                     },
                     knownSecretValues(environment),
                   )
@@ -1973,12 +2076,23 @@ export const toolCatalogueLayer: Layer.Layer<
               // command line: a `.env` value written by `fs_write` is the same secret (D59-06).
               const environment =
                 (yield* answered(variables.givenFor(project.id, workspace.id))) ?? {}
+              // Where the call points: outside the root, or at a sensitive place even inside it,
+              // asks whatever the judge says (#306).
+              const points = pointed(resolve(root, namedTarget ?? '.'), place)
               const classified = yield* classify(
                 asked,
                 made,
                 session.mission,
-                { tool: named, target: place.inside ? 'inside' : 'outside' },
-                { arguments: parsed.call.arguments, resolvedTarget: place.path },
+                {
+                  tool: named,
+                  target: place.inside ? 'inside' : 'outside',
+                  concerns: points.concerns,
+                },
+                {
+                  arguments: parsed.call.arguments,
+                  resolvedTarget: place.path,
+                  places: [points.place],
+                },
                 knownSecretValues(environment),
               )
               if (classified.generation < 0) {

@@ -38,7 +38,8 @@ import {
 } from '#engine/agents/supervisor.ts'
 import { heldWordsLayer } from '#engine/agents/held.ts'
 import { NoNotices } from '#engine/agents/notices.ts'
-import { Commands, commandsLayer } from '#engine/commands/service.ts'
+import { hostLookup } from '#engine/commands/line.ts'
+import { Commands, ProgramLookup, commandsLayer } from '#engine/commands/service.ts'
 import { ClassifierSettings, classifierSettingsLayer } from '#engine/classifier/settings.ts'
 import {
   JEV_MODEL,
@@ -142,7 +143,11 @@ type Engine =
  * the real supervisor, so a run of a command is a real process of this machine, and the human is
  * the layer this suite hands over rather than a default that would let a tool through.
  */
-function engine(human: Human, transport: JevTransport = typeSafeTransport) {
+function engine(
+  human: Human,
+  transport: JevTransport = typeSafeTransport,
+  lookup: Layer.Layer<never> = Layer.empty,
+) {
   const sink = Layer.succeed(StderrSink, { write: () => Effect.void })
   const processes = processSupervisorLayer.pipe(
     Layer.provideMerge(Layer.mergeAll(hostProcessesLayer, sink)),
@@ -168,6 +173,7 @@ function engine(human: Human, transport: JevTransport = typeSafeTransport) {
     // Nobody is watching: these suites read the thread and the runs, not what was pushed.
     Layer.provide(NoNotices),
     Layer.provide(Layer.succeed(JevTransportPort, transport)),
+    Layer.provide(lookup),
   )
   return <A, E>(program: Effect.Effect<A, E, Engine | Scope.Scope>): Promise<A> =>
     Effect.runPromise(
@@ -576,6 +582,55 @@ describe('Hemera Auto classifies one admitted tool call before execution', () =>
     expect(result.state).toBe('refused')
     expect(existsSync(join(root, 'late-human.md'))).toBe(false)
   })
+})
+
+describe('A run that cannot start is written failed in either mode', () => {
+  it.each(['agent-default', 'hemera-auto'] as const)(
+    'under %s, names Portless in a failed run and asks nobody',
+    async (mode) => {
+      const empty = join(folder, 'no-portless')
+      mkdirSync(empty, { recursive: true })
+      const human = humanSaying('allowed')
+      const seen = await engine(
+        human,
+        typeSafeTransport,
+        Layer.succeed(ProgramLookup, (cwd: string) => ({ ...hostLookup(cwd), path: empty })),
+      )(
+        Effect.gen(function* () {
+          const session = yield* opened
+          yield* (yield* ClassifierSettings).select(mode)
+          const commands = yield* Commands
+          yield* commands.save(
+            {
+              projectId: session.projectId,
+              name: 'web',
+              line: 'node -e 0',
+              type: 'serve',
+              lineWindows: null,
+              lineLinux: null,
+              scope: 'workspace',
+              portless: true,
+              portlessName: null,
+              folderBase: null,
+              folder: null,
+            },
+            false,
+          )
+          const ran = yield* calling({
+            sessionId: session.sessionId,
+            tool: 'commands_run',
+            arguments: { name: 'web', key: 'no-portless' },
+          })
+          return { ran, entries: yield* threadEntries(session.sessionId) }
+        }),
+      )
+      // The run is written, failed, and its box says why, as it was before Hemera Auto.
+      const run = seen.entries.find((entry) => entry.kind === 'command_run')
+      expect(JSON.parse(run?.payload ?? '{}')).toMatchObject({ state: 'failed' })
+      expect(seen.ran.text).toContain('portless was not found')
+      expect(human.asked).toHaveLength(0)
+    },
+  )
 })
 
 describe('Local rules settle only understood calls', () => {

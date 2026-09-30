@@ -1183,15 +1183,6 @@ export const toolCatalogueLayer: Layer.Layer<
               environment,
               startedBy: 'agent',
             }
-            const prepared = yield* answered(commands.preview(runRequest))
-            if (prepared === undefined)
-              return failed('the command could not be resolved', 'nothing was started')
-            if (prepared.missingPortless)
-              return failed('Portless is unavailable', 'nothing was started')
-            const commandLine = prepared.line
-            const invocation = prepared.invocation
-            if (invocation === null)
-              return failed('the command line is empty', 'nothing was started')
             const settings = yield* answered(classifier.current)
             if (settings === undefined) {
               return {
@@ -1199,10 +1190,25 @@ export const toolCatalogueLayer: Layer.Layer<
                 refused: true,
               }
             }
+            // Only Hemera Auto reads the process ahead: under Agent default a line goes the way it
+            // always went, and a run that cannot start is written failed by the runner itself.
+            const prepared =
+              settings.mode === 'hemera-auto' ? yield* answered(commands.preview(runRequest)) : null
+            if (prepared === undefined)
+              return failed('the command could not be resolved', 'nothing was started')
+            // Nothing can start — no Portless, nothing to run — so there is nothing to judge: the
+            // runner writes the run failed and says why, as it does under Agent default.
+            const invocation = prepared?.invocation ?? null
+            const judged =
+              prepared !== null && !prepared.missingPortless && invocation !== null
+                ? { prepared, invocation }
+                : null
+            const commandLine = prepared?.line ?? runRequest.line
             // What the local rules read: the words of the line as the runner splits them, the file
             // the runner starts, and whether the folder and every path the line names stay inside.
             const [program = '', ...words] = wordsOf(commandLine)
             const contained =
+              judged !== null &&
               resolvedPlace.inside &&
               (yield* Effect.forEach(
                 words.filter((word) => !word.startsWith('-')),
@@ -1210,9 +1216,11 @@ export const toolCatalogueLayer: Layer.Layer<
               )).every((place) => place.inside === true)
             // A program the Workspace itself holds is the Workspace's code, whatever it is named.
             const programPlace =
-              prepared.resolved === null ? null : yield* placeOf(root, prepared.resolved)
+              judged?.prepared.resolved == null
+                ? null
+                : yield* placeOf(root, judged.prepared.resolved)
             const auto =
-              settings.mode === 'hemera-auto'
+              judged !== null
                 ? yield* classify(
                     asked,
                     { projectId, agent: 'agent', milliseconds: 0 },
@@ -1223,15 +1231,15 @@ export const toolCatalogueLayer: Layer.Layer<
                       command: {
                         program,
                         args: words,
-                        shell: invocation.verbatim,
+                        shell: judged.invocation.verbatim,
                         platform,
-                        resolved: programPlace?.inside === false ? prepared.resolved : null,
+                        resolved: programPlace?.inside === false ? judged.prepared.resolved : null,
                       },
                     },
                     {
                       line: commandLine,
                       cwd: resolvedPlace.path,
-                      invocation,
+                      invocation: judged.invocation,
                       portless: entry?.portless ?? false,
                       environmentNames: Object.keys(environment),
                     },
@@ -1257,56 +1265,59 @@ export const toolCatalogueLayer: Layer.Layer<
             // A one-off is a line the agent wrote: whatever folder it names, the human sees the
             // line and decides before anything runs (D5-09) — one question, not one per rule.
             const inside =
-              entry !== undefined
-                ? folder === '.'
-                  ? auto?.verdict === 'ask'
-                    ? yield* askHuman(
+              prepared !== null && judged === null
+                ? // Under Hemera Auto, a line that cannot start asks nobody: the runner refuses it.
+                  { allowed: true as const, path: resolvedPlace.path }
+                : entry !== undefined
+                  ? folder === '.'
+                    ? auto?.verdict === 'ask'
+                      ? yield* askHuman(
+                          asked,
+                          home.path,
+                          folder,
+                          home.path,
+                          `commands_run asks to run ${commandLine} in ${home.path}`,
+                          commandLine,
+                          auto,
+                        )
+                      : { allowed: true as const, path: home.path }
+                    : auto?.verdict === 'ask' && resolvedPlace.inside
+                      ? yield* askHuman(
+                          asked,
+                          home.path,
+                          folder,
+                          resolvedPlace.path,
+                          `commands_run asks to run ${commandLine} in ${resolvedPlace.path}`,
+                          commandLine,
+                          auto,
+                        )
+                      : yield* allowed(
+                          asked,
+                          home.path,
+                          folder,
+                          auto === null ? undefined : { path: resolvedPlace.path, decision: auto },
+                        )
+                  : yield* Effect.gen(function* () {
+                      const place = yield* placeOf(root, folder)
+                      if (place.inside === null) {
+                        return { allowed: false as const, reason: place.reason }
+                      }
+                      const oneOff = line ?? ''
+                      if (auto?.verdict === 'allow' && place.inside) {
+                        return { allowed: true as const, path: place.path }
+                      }
+                      return yield* askHuman(
                         asked,
-                        home.path,
+                        root,
                         folder,
-                        home.path,
-                        `commands_run asks to run ${commandLine} in ${home.path}`,
-                        commandLine,
-                        auto,
+                        place.path,
+                        place.inside
+                          ? `commands_run asks to run ${oneOff} in ${place.path}`
+                          : `commands_run asks to run ${oneOff} outside the Workspace, in ${place.path}`,
+                        oneOff,
+                        auto ?? undefined,
                       )
-                    : { allowed: true as const, path: home.path }
-                  : auto?.verdict === 'ask' && resolvedPlace.inside
-                    ? yield* askHuman(
-                        asked,
-                        home.path,
-                        folder,
-                        resolvedPlace.path,
-                        `commands_run asks to run ${commandLine} in ${resolvedPlace.path}`,
-                        commandLine,
-                        auto,
-                      )
-                    : yield* allowed(
-                        asked,
-                        home.path,
-                        folder,
-                        auto === null ? undefined : { path: resolvedPlace.path, decision: auto },
-                      )
-                : yield* Effect.gen(function* () {
-                    const place = yield* placeOf(root, folder)
-                    if (place.inside === null) {
-                      return { allowed: false as const, reason: place.reason }
-                    }
-                    const oneOff = line ?? ''
-                    if (auto?.verdict === 'allow' && place.inside) {
-                      return { allowed: true as const, path: place.path }
-                    }
-                    return yield* askHuman(
-                      asked,
-                      root,
-                      folder,
-                      place.path,
-                      place.inside
-                        ? `commands_run asks to run ${oneOff} in ${place.path}`
-                        : `commands_run asks to run ${oneOff} outside the Workspace, in ${place.path}`,
-                      oneOff,
-                      auto ?? undefined,
-                    )
-                  })
+                    })
             if (!inside.allowed) return failed(inside.reason, inside.reason)
             if (inside.path !== resolvedPlace.path) {
               return {
@@ -1338,7 +1349,7 @@ export const toolCatalogueLayer: Layer.Layer<
             const started = yield* answered(
               commands.run({
                 ...runRequest,
-                expectedInvocation: auto === null ? undefined : invocation,
+                expectedInvocation: auto === null ? undefined : judged?.invocation,
               }),
             )
             if (started === undefined) {

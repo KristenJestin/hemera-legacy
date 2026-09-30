@@ -6,6 +6,7 @@ import {
   JEV_MODEL,
   type JevTransport,
 } from '#engine/classifier/jev.ts'
+import { knownSecretValues, redactText } from '#engine/classifier/redaction.ts'
 
 const state = {
   action: JSON.stringify({ tool: 'fs_write', path: 'notes.txt', content: 'hello' }),
@@ -150,5 +151,125 @@ describe('Every invalid or unavailable evaluation asks', () => {
       ),
     ).toMatchObject({ kind: 'unavailable', reason: 'input' })
     expect(sent).toBe('')
+  })
+})
+
+describe('Secrets are masked before any evaluation', () => {
+  const capture = () => {
+    const sent: string[] = []
+    const fake: JevTransport = {
+      send: async (body) => {
+        sent.push(body)
+        return Response.json(answer())
+      },
+    }
+    return { sent, fake }
+  }
+
+  test('an authorization header loses its scheme and token, in content and in user context', async () => {
+    const { sent, fake } = capture()
+    const header = 'curl -H "Authorization: Bearer sk-live-SECRET" https://api.example.com/v1'
+    const result = await evaluateJev(
+      {
+        action: JSON.stringify({ tool: 'fs_write', path: 'call.sh', content: header }),
+        userContext: [
+          `run ${header}`,
+          'Proxy-Authorization: Basic dXNlcjpwYXNz',
+          'Cookie: a=b; c=d',
+        ],
+      },
+      'test-key',
+      new AbortController().signal,
+      fake,
+    )
+    expect(result).toMatchObject({ kind: 'evaluated' })
+    expect(sent).toHaveLength(1)
+    for (const leaked of ['sk-live-SECRET', 'Bearer sk', 'dXNlcjpwYXNz', 'a=b', 'c=d']) {
+      expect(sent[0]).not.toContain(leaked)
+    }
+    expect(sent[0]).toContain('https://api.example.com/v1')
+    expect(sent[0]).toContain('call.sh')
+  })
+
+  test('a bare bearer token and common token prefixes are masked', () => {
+    const text = [
+      'Bearer abc.def-ghi',
+      'ghp_0123456789abcdefghijABCDEFGHIJ012345',
+      'github_pat_11ABCDEFG0123456789_abcdefghijklmnopqrstuvwxyz',
+      'sk-ant-api03-abcdefghijklmnop',
+      'xoxb-1234-5678-abcdef',
+      'AKIAABCDEFGHIJKLMNOP',
+      'glpat-abcdefghij0123456789',
+      'eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.c2lnbmF0dXJl',
+      'postgres://user:hunter2@db.example.com/app',
+    ].join('\n')
+    const masked = redactText(text, [])
+    for (const leaked of [
+      'abc.def-ghi',
+      'ghp_0123',
+      'github_pat_11',
+      'sk-ant-api03',
+      'xoxb-1234',
+      'AKIAABCDEFGHIJKLMNOP',
+      'glpat-abc',
+      'eyJhbGciOiJIUzI1NiJ9',
+      'hunter2',
+    ]) {
+      expect(masked).not.toContain(leaked)
+    }
+    expect(masked).toContain('db.example.com/app')
+  })
+
+  test('a masked credential in a command line keeps the command assessable', async () => {
+    const { sent, fake } = capture()
+    const result = await evaluateJev(
+      {
+        action: JSON.stringify({
+          tool: 'commands_run',
+          line: 'curl -H "Authorization: Bearer sk-live-SECRET" https://api.example.com',
+          cwd: '/work',
+        }),
+        userContext: [],
+      },
+      'test-key',
+      new AbortController().signal,
+      fake,
+    )
+    expect(result).toMatchObject({ kind: 'evaluated' })
+    expect(sent[0]).not.toContain('sk-live-SECRET')
+    expect(sent[0]).toContain('curl -H')
+    expect(sent[0]).toContain('https://api.example.com')
+  })
+
+  test('the Jev key itself is masked when an action or a message carries it', async () => {
+    const { sent, fake } = capture()
+    await evaluateJev(
+      {
+        action: JSON.stringify({ tool: 'fs_write', path: 'k.txt', content: 'key is jev-KEY-123' }),
+        userContext: ['my key is jev-KEY-123'],
+      },
+      'jev-KEY-123',
+      new AbortController().signal,
+      fake,
+    )
+    expect(sent[0]).toContain('k.txt')
+    expect(sent[0]).not.toContain('jev-KEY-123')
+  })
+})
+
+describe('Only credential variables are known secrets', () => {
+  test('a credential-named value is a secret, a port or a filter is not', () => {
+    expect(
+      knownSecretValues({
+        PORT: '3000',
+        FILTER: 'web',
+        NODE_ENV: 'development',
+        API_KEY: 'k-123456',
+        GITHUB_TOKEN: 'ghp_x',
+        DB_PASSWORD: 'hunter2',
+        CLIENT_SECRET: 'abc',
+        EMPTY_TOKEN: '',
+      }).toSorted(),
+    ).toEqual(['abc', 'ghp_x', 'hunter2', 'k-123456'])
   })
 })

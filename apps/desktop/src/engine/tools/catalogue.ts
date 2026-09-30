@@ -46,6 +46,7 @@ import { AgentNotices } from '../agents/notices.ts'
 import { Builds } from '../build/build.ts'
 import { ClassifierSettings } from '../classifier/settings.ts'
 import { evaluateJev, JEV_MODEL, JevTransportPort } from '../classifier/jev.ts'
+import { knownSecretValues } from '../classifier/redaction.ts'
 import type { Invocation } from '../commands/line.ts'
 import { Commands, Platform, type RunRequest } from '../commands/service.ts'
 import { Projects } from '../projects.ts'
@@ -1221,7 +1222,7 @@ export const toolCatalogueLayer: Layer.Layer<
                       portless: entry?.portless ?? false,
                       environmentNames: Object.keys(environment),
                     },
-                    Object.values(environment),
+                    knownSecretValues(environment),
                   )
                 : null
             if (auto !== null && auto.generation < 0) {
@@ -1630,12 +1631,17 @@ export const toolCatalogueLayer: Layer.Layer<
               if (place.inside === null) {
                 return { ...failed(place.reason, place.reason), refused: true }
               }
+              // The Workspace's credentials are masked in whatever a tool carries, not only in a
+              // command line: a `.env` value written by `fs_write` is the same secret (D59-06).
+              const environment =
+                (yield* answered(variables.givenFor(project.id, workspace.id))) ?? {}
               const classified = yield* classify(
                 asked,
                 made,
                 session.mission,
                 { tool: named, target: place.inside ? 'inside' : 'outside' },
                 { arguments: parsed.call.arguments, resolvedTarget: place.path },
+                knownSecretValues(environment),
               )
               if (classified.generation < 0) {
                 return {

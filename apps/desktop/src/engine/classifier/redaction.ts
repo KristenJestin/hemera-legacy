@@ -4,19 +4,57 @@ import { z } from 'zod'
 
 const credentialField = /(?:api[_-]?key|password|passwd|secret|token|credential|authorization)/i
 const destinationField = /^(?:path|target|resolvedTarget|cwd|command|program|line|url|host)$/i
+/** A header whose whole value is a credential: its scheme goes with its token. */
+const credentialHeader =
+  /\b(authorization|proxy-authorization|cookie|set-cookie)(\s*[:=]\s*)[^"'\r\n]+/gi
+const bearer = /\b(bearer|basic)\s+[A-Za-z0-9._~+/=-]+/gi
+/** Tokens recognisable by their prefix alone, wherever they appear. */
+const prefixedToken =
+  /\b(?:sk-[A-Za-z0-9_-]{8,}|gh[pousr]_[A-Za-z0-9]{16,}|github_pat_[A-Za-z0-9_]{16,}|xox[abprs]-[A-Za-z0-9-]{8,}|glpat-[A-Za-z0-9_-]{16,}|AKIA[0-9A-Z]{16}|eyJ[A-Za-z0-9_-]+\.eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+)/g
+/** The password in a URL's user information; the host stays readable. */
+const urlPassword = /(\b[a-z][a-z0-9+.-]*:\/\/[^\s:/@]+:)[^\s@/]+@/gi
 const credentialInText =
-  /\b(api[_ -]?key|password|passwd|secret|token|credential|authorization)\s*[:=]\s*([^\s,;]+)/gi
+  /\b(api[_ -]?key|password|passwd|secret|token|credential)\s*[:=]\s*([^\s,;]+)/gi
 const MASK = '[REDACTED]'
 
-export function redactText(text: string, secrets: readonly string[]): string {
+/** Credentials recognised by their shape, masked without knowing their value. */
+function maskShapes(text: string): string {
+  return text
+    .replace(credentialHeader, (_, name: string, separator: string) => `${name}${separator}${MASK}`)
+    .replace(bearer, (_, scheme: string) => `${scheme} ${MASK}`)
+    .replace(prefixedToken, MASK)
+    .replace(urlPassword, (_, user: string) => `${user}${MASK}@`)
+    .replace(credentialInText, (_, label: string) => `${label}=${MASK}`)
+}
+
+function maskKnown(text: string, secrets: readonly string[]): string {
   let redacted = text
   for (const secret of secrets) {
     if (secret !== '') redacted = redacted.replaceAll(secret, MASK)
   }
-  return redacted.replace(credentialInText, (_, label: string) => `${label}=${MASK}`)
+  return redacted
 }
 
-/** Never send a partial action: its structure and destination must survive masking. */
+export function redactText(text: string, secrets: readonly string[]): string {
+  return maskShapes(maskKnown(text, secrets))
+}
+
+/**
+ * The values among a Workspace's variables that are masked as known secrets: those whose name
+ * says they are a credential. A port or a filter name is not one, and masking it wherever it
+ * appears would void every action that happens to contain it.
+ */
+export function knownSecretValues(environment: Readonly<Record<string, string>>): string[] {
+  return Object.entries(environment)
+    .filter(([name, value]) => value !== '' && credentialField.test(name))
+    .map(([, value]) => value)
+}
+
+/**
+ * Never send a partial action: its structure and destination must survive masking. A credential
+ * recognised by its shape leaves a destination readable (the URL of a `curl` stays); a known
+ * secret value inside a destination may be the destination itself, and then nothing is sent.
+ */
 export function redactAction(action: string, secrets: readonly string[]): string | null {
   try {
     // SAFETY: JSON.parse is validated by z.json before the tree is traversed.
@@ -31,7 +69,9 @@ export function redactAction(action: string, secrets: readonly string[]): string
       const string = z.string().safeParse(value)
       if (string.success) {
         const clean = redactText(string.data, secrets)
-        if (destinationField.test(key) && clean !== string.data) lostDestination = true
+        if (destinationField.test(key) && clean !== maskShapes(string.data)) {
+          lostDestination = true
+        }
         return clean
       }
       if (Array.isArray(value)) return value.map((item) => visit(item))

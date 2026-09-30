@@ -60,7 +60,7 @@ import type { ToolOutcome } from '#engine/tools/catalogue.ts'
 import { ToolAccess, toolAccessLayer } from '#engine/tools/access.ts'
 import { ToolPermissions } from '#engine/tools/permissions.ts'
 import type { OutsideAnswer, OutsideRequest } from '#engine/tools/permissions.ts'
-import { variablesLayer } from '#engine/workspaces/variables.ts'
+import { Variables, variablesLayer } from '#engine/workspaces/variables.ts'
 
 import { idleBuilds } from './build-harness.ts'
 
@@ -133,6 +133,7 @@ type Engine =
   | ToolPermissions
   | Database
   | SqliteClient
+  | Variables
 
 /**
  * One run of this engine, over one database in the suite's folder.
@@ -154,7 +155,7 @@ function engine(human: Human, transport: JevTransport = typeSafeTransport) {
     Layer.provideMerge(toolAccessLayer),
     Layer.provideMerge(Layer.succeed(ToolPermissions, human.service)),
     Layer.provideMerge(commandsLayer),
-    Layer.provide(variablesLayer),
+    Layer.provideMerge(variablesLayer),
     Layer.provideMerge(
       Layer.mergeAll(
         projectsLayer,
@@ -574,6 +575,55 @@ describe('Hemera Auto classifies one admitted tool call before execution', () =>
     expect(human.asked).toHaveLength(1)
     expect(result.state).toBe('refused')
     expect(existsSync(join(root, 'late-human.md'))).toBe(false)
+  })
+})
+
+describe('Secrets are masked before any evaluation', () => {
+  it('masks a Workspace credential in any tool, and keeps a plain variable readable', async () => {
+    const sent: string[] = []
+    const transport: JevTransport = {
+      send: async (body) => {
+        sent.push(body)
+        return jevResponse(1)
+      },
+    }
+    const result = await engine(
+      humanSaying(),
+      transport,
+    )(
+      Effect.gen(function* () {
+        const session = yield* opened
+        const variables = yield* Variables
+        yield* variables.set(session.projectId, null, 'DEPLOY_TOKEN', 'tok-very-private')
+        yield* variables.set(session.projectId, null, 'PORT', '3000')
+        const settings = yield* ClassifierSettings
+        yield* settings.replaceKey('ciphertext', 'private-key')
+        yield* settings.setConsent(true)
+        yield* settings.select('hemera-auto')
+        const write = yield* calling({
+          sessionId: session.sessionId,
+          tool: 'fs_write',
+          arguments: {
+            path: 'deploy.sh',
+            content: 'curl -H "Authorization: Bearer sk-live-SECRET" -d tok-very-private :3000',
+            key: 'masked-write',
+          },
+        })
+        const run = yield* calling({
+          sessionId: session.sessionId,
+          tool: 'commands_run',
+          arguments: { line: 'node -e "process.exit(0)" 3000', key: 'plain-port' },
+        })
+        return { write, run }
+      }),
+    )
+    expect(result.write.state).toBe('completed')
+    expect(sent).toHaveLength(2)
+    expect(sent[0]).not.toContain('tok-very-private')
+    expect(sent[0]).not.toContain('sk-live-SECRET')
+    expect(sent[0]).toContain('deploy.sh')
+    // A port is no secret: the line reaches the judge whole instead of turning into a question.
+    expect(sent[1]).toContain('3000')
   })
 })
 

@@ -538,7 +538,7 @@ export const toolCatalogueLayer: Layer.Layer<
         if (
           answer.allowed &&
           guard !== undefined &&
-          !(yield* decisionIsCurrent(asked, guard.decision))
+          !(yield* decisionIsCurrent(asked, guard.decision, true))
         ) {
           return {
             allowed: false as const,
@@ -865,7 +865,17 @@ export const toolCatalogueLayer: Layer.Layer<
         }
       })
 
-    const decisionIsCurrent = (asked: ToolCall, decision: Classified): Effect.Effect<boolean> =>
+    /**
+     * Whether a decision still holds right before dispatch: same classifier, same settings, a
+     * Session still alive, and — for an automatic allow — no newer word from the user. A human who
+     * answered the question is that newer word: a message they wrote before answering does not
+     * take their answer back (D59-05, D59-07).
+     */
+    const decisionIsCurrent = (
+      asked: ToolCall,
+      decision: Classified,
+      humanAnswered: boolean,
+    ): Effect.Effect<boolean> =>
       Effect.gen(function* () {
         const [settings, entries] = yield* Effect.all([
           answered(classifier.current),
@@ -874,7 +884,8 @@ export const toolCatalogueLayer: Layer.Layer<
         return (
           settings?.mode === 'hemera-auto' &&
           settings.generation === decision.generation &&
-          humanContextOf('free', entries).latestHumanSeq === decision.latestHumanSeq &&
+          (humanAnswered ||
+            humanContextOf('free', entries).latestHumanSeq === decision.latestHumanSeq) &&
           (yield* access.live(asked.sessionId))
         )
       })
@@ -1337,7 +1348,14 @@ export const toolCatalogueLayer: Layer.Layer<
                 refused: true,
               }
             }
-            if (auto !== null && !(yield* decisionIsCurrent(asked, auto))) {
+            if (
+              auto !== null &&
+              !(yield* decisionIsCurrent(
+                asked,
+                auto,
+                auto.verdict !== 'allow' || !resolvedPlace.inside,
+              ))
+            ) {
               return {
                 ...failed(
                   'the classifier decision expired',
@@ -1708,7 +1726,13 @@ export const toolCatalogueLayer: Layer.Layer<
                 if (!question.allowed)
                   return { ...failed(question.reason, question.reason), refused: true }
               }
-              if (!(yield* decisionIsCurrent(asked, classified))) {
+              if (
+                !(yield* decisionIsCurrent(
+                  asked,
+                  classified,
+                  classified.verdict === 'ask' && place.inside,
+                ))
+              ) {
                 return {
                   ...failed(
                     'the classifier decision expired',

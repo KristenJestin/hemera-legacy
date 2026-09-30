@@ -45,6 +45,7 @@ import {
 import { LAUNCH_REQUESTS } from './launches.ts'
 import { SPEC_REQUESTS, missionSchema, specSnapshotSchema, specTypeSchema } from './specs.ts'
 import { BUILD_REQUESTS } from './build.ts'
+import { REVIEW_REQUESTS } from './review.ts'
 
 /**
  * Which build this is, and therefore which data folder it opens.
@@ -994,6 +995,8 @@ export const ENGINE_REQUESTS = {
 
   // The build of a `build` Session and the Project's checks it is judged by (D10-04 to D10-12).
   ...BUILD_REQUESTS,
+  // The review rounds of a build and the feedback the user leaves on them (issue #278).
+  ...REVIEW_REQUESTS,
 } as const
 
 export type EngineRequests = typeof ENGINE_REQUESTS

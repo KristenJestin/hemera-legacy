@@ -316,6 +316,10 @@ const RELAYED = [
   'checks.save',
   'checks.remove',
   'checks.acceptProposed',
+  // The review rounds of a build and the user's feedback on them (#278).
+  'review.read',
+  'review.addFeedback',
+  'review.withdrawFeedback',
 ] as const
 
 type Relayed = (typeof RELAYED)[number]

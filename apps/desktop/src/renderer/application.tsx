@@ -1075,6 +1075,7 @@ export function Application() {
         putAway,
         goTo,
         setPlace,
+        openSettings,
         setCreating,
         preference,
         onNewSession: () => void newSession(),
@@ -1620,6 +1621,7 @@ function commandsFor({
   putAway,
   goTo,
   setPlace,
+  openSettings,
   setCreating,
   preference,
   onNewSession,
@@ -1636,6 +1638,8 @@ function commandsFor({
   putAway: Session[]
   goTo: (entryId: string) => void
   setPlace: (place: Place) => void
+  /** Opens the settings of the application on their first section. */
+  openSettings: () => void
   setCreating: (creating: boolean) => void
   preference: ReturnType<typeof themePreference>
   onNewSession: () => void

@@ -2,7 +2,9 @@ import type { Meta, StoryObj } from '@storybook/react-vite'
 import type { ReactNode } from 'react'
 import { expect, userEvent, waitFor, within } from 'storybook/test'
 
+import { StatusDot } from '../../components/status-dot/status-dot.tsx'
 import { TooltipProvider } from '../../components/tooltip/tooltip.tsx'
+import { HelperIcon, type HelperIconName, type HelperIconSet } from './helper-icons.tsx'
 import { type SessionPageProps, SessionPage } from './page.tsx'
 
 /**
@@ -180,17 +182,48 @@ export const HelperDialog: Story = {
   },
 }
 
-/** A chip opens its helper's dialog; Escape closes it, and the keyboard is back on the chip. */
+/** A helper's chip opens its glance, as a run's does: how long, the step it is in, its last line. */
+export const HelperGlance: Story = {
+  args: { defaultGlance: 'helper-credit' },
+  play: async ({ canvasElement }) => {
+    const body = within(canvasElement.ownerDocument.body)
+    await expect(
+      await body.findByRole('button', { name: 'The thread of Credit notes' }),
+    ).toBeVisible()
+    await expect(body.getByRole('button', { name: 'Stop Credit notes' })).toBeVisible()
+    await expect(body.getByText('9 min')).toBeVisible()
+  },
+}
+
+/** ⓘ in the glance opens the thread; Escape closes it, and the keyboard is back on the chip. */
 export const HelperOpensAndCloses: Story = {
   play: async ({ canvasElement }) => {
     const body = within(canvasElement.ownerDocument.body)
     const chip = line(canvasElement).getByRole('button', { name: 'Helper Documenter, running' })
     await userEvent.click(chip)
+    await userEvent.click(await body.findByRole('button', { name: 'The thread of Documenter' }))
     const log = await body.findByRole('log', { name: 'What Documenter is doing' })
     await waitFor(() => expect(log).toBeVisible())
     await userEvent.keyboard('{Escape}')
     await waitFor(() => expect(body.queryByRole('dialog')).toBeNull())
     await waitFor(() => expect(chip).toHaveFocus())
+  },
+}
+
+/** × in the glance asks first; stopped, the helper's dot says so and the thread tells the agent. */
+export const HelperStop: Story = {
+  play: async ({ canvasElement }) => {
+    const body = within(canvasElement.ownerDocument.body)
+    await userEvent.click(
+      line(canvasElement).getByRole('button', { name: 'Helper Credit notes, silent' }),
+    )
+    await userEvent.click(await body.findByRole('button', { name: 'Stop Credit notes' }))
+    const ask = within(await body.findByRole('dialog', { name: 'Stop Credit notes?' }))
+    await userEvent.click(ask.getByRole('button', { name: 'Stop' }))
+    await expect(
+      await within(canvasElement).findByRole('button', { name: 'Helper Credit notes, stopped' }),
+    ).toBeVisible()
+    await expect(within(canvasElement).getByText('You stopped Credit notes')).toBeVisible()
   },
 }
 
@@ -200,6 +233,62 @@ export const HelperInFree: Story = {
   play: async ({ canvasElement }) => {
     const body = within(canvasElement.ownerDocument.body)
     await expect(await body.findByRole('log', { name: 'What Explore is doing' })).toBeVisible()
+  },
+}
+
+const SETS: readonly { set: HelperIconSet; name: string }[] = [
+  { set: 'face', name: 'A · the face, as it was' },
+  { set: 'sign', name: 'B · the tile and a sign (recommended)' },
+  { set: 'glyph', name: 'C · the catalogue’s icons' },
+]
+
+const ICONS: readonly { icon: HelperIconName; name: string }[] = [
+  { icon: 'free', name: 'Free helper' },
+  { icon: 'reviewer', name: 'Test review' },
+  { icon: 'security', name: 'Security review' },
+  { icon: 'documenter', name: 'Documenter' },
+  { icon: 'prototyper', name: 'Prototyper' },
+]
+
+const SAMPLE_CHIP =
+  'inline-flex h-control-sm items-center gap-1.5 rounded-md border border-border bg-card px-2 text-xs'
+
+/**
+ * The helper icons, three sets side by side, each large and at the size of a chip. A is the set
+ * so far: every helper a departure from Hemera's face, which reads at 40 px and blurs at a chip's
+ * 16. B keeps Hemera's tile for every helper and puts one sign in it — the eyes, a tick, a shield,
+ * lines, a plus on a dashed tile — which still reads at 16. C is the catalogue's own icons: the
+ * clearest at a chip's size, and nothing of Hemera left in them.
+ */
+export const HelperIcons: Story = {
+  render: () => (
+    <div className="flex min-h-screen flex-col gap-8 bg-background p-8 text-foreground">
+      {SETS.map(({ set, name }) => (
+        <section key={set} aria-label={name} className="flex flex-col gap-3">
+          <h2 className="text-sm font-medium">{name}</h2>
+          <div className="flex flex-wrap gap-6">
+            {ICONS.map(({ icon, name: helper }) => (
+              <div key={icon} className="flex w-menu-side flex-col items-start gap-3">
+                <span className="flex size-16 items-center justify-center rounded-xl border border-border bg-card">
+                  <HelperIcon name={icon} set={set} size="xl" />
+                </span>
+                <span className={SAMPLE_CHIP}>
+                  <span className="flex text-muted-foreground">
+                    <HelperIcon name={icon} set={set} size="md" />
+                  </span>
+                  <StatusDot status="running" size="sm" />
+                  {helper}
+                </span>
+              </div>
+            ))}
+          </div>
+        </section>
+      ))}
+    </div>
+  ),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await expect(canvas.getAllByRole('region')).toHaveLength(3)
   },
 }
 

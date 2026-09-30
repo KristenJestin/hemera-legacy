@@ -28,7 +28,7 @@ import { HelperIcon } from './helper-icons.tsx'
 import { HelperViewer } from './helper-viewer.tsx'
 import { PanelDock } from './panel-dock.tsx'
 import { BOARD } from './tasks-fixtures.ts'
-import { DEFINE_THREAD, FREE_THREAD, MAIN_THREAD } from './threads.tsx'
+import { DEFINE_THREAD, FREE_THREAD, MAIN_THREAD, stoppedEntry } from './threads.tsx'
 
 /**
  * A Session of any kind as the exploration lays it (issue #77, maintainer's feedback of 30
@@ -57,6 +57,8 @@ export interface SessionPageProps {
   defaultHelper?: string | null | undefined
   defaultGrouping?: Grouping | undefined
   defaultTask?: string | null | undefined
+  /** The helper whose glance is open as the page is drawn. */
+  defaultGlance?: string | null | undefined
 }
 
 /** The two runs of the Session: its dev server and its tests. */
@@ -108,14 +110,17 @@ const RIM_BODY =
 export function SessionPage({
   kind,
   head = 'page',
-  helpers = HELPERS[kind],
+  helpers: given = HELPERS[kind],
   defaultOver = false,
   defaultFolded = false,
   defaultHelper = null,
   defaultGrouping = 'story',
   defaultTask = null,
+  defaultGlance = null,
 }: SessionPageProps): ReactNode {
   const [folded, setFolded] = useState(defaultFolded)
+  const [stopped, setStopped] = useState<readonly string[]>([])
+  const helpers = given.map((helper) => (stopped.includes(helper.id) ? stoppedOf(helper) : helper))
   const [over, setOver] = useState(defaultOver)
   const [open, setOpen] = useState<string | null>(defaultHelper)
   const [answered, setAnswered] = useState(false)
@@ -128,11 +133,6 @@ export function SessionPage({
   const asker = helpers.find((one) => one.icon === 'free') ?? helpers[0]
   const groups: NoticeGroup[] =
     answered || asker === undefined ? [] : [permissionOf(asker, () => setAnswered(true))]
-
-  function press(id: string): void {
-    if (open === id) close()
-    else setOpen(id)
-  }
 
   function close(): void {
     const was = open
@@ -162,7 +162,12 @@ export function SessionPage({
         onAddToCatalogue={fn()}
         end={
           <>
-            <HelperChips helpers={helpers} open={open} onPress={press} />
+            <HelperChips
+              helpers={helpers}
+              onDetails={setOpen}
+              onStop={(id) => setStopped([...stopped, id])}
+              defaultGlance={defaultGlance}
+            />
             <RunCommand
               catalogue={CATALOGUE}
               workspace="csv-export"
@@ -176,7 +181,13 @@ export function SessionPage({
   )
 
   const chat = (
-    <ChatColumn thread={THREADS[kind]} head={head === 'chat' ? line : null}>
+    <ChatColumn
+      thread={[
+        ...THREADS[kind],
+        ...helpers.filter((helper) => stopped.includes(helper.id)).map(stoppedEntry),
+      ]}
+      head={head === 'chat' ? line : null}
+    >
       <ChatFoot
         value={value}
         onValueChange={setValue}
@@ -269,6 +280,11 @@ interface DockProps {
   over: boolean
   onFold: (folded: boolean) => void
   onOver: (over: boolean) => void
+}
+
+/** A helper the reader stopped. */
+function stoppedOf(helper: Helper): Helper {
+  return { ...helper, state: 'stopped' }
 }
 
 /** `define`'s Spec in the same panel: its key and title on the head, its column, its frame. */

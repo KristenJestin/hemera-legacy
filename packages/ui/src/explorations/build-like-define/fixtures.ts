@@ -11,13 +11,14 @@ import type { HelperIconName } from './helper-icons.tsx'
  */
 
 /** How a helper stands: `stuck` is running, and silent for too long. */
-export type HelperState = 'running' | 'stuck' | 'finished' | 'failed'
+export type HelperState = 'running' | 'stuck' | 'finished' | 'failed' | 'stopped'
 
 export const HELPER_TONES: Record<HelperState, StatusTone> = {
   running: 'running',
   stuck: 'pending',
   finished: 'success',
   failed: 'failure',
+  stopped: 'cancelled',
 }
 
 /** What a screen reader hears after the helper's name. */
@@ -26,6 +27,7 @@ export const HELPER_WORDS: Record<HelperState, string> = {
   stuck: 'silent',
   finished: 'done',
   failed: 'failed',
+  stopped: 'stopped',
 }
 
 export interface Helper {
@@ -39,6 +41,8 @@ export interface Helper {
   /** Its thread so far, one line a step, the last one the step it is in. */
   steps: readonly string[]
   at: string
+  /** How long it has been running, or ran. */
+  for: string
 }
 
 export const REVIEW: Helper = {
@@ -53,6 +57,7 @@ export const REVIEW: Helper = {
     'Run pnpm vitest run src/billing/export.query.test.ts',
   ],
   at: '10:34',
+  for: '6 min',
 }
 
 export const DOCUMENTER: Helper = {
@@ -63,6 +68,7 @@ export const DOCUMENTER: Helper = {
   last: 'The export page: what the file holds, and its column order.',
   steps: ['Read the Spec of ATL-7', 'Read docs/billing/', 'Write docs/billing/export.md'],
   at: '10:38',
+  for: '2 min',
 }
 
 export const WORKER: Helper = {
@@ -77,6 +83,7 @@ export const WORKER: Helper = {
     'Run pnpm vitest run src/billing/credit-notes.test.ts',
   ],
   at: '10:31',
+  for: '9 min',
 }
 
 /** The three helpers of a build going well. */
@@ -100,8 +107,14 @@ export const FREE_HELPERS: readonly Helper[] = [
     last: 'Three places build a CSV today; only shared/csv.ts escapes quotes.',
     steps: ['Search csv in src/', 'Read src/shared/csv.ts', 'Read src/reports/export.ts'],
     at: '09:12',
+    for: '4 min',
   },
-  { ...REVIEW, state: 'finished', last: 'The rounding fix is proved by its test: green.' },
+  {
+    ...REVIEW,
+    state: 'finished',
+    last: 'The rounding fix is proved by its test: green.',
+    for: '3 min',
+  },
 ]
 
 /** A `define` Session's helper: the prototyper, drawing a throwaway page to settle a question. */
@@ -114,5 +127,6 @@ export const DEFINE_HELPERS: readonly Helper[] = [
     last: 'The month picker as a select and as a calendar, side by side on one page.',
     steps: ['Read the Spec of ATL-7', 'Write scratch/month-picker.html', 'Serve scratch/'],
     at: '10:52',
+    for: '3 min',
   },
 ]

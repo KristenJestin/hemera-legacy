@@ -99,3 +99,8 @@ export const DEFINE_THREAD: ScrollerEntry[] = [
   ),
   call('launch-proto', 'helper_launch', 'Launch helper', 'Prototyper', true),
 ]
+
+/** What the thread says once the reader stopped a helper: the main agent is told. */
+export function stoppedEntry(helper: Helper): ScrollerEntry {
+  return hemera(`stopped-${helper.id}`, `You stopped ${helper.name}`, 'the main agent is told')
+}

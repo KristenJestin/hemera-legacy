@@ -250,6 +250,9 @@ export function answer(
         yield* (yield* AgentRuntime).classifierChanged
       return
     }
+    if (decision.name === 'classifier.decisions') {
+      return yield* (yield* Sessions).decisions(decision.argument.limit)
+    }
     if (decision.name === 'engine.status') return yield* (yield* EngineStatus).read
 
     if (decision.name === 'preferences.read') return yield* (yield* Preferences).read

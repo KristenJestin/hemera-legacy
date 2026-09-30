@@ -10,6 +10,7 @@ import { Checkbox } from '../components/checkbox/checkbox.tsx'
 import { Input } from '../components/field/field.tsx'
 import { IconBrandHemeraAuto, IconBrandTypeSafe, IconRobot } from '../icons.ts'
 import { arrival, collapse, expand, fold, useTransition } from '../motion.ts'
+import { StrictnessChoice, type StrictnessLevel } from './auto-strictness.tsx'
 
 export type ClassifierMode = 'agent-default' | 'hemera-auto'
 export type CredentialStatus = 'missing' | 'saved' | 'invalid' | 'storage-unavailable'
@@ -69,6 +70,8 @@ export interface ClassifierSectionProps {
   evaluator: EvaluatorStatus
   consent: boolean
   onConsentChange: (consent: boolean) => void
+  strictness: StrictnessLevel
+  onStrictnessChange: (strictness: StrictnessLevel) => void
   onSaveKey: (key: string) => void
   onRemoveKey: () => void
 }
@@ -107,6 +110,8 @@ export function ClassifierSection({
   evaluator,
   consent,
   onConsentChange,
+  strictness,
+  onStrictnessChange,
   onSaveKey,
   onRemoveKey,
 }: ClassifierSectionProps): ReactNode {
@@ -200,6 +205,11 @@ export function ClassifierSection({
                     If it cannot evaluate a call, Hemera asks you. Calls outside Hemera’s tools keep
                     their own permission path.
                   </p>
+                  <StrictnessChoice
+                    strictness={strictness}
+                    onStrictnessChange={onStrictnessChange}
+                    disabled={evaluator === 'transitioning'}
+                  />
                   <div className="flex flex-col gap-2">
                     <p className="text-sm font-medium">Evaluation engine</p>
                     <RadioGroup

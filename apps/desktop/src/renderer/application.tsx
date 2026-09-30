@@ -387,6 +387,7 @@ export function Application() {
   const [facts, setFacts] = useState<ProfileFacts | null>(null)
   const [classifier, setClassifier] = useState<{
     mode: ClassifierSectionProps['mode']
+    strictness: ClassifierSectionProps['strictness']
     credential: ClassifierSectionProps['credential']
     consent: boolean
     generation: number
@@ -1269,6 +1270,11 @@ export function Application() {
                   onConsentChange: (consent) =>
                     changeClassifier(() =>
                       window.hemera.invoke('classifier.consent.write', { consent }),
+                    ),
+                  strictness: classifier.strictness,
+                  onStrictnessChange: (strictness) =>
+                    changeClassifier(() =>
+                      window.hemera.invoke('classifier.strictness.write', { strictness }),
                     ),
                   onSaveKey: (key) =>
                     changeClassifier(() => window.hemera.invoke('classifier.key.save', { key })),

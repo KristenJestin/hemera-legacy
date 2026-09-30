@@ -146,6 +146,11 @@ export {
   type EvaluatorStatus,
 } from './settings/classifier-section.tsx'
 export {
+  StrictnessChoice,
+  type StrictnessChoiceProps,
+  type StrictnessLevel,
+} from './settings/auto-strictness.tsx'
+export {
   NotificationBell,
   NotificationList,
   type NotificationBellProps,

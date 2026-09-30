@@ -7,9 +7,9 @@
  * that is running — named where the panel stands, `Preparing the Workspace · <the step>` — with no
  * Session started yet. The Workspace becomes ready and the build starts: the Session is the
  * launch's (mission `build`, the Spec, the Workspace the preparation made), the Spec is rendered in
- * its thread as its brief, and the panel says `Build started` and offers `Open`. A Rework then
- * takes the Spec on, and `Open` stays where it was: a build that is running is reached through it,
- * whatever the Spec is doing.
+ * its thread as its brief, and the panel says `Build started` and offers `Open`. The build goes on
+ * past its `prepare` phase, and its first task started moves the Spec to `in_progress`: a Rework
+ * is no longer offered, and `Open` stays where it was, the way back to the build that is running.
  *
  * On the second, the Rework arrives while its Workspace is still being prepared: that launch is
  * cancelled where it waits, its Workspace still reaches ready, and nothing is started in it.
@@ -367,10 +367,15 @@ describe('A Spec’s build waits for the Workspace prepared for it', () => {
     writeFileSync(GO, 'go\n')
     await awaits('Build started', 60_000)
 
+    // The launch creates the build Session and leaves the Spec where it was; the build goes on past
+    // its `prepare` phase, and it is the first task begun in `execute` that moves the Spec to
+    // `in_progress` (core.md, the first delivered `build`).
+    await browser.waitUntil(async () => (await stateOf(BUILT)).status === 'in_progress', {
+      timeout: 30_000,
+      interval: 200,
+      timeoutMsg: 'the first task of the build never moved the Spec to in_progress',
+    })
     const built = await stateOf(BUILT)
-    // The launch creates the build Session and leaves the Spec where it was: it is the first task
-    // begun in `build` that moves the Spec to `in_progress` (core.md, "Build sessions").
-    expect(built.status).toBe('ready')
     expect(built.launch?.state).toBe('started')
     expect(built.launch?.sessionId).not.toBeNull()
     // The revision the launch names is the one the Spec was on when the build was asked for, and
@@ -401,36 +406,42 @@ describe('A Spec’s build waits for the Workspace prepared for it', () => {
     expect(await region(THREAD)).not.toContain('What the agent was told')
     expect(await region(THREAD)).not.toContain(ASKED_BUILT)
 
-    // The brief is the Spec as it stood on the revision the launch names.
+    // The brief is the Spec as it stood on the revision the launch names; each phase the build
+    // went on to since is handed over in a brief of its own.
     const briefs = await briefsOf(BUILT)
-    expect(briefs).toHaveLength(1)
+    expect(briefs[0]).toContain('# Mission: build')
     expect(briefs[0]).toContain(PROPOSAL.title)
+    expect(briefs.slice(1).every((brief) => brief.startsWith('# Phase: '))).toBe(true)
   })
 
-  it('keeps Open once a Rework takes the Spec on', async () => {
+  it('offers no Rework once the first task has started, and keeps Open', async () => {
     // Back to the Session that defines it, where the panel is: it opens folded, as a Session's
-    // panel does, so it is unfolded before anything in its head is pressed.
+    // panel does, so it is unfolded before anything in its head is read.
     await press(ASKED_BUILT)
     await browser.pause(800)
     await unfoldSpec(BUILT)
-    await pressIn(panelOf(BUILT), 'Rework')
-    await fill('Reason', 'The export drops the credit note date too.')
-    await pressIn(DIALOG, 'Rework')
-    await browser.pause(1500)
 
-    // The Spec is a draft on a new revision; the build is the one that was started, and the panel
-    // still leads to it — `Open` is the way back to a build that is running (D8-13).
+    // A Rework is refused once a task has started (core.md, the first delivered `build`): the
+    // panel does not offer it, and the build is the one that was started, which the panel still
+    // leads to — `Open` is the way back to a build that is running (D8-13).
+    const offered = await browser.execute(
+      (panel: string) =>
+        [...(document.querySelector(panel)?.querySelectorAll('button') ?? [])].some((button) =>
+          (button.textContent ?? '').trim().startsWith('Rework'),
+        ),
+      panelOf(BUILT),
+    )
+    expect(offered).toBe(false)
     const now = await stateOf(BUILT)
-    expect(now.status).toBe('draft')
-    expect(now.revision).toBe(2)
+    expect(now.status).toBe('in_progress')
+    expect(now.revision).toBe(1)
     expect(now.launch?.state).toBe('started')
-    expect(await region(panelOf(BUILT))).toContain('Build started')
     expect(await control('Open')).not.toBeNull()
 
     await pressIn(BUILD_GROUP, 'Open')
     await browser.pause(1500)
     expect(await region(panelOf(BUILT))).toBe('')
-    expect(await briefsOf(BUILT)).toHaveLength(1)
+    expect(await buildsOf(BUILT)).toHaveLength(1)
   })
 })
 
@@ -507,9 +518,11 @@ describe('A Spec whose launch a Rework cancelled is launched again by hand', () 
     await pressIn(BUILD_GROUP, 'Open')
     await browser.pause(1500)
     expect(await region(panelOf(TAKEN))).toBe('')
-    // Its brief is the Spec as it stood on the revision the new launch names.
+    // Its brief is the Spec as it stood on the revision the new launch names; the phases the build
+    // went on to since are briefs of their own.
     const briefs = await briefsOf(TAKEN)
-    expect(briefs).toHaveLength(1)
+    expect(briefs[0]).toContain('# Mission: build')
     expect(briefs[0]).toContain(PROPOSAL.title)
+    expect(briefs.slice(1).every((brief) => brief.startsWith('# Phase: '))).toBe(true)
   })
 })

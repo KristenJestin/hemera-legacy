@@ -1450,6 +1450,79 @@ describe('A profile that ran the Workspaces gains the choices of its Sessions', 
   })
 })
 
+/**
+ * What 0.4 shipped: every migration of the folder but the build's two, which were written before
+ * the ones 0.4 carries and reached `dev` after them.
+ */
+function shippedWithoutTheBuild(): string {
+  const folder = join(workspace, 'shipped-0.4')
+  for (const migration of readdirSync(SHIPPED)) {
+    if (migration === BUILD_MIGRATION || migration === REVIEW_MIGRATION) continue
+    cpSync(join(SHIPPED, migration), join(folder, migration), { recursive: true })
+  }
+  return folder
+}
+
+describe('A profile of 0.4 is migrated to the build lot', () => {
+  test('the build migrations run after the ones 0.4 ran, and keep what they wrote', async () => {
+    const dataFolder = join(workspace, 'from-0.4')
+    await on(dataFolder, openProfile(dataFolder, shippedWithoutTheBuild(), '0.4.0'))
+    await on(
+      dataFolder,
+      Effect.gen(function* () {
+        const sql = yield* SqliteClient
+        const at = '2026-09-29T10:00:00.000Z'
+        yield* sql`INSERT INTO projects (id, name, tone, created_at, updated_at, version)
+          VALUES ('atlas', 'Atlas', 'primary', ${at}, ${at}, 1)`
+        yield* sql`INSERT INTO project_commands (id, project_id, name, line, type, created_at, updated_at, run_at_open)
+          VALUES ('command-1', 'atlas', 'up', 'docker compose up -d', 'script', ${at}, ${at}, 1)`
+        yield* sql`INSERT INTO sessions (id, project_id, title, title_source, provider, native_session_id, native_state, cwd, created_at, last_written_at, version)
+          VALUES ('session-1', 'atlas', 'Set it up', 'derived', 'claude', 'native-1', 'attached', '/work/atlas', ${at}, ${at}, 3)`
+        yield* sql`INSERT INTO session_entries (id, session_id, seq, role, kind, body, payload, correlation_id, state, created_at)
+          VALUES ('entry-1', 'session-1', 1, 'hemera', 'setup_proposal', 'Declare ./api', '{}', 'setup:s1', 'pending', ${at})`
+        yield* sql`INSERT INTO command_runs (id, session_id, name, line, type, cwd, state, started_by, started_at, told)
+          VALUES ('run-1', 'session-1', 'up', 'docker compose up -d', 'script', '/work/atlas', 'running', 'user', ${at}, 'none')`
+        yield* sql`INSERT INTO queued_results (id, session_id, text, queued_at)
+          VALUES ('result-1', 'session-1', 'Two call sites.', ${at})`
+      }),
+    )
+
+    const standing = await on(dataFolder, openProfile(dataFolder, SHIPPED, '0.5.0'))
+    expect(standing.behind).toEqual([BUILD_MIGRATION, REVIEW_MIGRATION])
+    expect(readdirSync(join(dataFolder, BACKUPS_FOLDER))).toEqual([`${BUILD_MIGRATION}.sqlite`])
+
+    const schema = (await on(dataFolder, schemaOf)).join('\n')
+    for (const table of ['build_tasks', 'build_attempts', 'build_blockers', 'project_checks']) {
+      expect(schema).toContain(`${table}: CREATE TABLE`)
+    }
+
+    const kept = await on(
+      dataFolder,
+      Effect.gen(function* () {
+        const sql = yield* SqliteClient
+        return {
+          sessions: yield* sql<{
+            title: string
+            build_phase: string | null
+            build_review_at: string | null
+          }>`SELECT title, build_phase, build_review_at FROM sessions`,
+          entries: yield* sql<{ kind: string }>`SELECT kind FROM session_entries`,
+          runs: yield* sql<{ told: string }>`SELECT told FROM command_runs`,
+          commands: yield* sql<{ run_at_open: number }>`SELECT run_at_open FROM project_commands`,
+          queued: yield* sql<{ text: string }>`SELECT text FROM queued_results`,
+        }
+      }),
+    )
+    expect(kept).toEqual({
+      sessions: [{ title: 'Set it up', build_phase: null, build_review_at: null }],
+      entries: [{ kind: 'setup_proposal' }],
+      runs: [{ told: 'none' }],
+      commands: [{ run_at_open: 1 }],
+      queued: [{ text: 'Two call sites.' }],
+    })
+  })
+})
+
 describe('A profile of lot 20 is migrated to lot 22', () => {
   test('the build migration keeps the Sessions, their threads, runs and Journal', async () => {
     const dataFolder = join(workspace, 'from-lot-twenty')

@@ -4,6 +4,7 @@ import { useState } from 'react'
 import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
 
 import { emulateReducedMotion } from '../../../.storybook/reduced-motion.ts'
+import { check } from '../../motion.ts'
 import { Checkbox } from './checkbox.tsx'
 
 /** A box whose state the story keeps, so ticking it in the canvas does what it says. */
@@ -134,6 +135,13 @@ function scaleOf(box: HTMLElement): number {
   return matrix.a
 }
 
+/** What the tick and the box were seen at, frame by frame, and when each frame came. */
+interface Frames {
+  drawn: number[]
+  scales: number[]
+  at: number[]
+}
+
 /**
  * What the tick and the box go through, frame by frame, from just before `gesture` until the tick
  * is at `end`.
@@ -146,9 +154,10 @@ async function framesAround(
   box: HTMLElement,
   end: number,
   gesture: () => Promise<void>,
-): Promise<{ drawn: number[]; scales: number[] }> {
+): Promise<Frames> {
   const drawn: number[] = []
   const scales: number[] = []
+  const at: number[] = []
   let done = false
   const watching = (async () => {
     const started = performance.now()
@@ -157,13 +166,36 @@ async function framesAround(
       await new Promise((next) => requestAnimationFrame(next))
       drawn.push(drawnOf(box))
       scales.push(scaleOf(box))
+      at.push(performance.now())
       if (done && drawn.at(-1) === end && scales.at(-1) === 1) break
     }
   })()
   await gesture()
   done = true
   await watching
-  return { drawn, scales }
+  return { drawn, scales, at }
+}
+
+/**
+ * The longest a watch waited between two frames, in milliseconds.
+ *
+ * The tick draws for 260 ms and the box gives for 160: a frame that comes that long after the one
+ * before it, on a machine busy with the rest of the run, can step over the whole of either, and
+ * then no frame was there to see it — not a tick that jumped, and not one that drew either. Only
+ * then is the gesture played again; when every frame came sooner than that, what they saw is the
+ * answer, and a tick that never drew fails on the first try.
+ */
+function longestGap({ at }: Frames): number {
+  return Math.max(0, ...at.slice(1).map((one, index) => one - at[index]!))
+}
+
+/** How long the tick draws, and how long the box gives, in the milliseconds a frame is read in. */
+const DRAW = check.draw.duration * 1000
+const GIVE = check.press.duration * 1000
+
+/** Whether some frame saw the tick part of the way along: drawn, and not switched on. */
+function drawing({ drawn }: Frames): boolean {
+  return drawn.some((one) => one > 0 && one < 1)
 }
 
 /**
@@ -176,22 +208,22 @@ export const Checked: Story = {
   play: async ({ canvasElement }) => {
     const box = within(canvasElement).getByRole('checkbox', { name: /portless/i })
     await expect(drawnOf(box)).toBe(0)
-    // The give is over in 160 ms while the tick draws for 260 and is most of the way in by then: a
-    // machine busy with the rest of the run can give no frame inside the give and still one inside
-    // the draw. When no frame saw the box under its size, it is unchecked and checked again, up
-    // to five times: a box that never gives is never seen to.
-    const check = (): Promise<{ drawn: number[]; scales: number[] }> =>
-      framesAround(box, 1, () => userEvent.click(box))
-    let seen = await check()
-    for (let tries = 4; tries > 0 && Math.min(...seen.scales) === 1; tries -= 1) {
-      // oxlint-disable-next-line no-await-in-loop -- one gesture at a time: the retry is the point
+    const ticked = (): Promise<Frames> => framesAround(box, 1, () => userEvent.click(box))
+    // Played again only when no frame saw one of the two and a frame came too late to have: the
+    // box is unchecked and checked again, up to five times.
+    const unseen = (frames: Frames): boolean =>
+      (!drawing(frames) && longestGap(frames) >= DRAW) ||
+      (Math.min(...frames.scales) === 1 && longestGap(frames) >= GIVE)
+    let seen = await ticked()
+    for (let tries = 4; tries > 0 && unseen(seen); tries -= 1) {
+      // oxlint-disable-next-line no-await-in-loop -- one gesture at a time: the replay is the point
       await framesAround(box, 0, () => userEvent.click(box))
-      // oxlint-disable-next-line no-await-in-loop -- one gesture at a time: the retry is the point
-      seen = await check()
+      // oxlint-disable-next-line no-await-in-loop -- one gesture at a time: the replay is the point
+      seen = await ticked()
     }
     const { drawn, scales } = seen
     // Part of the way along on some frame: drawn, and not switched on.
-    expect(drawn.some((one) => one > 0 && one < 1)).toBe(true)
+    expect(drawing(seen)).toBe(true)
     expect(Math.min(...scales)).toBeLessThan(1)
     expect(drawn.at(-1)).toBe(1)
     expect(scales.at(-1)).toBe(1)
@@ -207,8 +239,18 @@ export const Unchecked: Story = {
     const box = within(canvasElement).getByRole('checkbox', { name: /portless/i })
     // Opened checked, it is drawn already: nothing draws itself on the way in.
     await expect(drawnOf(box)).toBe(1)
-    const { drawn, scales } = await framesAround(box, 0, () => userEvent.click(box))
-    expect(drawn.some((one) => one > 0 && one < 1)).toBe(true)
+    const unticked = (): Promise<Frames> => framesAround(box, 0, () => userEvent.click(box))
+    // Played again, up to five times, only when no frame saw the tick on its way and a frame came
+    // too late to have: the box is checked again, and unchecked again.
+    let seen = await unticked()
+    for (let tries = 4; tries > 0 && !drawing(seen) && longestGap(seen) >= DRAW; tries -= 1) {
+      // oxlint-disable-next-line no-await-in-loop -- one gesture at a time: the replay is the point
+      await framesAround(box, 1, () => userEvent.click(box))
+      // oxlint-disable-next-line no-await-in-loop -- one gesture at a time: the replay is the point
+      seen = await unticked()
+    }
+    const { drawn, scales } = seen
+    expect(drawing(seen)).toBe(true)
     // Letting go is not pressed: the box stays its size.
     expect(Math.min(...scales)).toBe(1)
     expect(drawn.at(-1)).toBe(0)

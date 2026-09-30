@@ -2,6 +2,8 @@ import type { Meta, StoryObj } from '@storybook/react-vite'
 import { type ReactNode, useState } from 'react'
 import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
 
+import { atRest } from '../../../.storybook/at-rest.ts'
+import { type Journey, journeyOf, readEveryFrame } from '../../../.storybook/journey.ts'
 import { movesLess } from '../../../.storybook/reduced-motion.ts'
 
 import { LIFT_EDGE } from '../../motion.ts'
@@ -367,36 +369,42 @@ export const GrowsWithWhatItHolds: Story = {
     // The body is the part of the dialog between its head and its footer.
     const box = within(dialog).getByRole('checkbox', { name: 'Serve it' })
     const body = [...dialog.children].find((part) => part.contains(box))!
-    const from = body.getBoundingClientRect().height
-
-    const heights: number[] = []
-    let watching = true
-    const watch = (): void => {
-      heights.push(body.getBoundingClientRect().height)
-      if (watching) requestAnimationFrame(watch)
-    }
-    watch()
-    await userEvent.click(within(dialog).getByRole('checkbox', { name: 'Serve it' }))
-    await expect(within(dialog).getByRole('textbox', { name: 'Address' })).toBeInTheDocument()
-
-    // It lands as tall as what it holds, with nothing to scroll…
     const content = body.firstElementChild!
-    await waitFor(() => {
-      expect(body.getBoundingClientRect().height).toBeCloseTo(
-        content.getBoundingClientRect().height,
-        0,
-      )
-    })
-    watching = false
-    const to = body.getBoundingClientRect().height
+    const height = (): number => body.getBoundingClientRect().height
+    const from = height()
+
+    // Every frame is read with the time it came, so that a way no frame was there to see — a
+    // frame late by more than the whole of it, on a machine busy with the rest of the run — is
+    // told from a jump, and the box is unticked and ticked again, up to five times. A jump seen
+    // between frames close together fails on the first try.
+    const grow = async (tries: number): Promise<{ journey: Journey; to: number }> => {
+      const watch = readEveryFrame(height)
+      await userEvent.click(box)
+      await expect(within(dialog).getByRole('textbox', { name: 'Address' })).toBeInTheDocument()
+      // It lands as tall as what it holds…
+      await waitFor(() => {
+        expect(height()).toBeCloseTo(content.getBoundingClientRect().height, 0)
+      })
+      const to = height()
+      // One more frame read, so that the watch has seen it land and not only the way there.
+      await new Promise((drawn) => requestAnimationFrame(drawn))
+      const journey = journeyOf(watch.stop(), from, to)
+      if (journey !== 'unseen' || tries === 1) return { journey, to }
+      await userEvent.click(box)
+      await waitFor(() => {
+        expect(height()).toBeCloseTo(from, 0)
+      })
+      await atRest(body)
+      return grow(tries - 1)
+    }
+    const { journey, to } = await grow(movesLess() ? 1 : 5)
+
     expect(to).toBeGreaterThan(from)
+    // …with nothing to scroll…
     expect(body.scrollHeight).toBe(body.clientHeight)
     if (!movesLess()) {
       // …and it got there over frames: a height between the two was drawn.
-      expect(
-        heights.some((height) => height > from + 1 && height < to - 1),
-        'the dialog jumped to its new height',
-      ).toBe(true)
+      expect(journey, 'the dialog jumped to its new height').toBe('travelled')
     }
   },
 }

@@ -1,5 +1,6 @@
 import { expect } from 'storybook/test'
 
+import { WHOLE_WAY } from './journey.ts'
 import { movesLess } from './reduced-motion.ts'
 
 /**
@@ -25,6 +26,8 @@ export interface MarkWatch {
   places: number
   /** The frames where a sibling item was drawn over the mark, said as `<item> over the mark`. */
   buried: string[]
+  /** The longest wait between two frames of the watch, in milliseconds. */
+  slowest: number
 }
 
 /** The mark's own attribute, and its shape's: what the watch looks for in the list. */
@@ -48,6 +51,8 @@ export async function watchMark(list: Element, move: () => Promise<void>): Promi
   let still = 0
   let last = ''
   let moving = true
+  let slowest = 0
+  let previous = performance.now()
 
   const look = (): void => {
     const mark = list.querySelector<HTMLElement>(MARK)
@@ -75,6 +80,9 @@ export async function watchMark(list: Element, move: () => Promise<void>): Promi
   const watching = new Promise<void>((done) => {
     const started = performance.now()
     const frame = (): void => {
+      const now = performance.now()
+      slowest = Math.max(slowest, now - previous)
+      previous = now
       look()
       const settled = !moving && still >= STILL_FRAMES
       if (settled || performance.now() - started > LONGEST) {
@@ -93,7 +101,7 @@ export async function watchMark(list: Element, move: () => Promise<void>): Promi
   } finally {
     style.remove()
   }
-  return { frames, places: seen.size, buried }
+  return { frames, places: seen.size, buried, slowest }
 }
 
 /**
@@ -141,18 +149,42 @@ interface Point {
 }
 
 /**
+ * Whether a watch saw nothing either way: the mark at two places only, where it was and where it
+ * landed, while a frame came later than the whole of a journey after the one before it.
+ *
+ * On a machine busy with the rest of the run a frame can come half a second after the one before
+ * it, and a mark's spring is home by then: it travelled, and no frame was there to see it. That
+ * is not a jump — a jump is two places with frames close together.
+ */
+function unseen(watched: MarkWatch): boolean {
+  return watched.places <= 2 && watched.slowest >= WHOLE_WAY && !movesLess()
+}
+
+/**
  * Watches the mark out to one item and back to another: the way down and the way up, the way
  * out and the way home. Two journeys, one after the other, because the second starts where the
  * first one landed.
+ *
+ * Played again, up to five times, while one of the two was unseen: there and back leaves the mark
+ * where it started, so each round is the same two journeys. What is answered is the last round,
+ * with every frame any round saw a sibling over the mark: a mark buried once is buried.
  */
 export async function watchThereAndBack(
   list: Element,
   there: () => Promise<void>,
   back: () => Promise<void>,
 ): Promise<MarkWatch[]> {
-  const out = await watchMark(list, there)
-  const home = await watchMark(list, back)
-  return [out, home]
+  const buried: string[] = []
+  for (let round = 1; ; round += 1) {
+    // oxlint-disable-next-line no-await-in-loop -- one journey at a time: the second starts where the first landed
+    const out = await watchMark(list, there)
+    // oxlint-disable-next-line no-await-in-loop -- one journey at a time: the second starts where the first landed
+    const home = await watchMark(list, back)
+    if (round === 5 || !(unseen(out) || unseen(home))) {
+      return [{ ...out, buried: [...buried, ...out.buried] }, home]
+    }
+    buried.push(...out.buried, ...home.buried)
+  }
 }
 
 /**
@@ -163,7 +195,7 @@ export async function watchThereAndBack(
 export function expectNeverBuried(watches: MarkWatch[]): void {
   for (const watched of watches) {
     expect(watched.buried).toEqual([])
-    if (!movesLess()) expect(watched.places).toBeGreaterThan(2)
+    if (!movesLess()) expect(watched.places, 'the mark jumped to its item').toBeGreaterThan(2)
   }
 }
 

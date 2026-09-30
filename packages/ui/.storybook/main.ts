@@ -1,5 +1,7 @@
 import type { StorybookConfig } from '@storybook/react-vite'
 
+import { withBadges } from './badges.ts'
+
 /**
  * Storybook is where this lot is validated and where its tests run (design D1-06).
  *
@@ -16,6 +18,8 @@ const config: StorybookConfig = {
     'storybook-addon-tag-badges',
   ],
   framework: { name: '@storybook/react-vite', options: {} },
+  // The `new` and `updated` badges are Git's to say, not the story file's: see `badges.ts`.
+  experimental_indexers: async (indexers) => withBadges(indexers ?? []),
   viteFinal: async (vite) => {
     const { default: tailwindcss } = await import('@tailwindcss/vite')
     return { ...vite, plugins: [...(vite.plugins ?? []), tailwindcss()] }

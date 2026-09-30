@@ -2,6 +2,7 @@ import type { Meta, StoryObj } from '@storybook/react-vite'
 import { expect, fn, screen, userEvent, waitFor, within } from 'storybook/test'
 import { type ReactNode, useState } from 'react'
 
+import { atRest } from '../../.storybook/at-rest.ts'
 import { onOneLine } from '../../.storybook/one-line.ts'
 import { emulateReducedMotion } from '../../.storybook/reduced-motion.ts'
 import { Button } from '../components/button/button.tsx'
@@ -462,6 +463,11 @@ export const SendAndStopSwap: Story = {
     const canvas = within(canvasElement)
     const menu = canvas.getByRole('button', { name: /DeepSeek V4\.1 Flash/ })
     const send = canvas.getByRole('button', { name: 'Send' })
+    // Where the row rests, once its words are drawn in their own face: read at once, on a runner
+    // busy with the rest of the run, it was read before the font had arrived, and the whole row
+    // then moved by the width the words took once it had, under a send that never moved.
+    await document.fonts.ready
+    await atRest(send)
     const place = send.getBoundingClientRect()
     const beside = menu.getBoundingClientRect()
     const frame = frameOf(canvas.getByRole('textbox')).getBoundingClientRect()
@@ -696,6 +702,39 @@ export const MentionAtTheCaret: Story = {
     expect(box.textContent).toMatch(/the spec$/)
 
     await menuGone()
+  },
+}
+
+/**
+ * The band open, and left open: the one story that ends with the list on screen.
+ *
+ * Every other story that opens the list chooses from it and waits for it to go, so the
+ * accessibility pass, which runs once the play is over, never saw the band's own label or its
+ * rows. Here it does, in both themes, once the frame has finished growing around the band: a
+ * colour read while the frame is still moving is not the colour the reader gets.
+ */
+export const Mentioning: Story = {
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const box = canvas.getByRole('textbox')
+    const frame = frameOf(box)
+
+    await userEvent.type(box, 'See @sources')
+    const menu = await within(document.body).findByRole('listbox', {
+      name: 'Files of the Project',
+    })
+    await waitFor(() => {
+      expect(within(menu).getAllByRole('option').length).toBeGreaterThan(1)
+    })
+    expect(canvas.getByText('A file of the Project…')).toBeVisible()
+
+    // Settled: the frame is the same height on two reads a frame apart.
+    await waitFor(async () => {
+      const before = frame.getBoundingClientRect().height
+      await new Promise((resolve) => requestAnimationFrame(resolve))
+      expect(frame.getBoundingClientRect().height).toBe(before)
+    })
+    expect(document.activeElement).toBe(box)
   },
 }
 

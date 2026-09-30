@@ -61,6 +61,7 @@ function Controlled({
   )
   const [consent, setConsent] = useState(classifier?.consent ?? false)
   const [strictness, setStrictness] = useState<StrictnessLevel>(classifier?.strictness ?? 'normal')
+  const [grace, setGrace] = useState(classifier?.grace ?? 10)
   const [tracing, setTracing] = useState(acpTrace ?? false)
   return (
     <Settings
@@ -85,6 +86,7 @@ function Controlled({
               credential,
               consent,
               strictness,
+              grace,
               credentialMessage:
                 credential === 'invalid'
                   ? 'The key was rejected. Replace it to retry.'
@@ -104,6 +106,10 @@ function Controlled({
               onStrictnessChange: (next) => {
                 setStrictness(next)
                 classifier.onStrictnessChange(next)
+              },
+              onGraceChange: (next) => {
+                setGrace(next)
+                classifier.onGraceChange(next)
               },
               onSaveKey: (key) => {
                 setCredential(key === 'invalid' ? 'invalid' : 'saved')
@@ -198,6 +204,8 @@ const CLASSIFIER: ClassifierSectionProps = {
   onConsentChange: fn(),
   strictness: 'normal',
   onStrictnessChange: fn(),
+  grace: 10,
+  onGraceChange: fn(),
   onSaveKey: fn(),
   onRemoveKey: fn(),
 }
@@ -741,6 +749,70 @@ export const StrictnessKeyboard: Story = {
     await waitFor(() => expect(permissive).toBeChecked())
     expect(permissive).toHaveFocus()
     expect(args.classifier?.onStrictnessChange).toHaveBeenCalledWith('permissive')
+  },
+}
+
+/**
+ * How long a call that needs an answer waits for it while the window is focused, before the agent
+ * goes on without it (#304): ten seconds until the reader chooses another, or none at all.
+ */
+export const ApprovalGrace: Story = {
+  args: {
+    defaultSection: 'hemera-auto',
+    classifier: { ...CLASSIFIER, mode: 'hemera-auto', consent: true, credential: 'saved' },
+  },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement)
+    const group = canvas.getByRole('radiogroup', { name: 'Approval grace' })
+    const choices = within(group).getAllByRole('radio')
+    expect(choices.map((choice) => choice.textContent)).toEqual([
+      'Off',
+      '5 s',
+      '10 s',
+      '15 s',
+      '30 s',
+    ])
+    expect(within(group).getByRole('radio', { name: '10 s' })).toBeChecked()
+    await userEvent.click(within(group).getByRole('radio', { name: '30 s' }))
+    await waitFor(() => expect(within(group).getByRole('radio', { name: '30 s' })).toBeChecked())
+    expect(args.classifier?.onGraceChange).toHaveBeenCalledWith(30)
+    await userEvent.click(within(group).getByRole('radio', { name: 'Off' }))
+    await waitFor(() => expect(within(group).getByRole('radio', { name: 'Off' })).toBeChecked())
+    expect(args.classifier?.onGraceChange).toHaveBeenCalledWith(0)
+  },
+}
+
+/** The arrows move the grace, as they move the level. */
+export const ApprovalGraceKeyboard: Story = {
+  args: { defaultSection: 'hemera-auto', classifier: { ...CLASSIFIER, mode: 'hemera-auto' } },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement)
+    const group = canvas.getByRole('radiogroup', { name: 'Approval grace' })
+    within(group).getByRole('radio', { name: '10 s' }).focus()
+    await userEvent.keyboard('{ArrowRight}')
+    const longer = within(group).getByRole('radio', { name: '15 s' })
+    await waitFor(() => expect(longer).toBeChecked())
+    expect(longer).toHaveFocus()
+    expect(args.classifier?.onGraceChange).toHaveBeenCalledWith(15)
+  },
+}
+
+/**
+ * The fill of the grace segment crossing it, from one end to the other and back: on every frame of
+ * the way it is drawn over the choices it crosses and never under them (issue #127).
+ */
+export const ApprovalGraceMarkCrossing: Story = {
+  args: { defaultSection: 'hemera-auto', classifier: { ...CLASSIFIER, mode: 'hemera-auto' } },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const segment = canvas.getByRole('radiogroup', { name: 'Approval grace' })
+    const watched = await watchThereAndBack(
+      segment,
+      () => userEvent.click(within(segment).getByRole('radio', { name: 'Off' })),
+      () => userEvent.click(within(segment).getByRole('radio', { name: '30 s' })),
+    )
+    expect(within(segment).getByRole('radio', { name: '30 s' })).toBeChecked()
+    expectNeverBuried(watched)
   },
 }
 

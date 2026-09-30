@@ -10,6 +10,7 @@ import { Input } from '../components/field/field.tsx'
 import { StatusDot, type StatusTone } from '../components/status-dot/status-dot.tsx'
 import { IconBrandHemeraAuto, IconBrandTypeSafe, IconRobot } from '../icons.ts'
 import { arrival, collapse, expand, fold, useTransition } from '../motion.ts'
+import { GraceChoice } from './auto-grace.tsx'
 import { StrictnessChoice, type StrictnessLevel } from './auto-strictness.tsx'
 
 export type ClassifierMode = 'agent-default' | 'hemera-auto'
@@ -72,6 +73,9 @@ export interface ClassifierSectionProps {
   onConsentChange: (consent: boolean) => void
   strictness: StrictnessLevel
   onStrictnessChange: (strictness: StrictnessLevel) => void
+  /** How long, in seconds, a call that needs an answer waits for it (#304). */
+  grace: number
+  onGraceChange: (grace: number) => void
   onSaveKey: (key: string) => void
   onRemoveKey: () => void
 }
@@ -127,6 +131,8 @@ export function ClassifierSection({
   onConsentChange,
   strictness,
   onStrictnessChange,
+  grace,
+  onGraceChange,
   onSaveKey,
   onRemoveKey,
 }: ClassifierSectionProps): ReactNode {
@@ -224,6 +230,11 @@ export function ClassifierSection({
                   <StrictnessChoice
                     strictness={strictness}
                     onStrictnessChange={onStrictnessChange}
+                    disabled={evaluator === 'transitioning'}
+                  />
+                  <GraceChoice
+                    grace={grace}
+                    onGraceChange={onGraceChange}
                     disabled={evaluator === 'transitioning'}
                   />
                   <div className="flex flex-col gap-2">

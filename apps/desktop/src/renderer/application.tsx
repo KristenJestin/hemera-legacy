@@ -399,6 +399,7 @@ export function Application() {
   const [classifier, setClassifier] = useState<{
     mode: ClassifierSectionProps['mode']
     strictness: ClassifierSectionProps['strictness']
+    grace: ClassifierSectionProps['grace']
     credential: ClassifierSectionProps['credential']
     consent: boolean
     generation: number
@@ -1332,6 +1333,11 @@ export function Application() {
                   onStrictnessChange: (strictness) =>
                     changeClassifier(() =>
                       window.hemera.invoke('classifier.strictness.write', { strictness }),
+                    ),
+                  grace: classifier.grace,
+                  onGraceChange: (grace) =>
+                    changeClassifier(() =>
+                      window.hemera.invoke('classifier.grace.write', { grace }),
                     ),
                   onSaveKey: (key) =>
                     changeClassifier(() => window.hemera.invoke('classifier.key.save', { key })),

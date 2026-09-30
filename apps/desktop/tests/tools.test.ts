@@ -27,6 +27,7 @@ import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vite-plus/test'
 import { Deferred, Effect, Fiber, Layer } from 'effect'
 import type { Scope } from 'effect'
+import { eq } from 'drizzle-orm'
 import { z } from 'zod'
 
 import { READ_PAGE_BYTES, SEARCH_MATCH_LIMIT, TOOL_NAMES, type ToolName } from '@hemera/core'
@@ -53,8 +54,9 @@ import { Projects, projectsLayer } from '#engine/projects.ts'
 import { Sessions, sessionsLayer } from '#engine/sessions.ts'
 import { NoSpecNotices } from '#engine/specs/notices.ts'
 import { specsLayer } from '#engine/specs/specs.ts'
-import { databaseLayer } from '#engine/storage/database.ts'
-import type { Database, SqliteClient } from '#engine/storage/database.ts'
+import { Database, databaseLayer } from '#engine/storage/database.ts'
+import type { SqliteClient } from '#engine/storage/database.ts'
+import { sessions as sessionRows } from '#engine/storage/schema.ts'
 import { ToolCatalogue, toolCatalogueLayer } from '#engine/tools/catalogue.ts'
 import type { ToolArguments } from '#engine/tools/arguments.ts'
 import type { ToolOutcome } from '#engine/tools/catalogue.ts'
@@ -714,6 +716,40 @@ describe("Hemera's own workflow tools are not judged again", () => {
     expect(human.asked).toHaveLength(0)
     expect(seen.entries.some((entry) => entry.kind === 'classifier_decision')).toBe(false)
     expect(seen.lines.some((line) => line.type === 'classifier.decision')).toBe(false)
+  })
+})
+
+describe('Unavailable context asks instead of refusing', () => {
+  it('lets a build Session whose build does not read still read locally and ask for a write', async () => {
+    fileInRoot('notes.md', 'notes')
+    const human = humanSaying('allowed')
+    const seen = await engine(human)(
+      Effect.gen(function* () {
+        const session = yield* opened
+        // A build Session whose build cannot be read: its frozen Spec is out of reach.
+        const database = yield* Database
+        yield* database
+          .update(sessionRows)
+          .set({ mission: 'build' })
+          .where(eq(sessionRows.id, session.sessionId))
+        yield* (yield* ToolAccess).granted(session.sessionId, 'agent-1', 'build')
+        yield* (yield* ClassifierSettings).select('hemera-auto')
+        const read = yield* calling({
+          sessionId: session.sessionId,
+          tool: 'fs_read',
+          arguments: { path: 'notes.md' },
+        })
+        const write = yield* calling({
+          sessionId: session.sessionId,
+          tool: 'fs_write',
+          arguments: { path: 'out.md', content: 'out', key: 'build-write' },
+        })
+        return { read, write }
+      }),
+    )
+    expect(seen.read.state).toBe('completed')
+    expect(seen.write.state).toBe('completed')
+    expect(human.asked).toHaveLength(1)
   })
 })
 

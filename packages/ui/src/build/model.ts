@@ -85,6 +85,17 @@ export interface BuildAttemptView {
   result: BuildAttemptResult | null
   checks: BuildCheckView[]
   files: BuildFileView[]
+  /**
+   * The final checks of a `bug`: the replay of its reproduction the agent reported before them;
+   * null when it reported none (issue #203).
+   */
+  reproduction?: BuildReproductionView | null | undefined
+}
+
+/** A replay of a bug's reproduction: what the agent observed, and whether the bug is gone. */
+export interface BuildReproductionView {
+  observed: string
+  gone: boolean
 }
 
 /** One contractual task of the build, with what Hemera kept about it. */
@@ -235,6 +246,8 @@ export interface BuildViewData {
   specId: string
   specKey: string
   specTitle: string
+  /** What the Spec proves; a `bug`'s final checks wait for the replay of its reproduction. */
+  specType?: 'feature' | 'bug' | 'maintenance' | undefined
   phase: BuildPhase
   /** When the user paused it; null while it runs. */
   pausedAt: string | null

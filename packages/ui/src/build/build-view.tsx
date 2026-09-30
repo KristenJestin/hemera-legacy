@@ -10,6 +10,7 @@ import type { StoryView } from '../spec/model.ts'
 import { BlockerBlock } from './blocker-block.tsx'
 import {
   type BuildBlockerView,
+  type BuildReproductionView,
   type BuildStoryProgress,
   type BuildStoryRow,
   type BuildTaskView,
@@ -125,6 +126,8 @@ const PROGRESS_TONES: Record<BuildStoryProgress, StatusTone> = {
 }
 
 const HINT = 'text-sm text-muted-foreground'
+
+const REPLAY_HEAD = 'flex items-center gap-2 text-sm font-medium'
 
 const WAITS = 'text-sm text-muted-foreground'
 
@@ -560,6 +563,30 @@ export function BuildView({
   )
 }
 
+/** Where the replay of a bug's reproduction stands, as the dot beside it says it. */
+function replayStanding(replay: BuildReproductionView | null | undefined): Standing {
+  if (replay === null || replay === undefined) return { word: 'Not replayed', tone: 'pending' }
+  return replay.gone ? { word: 'Gone', tone: 'success' } : { word: 'Still there', tone: 'failure' }
+}
+
+/**
+ * The replay of a bug's reproduction (issue #203): the one the agent reported before the last final
+ * checks, what it observed and whether the bug is gone. Accept waits for it.
+ */
+function Reproduction({ build }: { build: BuildViewData }): ReactNode {
+  const replay = lastAttempt(build.endAttempts)?.reproduction
+  const { word, tone } = replayStanding(replay)
+  return (
+    <section aria-label="Reproduction" className="flex flex-col gap-1">
+      <h3 className={REPLAY_HEAD}>
+        <StatusDot status={tone} label={word} />
+        Reproduction
+      </h3>
+      {replay !== null && replay !== undefined && <p className={NARRATIVE}>{replay.observed}</p>}
+    </section>
+  )
+}
+
 /** The final checks of the whole Spec (D10-07): their tries, as a task's are drawn. */
 function FinalChecks({ build, now }: { build: BuildViewData; now: string }): ReactNode {
   return (
@@ -571,6 +598,7 @@ function FinalChecks({ build, now }: { build: BuildViewData; now: string }): Rea
           failures; three red tries come back to you.
         </p>
       </header>
+      {build.specType === 'bug' && build.endAttempts.length > 0 && <Reproduction build={build} />}
       {build.endAttempts.length === 0 ? (
         <p className={HINT}>They run once every task is done.</p>
       ) : (

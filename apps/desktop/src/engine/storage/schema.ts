@@ -318,7 +318,10 @@ export const SESSION_ENTRY_ROLES = ['user', 'agent', 'hemera'] as const
  * where its protocol stands, a row rather than a memory so that a restart resumes exactly;
  * `build_paused_at` is when the user paused it, null while it runs (D10-09); `build_detail` says
  * why it stopped, as the user is told; `approach_note` is the agent's answer to the `prepare`
- * brief, shown before `execute` starts (D10-02).
+ * brief, shown before `execute` starts (D10-02). `build_reproduction` and `build_reproduction_gone`
+ * are the replay of a `bug`'s reproduction the agent reported in the turn under way — what it
+ * observed, and whether the incorrect behaviour is gone — held until the end checks that follow the
+ * turn open their attempt, which takes them (issue #203).
  */
 export const sessions = sqliteTable(
   'sessions',
@@ -351,6 +354,8 @@ export const sessions = sqliteTable(
     buildReviewAt: text('build_review_at'),
     buildDetail: text('build_detail'),
     approachNote: text('approach_note'),
+    buildReproduction: text('build_reproduction'),
+    buildReproductionGone: integer('build_reproduction_gone', { mode: 'boolean' }),
   },
   (table) => [
     check(
@@ -1226,6 +1231,10 @@ export const buildTasks = sqliteTable(
  * `result` is null while the attempt runs, then green, red, or unverified when there was no check
  * to run. `told_at` is when its failures were handed to the agent, so that a red attempt is told
  * once and its checks run again after the turn that carried them (D10-07).
+ *
+ * `reproduction` and `reproduction_gone` are an attempt at the end checks of a `bug`'s: the replay
+ * of its reproduction the agent reported in the turn before them, what it observed and whether the
+ * incorrect behaviour is gone; null when it reported none, which Accept refuses (issue #203).
  */
 export const buildAttempts = sqliteTable(
   'build_attempts',
@@ -1242,6 +1251,8 @@ export const buildAttempts = sqliteTable(
     endedAt: text('ended_at'),
     result: text('result'),
     toldAt: text('told_at'),
+    reproduction: text('reproduction'),
+    reproductionGone: integer('reproduction_gone', { mode: 'boolean' }),
   },
   (table) => [
     check('attempt_scope_is_known', sql`${table.scope} IN (${sql.raw(oneOf(ATTEMPT_SCOPES))})`),

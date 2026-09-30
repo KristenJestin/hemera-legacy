@@ -101,6 +101,8 @@ describe('The Journal shows each step of a build in plain words', () => {
       built('task.skipped', { label: 'T2', reason: 'Done by hand.', unblocks: true }),
       built('build.paused', {}, 'session'),
       built('build.resumed', {}, 'session'),
+      built('build.reproduction_replayed', { gone: true }, 'session'),
+      built('build.reproduction_replayed', { gone: false }, 'session'),
       built('build.accepted', {}, 'session'),
       built('build.stopped', { reason: 'Stopped by the user.' }, 'session'),
     ].map((entry) => lineOf(entry).label)
@@ -125,6 +127,8 @@ describe('The Journal shows each step of a build in plain words', () => {
       'T2 skipped: Done by hand.',
       'Build paused',
       'Build resumed',
+      'Reproduction replayed: the bug is gone',
+      'Reproduction replayed: the bug is still there',
       'Build accepted',
       'Build stopped: Stopped by the user.',
     ])

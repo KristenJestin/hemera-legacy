@@ -116,14 +116,16 @@ export const THREE: readonly TaskDraft[] = [
 /**
  * A `ready` Spec of a Project on a real `main` — `sources/api` unless other locations are named,
  * each a repository with one commit —
- * with the tasks given, in that order: labelled `T1…Tn` by it. Written the way the product
- * writes one: its writer's agent shapes, plans, decomposes and attests, and the human freezes it.
+ * with the tasks given, in that order: labelled `T1…Tn` by it, and of the type given, a `feature`
+ * unless told. Written the way the product writes one: its writer's agent shapes, plans, decomposes
+ * and attests, and the human freezes it.
  */
 export const aReadySpec = (
   dataFolder: string,
   tasks: readonly TaskDraft[],
   stories: readonly string[] = ['Export'],
   locations: readonly string[] = ['sources/api'],
+  type: 'feature' | 'bug' | 'maintenance' = 'feature',
 ) =>
   Effect.gen(function* () {
     const main = join(dataFolder, 'main')
@@ -138,7 +140,7 @@ export const aReadySpec = (
     const specs = yield* Specs
     const { session, snapshot } = yield* specs.create({
       sessionId: writer.id,
-      type: 'feature',
+      type,
       title: 'Export the journal',
     })
     const specId = snapshot.spec.id

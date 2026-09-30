@@ -40,6 +40,7 @@ import { type BareModeNotQualifiedError, refusedUnlessBare } from './agents/bare
 import { ADAPTERS, Discovery } from './agents/discovery.ts'
 import { type BuildRefusedError, Builds, type UnknownBuildError } from './build/build.ts'
 import { type CheckRefusedError, ProjectChecks, type UnknownCheckError } from './build/checks.ts'
+import { type ReviewRefusedError, ReviewRounds } from './review/round.ts'
 import { runAtOpen } from './commands/at-open.ts'
 import {
   type NothingToRunError,
@@ -202,6 +203,7 @@ export function answer(
   | Specs
   | ProjectChecks
   | Builds
+  | ReviewRounds
 > {
   return Effect.gen(function* () {
     if (decision.name === 'engine.status') return yield* (yield* EngineStatus).read
@@ -659,6 +661,19 @@ export function answer(
       return yield* projects.removeRepository(id, version, relativePath)
     }
 
+    // The review rounds of a build (issue #278): the window reads them, and adds and withdraws the
+    // user's feedback; nothing it sends opens, moves or closes a round.
+    const rounds = yield* ReviewRounds
+    if (decision.name === 'review.read') return yield* rounds.read(decision.argument.sessionId)
+    if (decision.name === 'review.addFeedback') {
+      const { sessionId, kind, body, anchor } = decision.argument
+      return yield* rounds.addFeedback(sessionId, kind, body, anchor)
+    }
+    if (decision.name === 'review.withdrawFeedback') {
+      const { sessionId, feedbackId } = decision.argument
+      return yield* rounds.withdrawFeedback(sessionId, feedbackId)
+    }
+
     // The build of a `build` Session (D10-04): the window says what the user did, and the engine
     // decides what follows; every act answers the build it leaves.
     const builds = yield* Builds
@@ -731,6 +746,7 @@ export type Refusal =
   | UnknownCheckError
   | BuildRefusedError
   | UnknownBuildError
+  | ReviewRefusedError
   | LaunchRefusal
   | SetupRefusedError
   | PathOutsideBaseError

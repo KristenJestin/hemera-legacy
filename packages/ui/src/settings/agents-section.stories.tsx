@@ -102,9 +102,9 @@ export const FoundNotInstalledAndNotSignedIn: Story = {
     // Each standing is a dot: its word is the dot's name and its hover, never drawn.
     for (const word of ['Found', 'Not installed', 'Not signed in']) {
       const dot = canvas.getByRole('img', { name: word })
-      await expect(dot).toBeVisible()
-      await expect(dot).toHaveAttribute('title', word)
-      await expect(canvas.queryByText(word)).not.toBeInTheDocument()
+      expect(dot).toBeVisible()
+      expect(dot).toHaveAttribute('title', word)
+      expect(canvas.queryByText(word)).not.toBeInTheDocument()
     }
     // Signed in or not is an icon, named yes or no.
     await expect(canvas.getAllByRole('img', { name: 'yes' })).toHaveLength(1)
@@ -351,7 +351,7 @@ export const RunsWithHemerasToolsOnly: Story = {
     // The line is a shield and a dot; its words are the fold's name and the dot's hover.
     await expect(fold.querySelector('[title="Runs with Hemera\'s tools only"]')).not.toBeNull()
     for (const said of canvas.getAllByText(/Runs with Hemera's tools only/)) {
-      await expect(said).toHaveClass('sr-only')
+      expect(said).toHaveClass('sr-only')
     }
     await expect(canvas.queryByText(/~\/\.claude\.json/)).not.toBeInTheDocument()
 

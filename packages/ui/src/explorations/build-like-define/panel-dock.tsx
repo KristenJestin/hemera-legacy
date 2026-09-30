@@ -22,8 +22,8 @@ import {
  * utilities (`spec-slot`, `spec-panel-in`, `w-spec-panel`), so every panel of a Session is the
  * same panel.
  *
- * Beside the fold, one toggle lays the panel over the chat, the whole width of the row, and takes
- * it back. Over the chat and not pushing it: the chat keeps its width under the panel and nothing
+ * Beside the fold, a choice in two words — beside the chat, over the chat — lays the panel over
+ * the chat, the whole width of the row, and takes it back. Over the chat and not pushing it: the chat keeps its width under the panel and nothing
  * in it reflows, so what moves is the panel's own left edge, on the swap's spring. The chat is out
  * of reach while it is covered, and two things of it come up over the panel:
  *
@@ -33,7 +33,8 @@ import {
  *   panel's head, and back to the chat once the panel is back beside it.
  *
  * The page hands the panel its title, its body and its small frame; the panel holds nothing of
- * what it shows.
+ * what it shows. Over the chat, the page hands it a richer body than beside it: the width is for
+ * showing more, not the same thing spread out.
  */
 
 /** The row, and the container the open panel's width is a share of. */
@@ -64,6 +65,15 @@ const TITLE = 'flex min-w-0 shrink-0 items-center gap-2'
 
 /** Where the head line stands in the panel's head while the panel covers the chat. */
 const LINE = 'relative flex min-w-0 flex-1 items-center'
+
+/**
+ * Where the panel stands, said in words and chosen by a press: beside the chat, or over it. Two
+ * words rather than an icon, since an icon for "a panel over another" reads as nothing.
+ */
+const PLACES = 'flex items-center gap-0.5 rounded-md border border-border p-0.5'
+
+const PLACE =
+  'rounded-sm px-2 py-0.5 text-xs text-muted-foreground outline-none hover:text-foreground focus-ring aria-pressed:bg-background aria-pressed:font-medium aria-pressed:text-foreground aria-pressed:shadow-sm'
 
 const END = 'ml-auto flex shrink-0 items-center gap-1.5'
 
@@ -239,17 +249,26 @@ export function PanelDock({
               </AnimatePresence>
             </span>
             <span className={END}>
-              <Tooltip label="Over the chat">
-                <IconButton
-                  variant="ghost"
-                  size="sm"
-                  icon={<CoverIcon over={over} />}
-                  aria-label="Over the chat"
+              <div role="group" aria-label="Where the panel stands" className={PLACES}>
+                <button
+                  type="button"
+                  className={PLACE}
+                  aria-pressed={!over}
+                  data-beside
+                  onClick={() => onOver(false)}
+                >
+                  Beside the chat
+                </button>
+                <button
+                  type="button"
+                  className={PLACE}
                   aria-pressed={over}
                   data-over-toggle
-                  onClick={() => onOver(!over)}
-                />
-              </Tooltip>
+                  onClick={() => onOver(true)}
+                >
+                  Over the chat
+                </button>
+              </div>
               <Tooltip label="Fold the panel">
                 <IconButton
                   variant="ghost"
@@ -287,28 +306,5 @@ export function PanelDock({
         </div>
       </div>
     </div>
-  )
-}
-
-/**
- * The toggle's icon, on Tabler's grid and stroke: a window and the panel's edge in it, the chevron
- * saying which way the edge goes — out over the chat, or back to its place.
- */
-function CoverIcon({ over }: { over: boolean }): ReactNode {
-  return (
-    <svg
-      viewBox="0 0 24 24"
-      xmlns="http://www.w3.org/2000/svg"
-      aria-hidden="true"
-      fill="none"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      className="size-icon-sm shrink-0 stroke-current"
-    >
-      <path d="M4 6a2 2 0 0 1 2 -2h12a2 2 0 0 1 2 2v12a2 2 0 0 1 -2 2h-12a2 2 0 0 1 -2 -2z" />
-      <path d={over ? 'M9 4v16' : 'M15 4v16'} />
-      <path d={over ? 'M13 9l3 3l-3 3' : 'M11 9l-3 3l3 3'} />
-    </svg>
   )
 }

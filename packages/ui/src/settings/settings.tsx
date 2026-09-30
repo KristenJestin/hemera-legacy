@@ -6,18 +6,18 @@ import { type FunctionComponent, type ReactNode, useState } from 'react'
 
 import { AgentsSection, type AgentsSectionProps } from './agents-section.tsx'
 import { ClassifierSection, type ClassifierSectionProps } from './classifier-section.tsx'
+import { type DecisionLine, DeveloperSection } from './developer-section.tsx'
 import { Button } from '../components/button/button.tsx'
 import { Card } from '../components/card/card.tsx'
-import { Checkbox } from '../components/checkbox/checkbox.tsx'
 import { List, ListItem } from '../components/list/list.tsx'
 import { OVER_MARK, SlidingMark } from '../components/sliding-mark/sliding-mark.tsx'
 import {
   IconArchive,
   IconBrandHemeraAuto,
+  IconBug,
   IconCircleHalf2,
   IconDatabase,
   IconDeviceDesktop,
-  IconFileText,
   IconFolderOpen,
   IconMoon,
   type IconProps,
@@ -32,14 +32,14 @@ import type { ThemeChoice } from '../window.ts'
  * archived out of the bar (design D4-07).
  *
  * Laid out as Project settings are (#294): a navigation on the left and one section on screen at
- * a time — Appearance, Agents, Hemera Auto, Archive and Profile — with the same tabs, the same
- * travelling fill and the same keys. A page that held them one under the other was a page read
- * by scrolling past the agents to reach the classifier. The section shown can be kept by the
- * caller, which is how a link to a setting opens its section.
+ * a time — Appearance, Agents, Hemera Auto, Archive, Profile and Developer — with the same tabs,
+ * the same travelling fill and the same keys. A page that held them one under the other was a
+ * page read by scrolling past the agents to reach the classifier. The section shown can be kept
+ * by the caller, which is how a link to a setting opens its section.
  *
  * Nothing here is computed. The Profile block says what the engine reported, word for word —
  * a page that worked out how big a database is would be a page reading a file it must not
- * open — and the two buttons hand a closed choice back to the main process, never a path.
+ * open — and its button hands a closed choice back to the main process, never a path.
  */
 const NOTE = 'text-sm text-muted-foreground'
 
@@ -97,7 +97,13 @@ const NAV_MARK = 'absolute inset-0 rounded-md bg-accent'
 const PANEL = 'flex min-w-0 flex-1 flex-col gap-4 outline-none'
 
 /** The sections of the page, in the order the navigation lists them. */
-export type SettingsSection = 'appearance' | 'agents' | 'hemera-auto' | 'archive' | 'profile'
+export type SettingsSection =
+  | 'appearance'
+  | 'agents'
+  | 'hemera-auto'
+  | 'archive'
+  | 'profile'
+  | 'developer'
 
 const SECTIONS: {
   value: SettingsSection
@@ -109,6 +115,7 @@ const SECTIONS: {
   { value: 'hemera-auto', label: 'Hemera Auto', icon: IconBrandHemeraAuto },
   { value: 'archive', label: 'Archive', icon: IconArchive },
   { value: 'profile', label: 'Profile', icon: IconDatabase },
+  { value: 'developer', label: 'Developer', icon: IconBug },
 ]
 
 const THEMES: { value: ThemeChoice; label: string; icon: ReactNode }[] = [
@@ -177,14 +184,9 @@ export interface ProfileFacts {
 export interface ProfileSectionProps {
   facts: ProfileFacts
   onOpenFolder: () => void
-  onOpenDiagnostic: () => void
 }
 
-export function ProfileSection({
-  facts,
-  onOpenFolder,
-  onOpenDiagnostic,
-}: ProfileSectionProps): ReactNode {
+export function ProfileSection({ facts, onOpenFolder }: ProfileSectionProps): ReactNode {
   return (
     <Card title="Profile">
       <dl className={ROW}>
@@ -208,37 +210,7 @@ export function ProfileSection({
           <IconFolderOpen size="sm" />
           Open the folder
         </Button>
-        <Button variant="secondary" size="sm" onClick={onOpenDiagnostic}>
-          <IconFileText size="sm" />
-          Open diagnostic.log
-        </Button>
       </div>
-    </Card>
-  )
-}
-
-/**
- * What Hemera writes down to find out why an agent went quiet (issue #131).
- *
- * One switch, off unless turned on: the ACP trace of each Session, beside the diagnostic. A
- * conversation written to a file is not something a reader should find out about afterwards, so
- * the sentence under it says what is kept and what is not.
- */
-function DiagnosticsSection({
-  acpTrace,
-  onAcpTraceChange,
-}: {
-  acpTrace: boolean
-  onAcpTraceChange: (on: boolean) => void
-}): ReactNode {
-  return (
-    <Card title="Diagnostics">
-      <Checkbox
-        checked={acpTrace}
-        onCheckedChange={onAcpTraceChange}
-        label="Write an ACP trace of each Session"
-        description="Every message between Hemera and the agent, with its time, beside diagnostic.log. Prompts, files and secrets are written as their size only. Takes effect from the next message."
-      />
     </Card>
   )
 }
@@ -299,8 +271,12 @@ export interface SettingsProps {
   onRestore: (id: string) => void
   /** Whether the ACP trace of each Session is written (issue #131). Off unless turned on. */
   acpTrace?: boolean | undefined
-  /** Turns it on or off; absent, the Diagnostics card is not drawn. */
+  /** Turns it on or off; absent, the switch is not drawn. */
   onAcpTraceChange?: ((on: boolean) => void) | undefined
+  /** Hemera Auto's latest decisions, newest first; null or absent while not read yet. */
+  decisions?: readonly DecisionLine[] | null | undefined
+  /** Opens the Session a decision was taken in. */
+  onOpenSession?: ((sessionId: string) => void) | undefined
   /** The section shown first; Appearance unless said otherwise. */
   defaultSection?: SettingsSection | undefined
   /** The section shown, for a caller that keeps it: a link to a setting opens its section. */
@@ -321,6 +297,8 @@ export function Settings({
   onRestore,
   acpTrace = false,
   onAcpTraceChange,
+  decisions = null,
+  onOpenSession = () => undefined,
   defaultSection = 'appearance',
   section,
   onSectionChange,
@@ -338,17 +316,15 @@ export function Settings({
         <ClassifierSection {...classifier} />
       ),
     archive: <ArchivedProjects projects={archived} onRestore={onRestore} />,
-    profile: (
-      <>
-        <ProfileSection
-          facts={facts}
-          onOpenFolder={onOpenFolder}
-          onOpenDiagnostic={onOpenDiagnostic}
-        />
-        {onAcpTraceChange === undefined ? null : (
-          <DiagnosticsSection acpTrace={acpTrace} onAcpTraceChange={onAcpTraceChange} />
-        )}
-      </>
+    profile: <ProfileSection facts={facts} onOpenFolder={onOpenFolder} />,
+    developer: (
+      <DeveloperSection
+        decisions={decisions}
+        onOpenSession={onOpenSession}
+        acpTrace={acpTrace}
+        onAcpTraceChange={onAcpTraceChange}
+        onOpenDiagnostic={onOpenDiagnostic}
+      />
     ),
   }
 

@@ -46,6 +46,7 @@ import {
   type ProfileFacts,
   type ProjectSettingsDraft,
   type RepositoryLine,
+  type SettingsSection,
   type ShellProject,
   type ShellSession,
 } from '@hemera/ui'
@@ -382,6 +383,13 @@ export function Application() {
     agents.agents.find((one) => one.id === id)?.id ?? null
 
   const [place, setPlace] = useState<Place>('entry')
+  /** The section of the settings on screen, which a link to a setting opens (#294). */
+  const [settingsSection, setSettingsSection] = useState<SettingsSection>('appearance')
+  /** Opens the settings of the application: on Appearance, or on the section a link points to. */
+  const openSettings = (section: SettingsSection = 'appearance') => {
+    setSettingsSection(section)
+    setPlace('settings')
+  }
   const [commanding, setCommanding] = useState(false)
   const [creating, setCreating] = useState(false)
   const [facts, setFacts] = useState<ProfileFacts | null>(null)
@@ -819,7 +827,8 @@ export function Application() {
             credential: classifier.credential,
             consent: classifier.consent,
           }),
-          onOpenSettings: () => setPlace('settings'),
+          // The menu points at Hemera Auto, so the settings open on its section.
+          onOpenSettings: () => openSettings('hemera-auto'),
         }
 
   // Remembered for the next start, which is one Session per Project and not one in all. What
@@ -1007,7 +1016,7 @@ export function Application() {
         return
       }
       if (action.kind === 'settings') {
-        setPlace('settings')
+        openSettings()
         return
       }
       if (action.kind === 'session') {
@@ -1112,7 +1121,7 @@ export function Application() {
         />
       }
       unseen={bell.unseen}
-      onOpenSettings={() => setPlace('settings')}
+      onOpenSettings={() => openSettings()}
       settingsActive={place === 'settings'}
       sessions={shellSessions}
       onNewSession={() => void newSession()}
@@ -1196,6 +1205,8 @@ export function Application() {
     if (place === 'settings') {
       return (
         <SettingsPage
+          section={settingsSection}
+          onSectionChange={setSettingsSection}
           subtitle={subtitle}
           theme={preference}
           onThemeChange={setThemePreference}
@@ -1661,7 +1672,7 @@ function commandsFor({
         label: 'Settings',
         keys: keysOf('settings'),
         icon: <IconSettings size="sm" />,
-        onSelect: () => setPlace('settings'),
+        onSelect: () => openSettings(),
       },
     ],
   }

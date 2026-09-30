@@ -6,11 +6,14 @@ import {
   type ArchivedProject,
   type ClassifierSectionProps,
   type ProfileFacts,
+  type SettingsSection,
 } from '@hemera/ui'
 import type { ThemeChoice } from '@hemera/ui/window'
 
 /** The settings of the application (design D4-07): composed, and bound to its callbacks. */
 export function SettingsPage({
+  section,
+  onSectionChange,
   subtitle,
   theme,
   onThemeChange,
@@ -24,6 +27,9 @@ export function SettingsPage({
   acpTrace,
   onAcpTraceChange,
 }: {
+  /** The section on screen, kept by the application so that a link to a setting opens it. */
+  section: SettingsSection
+  onSectionChange: (section: SettingsSection) => void
   subtitle: string
   theme: ThemeChoice
   onThemeChange: (theme: ThemeChoice) => void
@@ -41,6 +47,8 @@ export function SettingsPage({
 }): ReactNode {
   return (
     <Settings
+      section={section}
+      onSectionChange={onSectionChange}
       subtitle={subtitle}
       theme={theme}
       onThemeChange={onThemeChange}

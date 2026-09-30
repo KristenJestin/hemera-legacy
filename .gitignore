@@ -5,3 +5,4 @@ showcase-*.png
 shell-*.png
 reports/
 apps/desktop/adapters/
+apps/desktop/build/generated/

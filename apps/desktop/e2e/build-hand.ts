@@ -8,6 +8,8 @@
 
 import { browser, expect } from '@wdio/globals'
 
+import { NOTICES, openNotices, region } from './hand.ts'
+
 /** A build as the engine holds it, by task label: what the suites check. */
 export interface BuildNow {
   readonly phase: string
@@ -75,4 +77,19 @@ export async function pressExactly(words: string): Promise<void> {
   }, words)
   expect(pressed).toBe(true)
   await browser.pause(300)
+}
+
+/**
+ * Waits for a task to be the user's where the Session says so: a row of the build's kind of the
+ * notices on the composer's edge, `T2 is yours`, headed with the task (issue #237). The notices
+ * are left open, where the row's Done is.
+ */
+export async function awaitsYours(label: string, title: string): Promise<void> {
+  await openNotices('Build')
+  const row = `${NOTICES} [role="group"][aria-label="${label} is yours"]`
+  await browser.waitUntil(async () => (await region(row)).includes(`${label} · ${title}`), {
+    timeout: 20_000,
+    interval: 200,
+    timeoutMsg: `the notices never said ${label} is yours`,
+  })
 }

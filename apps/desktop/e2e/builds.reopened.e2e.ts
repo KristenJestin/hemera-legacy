@@ -7,7 +7,7 @@
  * `wdio.conf.ts` points this file at the data folder `builds.e2e.ts` wrote (`CONTINUED`), which
  * left the build mid-way — T1 done after a red try, T2 the user's, T3 waiting on it.
  *
- * Then the build ends where a build ends: the user marks T2 done from the view, the agent started
+ * Then the build ends where a build ends: the user marks T2 done from the notices, the agent started
  * again is handed T3 and finishes it, the final checks pass and Accept closes the build, the Spec
  * staying in progress.
  *
@@ -18,7 +18,7 @@ import { browser, expect } from '@wdio/globals'
 
 import { APPROACH } from './agent/script.ts'
 import { awaits, press, region } from './hand.ts'
-import { buildNow, pressExactly, unfoldTasks } from './build-hand.ts'
+import { awaitsYours, buildNow, pressExactly, unfoldTasks } from './build-hand.ts'
 
 const KEY = 'ATL-1'
 
@@ -35,7 +35,7 @@ describe('A restart resumes the build where it stood', () => {
     expect(build.paused).toBe(false)
     expect(build.states).toEqual({ T1: 'done', T2: 'yours', T3: 'waiting' })
     expect(build.tries.T1).toEqual(['red', 'green'])
-    await awaits('Yours: T2 · Sign the export format off')
+    await awaitsYours('T2', 'Sign the export format off')
   })
 })
 

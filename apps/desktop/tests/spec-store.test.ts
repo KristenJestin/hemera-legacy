@@ -505,6 +505,15 @@ describe('The build of a frozen Spec is read and reached', () => {
     expect(names()).toEqual([])
   })
 
+  test('a launch that moved on tells its Project, whose Sessions a started build adds to', async () => {
+    // A build is started in the engine after the request is answered (#132): the Session it makes
+    // is heard of through the launch alone, whichever Spec is on screen.
+    push({ event: 'launch.changed', specId: 'spec-9', projectId: 'atlas' })
+    await settled()
+
+    expect(told).toEqual(['atlas'])
+  })
+
   test('a build is asked for in a named Workspace, then the panel is read again', async () => {
     reads(2)
     await openSpec('spec-7')

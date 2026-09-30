@@ -610,7 +610,8 @@ export function Application() {
 
   // A Spec is written by whoever holds its right and read live by every Session on it (D7-11).
   // A Spec step can change a Session too — accepting a proposal makes it `define`, a Session is
-  // opened on a Spec — so the Sessions of the Project in front are read again with it.
+  // opened on a Spec, a build starts one — so the Sessions of the Project in front are read again
+  // with it.
   useEffect(
     () =>
       listenToSpecs((projectId) => {

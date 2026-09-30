@@ -83,6 +83,7 @@ import {
   updateAgent,
 } from './agent-store.ts'
 import { bareRowOf, offeredOf } from './bare-mode.ts'
+import { menuStatus, settingsEvaluator } from './classifier-status.ts'
 import {
   acceptProposal,
   addToCatalogue,
@@ -361,6 +362,7 @@ export function Application() {
   } | null>(null)
   const [classifierBusy, setClassifierBusy] = useState(false)
   const [classifierError, setClassifierError] = useState<string | undefined>()
+  const [classifierUnread, setClassifierUnread] = useState(false)
   const [subtitle, setSubtitle] = useState('Hemera')
   // Kept as the engine answered them and not as the page draws them: restoring one is a change
   // like any other and carries the version it was read at, which a name and a date do not have.
@@ -702,7 +704,9 @@ export function Application() {
   const readClassifier = useCallback(async () => {
     try {
       setClassifier(await window.hemera.invoke('classifier.read', {}))
+      setClassifierUnread(false)
     } catch {
+      setClassifierUnread(true)
       setClassifierError('The classifier settings could not be read.')
     }
   }, [])
@@ -731,11 +735,12 @@ export function Application() {
       ? undefined
       : {
           mode: classifier.mode,
-          status: classifierBusy
-            ? 'transitioning'
-            : classifier.credential === 'saved' && classifier.consent
-              ? 'ready'
-              : 'unavailable',
+          status: menuStatus({
+            busy: classifierBusy,
+            failed: classifierUnread,
+            credential: classifier.credential,
+            consent: classifier.consent,
+          }),
           onOpenSettings: () => setPlace('settings'),
         }
 
@@ -1139,7 +1144,10 @@ export function Application() {
                   onEngineChange: () => undefined,
                   credential: classifier.credential,
                   credentialMessage: classifierError,
-                  evaluator: classifierBusy ? 'transitioning' : 'ready',
+                  evaluator: settingsEvaluator({
+                    busy: classifierBusy,
+                    failed: classifierUnread,
+                  }),
                   consent: classifier.consent,
                   onConsentChange: (consent) =>
                     changeClassifier(() =>

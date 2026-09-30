@@ -138,6 +138,12 @@ const REPRODUCTION_MIGRATION = '20260930124109_bug_reproduction'
  */
 const REVIEW_ROUNDS_MIGRATION = '20260930170909_review_rounds'
 
+/**
+ * The migration of protocol v2 (issue #279): a build's phase may be `review` or `feedback`, and a
+ * build of 0.5 keeps the phase it stood in.
+ */
+const PROTOCOL_V2_MIGRATION = '20260930173534_build_protocol_v2'
+
 /** A folder carrying the shipped migrations up to one of them, as an older version did. */
 function shippedUpTo(last: string): string {
   const folder = join(workspace, `shipped-${last}`)
@@ -576,6 +582,7 @@ describe('A profile of lot 6 is migrated to lot 19 (specs)', () => {
       SETUP_MIGRATION,
       REPRODUCTION_MIGRATION,
       REVIEW_ROUNDS_MIGRATION,
+      PROTOCOL_V2_MIGRATION,
     ])
     expect(readdirSync(join(dataFolder, BACKUPS_FOLDER))).toEqual([`${SPECS_MIGRATION}.sqlite`])
 
@@ -956,6 +963,7 @@ describe('Un profil du lot 5 est migré vers le lot 6', () => {
       SETUP_MIGRATION,
       REPRODUCTION_MIGRATION,
       REVIEW_ROUNDS_MIGRATION,
+      PROTOCOL_V2_MIGRATION,
     ])
     expect(readdirSync(join(dataFolder, BACKUPS_FOLDER))).toEqual([`${TOOLS_MIGRATION}.sqlite`])
 
@@ -1106,6 +1114,7 @@ describe('A profile of lot 19 is migrated to lot 20', () => {
       SETUP_MIGRATION,
       REPRODUCTION_MIGRATION,
       REVIEW_ROUNDS_MIGRATION,
+      PROTOCOL_V2_MIGRATION,
     ])
     expect(readdirSync(join(dataFolder, BACKUPS_FOLDER))).toEqual([
       `${WORKSPACES_MIGRATION}.sqlite`,
@@ -1227,7 +1236,7 @@ describe('A profile of lot 19 is migrated to lot 20', () => {
       'profile.backed_up',
       'profile.migrated',
     ])
-    expect(JSON.parse(kept.events.at(-1)!.payload)).toEqual({ migration: REVIEW_ROUNDS_MIGRATION })
+    expect(JSON.parse(kept.events.at(-1)!.payload)).toEqual({ migration: PROTOCOL_V2_MIGRATION })
   })
 
   test('a command of a word of lot 18, or a step of an unknown state, is refused', async () => {
@@ -1439,6 +1448,7 @@ describe('A profile that ran the Workspaces gains the choices of its Sessions', 
       SETUP_MIGRATION,
       REPRODUCTION_MIGRATION,
       REVIEW_ROUNDS_MIGRATION,
+      PROTOCOL_V2_MIGRATION,
     ])
     expect(readdirSync(join(dataFolder, BACKUPS_FOLDER))).toEqual([`${CHOICES_MIGRATION}.sqlite`])
 
@@ -1476,7 +1486,13 @@ describe('A profile that ran the Workspaces gains the choices of its Sessions', 
  */
 function shippedWithoutTheBuild(): string {
   const folder = join(workspace, 'shipped-0.4')
-  const build = [BUILD_MIGRATION, REVIEW_MIGRATION, REPRODUCTION_MIGRATION, REVIEW_ROUNDS_MIGRATION]
+  const build = [
+    BUILD_MIGRATION,
+    REVIEW_MIGRATION,
+    REPRODUCTION_MIGRATION,
+    REVIEW_ROUNDS_MIGRATION,
+    PROTOCOL_V2_MIGRATION,
+  ]
   for (const migration of readdirSync(SHIPPED)) {
     if (build.includes(migration)) continue
     cpSync(join(SHIPPED, migration), join(folder, migration), { recursive: true })
@@ -1514,6 +1530,7 @@ describe('A profile of 0.4 is migrated to the build lot', () => {
       REVIEW_MIGRATION,
       REPRODUCTION_MIGRATION,
       REVIEW_ROUNDS_MIGRATION,
+      PROTOCOL_V2_MIGRATION,
     ])
     expect(readdirSync(join(dataFolder, BACKUPS_FOLDER))).toEqual([`${BUILD_MIGRATION}.sqlite`])
 
@@ -1594,6 +1611,7 @@ describe('A profile of lot 20 is migrated to lot 22', () => {
       SETUP_MIGRATION,
       REPRODUCTION_MIGRATION,
       REVIEW_ROUNDS_MIGRATION,
+      PROTOCOL_V2_MIGRATION,
     ])
     expect(readdirSync(join(dataFolder, BACKUPS_FOLDER))).toEqual([`${BUILD_MIGRATION}.sqlite`])
 
@@ -1922,6 +1940,7 @@ describe('A profile that ran the choices keeps a queued result across a quit', (
       SETUP_MIGRATION,
       REPRODUCTION_MIGRATION,
       REVIEW_ROUNDS_MIGRATION,
+      PROTOCOL_V2_MIGRATION,
     ])
     expect(readdirSync(join(dataFolder, BACKUPS_FOLDER))).toEqual([`${BUILD_MIGRATION}.sqlite`])
 
@@ -1973,6 +1992,7 @@ describe('A profile that ran the queued results keeps its commands, none run at 
       SETUP_MIGRATION,
       REPRODUCTION_MIGRATION,
       REVIEW_ROUNDS_MIGRATION,
+      PROTOCOL_V2_MIGRATION,
     ])
     expect(readdirSync(join(dataFolder, BACKUPS_FOLDER))).toEqual([
       `${RUN_AT_OPEN_MIGRATION}.sqlite`,
@@ -2018,6 +2038,7 @@ describe('A profile that ran the commands at open keeps what its Sessions were p
       SETUP_MIGRATION,
       REPRODUCTION_MIGRATION,
       REVIEW_ROUNDS_MIGRATION,
+      PROTOCOL_V2_MIGRATION,
     ])
     expect(readdirSync(join(dataFolder, BACKUPS_FOLDER))).toEqual([
       `${CONTEXT_WORDS_MIGRATION}.sqlite`,
@@ -2069,6 +2090,7 @@ describe('A profile that ran the context notices keeps its runs, none owed to an
       SETUP_MIGRATION,
       REPRODUCTION_MIGRATION,
       REVIEW_ROUNDS_MIGRATION,
+      PROTOCOL_V2_MIGRATION,
     ])
     expect(readdirSync(join(dataFolder, BACKUPS_FOLDER))).toEqual([`${RUN_TOLD_MIGRATION}.sqlite`])
 
@@ -2116,6 +2138,7 @@ describe('A profile that ran the run told keeps its threads, and holds a setup p
       SETUP_MIGRATION,
       REPRODUCTION_MIGRATION,
       REVIEW_ROUNDS_MIGRATION,
+      PROTOCOL_V2_MIGRATION,
     ])
     expect(readdirSync(join(dataFolder, BACKUPS_FOLDER))).toEqual([`${SETUP_MIGRATION}.sqlite`])
 
@@ -2158,7 +2181,11 @@ describe('A profile that ran the setup proposals keeps its builds, and holds a r
     )
 
     const standing = await on(dataFolder, openProfile(dataFolder, SHIPPED, '0.5.0'))
-    expect(standing.behind).toEqual([REPRODUCTION_MIGRATION, REVIEW_ROUNDS_MIGRATION])
+    expect(standing.behind).toEqual([
+      REPRODUCTION_MIGRATION,
+      REVIEW_ROUNDS_MIGRATION,
+      PROTOCOL_V2_MIGRATION,
+    ])
     expect(readdirSync(join(dataFolder, BACKUPS_FOLDER))).toEqual([
       `${REPRODUCTION_MIGRATION}.sqlite`,
     ])
@@ -2210,7 +2237,7 @@ describe('A profile of 0.5 is migrated to the review rounds', () => {
     )
 
     const standing = await on(dataFolder, openProfile(dataFolder, SHIPPED, '0.6.0'))
-    expect(standing.behind).toEqual([REVIEW_ROUNDS_MIGRATION])
+    expect(standing.behind).toEqual([REVIEW_ROUNDS_MIGRATION, PROTOCOL_V2_MIGRATION])
     expect(readdirSync(join(dataFolder, BACKUPS_FOLDER))).toEqual([
       `${REVIEW_ROUNDS_MIGRATION}.sqlite`,
     ])
@@ -2279,5 +2306,67 @@ describe('A profile of 0.5 is migrated to the review rounds', () => {
         'a story and a path at once',
       ],
     })
+  })
+})
+
+describe('A build of 0.5 keeps its phase under protocol v2', () => {
+  test('every phase stays, a round with it, and review and feedback are now phases', async () => {
+    const dataFolder = join(workspace, 'from-review-rounds')
+    await on(dataFolder, openProfile(dataFolder, shippedUpTo(REVIEW_ROUNDS_MIGRATION), '0.5.0'))
+    const phases = ['prepare', 'execute', 'verify', 'accepted', 'stopped'] as const
+    await on(
+      dataFolder,
+      Effect.gen(function* () {
+        const sql = yield* SqliteClient
+        const at = '2026-09-30T10:00:00.000Z'
+        yield* sql`INSERT INTO projects (id, name, tone, created_at, updated_at, version)
+          VALUES ('atlas', 'Atlas', 'primary', ${at}, ${at}, 1)`
+        for (const phase of phases) {
+          yield* sql`INSERT INTO sessions (id, project_id, title, title_source, provider, mission, build_phase, build_review_at, created_at, last_written_at, version)
+            VALUES (${`build-${phase}`}, 'atlas', 'Build ATL-9', 'derived', 'claude', 'build', ${phase}, ${phase === 'execute' ? at : null}, ${at}, ${at}, 1)`
+        }
+        yield* sql`INSERT INTO review_rounds (id, session_id, number, kind, state, opened_at)
+          VALUES ('round-1', 'build-verify', 1, 'spec', 'open', ${at})`
+      }),
+    )
+
+    const standing = await on(dataFolder, openProfile(dataFolder, SHIPPED, '0.6.0'))
+    expect(standing.behind).toEqual([PROTOCOL_V2_MIGRATION])
+
+    const kept = await on(
+      dataFolder,
+      Effect.gen(function* () {
+        const sql = yield* SqliteClient
+        const sessions = yield* sql<{
+          id: string
+          build_phase: string
+          build_review_at: string | null
+        }>`
+          SELECT id, build_phase, build_review_at FROM sessions ORDER BY id`
+        const rounds = yield* sql<{ id: string; session_id: string }>`
+          SELECT id, session_id FROM review_rounds`
+        yield* sql`UPDATE sessions SET build_phase = 'review' WHERE id = 'build-verify'`
+        yield* sql`UPDATE sessions SET build_phase = 'feedback' WHERE id = 'build-execute'`
+        const unknown = yield* Effect.exit(
+          sql`UPDATE sessions SET build_phase = 'deliver' WHERE id = 'build-prepare'`,
+        )
+        const moved = yield* sql<{ id: string; build_phase: string }>`
+          SELECT id, build_phase FROM sessions WHERE id IN ('build-verify', 'build-execute') ORDER BY id`
+        return { sessions, rounds, moved, refused: Exit.isFailure(unknown) }
+      }),
+    )
+    expect(kept.sessions).toEqual([
+      { id: 'build-accepted', build_phase: 'accepted', build_review_at: null },
+      { id: 'build-execute', build_phase: 'execute', build_review_at: '2026-09-30T10:00:00.000Z' },
+      { id: 'build-prepare', build_phase: 'prepare', build_review_at: null },
+      { id: 'build-stopped', build_phase: 'stopped', build_review_at: null },
+      { id: 'build-verify', build_phase: 'verify', build_review_at: null },
+    ])
+    expect(kept.rounds).toEqual([{ id: 'round-1', session_id: 'build-verify' }])
+    expect(kept.moved).toEqual([
+      { id: 'build-execute', build_phase: 'feedback' },
+      { id: 'build-verify', build_phase: 'review' },
+    ])
+    expect(kept.refused).toBe(true)
   })
 })

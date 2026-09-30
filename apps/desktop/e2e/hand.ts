@@ -365,8 +365,8 @@ export async function openNotices(kind: string, within = 20_000): Promise<void> 
 
 /**
  * Waits for a line of the thread named this way, a record of something that waited for the reader
- * (issue #237): `Spec proposed, ATL-1 «…», created`, `Proposed command dev, added to the catalogue`.
- * Read by its name, which says the answer the dot draws.
+ * (issue #237): `Spec proposed, ATL-1 «…», created`. Read by its name, which says the answer the dot
+ * draws. What a call proposed is not such a line: see `awaitsCallMark`.
  */
 export async function awaitsRecord(name: string, within = 20_000): Promise<void> {
   await browser.waitUntil(
@@ -379,6 +379,32 @@ export async function awaitsRecord(name: string, within = 20_000): Promise<void>
         name,
       ),
     { timeout: within, interval: 200, timeoutMsg: `the thread never kept "${name}"` },
+  )
+}
+
+/**
+ * Waits for one of Hemera's calls in the thread to wear this mark of what became of it — `added to
+ * the catalogue`, `declined` — unfolding the groups of work on the way: a call's own proposal is
+ * drawn with the call, not as a row, and the call folds with the work around it (review of #250).
+ */
+export async function awaitsCallMark(mark: string, within = 20_000): Promise<void> {
+  await browser.waitUntil(
+    async () =>
+      await browser.execute((named: string) => {
+        const thread = document.querySelector('[aria-label="The thread of this Session"]')
+        if (thread === null) return false
+        const marks = thread.querySelectorAll('[role="img"][aria-label]')
+        if ([...marks].some((one) => one.getAttribute('aria-label') === named)) return true
+        // A group of work, folded: `3 actions · …`, opened the way a hand opens it.
+        for (const button of thread.querySelectorAll('button[aria-expanded="false"]')) {
+          const line = button.parentElement?.textContent ?? ''
+          if (/^\s*\d+ (actions|runs)\b/.test(line) && button instanceof HTMLButtonElement) {
+            button.click()
+          }
+        }
+        return false
+      }, mark),
+    { timeout: within, interval: 200, timeoutMsg: `no call of the thread ever said "${mark}"` },
   )
 }
 

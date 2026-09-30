@@ -36,7 +36,7 @@ import { AGENT, ANSWERS, COMMAND_PROPOSAL, COMMAND_PROPOSE_ANSWER, MODELS } from
 import {
   addProject,
   awaits,
-  awaitsRecord,
+  awaitsCallMark,
   choose,
   control,
   fill,
@@ -611,7 +611,8 @@ describe('A proposal enters the catalogue only when accepted', () => {
     expect(await catalogue()).not.toContain(COMMAND_PROPOSAL.name)
 
     await $(proposal).$('button=Add').click()
-    await awaitsRecord(`Proposed command ${COMMAND_PROPOSAL.name}, added to the catalogue`)
+    // The thread keeps its record on the call that proposed it, folded with the work around it.
+    await awaitsCallMark('added to the catalogue')
 
     await settings('Commands')
     expect(await $(`button[aria-label="Remove ${COMMAND_PROPOSAL.name}"]`).isExisting()).toBe(true)

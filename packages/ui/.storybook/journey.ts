@@ -32,7 +32,7 @@ export type Journey = 'travelled' | 'jumped' | 'unseen'
  * journey of tens of pixels. A change from one end to the other inside less than this was not a
  * journey.
  */
-const WHOLE_WAY = 300
+export const WHOLE_WAY = 300
 
 /** A length being read on every frame. */
 export interface Watch {

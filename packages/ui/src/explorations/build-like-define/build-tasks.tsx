@@ -1,5 +1,5 @@
 import { AnimatePresence, motion } from 'motion/react'
-import { type ReactNode, useState } from 'react'
+import type { ReactNode } from 'react'
 
 import { IconButton } from '../../components/button/button.tsx'
 import { StatusDot, type StatusTone } from '../../components/status-dot/status-dot.tsx'
@@ -48,9 +48,9 @@ import { type BoardTask, type TaskReturn, TASK_STORIES } from './tasks-fixtures.
 export type Grouping = 'story' | 'list' | 'state'
 
 /** Where a task stands, at the level the progress line counts it. */
-type Bucket = 'done' | 'progress' | 'you' | 'todo'
+export type Bucket = 'done' | 'progress' | 'you' | 'todo'
 
-const BUCKET_OF: Record<BuildTaskState, Bucket> = {
+export const BUCKET_OF: Record<BuildTaskState, Bucket> = {
   done: 'done',
   skipped: 'done',
   in_progress: 'progress',
@@ -69,7 +69,7 @@ const BUCKETS: readonly { bucket: Bucket; word: string }[] = [
 ]
 
 /** A segment of the bar, in its bucket's colour. */
-const SEGMENT: Record<Bucket, string> = {
+export const SEGMENT: Record<Bucket, string> = {
   done: 'h-1.5 min-w-0 flex-1 rounded-full bg-success',
   progress: 'h-1.5 min-w-0 flex-1 rounded-full bg-warning',
   you: 'h-1.5 min-w-0 flex-1 rounded-full bg-destructive',
@@ -109,7 +109,7 @@ const GROUP_TITLE = 'min-w-0 truncate font-medium text-foreground'
 const GROUP_BAR = 'ml-auto flex w-24 shrink-0 items-center gap-0.5'
 
 const ROW =
-  'flex w-full min-w-0 items-center gap-3 rounded-md px-2 py-1.5 text-left text-sm outline-none hover:bg-accent focus-ring aria-expanded:bg-accent'
+  'flex w-full min-w-0 items-center gap-3 rounded-md px-2 py-1.5 text-left text-sm outline-none hover:bg-accent focus-ring aria-expanded:bg-accent aria-pressed:bg-accent'
 
 const STATE = 'flex size-icon-md shrink-0 items-center justify-center'
 
@@ -125,6 +125,9 @@ const CHEVRON =
   'flex shrink-0 text-muted-foreground transition-transform in-aria-expanded:rotate-180'
 
 const DETAIL = 'grid grid-cols-1 gap-4 px-2 pt-2 pb-4 pl-12 @3xl:grid-cols-3 @3xl:gap-6'
+
+/** The detail in a pane of its own: its parts one under the other. */
+const STACKED = 'flex flex-col gap-6 px-6 py-5'
 
 const PART = 'flex min-w-0 flex-col gap-2'
 
@@ -142,106 +145,152 @@ const RETURN = 'flex min-w-0 items-start gap-2 text-sm'
 
 const RETURN_ICON = 'flex shrink-0 pt-0.5 text-muted-foreground'
 
-export interface BuildTasksProps {
+/** How a list's tasks open: unfolded in place beside the chat, or picked for a pane beside. */
+export type TaskOpening = 'unfold' | 'select'
+
+export interface TasksProps {
   specKey: string
   title: string
   tasks: readonly BoardTask[]
-  defaultGrouping?: Grouping | undefined
-  /** The task unfolded as the view is drawn. */
-  defaultOpen?: string | null | undefined
+  grouping: Grouping
+  onGrouping: (grouping: Grouping) => void
+  /** The task open, as `group:task`, since a task of two stories is listed twice. */
+  open: string | null
+  onOpen: (open: string | null) => void
+  /** Whether the frozen Spec is shown, which its button says. */
+  specShown?: boolean | undefined
   onSpec: () => void
 }
 
-export function BuildTasks({
+/** The build's tasks as they stand beside the chat: the head, and the list unfolding in place. */
+export function BuildTasks(props: TasksProps): ReactNode {
+  return (
+    <section aria-label={`Tasks of ${props.specKey}`} className={VIEW}>
+      <TasksHead {...props} />
+      <div className={BODY}>
+        <TaskList {...props} opening="unfold" />
+      </div>
+    </section>
+  )
+}
+
+/** The head: the Spec, its actions, and how far the build is at a glance. */
+export function TasksHead({
   specKey,
   title,
   tasks,
-  defaultGrouping = 'story',
-  defaultOpen = null,
+  grouping,
+  onGrouping,
+  specShown = false,
   onSpec,
-}: BuildTasksProps): ReactNode {
-  const [grouping, setGrouping] = useState<Grouping>(defaultGrouping)
-  const [open, setOpen] = useState<string | null>(defaultOpen)
+}: TasksProps): ReactNode {
   const ordered = orderOf(tasks)
   return (
-    <section aria-label={`Tasks of ${specKey}`} className={VIEW}>
-      <header className={HEAD}>
-        <div className={HEAD_LINE}>
-          <span className={KEY}>{specKey}</span>
-          <h3 className={TITLE}>{title}</h3>
-          <StatusDot status="running" label="Building" />
-          <span className={ACTIONS}>
-            <Action label="The frozen Spec" icon={<IconFileDescription size="sm" />} on={onSpec} />
-            <Action label="Pause the build" icon={<IconPlayerPause size="sm" />} on={() => {}} />
-            <Action label="Stop the build" icon={<IconPlayerStop size="sm" />} on={() => {}} />
-          </span>
+    <header className={HEAD}>
+      <div className={HEAD_LINE}>
+        <span className={KEY}>{specKey}</span>
+        <h3 className={TITLE}>{title}</h3>
+        <StatusDot status="running" label="Building" />
+        <span className={ACTIONS}>
+          <Tooltip label="The frozen Spec">
+            <IconButton
+              variant={specShown ? 'secondary' : 'ghost'}
+              size="sm"
+              icon={<IconFileDescription size="sm" />}
+              aria-label="The frozen Spec"
+              aria-pressed={specShown}
+              onClick={onSpec}
+            />
+          </Tooltip>
+          <Action label="Pause the build" icon={<IconPlayerPause size="sm" />} on={() => {}} />
+          <Action label="Stop the build" icon={<IconPlayerStop size="sm" />} on={() => {}} />
+        </span>
+      </div>
+      <div className={PROGRESS}>
+        <Counts tasks={tasks} />
+        <div role="img" aria-label="Where each task stands" className={BAR}>
+          {ordered.map((task) => (
+            <span key={task.id} className={SEGMENT[BUCKET_OF[task.state]]} />
+          ))}
         </div>
-        <div className={PROGRESS}>
-          <Counts tasks={tasks} />
-          <div role="img" aria-label="Where each task stands" className={BAR}>
-            {ordered.map((task) => (
-              <span key={task.id} className={SEGMENT[BUCKET_OF[task.state]]} />
-            ))}
-          </div>
-          <div role="group" aria-label="Group the tasks" className={GROUPINGS}>
-            <Grouper
-              value="story"
-              label="By story"
-              icon={<IconListTree size="sm" />}
-              current={grouping}
-              onPick={setGrouping}
-            />
-            <Grouper
-              value="list"
-              label="One list"
-              icon={<IconLayoutList size="sm" />}
-              current={grouping}
-              onPick={setGrouping}
-            />
-            <Grouper
-              value="state"
-              label="By state"
-              icon={<IconCircleCheck size="sm" />}
-              current={grouping}
-              onPick={setGrouping}
-            />
-          </div>
+        <div role="group" aria-label="Group the tasks" className={GROUPINGS}>
+          <Grouper
+            value="story"
+            label="By story"
+            icon={<IconListTree size="sm" />}
+            current={grouping}
+            onPick={onGrouping}
+          />
+          <Grouper
+            value="list"
+            label="One list"
+            icon={<IconLayoutList size="sm" />}
+            current={grouping}
+            onPick={onGrouping}
+          />
+          <Grouper
+            value="state"
+            label="By state"
+            icon={<IconCircleCheck size="sm" />}
+            current={grouping}
+            onPick={onGrouping}
+          />
         </div>
-      </header>
-      <div className={BODY}>
-        {groupsOf(tasks, grouping).map((group) => (
-          <div key={group.id} role="group" aria-label={group.title} className={GROUP}>
-            {group.title !== '' && (
-              <div className={GROUP_HEAD}>
-                {group.key !== '' && <span className="font-mono">{group.key}</span>}
-                <span className={GROUP_TITLE}>{group.title}</span>
-                <span className="font-mono tabular-nums">
-                  {String(group.tasks.filter((one) => BUCKET_OF[one.state] === 'done').length)}/
-                  {String(group.tasks.length)}
-                </span>
-                <span aria-hidden="true" className={GROUP_BAR}>
-                  {group.tasks.map((task) => (
-                    <span key={task.id} className={SEGMENT[BUCKET_OF[task.state]]} />
-                  ))}
-                </span>
-              </div>
-            )}
-            {group.tasks.map((task) => (
+      </div>
+    </header>
+  )
+}
+
+/** The tasks, grouped as asked; each one unfolds in place, or is picked for the pane beside. */
+export function TaskList({
+  tasks,
+  grouping,
+  open,
+  onOpen,
+  opening,
+}: TasksProps & { opening: TaskOpening }): ReactNode {
+  return (
+    <>
+      {groupsOf(tasks, grouping).map((group) => (
+        <div key={group.id} role="group" aria-label={group.title} className={GROUP}>
+          {group.title !== '' && (
+            <div className={GROUP_HEAD}>
+              {group.key !== '' && <span className="font-mono">{group.key}</span>}
+              <span className={GROUP_TITLE}>{group.title}</span>
+              <span className="font-mono tabular-nums">
+                {String(group.tasks.filter((one) => BUCKET_OF[one.state] === 'done').length)}/
+                {String(group.tasks.length)}
+              </span>
+              <span aria-hidden="true" className={GROUP_BAR}>
+                {group.tasks.map((task) => (
+                  <span key={task.id} className={SEGMENT[BUCKET_OF[task.state]]} />
+                ))}
+              </span>
+            </div>
+          )}
+          {group.tasks.map((task) => {
+            const key = `${group.id}:${task.id}`
+            return (
               <TaskRow
                 key={task.id}
                 task={task}
                 showStories={grouping !== 'story'}
-                open={open === `${group.id}:${task.id}`}
-                onToggle={() =>
-                  setOpen(open === `${group.id}:${task.id}` ? null : `${group.id}:${task.id}`)
-                }
+                opening={opening}
+                open={opening === 'select' ? taskOf(tasks, open)?.id === task.id : open === key}
+                onToggle={() => onOpen(open === key && opening === 'unfold' ? null : key)}
               />
-            ))}
-          </div>
-        ))}
-      </div>
-    </section>
+            )
+          })}
+        </div>
+      ))}
+    </>
   )
+}
+
+/** The task a `group:task` key names. */
+export function taskOf(tasks: readonly BoardTask[], open: string | null): BoardTask | undefined {
+  const id = open?.split(':')[1]
+  return tasks.find((task) => task.id === id)
 }
 
 function Action({ label, icon, on }: { label: string; icon: ReactNode; on: () => void }) {
@@ -350,14 +399,17 @@ const CHECK_TONES: Record<BuildCheckView['verdict'], StatusTone> = {
 function TaskRow({
   task,
   showStories,
+  opening,
   open,
   onToggle,
 }: {
   task: BoardTask
   showStories: boolean
+  opening: TaskOpening
   open: boolean
   onToggle: () => void
 }): ReactNode {
+  const unfolds = opening === 'unfold'
   const transition = useTransition(fold)
   const stories = TASK_STORIES.filter((story) => task.storyIds.includes(story.id))
   return (
@@ -365,7 +417,8 @@ function TaskRow({
       <button
         type="button"
         className={ROW}
-        aria-expanded={open}
+        aria-expanded={unfolds ? open : undefined}
+        aria-pressed={unfolds ? undefined : open}
         data-task={task.label}
         onClick={onToggle}
       >
@@ -388,12 +441,14 @@ function TaskRow({
             />
           ))}
         </span>
-        <span className={CHEVRON}>
-          <IconChevronDown size="sm" aria-hidden="true" />
-        </span>
+        {unfolds && (
+          <span className={CHEVRON}>
+            <IconChevronDown size="sm" aria-hidden="true" />
+          </span>
+        )}
       </button>
       <AnimatePresence initial={false}>
-        {open && (
+        {unfolds && open && (
           <motion.div
             key="detail"
             className="overflow-hidden"
@@ -411,11 +466,22 @@ function TaskRow({
 }
 
 /** A task unfolded: its tries and their checks, the files, and what came back on it. */
-function TaskDetail({ task }: { task: BoardTask }): ReactNode {
+export function TaskDetail({
+  task,
+  stacked = false,
+}: {
+  task: BoardTask
+  /** Its parts one under the other, in a pane of its own. */
+  stacked?: boolean | undefined
+}): ReactNode {
   const files =
     [...task.attempts].reverse().find((attempt) => attempt.files.length > 0)?.files ?? []
   return (
-    <div className={DETAIL} role="region" aria-label={`${task.label} in detail`}>
+    <div
+      className={stacked ? STACKED : DETAIL}
+      role="region"
+      aria-label={`${task.label} in detail`}
+    >
       <div className={PART}>
         <span className={PART_HEAD}>
           <IconFlask size="sm" aria-hidden="true" />

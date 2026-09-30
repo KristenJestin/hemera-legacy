@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import type { ReactNode } from 'react'
 
-import type { ComposerChoice } from '@hemera/ipc'
+import type { ComposerChoice, PromptIntent } from '@hemera/ipc'
 import {
   ActivityFrame,
   AgentModelMenu,
@@ -9,6 +9,7 @@ import {
   EmptyProject,
   Greeting,
   SessionsFrame,
+  type AgentListing,
   type HomeSession,
   type JournalLine,
   type OfferedAgent,
@@ -22,6 +23,7 @@ import {
   openingAgentOf,
 } from '../agent-options.ts'
 import type { AgentOffering } from '../agent-store.ts'
+import type { OfferedWorkspace } from '../sessions-store.ts'
 
 /**
  * The Home of the active Project (design D4-07, D4b-02, D5-17, D17-11).
@@ -41,6 +43,9 @@ import type { AgentOffering } from '../agent-store.ts'
  * the agent and answers with what it announces then — which is the only way the effort of a
  * reasoning model ever appears (D5-13). Nothing about those choices is remembered here and
  * nothing is handed over again when the Session starts: the engine keeps them for it.
+ *
+ * The Workspace the Session will work in is chosen here too, on the pill at the foot of the box
+ * (D8-08): `main` unless another is picked, and handed to the Session when it is made.
  */
 const PAGE = 'mx-auto flex max-w-3xl flex-col gap-6 px-6 py-10'
 
@@ -55,6 +60,8 @@ export function HomePage({
   sessions,
   entries,
   agents,
+  agentsListing,
+  onRetryAgents,
   choice,
   offeringOf,
   onChooseAgent,
@@ -64,7 +71,10 @@ export function HomePage({
   onOpenJournal,
   onSearchFiles,
   onPickFiles,
+  workspaces,
   onSend,
+  focusComposer = false,
+  onFocusTaken,
 }: {
   projectName: string
   /** The last Sessions of this Project, most recently written first. */
@@ -72,6 +82,10 @@ export function HomePage({
   entries: JournalLine[]
   /** The agents this machine has, as the registry named them. */
   agents: OfferedAgent[]
+  /** Where that list stands: looked for, listed, or not read (`AgentListing`). */
+  agentsListing: AgentListing
+  /** Asks for the list again, which the menu offers when it could not be read. */
+  onRetryAgents: () => void
   /**
    * What this Project's composer was left on, as the data folder remembers it (design D5-17).
    *
@@ -91,14 +105,35 @@ export function HomePage({
   onOpenSession: (id: string) => void
   onOpenAllSessions: () => void
   onOpenJournal: () => void
-  onSearchFiles: (query: string) => Promise<string[]>
-  onPickFiles: () => Promise<string[]>
-  /** Starts the Session with the chosen agent, and says what to write in it. */
-  onSend: (text: string, agent: string) => Promise<string | null>
+  /** Searches the files of a Workspace, null for `main`: the one the pill chose (D8-08). */
+  onSearchFiles: (workspaceId: string | null, query: string) => Promise<string[]>
+  onPickFiles: (workspaceId: string | null) => Promise<string[]>
+  /** The Project's Workspaces a Session may be made in: `ready`, `main` first (D8-08). */
+  workspaces: readonly OfferedWorkspace[]
+  /**
+   * Starts the Session with the chosen agent in the chosen Workspace (null for `main`), and says
+   * what to write in it: with the intent `spec` when it was started by `New Spec` (issue #128).
+   */
+  onSend: (
+    text: string,
+    agent: string,
+    workspaceId: string | null,
+    intent?: PromptIntent,
+  ) => Promise<string | null>
+  /**
+   * Whether the caret is asked for in the composer, now: the sidebar's `+` (issue #128). Let go
+   * of with `onFocusTaken` once the box has it.
+   */
+  focusComposer?: boolean | undefined
+  onFocusTaken?: (() => void) | undefined
 }): ReactNode {
   const [value, setValue] = useState('')
   const [files, setFiles] = useState<string[]>([])
   const [agent, setAgent] = useState<string | null>(null)
+  const [named, setNamed] = useState<string | null>(null)
+  // The Workspace picked, by the name the pill shows; `main` until another is, and again if the
+  // one picked stops being offered — cleaned up meanwhile.
+  const workspace = workspaces.find((one) => one.name === named) ?? workspaces[0]
   const offering = agent === null ? null : offeringOf(agent)
   const options = offering?.options ?? []
   const model = modelStage(options)
@@ -150,12 +185,18 @@ export function HomePage({
         onValueChange={setValue}
         files={files}
         onFilesChange={setFiles}
-        onSearchFiles={onSearchFiles}
-        onPickFiles={onPickFiles}
+        onSearchFiles={async (query) => await onSearchFiles(workspace?.id ?? null, query)}
+        onPickFiles={async () => await onPickFiles(workspace?.id ?? null)}
         sendDisabledReason={reason}
+        // Until the list is read the composer offers its own `main`, which is what null sends.
+        workspaces={workspaces.length === 0 ? undefined : [...workspaces]}
+        workspace={workspace?.name}
+        onWorkspaceChange={setNamed}
         agentMenu={
           <AgentModelMenu
             agents={agents}
+            listing={agentsListing}
+            onRetryAgents={onRetryAgents}
             agent={agent}
             onAgentChange={choose}
             models={model?.choices ?? []}
@@ -182,9 +223,16 @@ export function HomePage({
           />
         }
         // The Home is where a Spec is made from the question that starts a Session; a Session is
-        // a conversation already under way and offers nothing of the sort (D4b-02).
-        spec
-        onSend={async (text) => (agent === null ? NO_AGENT : await onSend(text, agent))}
+        // a conversation already under way and offers nothing of the sort (D4b-02). The same
+        // Session as a send, whose agent is asked for a Spec proposal from it (issue #128).
+        onSpec={async (text) =>
+          agent === null ? NO_AGENT : await onSend(text, agent, workspace?.id ?? null, 'spec')
+        }
+        onSend={async (text) =>
+          agent === null ? NO_AGENT : await onSend(text, agent, workspace?.id ?? null)
+        }
+        takeFocus={focusComposer}
+        onFocusTaken={onFocusTaken}
       />
       {sessions.length === 0 ? (
         <EmptyProject projectName={projectName} onOpenJournal={onOpenJournal} />

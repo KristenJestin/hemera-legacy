@@ -36,7 +36,9 @@ import {
   processSupervisorLayer,
 } from '#engine/agents/supervisor.ts'
 import { agentDirectoriesLayer } from '#engine/agents/bare.ts'
+import { acpTracesLayer } from '#engine/agents/trace.ts'
 import { type HeldWords, heldWordsLayer } from '#engine/agents/held.ts'
+import { sessionModesLayer } from '#engine/agents/modes.ts'
 import { type Commands, commandsLayer } from '#engine/commands/service.ts'
 import { type Context as AgentContext, contextLayer } from '#engine/context/service.ts'
 import { type Journal, journalLayer } from '#engine/journal.ts'
@@ -45,6 +47,7 @@ import { preferencesLayer } from '#engine/preferences.ts'
 import type { Preferences } from '#engine/preferences.ts'
 import { Projects, projectsLayer } from '#engine/projects.ts'
 import { Sessions, sessionsLayer, type ThreadWrite } from '#engine/sessions.ts'
+import { domainEventsLayer } from '#engine/domain-events.ts'
 import { NoSpecNotices, type SpecNotices } from '#engine/specs/notices.ts'
 import { type Specs, specsLayer } from '#engine/specs/specs.ts'
 import { DatabaseError, databaseLayer } from '#engine/storage/database.ts'
@@ -54,6 +57,12 @@ import type { ToolAccess } from '#engine/tools/access.ts'
 import { toolCatalogueLayer } from '#engine/tools/catalogue.ts'
 import { type ToolPermissions, toolPermissionsLayer } from '#engine/tools/permissions.ts'
 import { ToolServer, toolServerLayer } from '#engine/tools/server.ts'
+import { type Git, gitLayer } from '#engine/git.ts'
+import { setupDeskLayer } from '#engine/setup/proposals.ts'
+import { type SetupValues, setupValuesLayer } from '#engine/setup/values.ts'
+import { type Recipe, recipeLayer } from '#engine/workspaces/recipe.ts'
+import { type Variables, variablesLayer } from '#engine/workspaces/variables.ts'
+import { type Workspaces, WorkspacesRoot, workspacesLayer } from '#engine/workspaces/workspaces.ts'
 
 export const SHIPPED = join(import.meta.dirname, '..', 'drizzle')
 
@@ -68,6 +77,21 @@ export const VERSION = '0.4.0'
  * from a `node_modules` this machine pretends to have, which is where a real one would find them
  * — never the `PATH`.
  */
+/**
+ * The same machine, holding none of the agents' bare means: a start that cannot happen, as it
+ * cannot on a machine where the agent was never installed (D6-02).
+ */
+export const bareMachine = Layer.succeed(MachineEnvironment, {
+  home: '/home/ana',
+  env: {},
+  locate: (command: string) => Effect.succeed(join('/usr/local/bin', command)),
+  bundled: (packageName: string) =>
+    Effect.succeed(join('/opt/hemera/node_modules', packageName, 'dist', 'index.js')),
+  readVersion: () => Effect.succeed('1.0.0'),
+  holds: () => Effect.succeed(false),
+  read: () => Effect.succeed(undefined),
+})
+
 export const machine = Layer.succeed(MachineEnvironment, {
   home: '/home/ana',
   env: {},
@@ -107,6 +131,13 @@ export function watching() {
       // A run is pushed as the run it is and not as an entry: the suites that watch the window
       // read the thread, and the Commands panel has suites of its own.
       ran: () => undefined,
+      // A launch change is about a Spec: the suite about the panel's own read of it is the
+      // renderer's, and this double keeps to what the thread is drawn from.
+      launched: () => undefined,
+      // A Workspace change is about a Project: the suites about Workspaces read it of their own.
+      workspace: () => undefined,
+      // A change of the machine's agents is the Agents section's own: its suites read it.
+      agents: () => undefined,
     }),
   }
 }
@@ -198,14 +229,20 @@ export function application(
     > = runtimeLayer.pipe(
       Layer.provideMerge(toolAccessLayer),
       Layer.provideMerge(contextLayer),
-      Layer.provide(Layer.mergeAll(server, commandsLayer, toolPermissionsLayer)),
+      Layer.provide(
+        Layer.mergeAll(server, commandsLayer, toolPermissionsLayer, gitLayer(), variablesLayer),
+      ),
       Layer.provideMerge(
         Layer.mergeAll(
           projectsLayer,
           storage.sessions,
           preferencesLayer,
           specsLayer.pipe(Layer.provide(NoSpecNotices)),
-        ).pipe(Layer.provideMerge(databaseLayer(join(dataFolder, 'hemera.sqlite')))),
+        ).pipe(
+          Layer.provideMerge(
+            Layer.mergeAll(databaseLayer(join(dataFolder, 'hemera.sqlite')), domainEventsLayer),
+          ),
+        ),
       ),
       Layer.provide(discoveryLayer.pipe(Layer.provide(environment))),
       Layer.provide(supervisor ?? fakeSupervisor(agent)),
@@ -216,7 +253,9 @@ export function application(
       Layer.provide(poolLayer.pipe(Layer.provide(clockLayer))),
       Layer.provideMerge(TestClock.layer()),
       Layer.provideMerge(heldWordsLayer),
+      Layer.provideMerge(sessionModesLayer),
       Layer.provide(agentDirectoriesLayer(dataFolder)),
+      Layer.provide(acpTracesLayer(dataFolder)),
     )
     return <A, E>(
       program: Effect.Effect<
@@ -383,6 +422,11 @@ export type ToolEngine =
   | Database
   | SqliteClient
   | HeldWords
+  | Variables
+  | Workspaces
+  | Recipe
+  | SetupValues
+  | Git
 
 /**
  * One supervisor for an agent that is the fake and commands that are real (D5-04, D6-11, D6-12).
@@ -418,6 +462,20 @@ export const besideTheAgent = (
   ).pipe(Layer.provide(processSupervisorLayer))
 
 /**
+ * The Workspaces and the recipe the setup tools read, and the values they hold (#218), over the
+ * machine's `git`, made under the data folder: handed up, so a suite accepting a proposal changes
+ * what the tools read.
+ */
+export function setupPlaces(dataFolder: string, notices: Layer.Layer<AgentNotices> = NoNotices) {
+  const places = Layer.mergeAll(workspacesLayer, recipeLayer, setupValuesLayer).pipe(
+    Layer.provideMerge(gitLayer()),
+    Layer.provide(Layer.succeed(WorkspacesRoot, join(dataFolder, 'workspaces'))),
+    Layer.provide(notices),
+  )
+  return setupDeskLayer.pipe(Layer.provideMerge(places))
+}
+
+/**
  * A run of the whole engine over one fake agent that reaches Hemera's tools (design D6-11).
  *
  * `application` hands its runtime an address nothing listens on; this one is the composition the
@@ -445,15 +503,19 @@ export function toolApplication(
           written.push(line)
         }),
     })
+    const places = setupPlaces(dataFolder)
     const tools = toolServerLayer.pipe(
       Layer.provideMerge(toolCatalogueLayer),
       Layer.provideMerge(toolAccessLayer),
       Layer.provideMerge(toolPermissionsLayer),
       Layer.provideMerge(commandsLayer),
+      Layer.provide(variablesLayer),
+      Layer.provideMerge(places),
     )
     const services: Layer.Layer<ToolEngine> = runtimeLayer.pipe(
       Layer.provideMerge(tools),
-      Layer.provideMerge(contextLayer),
+      Layer.provideMerge(contextLayer.pipe(Layer.provide(gitLayer()))),
+      Layer.provideMerge(variablesLayer),
       Layer.provideMerge(journalLayer),
       Layer.provideMerge(
         Layer.mergeAll(
@@ -461,7 +523,11 @@ export function toolApplication(
           storage.sessions,
           preferencesLayer,
           specsLayer.pipe(Layer.provide(specNotices)),
-        ).pipe(Layer.provideMerge(databaseLayer(join(dataFolder, 'hemera.sqlite')))),
+        ).pipe(
+          Layer.provideMerge(
+            Layer.mergeAll(databaseLayer(join(dataFolder, 'hemera.sqlite')), domainEventsLayer),
+          ),
+        ),
       ),
       Layer.provide(discoveryLayer.pipe(Layer.provide(environment))),
       Layer.provide(
@@ -473,7 +539,9 @@ export function toolApplication(
       Layer.provide(lines),
       Layer.provide(poolLayer.pipe(Layer.provide(clockLayer))),
       Layer.provideMerge(heldWordsLayer),
+      Layer.provideMerge(sessionModesLayer),
       Layer.provide(agentDirectoriesLayer(dataFolder)),
+      Layer.provide(acpTracesLayer(dataFolder)),
     )
     return <A, E>(program: Effect.Effect<A, E, ToolEngine | Scope.Scope>) =>
       Effect.runPromise(

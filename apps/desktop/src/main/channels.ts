@@ -3,14 +3,16 @@
 import type { DisplayPreferences, EngineEvent } from '@hemera/ipc'
 import { ENGINE_EVENT_CHANNEL } from '@hemera/ipc'
 import { type BrowserWindow, dialog } from 'electron/main'
+import type { OpenDialogOptions } from 'electron'
 import { shell } from 'electron/common'
+import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { Effect } from 'effect'
 
 import type { ApplicationIdentity } from './channel.ts'
 import { readSidecar, writeSidecar } from './display-sidecar.ts'
-import { DIAGNOSTIC_FILE } from './diagnostic.ts'
+import { DIAGNOSTIC_FILE, traceFileOf } from './diagnostic.ts'
 import { collectReport } from './environment.ts'
 import { handle } from './handle.ts'
 import type { EngineConversation } from './engine-conversation.ts'
@@ -105,14 +107,20 @@ export function registerChannels(
    * is picking, and a window that says File while greying out every file is a window the user
    * reads twice. `createDirectory` because the folder of a Workspace is often one that does not
    * exist yet — which is the whole reason the field accepts a path nothing is at.
+   *
+   * It opens on the folder the page says the user is working in, when it says one: a command's
+   * picker starts where that command runs from. A page that says nothing gets the system's own
+   * last place, which is where a picker left to itself opens.
    */
-  handle('dialog.pickFolder', () =>
+  handle('dialog.pickFolder', ({ start }) =>
     Effect.promise(async () => {
-      const chosen = await dialog.showOpenDialog(window, {
+      const options: OpenDialogOptions = {
         title: 'Choose a folder',
         buttonLabel: 'Choose',
         properties: ['openDirectory', 'createDirectory'],
-      })
+      }
+      if (start !== undefined) options.defaultPath = start
+      const chosen = await dialog.showOpenDialog(window, options)
       return chosen.canceled ? null : (chosen.filePaths[0] ?? null)
     }),
   )
@@ -154,6 +162,25 @@ export function registerChannels(
     }),
   )
 
+  /**
+   * The ACP trace of one Session, which the engine writes when the settings ask it to (#131):
+   * whether there is one, and the file itself opened with the desktop. Resolved here, from the
+   * Session's identifier, as the diagnostic is.
+   */
+  handle('trace.exists', ({ sessionId }) =>
+    Effect.sync(() => {
+      const file = traceFileOf(directory, sessionId)
+      return file !== null && existsSync(file)
+    }),
+  )
+
+  handle('trace.open', ({ sessionId }) =>
+    Effect.promise(async () => {
+      const file = traceFileOf(directory, sessionId)
+      if (file !== null && existsSync(file)) await shell.openPath(file)
+    }),
+  )
+
   handle('repositories.status', ({ root, paths }) =>
     Effect.promise(() => repositoryStatus(root, paths)),
   )
@@ -178,12 +205,17 @@ const RELAYED = [
   'projects.restore',
   'repositories.add',
   'repositories.remove',
+  'repositories.update',
+  'projects.setWorkspacesRoot',
+  'projects.setBranchPrefix',
+  'projects.setRepositoryIncluded',
   'journal.read',
   'journal.unseen',
   'journal.markSeen',
   'sessions.list',
   'sessions.create',
   'sessions.rename',
+  'sessions.chooseWorkspace',
   'sessions.archive',
   'sessions.restore',
   'sessions.append',
@@ -199,24 +231,59 @@ const RELAYED = [
   'agents.stop',
   'agents.decide',
   'agents.resume',
+  'agents.handOver',
   'agents.check',
   'agents.update',
   // What Hemera lends the agent: the commands of a Project and the runs they became, and what a
   // Session was provided. A process and a file are the engine's, like the rest (D6-10, D6-12).
   'commands.list',
+  'commands.portless',
   'commands.create',
   'commands.update',
   'commands.remove',
   'commands.runs',
   'commands.run',
   'commands.stop',
+  'commands.runAgain',
   'commands.output',
+  'commands.runOf',
+  'commands.services',
+  'commands.stopService',
+  'commands.proposeAccept',
+  'commands.proposeDecline',
+  'setup.accept',
+  'setup.acceptAll',
+  'setup.decline',
   'context.read',
+  // The Workspaces of a Project, their preparation, the recipe and the variables: rows, worktrees
+  // and steps the engine holds and runs (D8-01 to D8-06).
+  'workspaces.list',
+  'workspaces.plan',
+  'workspaces.planRepository',
+  'workspaces.create',
+  'workspaces.createOnFolder',
+  'workspaces.status',
+  'workspaces.cleanup',
+  'preparation.steps',
+  'preparation.prepare',
+  'preparation.resume',
+  'recipe.list',
+  'recipe.add',
+  'recipe.update',
+  'recipe.remove',
+  'recipe.move',
+  'variables.list',
+  'variables.set',
+  'variables.remove',
+  // The entries of a folder under a base, which a path field offers as it is typed (#109).
+  'paths.entries',
   // The Specs, all of them the engine's to answer (D7-01).
   'specs.list',
   'specs.read',
   'specs.revisions',
   'specs.create',
+  'specs.declineProposal',
+  'specs.acceptExisting',
   'specs.openSession',
   'specs.writeSection',
   'specs.writeStories',
@@ -229,6 +296,12 @@ const RELAYED = [
   'specs.buffers.read',
   'specs.buffers.save',
   'specs.buffers.discard',
+  // The Workspace a Spec is set on, and the launch of its build (D8-12, D8-13).
+  'specs.useWorkspace',
+  'launches.forSpec',
+  'launches.request',
+  'launches.start',
+  'launches.retry',
 ] as const
 
 type Relayed = (typeof RELAYED)[number]

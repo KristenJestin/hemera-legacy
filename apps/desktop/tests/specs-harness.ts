@@ -16,6 +16,7 @@ import type { Journal } from '#engine/journal.ts'
 import { openProfile } from '#engine/migrate.ts'
 import { Projects, projectsLayer } from '#engine/projects.ts'
 import { Sessions, sessionsLayer } from '#engine/sessions.ts'
+import { domainEventsLayer } from '#engine/domain-events.ts'
 import { NoSpecNotices, type SpecNotices } from '#engine/specs/notices.ts'
 import { Specs, specsLayer } from '#engine/specs/specs.ts'
 import { SqliteClient, databaseLayer } from '#engine/storage/database.ts'
@@ -35,7 +36,9 @@ export function openedOn(dataFolder: string, notices: Layer.Layer<SpecNotices> =
     specsLayer.pipe(Layer.provide(notices)),
     journalLayer,
   ).pipe(
-    Layer.provideMerge(databaseLayer(join(dataFolder, 'hemera.sqlite'))),
+    Layer.provideMerge(
+      Layer.mergeAll(databaseLayer(join(dataFolder, 'hemera.sqlite')), domainEventsLayer),
+    ),
     // Where the Sessions tell a write that came too late: nowhere, in a suite that reads none.
     Layer.provide(Layer.succeed(StderrSink, { write: () => Effect.void })),
   )

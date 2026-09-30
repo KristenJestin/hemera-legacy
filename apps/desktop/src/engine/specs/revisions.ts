@@ -279,6 +279,8 @@ export function reopen(
     const asked = yield* askAgain(transaction, snapshot, questionIds)
     return {
       events: [
+        // What says the Spec was reworked: the launches follow it, and cancel what waited on the
+        // revision it has just left (D8-13, #113). This step knows nothing of them.
         specEvent(spec, revisionId, 'spec.reopened', {
           author: 'human',
           sessionId: request.sessionId,

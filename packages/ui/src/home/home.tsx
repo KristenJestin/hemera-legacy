@@ -1,21 +1,16 @@
 import { motion } from 'motion/react'
 import type { ReactNode } from 'react'
 
+import { AppIcon } from '../components/app-icon/app-icon.ts'
 import { Button } from '../components/button/button.tsx'
+import { Face } from '../components/face/face.tsx'
 import { Frame, FrameHeader } from '../components/frame/frame.tsx'
 import { List, ListItem } from '../components/list/list.tsx'
 import { Timeline, TimelineStop } from '../components/timeline/timeline.tsx'
 import { Kbd } from '../components/kbd/kbd.tsx'
-import {
-  IconActivity,
-  IconFolderPlus,
-  IconMessage,
-  IconMessages,
-  IconTimelineEvent,
-} from '../icons.ts'
+import { IconActivity, IconFolderPlus, IconMessages, IconTimelineEvent } from '../icons.ts'
 import type { JournalLine } from '../journal/journal.tsx'
 import { LABEL_DELAY, MARK_TRAVEL, arrival, useTransition } from '../motion.ts'
-import { HemeraMark } from '../shell/mark.tsx'
 
 /**
  * The pieces the Home of a Project is made of, and the page a window with no Project shows
@@ -33,6 +28,9 @@ const GREETING = 'flex flex-col items-center gap-1 text-center'
 const EMPTY = 'flex flex-col items-center gap-2 py-10 text-center'
 
 const LAUNCH = 'mx-auto flex max-w-md flex-col items-center gap-4 py-16 text-center'
+
+/** The application's icon over the welcome, at the size a launcher's grid draws it. */
+const WELCOME_ICON = 64
 
 /** What a Project is greeted with: its name, and what writing here does. */
 export function Greeting({ projectName, note }: { projectName: string; note: string }): ReactNode {
@@ -200,7 +198,13 @@ export function ActivityFrame({ entries, onOpenJournal }: ActivityFrameProps): R
   )
 }
 
-/** What a Project with no Session says, which is that it has none. */
+/**
+ * What a Project with no Session says, which is that it has none.
+ *
+ * Hemera's face stands over it at its hero size (issue #140), asleep: no Session, so no agent,
+ * and nothing is running. It is the first thing a new Project shows of the face that will be at
+ * work in every Session made from here.
+ */
 export function EmptyProject({
   projectName,
   onOpenJournal,
@@ -210,7 +214,7 @@ export function EmptyProject({
 }): ReactNode {
   return (
     <div className={EMPTY}>
-      <IconMessage size="lg" />
+      <Face state="asleep" size="hero" label="Hemera, asleep" />
       <p className="font-medium">No Session in {projectName}</p>
       <p className="max-w-md text-sm text-muted-foreground">
         The sidebar will list them as they are created. The Journal already holds the creation of
@@ -240,7 +244,7 @@ export function FirstLaunch({ onCreateProject, commandShortcut }: FirstLaunchPro
       animate={{ opacity: 1, y: 0 }}
       transition={transition}
     >
-      <HemeraMark />
+      <AppIcon channel="prod" size={WELCOME_ICON} />
       <h1 className="text-3xl font-medium">Welcome to Hemera</h1>
       <p className="text-sm text-muted-foreground">
         A Project holds your Sessions, your Journal and, later, your Specs and Workspaces. Start

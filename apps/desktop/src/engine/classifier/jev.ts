@@ -44,8 +44,20 @@ export type JevResult =
         readonly approval: number
         readonly userRequested: number
       }
+      /** How long Jev took to answer, request to parsed answer. */
+      readonly ms: number
     }
-  | { readonly kind: 'unavailable'; readonly reason: 'input' | 'response' | 'network' }
+  | {
+      readonly kind: 'unavailable'
+      /**
+       * Why, as a safe category: the input could not be sent whole, the answer did not parse, the
+       * network failed, the deadline passed, or Jev answered with an HTTP error (`status`).
+       */
+      readonly reason: 'input' | 'response' | 'network' | 'timeout' | 'http'
+      readonly status?: number
+      /** How long was spent waiting on Jev, when it was asked at all. */
+      readonly ms?: number
+    }
 
 /** Injected so tests never contact a provider. */
 export interface JevTransport {
@@ -124,14 +136,24 @@ export async function evaluateJev(
     combined.addEventListener('abort', () => reject(combined.reason), { once: true })
   })
   aborted.catch(() => {})
+  const began = performance.now()
+  const ms = () => Math.round(performance.now() - began)
+  const failed = (): JevResult => ({
+    kind: 'unavailable',
+    reason: deadline.aborted && !signal.aborted ? 'timeout' : 'network',
+    ms: ms(),
+  })
   try {
     const response = await Promise.race([transport.send(body, key, combined), aborted])
-    if (!response.ok || combined.aborted) return { kind: 'unavailable', reason: 'network' }
+    if (combined.aborted) return failed()
+    if (!response.ok)
+      return { kind: 'unavailable', reason: 'http', status: response.status, ms: ms() }
     // SAFETY: JSON from a network response is untrusted until the schema parses it below.
-    const json: unknown = await Promise.race([response.json(), aborted])
-    if (combined.aborted) return { kind: 'unavailable', reason: 'network' }
+    // A body that is not JSON is an answer that does not parse, like a JSON one of the wrong shape.
+    const json: unknown = await Promise.race([response.json().catch(() => undefined), aborted])
+    if (combined.aborted) return failed()
     const parsed = responseSchema.safeParse(json)
-    if (!parsed.success) return { kind: 'unavailable', reason: 'response' }
+    if (!parsed.success) return { kind: 'unavailable', reason: 'response', ms: ms() }
     const { risk, approval, user_requested: userRequested } = parsed.data.answers
     return {
       kind: 'evaluated',
@@ -143,8 +165,9 @@ export async function evaluateJev(
       }),
       model: parsed.data.model,
       scores: { risk: risk.score, approval: approval.noul, userRequested: userRequested.noul },
+      ms: ms(),
     }
   } catch {
-    return { kind: 'unavailable', reason: 'network' }
+    return combined.aborted ? failed() : { kind: 'unavailable', reason: 'network', ms: ms() }
   }
 }

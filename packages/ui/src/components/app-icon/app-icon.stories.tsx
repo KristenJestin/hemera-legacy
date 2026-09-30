@@ -12,7 +12,7 @@ import { AppIcon } from './app-icon.ts'
  * it its master.
  */
 const meta = {
-  tags: ['autodocs', 'new'],
+  tags: ['autodocs'],
   title: 'Components/AppIcon',
   component: AppIcon,
   parameters: { layout: 'centered' },

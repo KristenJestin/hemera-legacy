@@ -2,7 +2,6 @@ import { AnimatePresence, motion } from 'motion/react'
 import { type ReactNode, useMemo, useRef, useState } from 'react'
 import { fn } from 'storybook/test'
 
-import { BuildSpecPanel } from '../../build/build-spec-panel.tsx'
 import { Composer } from '../../composer/composer.tsx'
 import { IconButton } from '../../components/button/button.tsx'
 import { StatusDot } from '../../components/status-dot/status-dot.tsx'
@@ -21,10 +20,12 @@ import { MID_PLAN, READY } from '../../spec/spec-fixtures.ts'
 import { SpecFrame } from '../../spec/spec-frame.tsx'
 import { phasesOf } from '../../spec/spec-phases.ts'
 import { BuildTasks, type Grouping } from './build-tasks.tsx'
+import { BuildWide } from './build-wide.tsx'
+import { DefineWide } from './define-wide.tsx'
 import { DEFINE_HELPERS, FREE_HELPERS, type Helper, STUCK } from './fixtures.ts'
 import { HelperChips } from './helper-chips.tsx'
 import { HelperIcon } from './helper-icons.tsx'
-import { HelperViewer, type Opening } from './helper-viewer.tsx'
+import { HelperViewer } from './helper-viewer.tsx'
 import { PanelDock } from './panel-dock.tsx'
 import { BOARD } from './tasks-fixtures.ts'
 import { DEFINE_THREAD, FREE_THREAD, MAIN_THREAD } from './threads.tsx'
@@ -49,7 +50,6 @@ export type HeadPlacement = 'page' | 'chat'
 export interface SessionPageProps {
   kind: Kind
   head?: HeadPlacement | undefined
-  opening?: Opening | undefined
   helpers?: readonly Helper[] | undefined
   defaultOver?: boolean | undefined
   defaultFolded?: boolean | undefined
@@ -108,7 +108,6 @@ const RIM_BODY =
 export function SessionPage({
   kind,
   head = 'page',
-  opening = 'sheet',
   helpers = HELPERS[kind],
   defaultOver = false,
   defaultFolded = false,
@@ -120,7 +119,9 @@ export function SessionPage({
   const [over, setOver] = useState(defaultOver)
   const [open, setOpen] = useState<string | null>(defaultHelper)
   const [answered, setAnswered] = useState(false)
-  const [specOpen, setSpecOpen] = useState(false)
+  const [specShown, setSpecShown] = useState(false)
+  const [grouping, setGrouping] = useState<Grouping>(defaultGrouping)
+  const [task, setTask] = useState<string | null>(defaultTask)
   const [value, setValue] = useState('')
   const [files, setFiles] = useState<string[]>([])
   const stage = useRef<HTMLDivElement>(null)
@@ -190,6 +191,25 @@ export function SessionPage({
   )
 
   const notices = <SessionNotices groups={groups} />
+  const tasks = {
+    specKey: 'ATL-7',
+    title: 'CSV invoice export',
+    tasks: BOARD,
+    grouping,
+    onGrouping: setGrouping,
+    open: task,
+    onOpen: setTask,
+    specShown: over && specShown,
+    // Beside the chat, the Spec takes the panel over the chat, to be read beside its tasks.
+    onSpec: () => {
+      if (over) {
+        setSpecShown(!specShown)
+        return
+      }
+      setSpecShown(true)
+      setOver(true)
+    },
+  }
   const inPanel = head === 'chat' ? line : undefined
 
   return (
@@ -228,30 +248,23 @@ export function SessionPage({
             }
             frame={<BuildFrame onUnfold={() => fold(false)} />}
             body={
-              <Swapped showing={specOpen ? 'spec' : 'tasks'}>
-                {specOpen ? (
-                  <BuildSpecPanel spec={READY} onClose={() => setSpecOpen(false)} />
-                ) : (
-                  <BuildTasks
-                    specKey="ATL-7"
-                    title="CSV invoice export"
-                    tasks={BOARD}
-                    defaultGrouping={defaultGrouping}
-                    defaultOpen={defaultTask}
-                    onSpec={() => setSpecOpen(true)}
+              <Swapped showing={over ? 'wide' : 'beside'}>
+                {over ? (
+                  <BuildWide
+                    {...tasks}
+                    helpers={helpers}
+                    runs={RUNS.flatMap((item) => (item.kind === 'run' ? [item] : []))}
+                    onHelper={setOpen}
+                    frozen={READY}
                   />
+                ) : (
+                  <BuildTasks {...tasks} />
                 )}
               </Swapped>
             }
           />
         )}
-        <HelperViewer
-          opening={opening}
-          helpers={helpers}
-          open={open}
-          onOpen={setOpen}
-          onClose={close}
-        />
+        <HelperViewer helpers={helpers} open={open} onClose={close} />
       </div>
     </div>
   )
@@ -292,7 +305,15 @@ function DefineDock(props: DockProps): ReactNode {
           onUnfold={() => props.onFold(false)}
         />
       }
-      body={<SpecColumn spec={spec} groups={groups} column={column} still={still} />}
+      body={
+        <Swapped showing={props.over ? 'wide' : 'beside'}>
+          {props.over ? (
+            <DefineWide spec={spec} groups={groups} column={column} still={still} />
+          ) : (
+            <SpecColumn spec={spec} groups={groups} column={column} still={still} />
+          )}
+        </Swapped>
+      }
     />
   )
 }

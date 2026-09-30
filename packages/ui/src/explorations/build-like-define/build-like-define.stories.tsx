@@ -16,9 +16,11 @@ import { type SessionPageProps, SessionPage } from './page.tsx'
  *   chat, the notices float over the panel where they stood over the chat.
  * - The head line — runs, helpers, Run, ⓘ and `…` — across the page (A) or over the chat only,
  *   going into the panel's head while the panel covers the chat (B).
- * - A helper's chip is its icon, its dot and its name. It opens the helper's live thread, read
- *   only, the same way in every kind of Session (`HelperViewer`): a sheet under the head line
- *   (recommended), a dialog, or a sheet from the right.
+ * - A helper's chip is its icon, its dot and its name. It opens that helper's live thread, read
+ *   only, in a dialog, the same way in every kind of Session (`HelperViewer`).
+ * - Over the chat, the panel shows more: the build's stories, helpers and runs at work, its tasks
+ *   and one task whole, or the frozen Spec beside the tasks; the Spec's outline and open
+ *   questions beside it.
  * - The build's tasks, almost empty at rest: how far the build is at a glance, the tasks grouped
  *   by story, as one list or by state, and each task unfolding to its tries, files and returns.
  */
@@ -38,11 +40,10 @@ const meta = {
   component: Screen,
   tags: ['autodocs'],
   parameters: { layout: 'fullscreen' },
-  args: { kind: 'build', head: 'page', opening: 'sheet' },
+  args: { kind: 'build', head: 'page' },
   argTypes: {
     kind: { control: 'inline-radio', options: ['free', 'define', 'build'] },
     head: { control: 'inline-radio', options: ['page', 'chat'] },
-    opening: { control: 'inline-radio', options: ['sheet', 'dialog', 'side'] },
   },
 } satisfies Meta<typeof Screen>
 
@@ -95,11 +96,10 @@ export const OverAndBack: Story = {
     const chat = canvas.getByRole('log', { name: 'The thread of this Session' })
     const beside = panel.getBoundingClientRect().width
     const chatWidth = chat.getBoundingClientRect().width
-    const toggle = canvas.getByRole('button', { name: 'Over the chat' })
-    await userEvent.click(toggle)
+    await userEvent.click(canvas.getByRole('button', { name: 'Over the chat' }))
     await waitFor(() => expect(panel.getBoundingClientRect().width).toBeGreaterThan(beside * 1.5))
     await expect(chat.getBoundingClientRect().width).toBe(chatWidth)
-    await userEvent.click(toggle)
+    await userEvent.click(canvas.getByRole('button', { name: 'Beside the chat' }))
     await waitFor(() => expect(panel.getBoundingClientRect().width).toBe(beside))
   },
 }
@@ -168,60 +168,83 @@ export const HeadInThePanel: Story = {
   },
 }
 
-/** Helper · 1 · recommended · A sheet under the head line, over the page. */
-export const HelperSheet: Story = {
-  args: { defaultHelper: 'helper-credit' },
-  play: async ({ canvasElement }) => {
-    const canvas = within(canvasElement)
-    const sheet = within(canvas.getByRole('region', { name: 'Helpers' }))
-    await expect(sheet.getByRole('log', { name: 'What Credit notes is doing' })).toBeVisible()
-    await expect(sheet.queryAllByRole('textbox')).toHaveLength(0)
-  },
-}
-
-/** Helper · 2 · A dialog, as the Session details are one. */
+/** A helper's thread in a dialog: that helper only, its live thread, no box to write in. */
 export const HelperDialog: Story = {
-  args: { opening: 'dialog', defaultHelper: 'helper-review' },
+  args: { defaultHelper: 'helper-review' },
   play: async ({ canvasElement }) => {
     const body = within(canvasElement.ownerDocument.body)
-    await expect(await body.findByRole('log', { name: 'What Test review is doing' })).toBeVisible()
+    const dialog = within(await body.findByRole('dialog', { name: 'Test review' }))
+    await expect(dialog.getByRole('log', { name: 'What Test review is doing' })).toBeVisible()
+    await expect(dialog.queryByRole('group', { name: /helpers/ })).toBeNull()
+    await expect(dialog.queryAllByRole('textbox')).toHaveLength(0)
   },
 }
 
-/** Helper · 3 · A sheet sliding over the page from the right. */
-export const HelperSide: Story = {
-  args: { opening: 'side', defaultHelper: 'helper-docs' },
+/** A chip opens its helper's dialog; Escape closes it, and the keyboard is back on the chip. */
+export const HelperOpensAndCloses: Story = {
   play: async ({ canvasElement }) => {
-    const sheet = within(within(canvasElement).getByRole('region', { name: 'Helpers' }))
-    await expect(sheet.getByRole('log', { name: 'What Documenter is doing' })).toBeVisible()
+    const body = within(canvasElement.ownerDocument.body)
+    const chip = line(canvasElement).getByRole('button', { name: 'Helper Documenter, running' })
+    await userEvent.click(chip)
+    const log = await body.findByRole('log', { name: 'What Documenter is doing' })
+    await waitFor(() => expect(log).toBeVisible())
+    await userEvent.keyboard('{Escape}')
+    await waitFor(() => expect(body.queryByRole('dialog')).toBeNull())
+    await waitFor(() => expect(chip).toHaveFocus())
   },
 }
 
-/** Any opening · From inside, a press goes to another helper; Escape closes, back to the chip. */
-export const HelperSwitchAndClose: Story = {
-  args: { defaultHelper: 'helper-credit' },
+/** The same dialog in a `free` Session. */
+export const HelperInFree: Story = {
+  args: { kind: 'free', defaultHelper: 'helper-explore' },
+  play: async ({ canvasElement }) => {
+    const body = within(canvasElement.ownerDocument.body)
+    await expect(await body.findByRole('log', { name: 'What Explore is doing' })).toBeVisible()
+  },
+}
+
+/** Over the chat, the build shows more: stories, who is at work, the tasks and one task whole. */
+export const BuildWideView: Story = {
+  args: { defaultOver: true },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    const sheet = within(canvas.getByRole('region', { name: 'Helpers' }))
-    await userEvent.click(sheet.getByRole('button', { name: 'Helper Documenter, running' }))
-    await expect(await sheet.findByRole('log', { name: 'What Documenter is doing' })).toBeVisible()
-    await userEvent.keyboard('{Escape}')
-    await waitFor(() => expect(canvas.queryByRole('region', { name: 'Helpers' })).toBeNull())
-    await waitFor(() =>
-      expect(
-        line(canvasElement).getByRole('button', { name: 'Helper Documenter, running' }),
-      ).toHaveFocus(),
+    const side = within(canvas.getByRole('complementary', { name: 'The build at work' }))
+    await expect(side.getByText('Pick the month')).toBeVisible()
+    await expect(side.getByRole('button', { name: 'Open Credit notes, silent' })).toBeVisible()
+    await expect(canvas.getByRole('region', { name: 'T5 in detail' })).toBeVisible()
+  },
+}
+
+/** Over the chat, a task picked in the list shows whole beside it. */
+export const BuildWidePick: Story = {
+  args: { defaultOver: true },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await userEvent.click(canvas.getAllByRole('button', { name: /T2/ })[0]!)
+    await expect(await canvas.findByRole('region', { name: 'T2 in detail' })).toBeVisible()
+  },
+}
+
+/** The frozen Spec, from beside the chat: the panel goes over it, the Spec beside its tasks. */
+export const FrozenSpec: Story = {
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await userEvent.click(canvas.getByRole('button', { name: 'The frozen Spec' }))
+    await expect(await canvas.findByRole('region', { name: 'The frozen Spec ATL-7' })).toBeVisible()
+    await expect(canvas.getByRole('button', { name: 'Over the chat' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
     )
   },
 }
 
-/** The same sheet in a `free` Session. */
-export const HelperInFree: Story = {
-  args: { kind: 'free', defaultHelper: 'helper-explore' },
+/** Over the chat, the Spec shows more: its outline, the Spec, its open questions. */
+export const DefineWideView: Story = {
+  args: { kind: 'define', defaultOver: true },
   play: async ({ canvasElement }) => {
-    await expect(
-      within(canvasElement).getByRole('log', { name: 'What Explore is doing' }),
-    ).toBeVisible()
+    const canvas = within(canvasElement)
+    await expect(canvas.getByRole('navigation', { name: 'Outline of ATL-7' })).toBeVisible()
+    await expect(canvas.getByRole('complementary', { name: 'Open questions' })).toBeVisible()
   },
 }
 

@@ -5,14 +5,13 @@ import { expect, within } from 'storybook/test'
 import { TooltipProvider } from '../../components/tooltip/tooltip.tsx'
 import type { Grouping } from './build-tasks.tsx'
 import { DEFINE_HELPERS, FREE_HELPERS, HELPERS, type Helper, STUCK } from './fixtures.ts'
-import type { Opening } from './helper-viewer.tsx'
 import { type HeadPlacement, type Kind, SessionPage } from './page.tsx'
 
 /**
  * The exploration of issue #77 as one page to try by hand (30 September 2026). Storybook's own
  * Controls pick the kind of Session — `free`, `define`, `build` — where the head line stands (A
- * across the page, B over the chat only), how a helper's thread opens (a sheet under the head
- * line, a dialog, a side sheet), how the build's tasks are grouped, and whether the panel starts
+ * across the page, the maintainer's choice, or B over the chat only), how the build's tasks are
+ * grouped, and whether the panel starts
  * folded or over the chat and a helper is stuck. The page shows the app and nothing else, and
  * everything in it stays live: the fold, the panel over the chat, the run and helper chips, the
  * notices and their answer, the tasks and their detail. Light and dark through Storybook's
@@ -22,7 +21,6 @@ import { type HeadPlacement, type Kind, SessionPage } from './page.tsx'
 interface PlaygroundArgs {
   kind: Kind
   head: HeadPlacement
-  helperOpening: Opening
   taskGrouping: Grouping
   folded: boolean
   over: boolean
@@ -39,15 +37,7 @@ function helpersOf(kind: Kind, stuck: boolean): readonly Helper[] {
   return [silent, ...rest]
 }
 
-function Page({
-  kind,
-  head,
-  helperOpening,
-  taskGrouping,
-  folded,
-  over,
-  stuck,
-}: PlaygroundArgs): ReactNode {
+function Page({ kind, head, taskGrouping, folded, over, stuck }: PlaygroundArgs): ReactNode {
   return (
     <TooltipProvider>
       <div className="h-screen">
@@ -57,7 +47,6 @@ function Page({
           key={[kind, taskGrouping, folded, over, stuck].join(':')}
           kind={kind}
           head={head}
-          opening={helperOpening}
           helpers={helpersOf(kind, stuck)}
           defaultGrouping={taskGrouping}
           defaultFolded={folded}
@@ -76,7 +65,6 @@ const meta = {
   args: {
     kind: 'build',
     head: 'page',
-    helperOpening: 'sheet',
     taskGrouping: 'story',
     folded: false,
     over: false,
@@ -95,14 +83,6 @@ const meta = {
         labels: { page: 'A · across the page', chat: 'B · over the chat' },
       },
       options: ['page', 'chat'],
-    },
-    helperOpening: {
-      description: 'How a helper’s thread opens',
-      control: {
-        type: 'inline-radio',
-        labels: { sheet: 'Sheet under the head', dialog: 'Dialog', side: 'Side sheet' },
-      },
-      options: ['sheet', 'dialog', 'side'],
     },
     taskGrouping: {
       description: 'How the build’s tasks are grouped',

@@ -484,7 +484,10 @@ export const ClassifierSelection: Story = {
 
 /** The full key journey uses mock state and never holds a real credential. */
 export const CredentialJourney: Story = {
-  args: { defaultSection: 'hemera-auto', classifier: { ...CLASSIFIER, mode: 'hemera-auto', consent: true } },
+  args: {
+    defaultSection: 'hemera-auto',
+    classifier: { ...CLASSIFIER, mode: 'hemera-auto', consent: true },
+  },
   play: async ({ canvasElement, args }) => {
     const canvas = within(canvasElement)
     const field = canvas.getByLabelText('Jev API key')
@@ -696,10 +699,7 @@ export const NavigationMarkCrossing: Story = {
       () => userEvent.click(canvas.getByRole('tab', { name: 'Profile' })),
       () => userEvent.click(canvas.getByRole('tab', { name: 'Appearance' })),
     )
-    expect(canvas.getByRole('tab', { name: 'Appearance' })).toHaveAttribute(
-      'aria-selected',
-      'true',
-    )
+    expect(canvas.getByRole('tab', { name: 'Appearance' })).toHaveAttribute('aria-selected', 'true')
     expectNeverBuried(watched)
   },
 }

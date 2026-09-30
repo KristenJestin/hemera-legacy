@@ -225,6 +225,7 @@ export function registerChannels(
 /** Every channel that is nothing but a message on its way to the engine and back. */
 const RELAYED = [
   'engine.status',
+  'classifier.decisions',
   'projects.list',
   'projects.create',
   'projects.update',

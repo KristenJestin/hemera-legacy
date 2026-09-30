@@ -3,13 +3,13 @@ import { type ReactNode, useState } from 'react'
 import { expect, userEvent, waitFor, within } from 'storybook/test'
 
 import { TooltipProvider } from '../../components/tooltip/tooltip.tsx'
-import { type HelperLook, HelperMark, type HelperMarkSize } from './helper-icons.tsx'
-import { DEFINE_HELPERS, FREE_HELPERS, type Helper, STUCK } from './fixtures.ts'
+import { HelperChips } from './helper-chips.tsx'
+import { type AvatarSize, HelperAvatar } from './helper-icons.tsx'
+import { DEFINE_HELPERS, FREE_HELPERS, HELPERS, type Helper } from './fixtures.ts'
 import type { CommandState } from '../../activity/command-run.tsx'
 import { GOING_ON } from '../../session/going-on-fixtures.ts'
 import type { GoingOnRun } from '../../session/going-on.ts'
 import { type SessionPageProps, SessionPage } from './page.tsx'
-import type { WorkingLook } from './live-chip.tsx'
 import { type LiveRun, RunChips as Chips } from './run-chips.tsx'
 import { type MarkState, StatusMark } from './status-mark.tsx'
 
@@ -197,7 +197,7 @@ export const HelperGlance: Story = {
       await body.findByRole('button', { name: 'The thread of Credit notes' }),
     ).toBeVisible()
     await expect(body.getByRole('button', { name: 'Stop Credit notes' })).toBeVisible()
-    await expect(body.getByText('9 min')).toBeVisible()
+    await expect(body.getAllByText(/^\d+s$/).length).toBeGreaterThan(0)
   },
 }
 
@@ -242,58 +242,50 @@ export const HelperInFree: Story = {
   },
 }
 
-const MARK_LOOKS: readonly { look: HelperLook; name: string }[] = [
-  { look: 'face', name: 'A · the agent’s live face, the same for every helper (recommended)' },
-  { look: 'monogram', name: 'B · a tile with the role’s initial' },
-]
-
-const MARK_SIZES: readonly HelperMarkSize[] = ['sm', 'md', 'xl']
+const AVATAR_SIZES: readonly AvatarSize[] = ['sm', 'md', 'xl']
 
 const ICON_ROW = 'flex flex-wrap items-end gap-8'
 
 const ICON_CELL = 'flex flex-col items-start gap-2'
 
-const SAMPLE_CHIP =
-  'inline-flex h-control-sm items-center gap-1.5 rounded-md border border-border bg-card px-2 text-xs text-foreground'
-
-/** Helpers in several states, so the faces show what each is doing. */
-const SAMPLES: readonly Helper[] = [...STUCK, FREE_HELPERS[1]!, DEFINE_HELPERS[0]!]
+/** The Session's helpers, and two that share an initial, so the two-letter rule shows. */
+const SAMPLES: readonly Helper[] = [
+  ...HELPERS,
+  DEFINE_HELPERS[0]!,
+  { ...FREE_HELPERS[0]!, id: 'helper-docs-2', name: 'Docs index' },
+]
 
 /**
- * What a helper wears on its chip. A: helpers are agents, so they wear the agent's face — the same
- * for every helper, live, its expression saying what it does (reading, writing, running, silent,
- * done) — and the role is the chip's name; commands keep their type icons, so agents are faces and
- * commands are icons. B: a tile with the role's initial. Each at the face's steps (18, 24, 40 px)
- * or the tile's (16, 20, 40 px), and on a chip.
+ * What a helper wears on its chip: a letter avatar, its initial on a round tile in a colour of its
+ * own, read from its name. Two helpers that share an initial take two letters each (Documenter and
+ * Docs index). At 16, 20 and 40 px, and on the chip, as it works and once it is done. The live face
+ * stays in the helper's dialog.
  */
 export const HelperIcons: Story = {
   render: () => (
-    <div className="flex min-h-screen flex-col gap-10 bg-background p-8 text-foreground">
-      {MARK_LOOKS.map(({ look, name }) => (
-        <section key={look} aria-label={name} className="flex flex-col gap-3">
-          <h2 className="text-sm font-medium">{name}</h2>
-          <div className={ICON_ROW}>
-            {SAMPLES.map((helper) => (
-              <div key={helper.id} className={ICON_CELL}>
-                <span className="flex items-end gap-3">
-                  {MARK_SIZES.map((size) => (
-                    <HelperMark key={size} helper={helper} look={look} size={size} />
-                  ))}
-                </span>
-                <span className={SAMPLE_CHIP}>
-                  <HelperMark helper={helper} look={look} />
-                  {helper.name}
-                  <span className="font-mono text-muted-foreground tabular-nums">42s</span>
-                </span>
-              </div>
-            ))}
-          </div>
-        </section>
-      ))}
-    </div>
+    <TooltipProvider>
+      <div className="flex min-h-screen flex-col gap-6 bg-background p-8 text-foreground">
+        <div className={ICON_ROW}>
+          {SAMPLES.map((helper) => (
+            <div key={helper.id} className={ICON_CELL}>
+              <span className="flex items-end gap-3">
+                {AVATAR_SIZES.map((size) => (
+                  <HelperAvatar key={size} helper={helper} helpers={SAMPLES} size={size} />
+                ))}
+              </span>
+            </div>
+          ))}
+        </div>
+        <div className="flex flex-wrap gap-y-2">
+          <HelperChips helpers={SAMPLES} onDetails={() => {}} onStop={() => {}} />
+        </div>
+      </div>
+    </TooltipProvider>
   ),
   play: async ({ canvasElement }) => {
-    await expect(within(canvasElement).getAllByRole('region')).toHaveLength(2)
+    const canvas = within(canvasElement)
+    await expect(canvas.getAllByText('DO').length).toBeGreaterThan(0)
+    await expect(canvas.getAllByText('DI').length).toBeGreaterThan(0)
   },
 }
 
@@ -422,23 +414,32 @@ export const StatusMarks: Story = {
   },
 }
 
-const WORKING_LOOKS: readonly { look: WorkingLook; name: string }[] = [
-  { look: 'line', name: 'A · a still line along the foot while it works (recommended)' },
-  { look: 'faint', name: 'B · a faint tint breathing on the running dot’s beat' },
-]
+/** A run whose name is far longer than a chip, and a helper whose name is too. */
+const LONG_RUN = 'pnpm vitest run --project api --reporter verbose src/billing/export'
 
-/** Runs in each state, driven by hand: running, done, failed, and run again. */
+const LONG_HELPER: Helper = {
+  ...HELPERS[0]!,
+  id: 'helper-long',
+  name: 'Credit notes and refunds reconciliation review',
+}
+
 function RunBench(): ReactNode {
   const now = Date.now()
   const base = GOING_ON.few.flatMap((item) => (item.kind === 'run' ? [item] : []))
   const [runs, setRuns] = useState<readonly LiveRun[]>(() =>
-    base.flatMap((item, index) =>
-      (['running', 'finished', 'failed'] as const).map((state) => ({
-        item: runOf(item, `${item.id}-${state}`, state),
-        startedAt: now - (index + 1) * 83_000,
-        endedAt: state === 'running' ? null : now - 12_000,
-      })),
-    ),
+    base
+      .flatMap((item, index) =>
+        (['running', 'finished', 'failed'] as const).map((state) => ({
+          item: runOf(item, `${item.id}-${state}`, state),
+          startedAt: now - (index + 1) * 83_000,
+          endedAt: state === 'running' ? null : now - 12_000,
+        })),
+      )
+      .concat({
+        item: { ...base[1]!, id: 'run-long', name: LONG_RUN, command: LONG_RUN, state: 'running' },
+        startedAt: now - 7_000,
+        endedAt: null,
+      }),
   )
   function set(id: string, state: CommandState): void {
     setRuns((all) =>
@@ -456,19 +457,31 @@ function RunBench(): ReactNode {
   const driven = runs.find((run) => run.item.id === 'run-test-running')
   return (
     <div className={BENCH}>
-      {WORKING_LOOKS.map(({ look, name }) => (
-        <section key={look} aria-label={name} className="flex flex-col gap-2">
-          <h2 className="text-sm font-medium">{name}</h2>
-          <div role="group" aria-label={`Runs · ${look}`} className="flex flex-wrap gap-y-2">
-            <Chips
-              runs={runs}
-              working={look}
-              onStop={(id) => set(id, 'stopped')}
-              onRetry={(id) => set(id, 'running')}
-            />
-          </div>
-        </section>
-      ))}
+      <section aria-label="Every state" className="flex flex-col gap-2">
+        <h2 className="text-sm font-medium">
+          Running, done, failed · and names too long for a chip
+        </h2>
+        <div role="group" aria-label="Runs" className="flex flex-wrap gap-y-2">
+          <Chips
+            runs={runs}
+            onStop={(id) => set(id, 'stopped')}
+            onRetry={(id) => set(id, 'running')}
+          />
+          <HelperChips helpers={[LONG_HELPER]} onDetails={() => {}} onStop={() => {}} />
+        </div>
+      </section>
+      <section aria-label="A crowded line" className="flex flex-col gap-2">
+        <h2 className="text-sm font-medium">
+          A crowded head line · one row, which scrolls sideways; Run stays at its end
+        </h2>
+        <div className="flex w-spec-panel min-w-0 items-center rounded-md border border-border p-2">
+          <span className="scroll-quiet flex min-w-0 shrink items-center overflow-x-auto">
+            <Chips runs={runs} onStop={() => {}} onRetry={() => {}} />
+            <HelperChips helpers={HELPERS} onDetails={() => {}} onStop={() => {}} />
+          </span>
+          <span className="shrink-0 pl-1 text-xs text-muted-foreground">Run</span>
+        </div>
+      </section>
       <div role="group" aria-label="Drive the tests" className="flex gap-1.5">
         <button type="button" className={PICK} onClick={() => set('run-test-running', 'finished')}>
           Finish the tests
@@ -491,9 +504,11 @@ function runOf(item: GoingOnRun, id: string, state: CommandState): GoingOnRun {
 }
 
 /**
- * The run chips: running (a calm sign, the seconds ticking), done (one wipe of the success tint,
- * a plain tick), failed (one wipe of the failure's tint, one shake, a plain cross), the tests driven
- * by hand; two calm signs of working side by side. Running again is in the glance.
+ * The chip every run and helper is (`LiveChip`): running (a faint tint breathing, the seconds
+ * ticking), done (one wipe of the success tint, a plain tick), failed (one wipe of the failure's
+ * tint, one shake, a plain cross), the tests driven by hand. A run and a helper whose names are too
+ * long end in an ellipsis and keep their seconds, the whole name in their tooltip and glance. And a
+ * head line too crowded for its row: the row scrolls sideways, quietly.
  */
 export const RunChips: Story = {
   render: () => (
@@ -503,13 +518,14 @@ export const RunChips: Story = {
   ),
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    const calm = within(canvas.getByRole('group', { name: 'Runs · line' }))
-    await expect(calm.queryByRole('button', { name: 'Run test again' })).toBeNull()
+    const runs = within(canvas.getByRole('group', { name: 'Runs' }))
+    await expect(runs.queryByRole('button', { name: 'Run test again' })).toBeNull()
     await userEvent.click(canvas.getByRole('button', { name: 'Fail the tests' }))
     await waitFor(() =>
-      expect(calm.getAllByRole('button', { name: 'test, failed' })).toHaveLength(2),
+      expect(runs.getAllByRole('button', { name: 'test, failed' })).toHaveLength(2),
     )
-    await expect(calm.getAllByText(/^\d+s$/).length).toBeGreaterThan(0)
+    await expect(runs.getAllByText(/^\d+s$/).length).toBeGreaterThan(0)
+    await expect(runs.getByRole('button', { name: `${LONG_RUN}, running` })).toBeVisible()
   },
 }
 

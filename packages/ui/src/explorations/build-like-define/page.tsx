@@ -23,7 +23,7 @@ import { BuildWide } from './build-wide.tsx'
 import { DefineWide } from './define-wide.tsx'
 import { DEFINE_HELPERS, FREE_HELPERS, type Helper, STUCK } from './fixtures.ts'
 import { HelperChips } from './helper-chips.tsx'
-import { HelperMark } from './helper-icons.tsx'
+import { HelperAvatar } from './helper-icons.tsx'
 import { HelperViewer } from './helper-viewer.tsx'
 import { useLiveSession } from './live.ts'
 import { PanelDock } from './panel-dock.tsx'
@@ -85,6 +85,9 @@ const TITLES: Record<Kind, string> = {
   define: 'Spec CSV',
   build: 'Build CSV export',
 }
+
+/** The run and helper chips of the head line: one row that scrolls when it is too long. */
+const CHIP_ROW = 'scroll-quiet flex min-w-0 shrink items-center overflow-x-auto'
 
 const PAGE = 'flex h-full min-h-0 flex-col bg-background text-foreground'
 
@@ -163,15 +166,19 @@ export function SessionPage({
         onAddToCatalogue={fn()}
         end={
           <>
-            {kind !== 'define' && (
-              <RunChips runs={session.runs} onStop={session.stop} onRetry={session.retry} />
-            )}
-            <HelperChips
-              helpers={helpers}
-              onDetails={setOpen}
-              onStop={(id) => setStopped([...stopped, id])}
-              defaultGlance={defaultGlance}
-            />
+            {/* The chips keep one row: too many for it, the row scrolls sideways under the hand,
+                quietly, and Run stays at its end. */}
+            <span className={CHIP_ROW}>
+              {kind !== 'define' && (
+                <RunChips runs={session.runs} onStop={session.stop} onRetry={session.retry} />
+              )}
+              <HelperChips
+                helpers={helpers}
+                onDetails={setOpen}
+                onStop={(id) => setStopped([...stopped, id])}
+                defaultGlance={defaultGlance}
+              />
+            </span>
             <RunCommand
               catalogue={CATALOGUE}
               workspace="csv-export"
@@ -373,7 +380,7 @@ function permissionOf(helper: Helper, onAnswer: () => void): NoticeGroup {
             line="pnpm add -D csv-parse"
             place={
               <span className="flex items-center gap-1.5">
-                <HelperMark helper={helper} />
+                <HelperAvatar helper={helper} helpers={[helper]} />
                 {helper.name}
               </span>
             }

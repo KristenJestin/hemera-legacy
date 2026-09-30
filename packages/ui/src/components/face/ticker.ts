@@ -24,7 +24,18 @@ export function onFrame(listener: (at: number) => void): () => void {
   }
 }
 
-/** The time the frames are told, in seconds, read now. */
+/**
+ * The time the frames are told, in seconds: the time of the frame being made, the one
+ * `requestAnimationFrame` hands the loop above.
+ *
+ * Not `performance.now()`, which moves between two reads of the same frame. Every face mounted in
+ * one render reads it in a layout effect of its own, one after the other, each painting its first
+ * frame before the next one reads: on a busy machine the second read came tens of milliseconds
+ * after the first, and two faces with the same seed began that far apart — two lives, where the
+ * seed promises one. The frame's time is the same for everything done in that frame. Where the
+ * document has no timeline running, the time read now is all there is.
+ */
 export function clock(): number {
-  return performance.now() / 1000
+  const frame = document.timeline.currentTime
+  return (frame === null ? performance.now() : Number(frame)) / 1000
 }

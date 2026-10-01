@@ -1,4 +1,4 @@
-import { AnimatePresence, animate, motion, useIsPresent, useMotionValue } from 'motion/react'
+import { animate, motion, useMotionValue } from 'motion/react'
 import {
   type ReactNode,
   createContext,
@@ -39,9 +39,11 @@ import { CROSSFADE, crossfade, instant, onTheBeat, slide, swap, useTransition } 
  * takes it back: arrows out while it is beside the chat, arrows in while it is over it. Over the
  * chat and not pushing it: the chat keeps its width under the panel and nothing in it reflows, so
  * what moves is the panel's own left edge, on the swap's spring. The chat is out of reach while it
- * is covered. Folding the panel takes it back beside the chat. The Session's notices come up over
- * the panel while it covers the chat: floated over its content where they stood over the chat —
- * on the composer's top edge, the same height from the row's foot — rising out of that edge and
+ * is covered. Folding the panel takes it back beside the chat. What the panel shows beside the chat
+ * and what it shows over it are both kept drawn, the one not shown faded out and out of reach, so
+ * going over and back loses nothing unfolded or scrolled in either. The Session's notices come up
+ * over the panel while it covers the chat: floated over its content where they stood over the chat
+ * — on the composer's top edge, the same height from the row's foot — rising out of that edge and
  * popping as they do there, and never in a band of their own.
  *
  * The caller hands the panel its head, its body, its foot and its small frame, and decides whether
@@ -207,7 +209,6 @@ export function PanelDock({
   }
   const move = useTransition(swap.move)
   const fade = useTransition(swap.fade)
-  const swapBody = useTransition(crossfade)
   const still = move === instant
   // How far open the panel is, from its small frame (0) to its panel (1).
   const open = useMotionValue(folded ? 0 : 1)
@@ -313,7 +314,9 @@ export function PanelDock({
     if (!refocus.current) return
     refocus.current = false
     const target = folded ? '[data-unfold]' : (landing ?? '[data-fold]')
-    dock.current?.querySelector<HTMLElement>(target)?.focus({ preventScroll: true })
+    // The one in reach: the body keeps its two views drawn, the one not shown out of reach.
+    const found = [...(dock.current?.querySelectorAll<HTMLElement>(target) ?? [])]
+    found.find((one) => one.closest('[inert]') === null)?.focus({ preventScroll: true })
   }, [folded])
 
   // The small frame leaves at once, and comes back a beat after the panel started leaving.
@@ -373,18 +376,10 @@ export function PanelDock({
             {wide === undefined ? (
               body
             ) : (
-              <AnimatePresence initial={false}>
-                <motion.div
-                  key={over ? 'wide' : 'beside'}
-                  className={LAYER}
-                  initial={CROSSFADE.from}
-                  animate={CROSSFADE.to}
-                  exit={CROSSFADE.from}
-                  transition={swapBody}
-                >
-                  <Leaving>{over ? wide : body}</Leaving>
-                </motion.div>
-              </AnimatePresence>
+              <>
+                <Layer shown={!over}>{body}</Layer>
+                <Layer shown={over}>{wide}</Layer>
+              </>
             )}
           </div>
           {foot}
@@ -411,16 +406,23 @@ export function PanelDock({
   )
 }
 
-/** What leaves the body, out of reach from the moment it starts leaving. */
-function Leaving({ children }: { children: ReactNode }): ReactNode {
-  const present = useIsPresent()
+/**
+ * One of what the body shows, beside the chat or over it. Both stay drawn, the one not shown
+ * cross-faded out and out of reach, so going over the chat and back keeps what was unfolded and
+ * scrolled in each rather than drawing it again.
+ */
+function Layer({ shown, children }: { shown: boolean; children: ReactNode }): ReactNode {
+  const fade = useTransition(crossfade)
   return (
-    <div
-      className="flex min-h-0 flex-1 flex-col"
-      inert={!present}
-      aria-hidden={present ? undefined : true}
+    <motion.div
+      className={LAYER}
+      inert={!shown}
+      aria-hidden={shown ? undefined : true}
+      initial={false}
+      animate={shown ? CROSSFADE.to : CROSSFADE.from}
+      transition={fade}
     >
       {children}
-    </div>
+    </motion.div>
   )
 }

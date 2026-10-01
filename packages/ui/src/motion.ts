@@ -532,3 +532,21 @@ export const pop: Transition = {
   ease: easing,
   times: [0, 0.4, 0.75, 1],
 }
+
+/**
+ * The `shake` kind: one short shake sideways, once, for what has just failed — a live chip whose
+ * run ended red (issue #77).
+ *
+ * Out to `SHAKE_REACH` pixels to the left, past its place to the right, a smaller step back, and
+ * still, on the theme's `slow` beat: read as a flinch, not as an alarm going on. A translation and
+ * nothing else, so nothing beside the chip moves with it. A tween and not a spring, because it
+ * passes through several values and a spring only goes to one. A reader asking for less movement
+ * is answered `instant` by `useTransition`, and the component then does not shake at all.
+ */
+export const SHAKE_REACH = 3
+export const SHAKE = { x: [0, -SHAKE_REACH, SHAKE_REACH, -SHAKE_REACH / 2, 0] }
+export const shake: Transition = {
+  duration: durations.slow,
+  ease: easing,
+  times: [0, 0.25, 0.5, 0.75, 1],
+}

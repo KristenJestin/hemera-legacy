@@ -192,7 +192,7 @@ function filesChanged(attempt: BriefAttempt): string {
  * A task's whole definition, and the failures of its last ended attempt when it was red — the
  * attempt that follows may already be open, and it is those failures it is there to address.
  */
-function definition(task: BriefTask): string {
+export function taskDefinition(task: BriefTask): string {
   const facts = [`Type: ${task.type}`]
   if (task.dependsOn.length > 0) facts.push(`Depends on: ${task.dependsOn.join(', ')}`)
   if (task.covers.length > 0) facts.push(`Covers: ${task.covers.join(', ')}`)
@@ -220,7 +220,7 @@ function readyText(ready: readonly BriefTask[]): string {
   const labels = ready.map((task) => task.label).join(', ')
   return [
     `# Tasks handed now\n\nEvery task ready now, handed at once: ${labels}.`,
-    ...ready.map(definition),
+    ...ready.map(taskDefinition),
   ].join('\n\n')
 }
 

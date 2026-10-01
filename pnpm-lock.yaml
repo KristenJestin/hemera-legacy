@@ -337,7 +337,11 @@ importers:
         specifier: 0.3.2
         version: 0.3.2(@types/node@24.13.4)(@vitest/browser-playwright@4.1.11)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.13)(typescript@7.0.2)(yaml@2.9.1)
 
-  packages/core: {}
+  packages/core:
+    dependencies:
+      zod:
+        specifier: 4.6.5
+        version: 4.6.5
 
   packages/ipc:
     dependencies:

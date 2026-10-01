@@ -263,9 +263,12 @@ export type GitSpawn = (
   environment?: Record<string, string>,
 ) => Effect.Effect<string, Refusal>
 
-/** The machine's own spawn: a child with its arguments, no shell, killed when it is abandoned. */
+/**
+ * The machine's own spawn: a child with its arguments, no shell, killed and waited for when it is
+ * abandoned.
+ */
 export const spawnGit: GitSpawn = (program, cwd, args, limit, environment = {}) =>
-  Effect.callback<string, Refusal>((resume, signal) => {
+  Effect.callback<string, Refusal>((resume) => {
     const child = execFile(
       program,
       ['-C', cwd, ...args],
@@ -300,9 +303,17 @@ export const spawnGit: GitSpawn = (program, cwd, args, limit, environment = {}) 
         )
       },
     )
-    // A read that is abandoned — an interrupted plan, a test that ended — may not leave the
-    // child behind: it holds the folder its `-C` names, and a cleanup then fails with EPERM.
-    signal.addEventListener('abort', () => child.kill('SIGKILL'))
+    // A read that is abandoned — an interrupted plan, an engine that quits — may not leave the
+    // child behind: it stands in the folder its `-C` names and may hold a file of it, and Windows
+    // refuses to remove either while it lives (#279). It is killed, and the interruption returns
+    // once it is gone, not once it was told to go.
+    return Effect.callback<void>((gone) => {
+      if (child.pid === undefined || child.exitCode !== null || child.signalCode !== null) {
+        return gone(Effect.void)
+      }
+      child.once('exit', () => gone(Effect.void))
+      child.kill('SIGKILL')
+    })
   })
 
 /** Git's own `git`, or the program named: a test names one that is not on the `PATH`. */

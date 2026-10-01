@@ -5,7 +5,7 @@ import { Button } from '../components/button/button.tsx'
 import { IconCheck } from '../icons.ts'
 import { collapse, expand, instant, morph, swap, useTransition } from '../motion.ts'
 import { PanelDock } from '../session/session-row.tsx'
-import type { PhaseName, ReaderView, SpecView } from './model.ts'
+import { type PhaseName, type ReaderView, type SpecView, specCalledOf } from './model.ts'
 import { ReaderBar } from './reader-bar.tsx'
 import { ReworkDialog } from './rework-dialog.tsx'
 import { SpecColumn, goToPhase } from './spec-column.tsx'
@@ -248,7 +248,7 @@ export function SpecPanel({
         foot={<SpecFoot content={foot} />}
         frame={
           <SpecFrame
-            specKey={spec.provisional === true ? 'the provisional Spec' : spec.key}
+            specKey={specCalledOf(spec)}
             groups={groups}
             writing={spec.focus}
             onUnfold={(phase) => fold(false, true, phase)}

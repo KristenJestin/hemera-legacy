@@ -3,16 +3,11 @@ import { MotionConfig } from 'motion/react'
 import { type ReactNode, useState } from 'react'
 import { expect, fn, screen, userEvent, waitFor, within } from 'storybook/test'
 
-import { readEveryFrame } from '../../../.storybook/journey.ts'
-import {
-  AT_ONCE,
-  emulateReducedMotion,
-  movesLess,
-  withinFrames,
-} from '../../../.storybook/reduced-motion.ts'
+import { useBeat } from '../../../.storybook/beat.ts'
+import { journeyOf, readEveryFrame } from '../../../.storybook/journey.ts'
+import { AT_ONCE, emulateReducedMotion, movesLess } from '../../../.storybook/reduced-motion.ts'
 import { IconChecklist, IconFlask, IconHammer, IconServer } from '../../icons.ts'
 import { HelperAvatar } from '../../session/helper-avatar.tsx'
-import { Button } from '../button/button.tsx'
 import { TooltipProvider } from '../tooltip/tooltip.tsx'
 import { LiveChip, type LiveChipProps, type LiveState } from './live-chip.tsx'
 
@@ -54,25 +49,27 @@ function crossingOf(wipe: Element): number {
   return shiftOf(wipe) / wipe.offsetWidth
 }
 
-/** A chip that runs until its End is pressed, and ends as asked. */
+/**
+ * A chip that works for a beat, ends as asked for a beat, and runs again: the story plays the
+ * change by itself, over and over, with nothing beside the chip to drive it.
+ */
 function Ending({ to, ...props }: LiveChipProps & { to: LiveState }): ReactNode {
-  const [state, setState] = useState<LiveState>('running')
-  const [endedAt, setEndedAt] = useState<number | null>(null)
-  return (
-    <div className="flex items-center gap-3">
-      <LiveChip {...props} state={state} endedAt={endedAt} />
-      <Button
-        size="sm"
-        variant="ghost"
-        onClick={() => {
-          setState(to)
-          setEndedAt(Date.now())
-        }}
-      >
-        End
-      </Button>
-    </div>
-  )
+  const step = useBeat(2)
+  const [shown, setShown] = useState<{ step: number; endedAt: number | null }>({
+    step: 0,
+    endedAt: null,
+  })
+  if (shown.step !== step) setShown({ step, endedAt: step === 0 ? null : Date.now() })
+  return <LiveChip {...props} state={step === 0 ? 'running' : to} endedAt={shown.endedAt} />
+}
+
+/** The wipe of a chip, once its end has come round. */
+async function wipeOf(chip: HTMLElement): Promise<Element> {
+  return await waitFor(() => {
+    const wipe = chip.querySelector('[data-wipe]')
+    expect(wipe).not.toBeNull()
+    return wipe!
+  })
 }
 
 const meta = {
@@ -332,23 +329,19 @@ export const EndsWell: Story = {
     const chip = canvas.getByRole('button', { name: 'test, running' })
     const surface = getComputedStyle(chip).backgroundColor
     const edge = getComputedStyle(chip).borderColor
-    await userEvent.click(canvas.getByRole('button', { name: 'End' }))
-    const wipe = chip.querySelector('[data-wipe]')
-    await expect(wipe).not.toBeNull()
+    const wipe = await wipeOf(chip)
     await expect(wipe).toHaveClass('bg-success-muted')
     // While the wipe crosses, the icon is still the chip's own.
     await expect(chip.querySelector('[data-end]')).toBeNull()
-    const watch = readEveryFrame(() => crossingOf(wipe!))
+    // In hundredths of the chip's width, which is the unit a journey of a share is told in.
+    const watch = readEveryFrame(() => crossingOf(wipe) * 100)
     await waitFor(() => expect(chip.querySelector('[data-wipe]')).toBeNull())
-    const crossing = watch
-      .stop()
-      .map((reading) => reading.value)
-      .filter((value) => !Number.isNaN(value))
+    const readings = watch.stop().filter((reading) => !Number.isNaN(reading.value))
+    const crossing = readings.map((reading) => reading.value)
     // Once across, left to right and never back: every frame further on than the one before.
-    await expect(crossing.length).toBeGreaterThan(2)
-    await expect(crossing.some((share) => share > -0.9 && share < 0.9)).toBe(true)
-    const backwards = crossing.filter((share, at) => at > 0 && share < crossing[at - 1]! - 0.001)
+    const backwards = crossing.filter((share, at) => at > 0 && share < crossing[at - 1]! - 0.1)
     await expect(backwards).toEqual([])
+    if (!movesLess()) await expect(journeyOf(readings, -100, 100)).not.toBe('jumped')
     // Then nothing lasting: the chip's own surface and edge, and a green check for its icon.
     await expect(chip).toHaveAccessibleName('test, done')
     await expect(getComputedStyle(chip).backgroundColor).toBe(surface)
@@ -372,19 +365,25 @@ export const EndsInFailure: Story = {
     const chip = canvas.getByRole('button', { name: 'test, running' })
     const shaken = chip.closest('[data-live-chip]')
     await expect(shaken).not.toBeNull()
-    const watch = readEveryFrame(() => shiftOf(shaken!))
-    await userEvent.click(canvas.getByRole('button', { name: 'End' }))
-    await expect(chip.querySelector('[data-wipe]')).toHaveClass('bg-destructive-muted')
+    // Every frame's shift, kept as it is read, so the wait below sees the shake as it comes.
+    const shifts: number[] = []
+    const watch = readEveryFrame(() => {
+      const shift = shiftOf(shaken!)
+      shifts.push(shift)
+      return shift
+    })
+    await expect(await wipeOf(chip)).toHaveClass('bg-destructive-muted')
     await waitFor(() => expect(chip.querySelector('[data-wipe]')).toBeNull())
     await waitFor(() =>
       expect(chip.querySelector('[data-end="failed"]')).toHaveClass('text-destructive'),
     )
-    await new Promise((settled) => setTimeout(settled, 600))
-    const shifts = watch.stop().map((reading) => reading.value)
     // One shake, both ways, and back to its place.
-    await expect(Math.min(...shifts)).toBeLessThan(-1)
-    await expect(Math.max(...shifts)).toBeGreaterThan(1)
-    await expect(shifts.at(-1)).toBe(0)
+    await waitFor(() => {
+      expect(Math.min(...shifts)).toBeLessThan(-1)
+      expect(Math.max(...shifts)).toBeGreaterThan(1)
+      expect(shiftOf(shaken!)).toBe(0)
+    })
+    watch.stop()
   },
 }
 
@@ -408,11 +407,17 @@ export const ReducedMotion: Story = {
     const shaken = chip.closest('[data-live-chip]')!
     const wiped = readEveryFrame(() => (chip.querySelector('[data-wipe]') === null ? 0 : 1))
     const shifted = readEveryFrame(() => shiftOf(shaken))
-    await userEvent.click(canvas.getByRole('button', { name: 'End' }))
-    await expect(
-      await withinFrames(() => chip.querySelector('[data-end="failed"]') !== null, AT_ONCE),
-    ).toBe(true)
+    // Each frame: 0 while it works, 1 once it has failed, 2 once its ✕ is there too.
+    const ending = readEveryFrame(() => {
+      if (chip.dataset['state'] !== 'failed') return 0
+      return chip.querySelector('[data-end="failed"]') === null ? 1 : 2
+    })
+    await waitFor(() => expect(chip).toHaveAccessibleName('test, failed'))
     await new Promise((settled) => setTimeout(settled, 600))
+    const ends = ending.stop().map((reading) => reading.value)
+    const failedAt = ends.findIndex((value) => value > 0)
+    await expect(failedAt).toBeGreaterThanOrEqual(0)
+    await expect(ends.indexOf(2, failedAt) - failedAt).toBeLessThanOrEqual(AT_ONCE)
     await expect(wiped.stop().every((reading) => reading.value === 0)).toBe(true)
     await expect(shifted.stop().every((reading) => reading.value === 0)).toBe(true)
     // The breath is the stylesheet's, which answers the system's own preference.
@@ -548,8 +553,7 @@ export const HelperEnds: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     const chip = canvas.getByRole('button', { name: 'Reviewer, running' })
-    await userEvent.click(canvas.getByRole('button', { name: 'End' }))
-    await expect(chip.querySelector('[data-wipe]')).toHaveClass('bg-success-muted')
+    await expect(await wipeOf(chip)).toHaveClass('bg-success-muted')
     await waitFor(() => expect(chip.querySelector('[data-end="finished"]')).not.toBeNull())
     // The avatar keeps its room under the check, so nothing on the line moves.
     const avatar = chip.querySelector('.rounded-full')!

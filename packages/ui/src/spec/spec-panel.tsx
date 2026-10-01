@@ -12,6 +12,7 @@ import { SpecColumn, goToPhase } from './spec-column.tsx'
 import { SpecFrame } from './spec-frame.tsx'
 import { SpecHead } from './spec-head.tsx'
 import { phasesOf } from './spec-phases.ts'
+import { SpecWide } from './spec-wide.tsx'
 import { WorkspaceActions, type WorkspaceActionsProps } from './workspace-actions.tsx'
 
 /**
@@ -32,8 +33,10 @@ import { WorkspaceActions, type WorkspaceActionsProps } from './workspace-action
  * in from that edge and pushes the chat; closing, the panel slides out, and a beat later the small
  * frame comes back. The two moves always overlap, so there is no frame where neither is there.
  *
- * The frame, its widths, the swap and the fold are the Session's panel's (`session/panel-dock.tsx`),
- * which the build's panel is drawn by too (#77): this file says what the Spec puts in it.
+ * The frame, its widths, the swap and the fold are the Session's panel's (`session/session-row.tsx`),
+ * which the build's panel is drawn by too (#77): this file says what the Spec puts in it. Laid over
+ * the chat, the Spec is read at a reading measure beside a sidebar of its phases and their sections
+ * (`spec-wide.tsx`).
  *
  * Who opens it: the chevron and the glyphs; and the agent starting on a part opens it on that
  * part's phase, unless the hand folded it during this Session — a fold by the hand holds until the
@@ -228,6 +231,18 @@ export function SpecPanel({
               />
             )}
             <SpecColumn spec={spec} groups={groups} column={column} still={still} />
+          </>
+        }
+        wide={
+          <>
+            {reader !== undefined && (
+              <ReaderBar
+                writer={reader.writer}
+                takeOverRefused={reader.takeOverRefused}
+                onTakeOver={onTakeOver}
+              />
+            )}
+            <SpecWide spec={spec} groups={groups} still={still} />
           </>
         }
         foot={<SpecFoot content={foot} />}

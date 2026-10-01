@@ -1122,6 +1122,139 @@ export const OverAndBack: Story = {
 }
 
 /**
+ * The Spec over the chat (#77): a sidebar of its phases on the left — each its glyph, its name and
+ * how much of it is written, its sections on a line under it, the one being read marked — in place
+ * of the phase headings' menu, and the Spec's text at a reading measure beside it.
+ */
+export const WideSpec: Story = {
+  args: { defaultOver: true },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const outline = within(canvas.getByRole('navigation', { name: 'Outline of ATL-7' }))
+    await expect(outline.getByRole('button', { name: /^Shape, \d+ of \d+ written$/ })).toBeVisible()
+    await expect(outline.getByRole('button', { name: /^Plan, / })).toBeVisible()
+    await expect(outline.getByRole('button', { name: /^Decompose, / })).toBeVisible()
+    await expect(outline.getByRole('button', { name: 'Tasks' })).toBeVisible()
+    const contents = canvas.getByRole('region', { name: 'Contents of ATL-7' })
+    // No menu of the phases: the sidebar is the way through.
+    await expect(within(contents).queryByRole('button', { name: /go to another phase/ })).toBeNull()
+    // The text at a reading measure, however wide the row.
+    const page = contents.querySelector('[data-phase="shape"]')!.getBoundingClientRect()
+    await expect(page.width).toBeLessThanOrEqual(768)
+    await expect(contents.getBoundingClientRect().width).toBeGreaterThan(page.width)
+  },
+}
+
+/**
+ * A section pressed in the sidebar: the reader goes there, and the mark goes with it; read back up
+ * by hand, the mark follows.
+ */
+export const OutlineGoesThere: Story = {
+  args: { defaultOver: true },
+  decorators: [
+    (Story) => (
+      <MotionConfig reducedMotion="always">
+        <Story />
+      </MotionConfig>
+    ),
+  ],
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const outline = within(canvas.getByRole('navigation', { name: 'Outline of ATL-7' }))
+    const contents = canvas.getByRole('region', { name: 'Contents of ATL-7' })
+    const tasks = outline.getByRole('button', { name: 'Tasks' })
+    await expect(tasks).not.toHaveAttribute('aria-current')
+    await userEvent.click(tasks)
+    await expect(tasks).toHaveAttribute('aria-current', 'location')
+    const part = contents.querySelector<HTMLElement>('[data-part="tasks"]')!
+    await waitFor(() =>
+      expect(
+        Math.abs(part.getBoundingClientRect().top - contents.getBoundingClientRect().top),
+      ).toBeLessThan(40),
+    )
+    await expect(outline.getAllByRole('button', { current: 'location' })).toHaveLength(1)
+    // Read back up by hand, the mark follows the reading to the first part.
+    contents.scrollTo({ top: 0, behavior: 'instant' })
+    const first = outline.getAllByRole('button').find((one) => !one.hasAttribute('aria-label'))!
+    await waitFor(() => expect(first).toHaveAttribute('aria-current', 'location'))
+    await expect(tasks).not.toHaveAttribute('aria-current')
+  },
+}
+
+/** The four channels of a colour the browser computed, alpha last. */
+function channelsOf(css: string): [number, number, number, number] {
+  const [red = 0, green = 0, blue = 0, alpha = 1] = (css.match(/[\d.]+/g) ?? []).map(Number)
+  return [red, green, blue, alpha]
+}
+
+/** What a colour that lets some of what is under it through is drawn as. */
+function laid(
+  colour: [number, number, number, number],
+  under: [number, number, number, number],
+): [number, number, number, number] {
+  const [red, green, blue, alpha] = colour
+  return [
+    red * alpha + under[0] * (1 - alpha),
+    green * alpha + under[1] * (1 - alpha),
+    blue * alpha + under[2] * (1 - alpha),
+    1,
+  ]
+}
+
+/** What an element is drawn on: its own fill over the first one up the page that hides the rest. */
+function fillUnder(element: Element): [number, number, number, number] {
+  const fills: [number, number, number, number][] = []
+  for (let at: Element | null = element; at !== null; at = at.parentElement) {
+    const colour = channelsOf(getComputedStyle(at).backgroundColor)
+    if (colour[3] > 0) fills.push(colour)
+    if (colour[3] === 1) break
+  }
+  return fills.reduceRight<[number, number, number, number]>(
+    (under, fill) => laid(fill, under),
+    [255, 255, 255, 1],
+  )
+}
+
+function luminanceOf([red, green, blue]: [number, number, number, number]): number {
+  const linear = (channel: number) => {
+    const share = channel / 255
+    return share <= 0.03928 ? share / 12.92 : ((share + 0.055) / 1.055) ** 2.4
+  }
+  return 0.2126 * linear(red) + 0.7152 * linear(green) + 0.0722 * linear(blue)
+}
+
+/** The contrast of an element's text on what it is drawn on. */
+function contrastOf(element: Element): number {
+  const fill = fillUnder(element)
+  const ink = laid(channelsOf(getComputedStyle(element).color), fill)
+  const [light, dark] = [luminanceOf(fill), luminanceOf(ink)].toSorted((one, other) => other - one)
+  return (light! + 0.05) / (dark! + 0.05)
+}
+
+/**
+ * The sidebar reads in this theme (#77): the section being read, the others, a phase's name and
+ * how much of it is written all stand at AA or better on what they are drawn on — no grey on grey.
+ */
+export const OutlineContrast: Story = {
+  args: { defaultOver: true },
+  play: async ({ canvasElement }) => {
+    const outline = within(canvasElement).getByRole('navigation', { name: 'Outline of ATL-7' })
+    const current = outline.querySelector('[aria-current="location"]')!
+    const other = [...outline.querySelectorAll('button:not([aria-label])')].find(
+      (one) => !one.hasAttribute('aria-current'),
+    )!
+    const words = [...outline.querySelectorAll('span')].filter((one) =>
+      /written/.test(one.textContent ?? ''),
+    )
+    const read = [current, other, ...words].map((one) => ({
+      text: one.textContent,
+      contrast: contrastOf(one),
+    }))
+    await expect(read.filter((one) => one.contrast < 4.5)).toEqual([])
+  },
+}
+
+/**
  * Folding the Spec over the chat takes it back beside the chat: unfolded again, it stands where
  * it always does, and the chat is in reach.
  */

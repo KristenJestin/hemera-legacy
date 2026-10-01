@@ -488,17 +488,20 @@ export const HelpersCrowded: Story = {
   },
 }
 
-/** Two helpers share an initial: each avatar takes two letters. */
+/**
+ * Two helpers share an initial: each avatar takes two letters, never the same two — the first
+ * letter where their names differ, once their words' initials are shared too.
+ */
 export const SharedInitials: Story = {
   args: { items: HELPERS.sharedInitials },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     await expect(
       canvas.getByRole('button', { name: 'Helper Write the reader, running' }),
-    ).toHaveTextContent(/^WT/)
+    ).toHaveTextContent(/^WR/)
     await expect(
       canvas.getByRole('button', { name: 'Helper Wire them, running' }),
-    ).toHaveTextContent(/^WT/)
+    ).toHaveTextContent(/^WI/)
   },
 }
 

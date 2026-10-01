@@ -13,12 +13,22 @@ import { compareRanks } from './rank.ts'
 import type { SpecTask, TaskDependency, TaskExecutor, TaskStory } from './spec.ts'
 
 /**
- * Where a `build` Session stands (D10-01): `prepare`, `execute` and `verify` in that order, then
- * `accepted` once the user accepted the result, or `stopped` once the user stopped it or its
- * revision was replaced before its first task started. The last two are closed: the build stays
- * readable and nothing runs in it any more.
+ * Where a `build` Session stands (D10-01, protocol v2 of issue #279): `prepare`, `execute`,
+ * `verify` and `review` in that order — `review` is the helpers' review, then the user's, a review
+ * round of the build — and `feedback`, where the build resumes from once the user asked for a fix
+ * of a round, before it goes back to `execute`. Then `accepted` once the user accepted the result,
+ * or `stopped` once the user stopped it or its revision was replaced before its first task
+ * started. The last two are closed: the build stays readable and nothing runs in it any more.
  */
-export const BUILD_PHASES = ['prepare', 'execute', 'verify', 'accepted', 'stopped'] as const
+export const BUILD_PHASES = [
+  'prepare',
+  'execute',
+  'verify',
+  'review',
+  'feedback',
+  'accepted',
+  'stopped',
+] as const
 
 export type BuildPhase = (typeof BUILD_PHASES)[number]
 

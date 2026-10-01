@@ -54,20 +54,21 @@ Objective: every task is settled; verify the whole against the Spec. Hemera runs
 
 Check each story's acceptance criteria and the Spec's \`verification\` section against the real result. For a \`bug\`, replay the reproduction scenario on the code as it stands now, then call \`reproduction_replayed\` with whether the incorrect behaviour is gone and what you observed: Hemera keeps it with the end checks that follow this turn, and the user cannot accept the build without it. After any fix, replay it and report it again. Fix what fails without changing the Spec; red end checks are handed to you with their output.
 
-Expected result: your answer: what you verified, how, and what you observed. The user then accepts the build or not.`,
+Expected result: your answer: what you verified, how, and what you observed. Once the end checks are green, the build goes on to its review.`,
+
+  review: `# Phase: review
+
+Objective: the result is verified; review it before the user does. Nothing in the Workspace changes in this phase.
+
+Read the result against the Spec: each story and its acceptance criteria, the \`verification\` section, and the evidence of the checks \`build_read\` shows.
+
+Expected result: your answer: what you reviewed and what you found. When your turn ends, Hemera freezes the result and opens a Spec review round for the user, who accepts the build or sends you their feedback to fix.`,
+
+  feedback: `# Phase: feedback
+
+Objective: fix what the user's feedback on the last Spec review round asks, without changing the Spec. Their feedback follows this brief.
+
+For each feedback: check it on the real result, then fix it in the Workspace. A question is answered in your reply and changes nothing. A feedback that would need the frozen Spec to change is not carried out: say so in your answer, with the reason. For a \`bug\`, replay its reproduction scenario once the fixes are done and report it with \`reproduction_replayed\`: the user cannot accept the build without it.
+
+Expected result: your answer: what each feedback changed, and how you verified it. When your turn ends, Hemera runs the end checks of the whole Spec again, then the review, and opens a new round for the user.`,
 }
-
-/**
- * The brief of a review the user wrote in the chat while the build waited for it (issue #117).
- * The review itself is the user's own message, in front of this brief; what this says is what it is
- * and what the build does with it.
- */
-export const BUILD_REVIEW_BRIEF = `# The user's review
-
-Objective: carry out the review the user wrote in the chat. Their message is the message in front of this brief: read it as the review of what the build has done — a change asked for, a fault found, a check to redo.
-
-Work in the Workspace as it asks, and redefine nothing: the Spec is as frozen as it was, and a task the review makes impossible is reported with \`task_blocked\` again, with the reason.
-
-For a \`bug\`, replay its reproduction scenario once the review is carried out and report it with \`reproduction_replayed\`: the end checks that follow your turn take it with them, and the user cannot accept the build without it.
-
-Expected result: your answer: what the review changed, what you verified and how. When your turn ends, Hemera runs the end checks of the whole Spec again, and the user accepts the build or writes another review.`

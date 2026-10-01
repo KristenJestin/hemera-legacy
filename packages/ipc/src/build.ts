@@ -13,8 +13,19 @@ import { z } from 'zod'
 import { reviewRoundViewSchema } from './review.ts'
 import { specTypeSchema } from './specs.ts'
 
-/** Where a build stands (D10-01): its three phases, then accepted or stopped. */
-export const buildPhaseSchema = z.enum(['prepare', 'execute', 'verify', 'accepted', 'stopped'])
+/**
+ * Where a build stands (D10-01, protocol v2 of issue #279): `prepare`, `execute`, `verify`,
+ * `review` and `feedback`, then accepted or stopped.
+ */
+export const buildPhaseSchema = z.enum([
+  'prepare',
+  'execute',
+  'verify',
+  'review',
+  'feedback',
+  'accepted',
+  'stopped',
+])
 
 export type BuildPhase = z.infer<typeof buildPhaseSchema>
 
@@ -156,8 +167,9 @@ export type StoryView = z.infer<typeof storyViewSchema>
  * A `build` Session's build, as `build.read` answers it and every build action answers the build
  * it leaves (D10-12). `revision` is the number of the revision the build was started on, which
  * "Spec" opens read only; `detail` says why it stopped; `note` is the agent's approach (D10-02);
- * `canAccept` is true once `verify` is green and nothing waits for the user (D10-11), and for a
- * `bug` once the replay of its reproduction was reported (issue #203).
+ * `canAccept` is true on a review round that is open and not stale, with no feedback waiting for
+ * a fix, and with the end checks green — for a `bug`, with the replay of its reproduction (D10-11,
+ * issues #203 and #279).
  */
 export const buildViewSchema = z.object({
   sessionId: z.string(),

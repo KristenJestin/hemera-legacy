@@ -244,6 +244,10 @@ export interface BuildPlan {
   readonly resume?: (labels: readonly string[], handed: string) => readonly FakeStep[]
   /** What it does in `verify`; a sentence by default. */
   readonly verify?: (handed: string) => readonly FakeStep[]
+  /** What it does in `review`; a sentence by default. */
+  readonly review?: (handed: string) => readonly FakeStep[]
+  /** What it does with the feedback of a round; a sentence by default. */
+  readonly feedback?: (handed: string) => readonly FakeStep[]
 }
 
 /**
@@ -263,6 +267,12 @@ export function buildAgent(plan: BuildPlan = {}, script: Partial<FakeScript> = {
       }
       if (text.includes('# Phase: verify')) {
         return plan.verify?.(text) ?? [{ does: 'says', text: 'Verified against the Spec.' }]
+      }
+      if (text.includes('# Phase: review')) {
+        return plan.review?.(text) ?? [{ does: 'says', text: 'Reviewed against the Spec.' }]
+      }
+      if (text.includes('# Phase: feedback')) {
+        return plan.feedback?.(text) ?? [{ does: 'says', text: 'The feedback is fixed.' }]
       }
       return plan.execute?.(labels, text) ?? labels.map(finished)
     },

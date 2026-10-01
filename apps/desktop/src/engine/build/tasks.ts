@@ -29,7 +29,7 @@ import {
   storyDone,
   tasksSettled,
 } from '@hemera/core'
-import { and, asc, eq, inArray, isNotNull, ne } from 'drizzle-orm'
+import { and, asc, eq, inArray, isNotNull, ne, sql } from 'drizzle-orm'
 import { Effect } from 'effect'
 
 import type { EventAuthor, NewEvent } from '../journal.ts'
@@ -43,6 +43,9 @@ import {
   buildLaunches,
   buildTasks,
   contextDeliveries,
+  reviewFeedback,
+  reviewRoundRepositories,
+  reviewRounds,
   sessions,
   specRevisions,
 } from '../storage/schema.ts'
@@ -55,6 +58,8 @@ export type TreeRow = typeof buildAttemptTrees.$inferSelect
 export type FileRow = typeof buildAttemptFiles.$inferSelect
 export type ResultRow = typeof buildCheckResults.$inferSelect
 export type BlockerRow = typeof buildBlockers.$inferSelect
+export type RoundRow = typeof reviewRounds.$inferSelect
+export type FeedbackRow = typeof reviewFeedback.$inferSelect
 
 /** Why a build is stopped when its revision was replaced before its first task started (D10-04). */
 export const OBSOLETE = 'The Spec was reworked before the build started.'
@@ -63,7 +68,9 @@ export const OBSOLETE = 'The Spec was reworked before the build started.'
  * A build as its rows stand, read at one moment: the Session, the revision it was started on
  * (D8-13), and everything the build keeps of its work. Lists are in their order — tasks by rank,
  * attempts and results as they came — and `briefed` holds the phases a delivery has already
- * opened for the agent, so a later delivery of the same phase is a line rather than a brief.
+ * opened for the agent, so a later delivery of the same phase is a line rather than a brief. Its
+ * review rounds come with them (issue #279): each round, the ones a repository went stale in, and
+ * the feedback of every round.
  */
 export interface BuildRows {
   readonly session: SessionRow
@@ -78,6 +85,11 @@ export interface BuildRows {
   readonly results: readonly ResultRow[]
   readonly blockers: readonly BlockerRow[]
   readonly briefed: ReadonlySet<string>
+  /** In their order. */
+  readonly rounds: readonly RoundRow[]
+  /** The rounds one of whose repositories went stale. */
+  readonly staleRounds: ReadonlySet<string>
+  readonly feedback: readonly FeedbackRow[]
 }
 
 /** What `context_deliveries` calls the brief of a build's phase once the agent took it. */
@@ -86,11 +98,21 @@ export function briefPath(phase: BuildPhase): string {
 }
 
 /**
- * The path a review's brief is recorded under (issue #117), the same in `context_deliveries` and in
- * `briefed`: the agent is briefed once per review, and a review after another is a brief of its own.
+ * The path the `review` brief is recorded under, per pass (issue #279): the pass that comes before
+ * round `number` opens. A build reviewed again after a fix is briefed again.
  */
-export function reviewBrief(at: string): string {
-  return `build · review · ${at}`
+export function reviewPath(number: number): string {
+  return `build · review · ${number}`
+}
+
+/** The path the `feedback` brief of round `number` is recorded under (issue #279). */
+export function feedbackPath(number: number): string {
+  return `build · feedback · ${number}`
+}
+
+/** The build's review round that is not closed — open, or being fixed — if there is one. */
+export function unclosedRound(rows: BuildRows): RoundRow | undefined {
+  return rows.rounds.find((round) => round.state !== 'closed')
 }
 
 export function phaseOf(row: Pick<SessionRow, 'buildPhase'>): BuildPhase | null {
@@ -183,6 +205,29 @@ export function readBuild(transaction: EngineTransaction, sessionId: string) {
       .from(contextDeliveries)
       .where(and(eq(contextDeliveries.sessionId, sessionId), eq(contextDeliveries.kind, 'brief')))
       .pipe(read('briefs'))
+    const rounds = yield* transaction
+      .select()
+      .from(reviewRounds)
+      .where(eq(reviewRounds.sessionId, sessionId))
+      .orderBy(asc(reviewRounds.number))
+      .pipe(read('review rounds'))
+    const roundIds = rounds.map((round) => round.id)
+    const stale = yield* transaction
+      .select({ roundId: reviewRoundRepositories.roundId })
+      .from(reviewRoundRepositories)
+      .where(
+        and(
+          inArray(reviewRoundRepositories.roundId, roundIds),
+          isNotNull(reviewRoundRepositories.staleAt),
+        ),
+      )
+      .pipe(read('stale repositories'))
+    const feedback = yield* transaction
+      .select()
+      .from(reviewFeedback)
+      .where(inArray(reviewFeedback.roundId, roundIds))
+      .orderBy(asc(reviewFeedback.createdAt), sql`rowid`)
+      .pipe(read('feedback'))
     const rows: BuildRows = {
       session,
       phase: phaseOf(session),
@@ -199,6 +244,9 @@ export function readBuild(transaction: EngineTransaction, sessionId: string) {
       results: results.toSorted((left, right) => left.ranAt.localeCompare(right.ranAt)),
       blockers: blockers.toSorted((left, right) => left.raisedAt.localeCompare(right.raisedAt)),
       briefed: new Set(briefs.map((brief) => brief.path)),
+      rounds,
+      staleRounds: new Set(stale.map((one) => one.roundId)),
+      feedback,
     }
     return rows
   })
@@ -431,10 +479,7 @@ export function moveTask(
     .pipe(Effect.mapError(failed('writing the task')))
 }
 
-/**
- * Writes where a build's protocol stands (D10-01). A review's stamp is not the phase's to clear: it
- * stands until the checks it asked for are judged (issue #117).
- */
+/** Writes where a build's protocol stands (D10-01). */
 export function movePhase(
   transaction: EngineTransaction,
   sessionId: string,
@@ -497,11 +542,43 @@ export function follow(transaction: EngineTransaction, sessionId: string, at: st
     // The end checks wait for the agent's own verification: they run once the turn that handed it
     // the `verify` brief is over, never beside it (D10-07).
     if (rows.phase === 'execute' && tasksSettled(tasks)) {
-      yield* movePhase(transaction, sessionId, 'verify')
-      events.push(buildEvent(rows, 'build.phase_started', 'hemera', { phase: 'verify' }))
+      events.push(...(yield* verifyBegins(transaction, rows)))
     }
     return { events, jobs }
   })
+}
+
+/**
+ * Where `verify` begins (protocol v2, issue #279): the documentation step of the build comes here,
+ * before the end checks, and is the documenter's to fill (issue #280). Today it moves the phase.
+ */
+export function verifyBegins(transaction: EngineTransaction, rows: BuildRows) {
+  return movePhase(transaction, rows.session.id, 'verify').pipe(
+    Effect.as([buildEvent(rows, 'build.phase_started', 'hemera', { phase: 'verify' })]),
+  )
+}
+
+/**
+ * Closes a round of the build, with its Journal line (issue #279): once its fix is over, or once
+ * the build is accepted or stopped.
+ */
+export function closeRound(
+  transaction: EngineTransaction,
+  rows: BuildRows,
+  round: RoundRow,
+  at: string,
+  author: EventAuthor,
+) {
+  return transaction
+    .update(reviewRounds)
+    .set({ state: 'closed', closedAt: at })
+    .where(eq(reviewRounds.id, round.id))
+    .pipe(
+      Effect.mapError(failed('closing the review round')),
+      Effect.as(
+        buildEvent(rows, 'review.round_moved', author, { number: round.number, state: 'closed' }),
+      ),
+    )
 }
 
 /**
@@ -550,6 +627,8 @@ export function slotHolder(reader: EngineDatabase | EngineTransaction, specId: s
       if (phase === 'prepare') return 'it is getting ready'
       if (phase === 'execute') return 'it is building'
       if (phase === 'verify') return 'it is in its final checks'
+      if (phase === 'review') return 'it is in review'
+      if (phase === 'feedback') return 'it is fixing the feedback of its review'
       return 'it was accepted'
     }
     const launches = yield* reader

@@ -14,8 +14,19 @@
 
 import type { StoryView } from '../spec/model.ts'
 
-/** Where a build stands (D10-01): its three phases, then accepted or stopped. */
-export type BuildPhase = 'prepare' | 'execute' | 'verify' | 'accepted' | 'stopped'
+/**
+ * Where a build stands (D10-01, protocol v2 of issue #279): `prepare`, `execute`, `verify`,
+ * `review` — the helpers' review, then the user's round — and `feedback`, the fix of a round's
+ * feedback; then accepted or stopped.
+ */
+export type BuildPhase =
+  | 'prepare'
+  | 'execute'
+  | 'verify'
+  | 'review'
+  | 'feedback'
+  | 'accepted'
+  | 'stopped'
 
 /** Where a contractual task stands in the build (D10-04). */
 export type BuildTaskState =
@@ -260,7 +271,10 @@ export interface BuildViewData {
   stories: BuildStoryView[]
   /** The tries of the final checks, in `verify`. */
   endAttempts: BuildAttemptView[]
-  /** Whether Accept is offered: verify is green and nothing waits for the user (D10-11). */
+  /**
+   * Whether Accept is offered: a review round is open and not stale, no feedback waits for a fix,
+   * and the final checks are green (D10-11, issue #279).
+   */
   canAccept: boolean
 }
 
@@ -272,6 +286,8 @@ export const PHASE_LABELS: Record<BuildPhase, string> = {
   prepare: 'Getting ready',
   execute: 'Building',
   verify: 'Final checks',
+  review: 'In review',
+  feedback: 'Fixing the feedback',
   accepted: 'Accepted',
   stopped: 'Stopped',
 }

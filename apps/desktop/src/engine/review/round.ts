@@ -205,6 +205,70 @@ function anchorColumns(anchor: FeedbackAnchor | null) {
   }
 }
 
+/** One repository's checkpoint as a round keeps it, its files copied beside it. */
+export interface RoundCheckpoint {
+  readonly repository: string
+  readonly head: string
+  readonly tree: string
+  readonly base: string | null
+  readonly baseCommit: string
+  readonly files: readonly RoundFileView[]
+}
+
+/**
+ * Writes the next round of a build — a review of its Spec, `open` — with its checkpoints, inside
+ * the transaction the caller holds, and answers its number. `open` writes it after Git took the
+ * checkpoints; a build whose Workspace has no repository opens its round with none, in the very
+ * transaction that ends its `verify` (issue #279).
+ */
+export function insertRound(
+  transaction: EngineTransaction,
+  sessionId: string,
+  roundId: string,
+  checkpoints: readonly RoundCheckpoint[],
+  at: string,
+) {
+  return Effect.gen(function* () {
+    const last = yield* transaction
+      .select({ number: max(reviewRounds.number) })
+      .from(reviewRounds)
+      .where(eq(reviewRounds.sessionId, sessionId))
+    const number = (last[0]?.number ?? 0) + 1
+    yield* transaction.insert(reviewRounds).values({
+      id: roundId,
+      sessionId,
+      number,
+      kind: 'spec',
+      state: 'open',
+      openedAt: at,
+    })
+    for (const checkpoint of checkpoints) {
+      yield* transaction.insert(reviewRoundRepositories).values({
+        roundId,
+        repository: checkpoint.repository,
+        head: checkpoint.head,
+        tree: checkpoint.tree,
+        base: checkpoint.base,
+        baseCommit: checkpoint.baseCommit,
+      })
+      if (checkpoint.files.length > 0) {
+        yield* transaction.insert(reviewRoundFiles).values(
+          checkpoint.files.map((file) => ({
+            roundId,
+            repository: checkpoint.repository,
+            path: file.path,
+            status: file.status,
+            added: file.added,
+            removed: file.removed,
+            untracked: file.untracked,
+          })),
+        )
+      }
+    }
+    return number
+  }).pipe(Effect.mapError(failed('opening a review round')))
+}
+
 export const reviewRoundsLayer = (
   everyMs: number = ROUND_WATCH_MS,
 ): Layer.Layer<ReviewRounds, never, Database | Git | BuildNotices | StderrSink> =>
@@ -541,50 +605,14 @@ export const reviewRoundsLayer = (
           for (const place of places) checkpoints.push(yield* checkpointOf(place))
           const roundId = crypto.randomUUID()
           yield* written('opening a review round', (transaction) =>
-            Effect.gen(function* () {
-              const last = yield* transaction
-                .select({ number: max(reviewRounds.number) })
-                .from(reviewRounds)
-                .where(eq(reviewRounds.sessionId, sessionId))
-              const number = (last[0]?.number ?? 0) + 1
-              yield* transaction.insert(reviewRounds).values({
-                id: roundId,
-                sessionId,
-                number,
-                kind: 'spec',
-                state: 'open',
-                openedAt: now(),
-              })
-              for (const checkpoint of checkpoints) {
-                yield* transaction.insert(reviewRoundRepositories).values({
-                  roundId,
-                  repository: checkpoint.repository,
-                  head: checkpoint.head,
-                  tree: checkpoint.tree,
-                  base: checkpoint.base,
-                  baseCommit: checkpoint.baseCommit,
-                })
-                if (checkpoint.files.length > 0) {
-                  yield* transaction.insert(reviewRoundFiles).values(
-                    checkpoint.files.map((file) => ({
-                      roundId,
-                      repository: checkpoint.repository,
-                      path: file.path,
-                      status: file.status,
-                      added: file.added,
-                      removed: file.removed,
-                      untracked: file.untracked,
-                    })),
-                  )
-                }
-              }
-              return {
+            insertRound(transaction, sessionId, roundId, checkpoints, now()).pipe(
+              Effect.map((number) => ({
                 result: number,
                 events: [
                   roundEvent(session, 'review.round_opened', false, { number, kind: 'spec' }),
                 ],
-              }
-            }),
+              })),
+            ),
           )
           yield* told(sessionId)
           return yield* viewOf(sessionId, roundId)

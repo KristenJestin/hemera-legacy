@@ -7,6 +7,7 @@ import { describe, expect, test } from 'vite-plus/test'
 
 import {
   BUILD_MISSION_BRIEF,
+  BUILD_PHASES,
   BUILD_PHASE_BRIEFS,
   BUILD_PROTOCOL,
   composeBuildBrief,
@@ -58,15 +59,26 @@ const RED: BriefAttempt = {
 }
 
 describe('The build protocol', () => {
-  test('version 1: prepare, execute, verify, each after the one before', () => {
+  test('version 2: prepare, execute, verify, review, and feedback to resume from', () => {
     expect(BUILD_PROTOCOL).toEqual({
-      version: 1,
+      version: 2,
       phases: [
         { id: 'prepare', dependsOn: [], available: true },
         { id: 'execute', dependsOn: ['prepare'], available: true },
         { id: 'verify', dependsOn: ['execute'], available: true },
+        { id: 'review', dependsOn: ['verify'], available: true },
+        { id: 'feedback', dependsOn: ['review'], available: true },
       ],
     })
+    expect(BUILD_PHASES).toEqual([
+      'prepare',
+      'execute',
+      'verify',
+      'review',
+      'feedback',
+      'accepted',
+      'stopped',
+    ])
   })
 
   test('the mission brief names only tools a build Session is offered', () => {
@@ -296,5 +308,61 @@ describe('The verify brief', () => {
     expect(brief).toContain(BUILD_PHASE_BRIEFS.verify)
     expect(brief).not.toContain('# Tasks handed now')
     expect(brief).toContain('- T1 · Title of T1: done by the user')
+  })
+})
+
+describe('Verify green goes to review, then a Spec review round', () => {
+  test('the review brief is the review phase, and says the user reviews once it is over', () => {
+    const brief = composeBuildBrief({ kind: 'review' })
+    expect(brief).toBe(BUILD_PHASE_BRIEFS.review)
+    expect(brief).toContain('# Phase: review')
+    expect(brief).toContain('Spec review')
+  })
+
+  test('a resume in review hands no task', () => {
+    const brief = composeBuildBrief({
+      kind: 'resume',
+      phase: 'review',
+      snapshot: passingSnapshot(),
+      labels: LABELS,
+      tasks: [briefTask('T1', { state: 'done' })],
+      ready: [],
+      failures: [],
+    })
+    expect(brief).toContain(BUILD_PHASE_BRIEFS.review)
+    expect(brief).not.toContain('# Tasks handed now')
+  })
+})
+
+describe('Fix goes to feedback, then execute, verify, review and a new round', () => {
+  const feedback = [
+    { kind: 'product' as const, body: 'The export has no header row.', story: 'Export' },
+    { kind: 'general' as const, body: 'Name the file after the day.', story: null },
+    { kind: 'question' as const, body: 'Why CSV and not JSON?', story: null },
+  ]
+
+  test('the feedback brief names the round and carries every feedback, with its story', () => {
+    const brief = composeBuildBrief({ kind: 'feedback', round: 'Spec review · round 2', feedback })
+    expect(brief.startsWith(BUILD_PHASE_BRIEFS.feedback)).toBe(true)
+    expect(brief).toContain('# The feedback of Spec review · round 2')
+    expect(brief).toContain('- product, on the story "Export": The export has no header row.')
+    expect(brief).toContain('- general: Name the file after the day.')
+    expect(brief).toContain('- question: Why CSV and not JSON?')
+  })
+
+  test('a resume in feedback carries the feedback again', () => {
+    const brief = composeBuildBrief({
+      kind: 'resume',
+      phase: 'feedback',
+      snapshot: passingSnapshot(),
+      labels: LABELS,
+      tasks: [briefTask('T1', { state: 'done' })],
+      ready: [],
+      failures: [],
+      feedback: { round: 'Spec review · round 1', feedback },
+    })
+    expect(brief).toContain(BUILD_PHASE_BRIEFS.feedback)
+    expect(brief).toContain('# The feedback of Spec review · round 1')
+    expect(brief).toContain('The export has no header row.')
   })
 })

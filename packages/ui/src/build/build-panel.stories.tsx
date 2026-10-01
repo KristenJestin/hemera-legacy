@@ -203,7 +203,6 @@ function Screen({
   onTaskDone,
   onTaskSkip,
   onDismissBlocker,
-  onOpenChat,
 }: {
   screen: keyof typeof SCREENS
   /** Whether a permission of the agent waits, among the notices and in the thread. */
@@ -219,7 +218,6 @@ function Screen({
   onTaskDone: (taskId: string) => void
   onTaskSkip: (taskId: string, reason: string, unblock: boolean) => void
   onDismissBlocker: (blockerId: string, note: string | null) => void
-  onOpenChat: () => void
 }): ReactNode {
   const thread = asking ? [...THREAD, PERMISSION] : THREAD
   // The task a notice opens is held here, since the notices and the view's stage are two readings
@@ -235,7 +233,6 @@ function Screen({
     onTaskDone,
     onTaskSkip,
     onDismissBlocker,
-    onOpenChat,
   }
   return (
     <TooltipProvider>
@@ -278,7 +275,6 @@ const meta = {
     onTaskDone: fn(),
     onTaskSkip: fn(),
     onDismissBlocker: fn(),
-    onOpenChat: fn(),
   },
   argTypes: {
     screen: {
@@ -299,7 +295,6 @@ const meta = {
     onTaskDone: { action: 'task done' },
     onTaskSkip: { action: 'task skipped' },
     onDismissBlocker: { action: 'blocker dismissed' },
-    onOpenChat: { action: 'chat opened' },
   },
 } satisfies Meta<typeof Screen>
 
@@ -553,27 +548,6 @@ export const YoursAmongTheNotices: Story = {
     await expect(notice.getByRole('button', { name: 'Skip…' })).toBeInTheDocument()
     await userEvent.click(notice.getByRole('button', { name: 'Done' }))
     await expect(args.onTaskDone).toHaveBeenCalledWith(T4_YOURS.id)
-  },
-}
-
-/**
- * Every story done and the final checks green: the review waits among the notices, `Review` hands
- * the keyboard to the composer it is written in, and `Accept` ends the build.
- */
-export const ReviewAmongTheNotices: Story = {
-  args: { screen: 'readyToAccept' },
-  play: async ({ canvasElement, args }) => {
-    const canvas = within(canvasElement)
-    await userEvent.click(
-      await canvas.findByRole('button', { name: 'Waiting for your answer: Build 1' }),
-    )
-    const notice = within(
-      await within(document.body).findByRole('group', { name: 'Review of ATL-7' }),
-    )
-    await userEvent.click(notice.getByRole('button', { name: 'Review' }))
-    await expect(args.onOpenChat).toHaveBeenCalled()
-    await userEvent.click(notice.getByRole('button', { name: 'Accept' }))
-    await expect(args.onAccept).toHaveBeenCalled()
   },
 }
 

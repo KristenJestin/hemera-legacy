@@ -741,8 +741,6 @@ export function SessionPage({
           onTaskDone: (taskId) => void doneTask(taskId),
           onTaskSkip: (taskId, reason, unblock) => void skipTask(taskId, reason, unblock),
           onDismissBlocker: (blockerId, note) => void dismissBlocker(blockerId, note),
-          // The review is written in the composer, which takes the keyboard (issue #117).
-          onOpenChat: () => setComposing(true),
         }
 
   const itemsOf = (kind: NoticeKind): NoticeItem[] => waitingByKind.get(kind) ?? []

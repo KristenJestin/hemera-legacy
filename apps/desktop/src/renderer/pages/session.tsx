@@ -116,6 +116,7 @@ import {
 import {
   glanceClosed,
   glanceOpened,
+  glancesLeft,
   leaveOnTheirOwn,
   linesSnapshot,
   marksOf,
@@ -542,6 +543,8 @@ export function SessionPage({
   useEffect(() => {
     leaveOnTheirOwn(session.id, endedAgentOneOffs(commandRuns))
   }, [session.id, commandRuns])
+  // A glance open as the page goes holds its chip no longer: nothing is left to close it.
+  useEffect(() => () => glancesLeft(session.id), [session.id])
   // Whether this Session was free when the page opened it: its Spec panel, once there, is one the
   // proposal just made, and it arrives rather than standing there (issue #130). The page is
   // keyed by the Session, so this is read once per Session opened.

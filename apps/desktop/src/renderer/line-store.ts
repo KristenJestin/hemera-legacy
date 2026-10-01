@@ -95,3 +95,14 @@ export function glanceClosed(sessionId: string, id: string): void {
   glancing.delete(key)
   if (due.delete(key)) leave(sessionId, id)
 }
+
+/**
+ * The Session's page is gone with glances open (unmounted, or another Session opened): no glance
+ * of it is left to close, so none holds a chip any more, and what came due meanwhile leaves now.
+ */
+export function glancesLeft(sessionId: string): void {
+  const prefix = keyOf(sessionId, '')
+  for (const key of [...glancing].filter((one) => one.startsWith(prefix))) {
+    glanceClosed(sessionId, key.slice(prefix.length))
+  }
+}

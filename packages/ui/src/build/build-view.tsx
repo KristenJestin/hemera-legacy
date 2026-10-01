@@ -34,7 +34,7 @@ import {
 } from './model.ts'
 import { ReviewCard } from './review-card.tsx'
 import { StopBuild } from './stop-build.tsx'
-import { BuildTries, TaskStage } from './task-stage.tsx'
+import { BuildTries, SaidMark, TaskStage } from './task-stage.tsx'
 import { ago, taskTime, tryLabel } from './times.ts'
 import { YoursBlock } from './yours-block.tsx'
 
@@ -361,10 +361,9 @@ export function Approach({ build }: { build: BuildViewData }): ReactNode {
     return (
       <div className={APPROACH}>
         <p className={WAITING}>
-          <StatusMark
-            state="progress"
-            label="Waiting for the agent's approach: no task starts before it"
-          />
+          <SaidMark label="Waiting for the agent's approach: no task starts before it">
+            <StatusMark state="progress" />
+          </SaidMark>
           Approach
         </p>
       </div>
@@ -440,10 +439,9 @@ export function TaskAttention({
     .map((one) => one.label)
   return (
     <p className={WAITS}>
-      <StatusMark
-        state="blocked"
-        label={`Waits on ${holding.join(', ')}, which the agent says contradicts the Spec`}
-      />
+      <SaidMark label={`Waits on ${holding.join(', ')}, which the agent says contradicts the Spec`}>
+        <StatusMark state="blocked" />
+      </SaidMark>
       {holding.join(', ')}
     </p>
   )
@@ -703,7 +701,9 @@ export function FinalChecks({ build, now }: { build: BuildViewData; now: string 
     <section aria-label="Final checks" className="flex flex-col gap-6">
       <h2 className={FINALS_HEAD}>
         {build.endAttempts.length === 0 && (
-          <StatusMark state="todo" label="They run once every task is done" />
+          <SaidMark label="They run once every task is done">
+            <StatusMark state="todo" />
+          </SaidMark>
         )}
         Final checks
       </h2>

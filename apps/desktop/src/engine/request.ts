@@ -24,7 +24,9 @@ import type {
   EmptyCommandNameError,
   EmptyMessageError,
   EmptyTitleError,
+  HelperReadOnlyError,
   InvalidCommandFolderError,
+  InvalidHelpersAtOnceError,
   InvalidPortlessNameError,
   InvalidProjectNameError,
   InvalidRepositoryPathError,
@@ -59,6 +61,7 @@ import { Commands, type UnknownCommandError, type UnknownRunError } from './comm
 import { SetupProposals, type SetupRefusedError } from './setup/proposals.ts'
 import { type Context, type UnreadableInstructionsError } from './context/service.ts'
 import { contextOf } from './context/view.ts'
+import { Helpers } from './helpers/helpers.ts'
 import { type InvalidCursorError, Journal } from './journal.ts'
 import { type PathOutsideBaseError, entriesUnder } from './paths.ts'
 import { Preferences } from './preferences.ts'
@@ -202,6 +205,7 @@ export function answer(
   | Specs
   | ProjectChecks
   | Builds
+  | Helpers
 > {
   return Effect.gen(function* () {
     if (decision.name === 'engine.status') return yield* (yield* EngineStatus).read
@@ -282,6 +286,10 @@ export function answer(
     if (decision.name === 'projects.setWorkspacesRoot') {
       const { id, version, path } = decision.argument
       return yield* projects.setWorkspacesRoot(id, version, path)
+    }
+    if (decision.name === 'projects.setHelpersAtOnce') {
+      const { id, version, helpersAtOnce } = decision.argument
+      return yield* projects.setHelpersAtOnce(id, version, helpersAtOnce)
     }
     if (decision.name === 'projects.setBranchPrefix') {
       const { id, version, prefix } = decision.argument
@@ -659,6 +667,15 @@ export function answer(
       return yield* projects.removeRepository(id, version, relativePath)
     }
 
+    // The helpers of a build (issue #77): read for the line of what goes on, and stopped by the
+    // user's ×, which tells the main agent; both answer the build's helpers as they stand.
+    if (decision.name === 'helpers.list') {
+      return { helpers: [...(yield* (yield* Helpers).list(decision.argument.sessionId))] }
+    }
+    if (decision.name === 'helpers.stop') {
+      return { helpers: [...(yield* (yield* Helpers).stop(decision.argument.sessionId))] }
+    }
+
     // The build of a `build` Session (D10-04): the window says what the user did, and the engine
     // decides what follows; every act answers the build it leaves.
     const builds = yield* Builds
@@ -723,6 +740,8 @@ export type Refusal =
   | InvalidVariableKeyError
   | InvalidWorkspacesRootError
   | InvalidBranchPrefixError
+  | InvalidHelpersAtOnceError
+  | HelperReadOnlyError
   | WorkspaceNotReadyError
   | WorkspaceFixedError
   | UnknownProposalError

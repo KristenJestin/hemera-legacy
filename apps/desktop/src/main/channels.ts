@@ -208,6 +208,7 @@ const RELAYED = [
   'repositories.update',
   'projects.setWorkspacesRoot',
   'projects.setBranchPrefix',
+  'projects.setHelpersAtOnce',
   'projects.setRepositoryIncluded',
   'journal.read',
   'journal.unseen',
@@ -316,6 +317,9 @@ const RELAYED = [
   'checks.save',
   'checks.remove',
   'checks.acceptProposed',
+  // The helpers of a build, read and stopped by the user (issue #77).
+  'helpers.list',
+  'helpers.stop',
 ] as const
 
 type Relayed = (typeof RELAYED)[number]

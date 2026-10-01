@@ -1,6 +1,6 @@
 /**
  * Helper agents as data (issue #77): the defined helpers, written one file each against one schema,
- * its brief and how its answer is read.
+ * the tools a helper Session holds, its brief and how its answer is read.
  */
 
 import { existsSync } from 'node:fs'
@@ -11,6 +11,7 @@ import { describe, expect, test } from 'vite-plus/test'
 
 import {
   HELPERS,
+  HELPER_DEPTH,
   HELPER_MISSION_BRIEF,
   TOOL_NAMES,
   composeHelperBrief,
@@ -19,8 +20,9 @@ import {
   helperResult,
   helpersAtOnce,
   helpersFor,
+  sessionTools,
 } from '#index.ts'
-import type { BriefTask } from '#index.ts'
+import type { BriefTask, HelperPlace } from '#index.ts'
 
 const FOLDER = join(import.meta.dirname, '..', 'src', 'protocols', 'helpers')
 
@@ -35,6 +37,14 @@ const aDefinition = (more: Record<string, string | boolean | readonly string[]> 
   writes: false,
   returns: z.object({ verdict: z.string() }),
   ...more,
+})
+
+const helper = (place: Partial<HelperPlace>): HelperPlace => ({
+  parentSessionId: 'build-1',
+  definition: null,
+  depth: 1,
+  task: null,
+  ...place,
 })
 
 const T2: BriefTask = {
@@ -91,9 +101,12 @@ describe('Defined helpers are data, one file each, validated by one schema', () 
     expect(helperNamed('nobody')).toBeNull()
   })
 
-  test('the schema refuses a read-only helper that writes, and a tool Hemera does not have', () => {
+  test('the schema refuses a read-only helper that writes, a helper tool and an unknown tool', () => {
     expect(helperDefinition.safeParse(aDefinition()).success).toBe(true)
     expect(helperDefinition.safeParse(aDefinition({ tools: ['fs_write'] })).success).toBe(false)
+    expect(helperDefinition.safeParse(aDefinition({ tools: ['helper_launch'] })).success).toBe(
+      false,
+    )
     expect(helperDefinition.safeParse(aDefinition({ tools: ['rm_rf'] })).success).toBe(false)
     expect(
       helperDefinition.safeParse(aDefinition({ missions: ['define'], tools: ['task_finished'] }))
@@ -109,6 +122,50 @@ describe('Defined helpers are data, one file each, validated by one schema', () 
     expect(listed).toContain('review-tests (Test review)')
     expect(listed).toContain('documenter (Documenter)')
     expect(listed).not.toContain('prototyper')
+  })
+})
+
+describe('A helper Session holds its own tools', () => {
+  test('a Session the user started holds its mission’s, helpers included for a build', () => {
+    expect(sessionTools({ mission: 'build', helper: null })).toContain('helper_launch')
+    expect(sessionTools({ mission: 'free', helper: null })).not.toContain('helper_launch')
+  })
+
+  test('a free helper holds the code tools, no proposal, no build tool, and may launch its own', () => {
+    const tools = sessionTools({ mission: 'build', helper: helper({}) })
+    expect(tools).toEqual(
+      expect.arrayContaining(['fs_read', 'fs_write', 'commands_run', 'helper_launch']),
+    )
+    for (const never of [
+      'commands_propose',
+      'setup_propose',
+      'spec_propose',
+      'task_finished',
+      'build_read',
+    ]) {
+      expect(tools).not.toContain(never)
+    }
+  })
+
+  test('a helper launched on a task holds that task’s build tools', () => {
+    const tools = sessionTools({ mission: 'build', helper: helper({ task: 'T2' }) })
+    expect(tools).toEqual(expect.arrayContaining(['build_read', 'task_finished', 'task_blocked']))
+    expect(tools).not.toContain('reproduction_replayed')
+  })
+
+  test('a helper at the depth cap launches none of its own', () => {
+    const tools = sessionTools({ mission: 'build', helper: helper({ depth: HELPER_DEPTH }) })
+    for (const tool of ['helper_launch', 'helper_stop', 'helper_read']) {
+      expect(tools).not.toContain(tool)
+    }
+  })
+
+  test('a defined helper holds its definition’s tools and nothing else of its mission', () => {
+    const tools = sessionTools({
+      mission: 'build',
+      helper: helper({ definition: 'review-security', depth: 2 }),
+    })
+    expect(tools).toEqual(['fs_read', 'fs_list', 'search', 'build_read'])
   })
 })
 

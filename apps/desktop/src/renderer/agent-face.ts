@@ -41,6 +41,10 @@ const MARK_FACES: Readonly<Record<ToolMark, FaceState>> = {
   'block-task': 'blocked',
   // The replay of a bug's reproduction (issue #203): the agent checking what it built.
   'replay-reproduction': 'checking',
+  // An orchestrator's three (issue #77): a helper launched or stopped, and where one stands.
+  'launch-helper': 'running',
+  'stop-helper': 'running',
+  'read-helper': 'reading',
 }
 
 /**

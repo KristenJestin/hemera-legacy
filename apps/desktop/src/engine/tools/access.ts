@@ -18,7 +18,7 @@
 import { createHash, randomBytes } from 'node:crypto'
 import { Context, Effect, Layer } from 'effect'
 
-import { type Mission, type ToolName, offeredTools } from '@hemera/core'
+import type { ToolName } from '@hemera/core'
 
 import { StderrSink } from '../agents/supervisor.ts'
 
@@ -44,11 +44,14 @@ export interface GrantedAccess extends AccessGrant {
 }
 
 export interface ToolAccessService {
-  /** Mints the token of one Session for one agent process, and revokes what came before it. */
+  /**
+   * Mints the token of one Session for one agent process, and revokes what came before it: what it
+   * may ask for is the set of the Session's tools, its mission's or a helper's own (D7-14, #77).
+   */
   readonly granted: (
     sessionId: string,
     agentProcess: string,
-    mission: Mission,
+    offered: readonly ToolName[],
     tokenInQuery?: boolean,
   ) => Effect.Effect<GrantedAccess>
   /** The grant a token belongs to, and null for anything else — a foreign or a revoked one. */
@@ -130,7 +133,7 @@ export const toolAccessLayer: Layer.Layer<ToolAccess, never, StderrSink> = Layer
       })
 
     return {
-      granted: (sessionId, agentProcess, mission, tokenInQuery = false) =>
+      granted: (sessionId, agentProcess, offered, tokenInQuery = false) =>
         Effect.gen(function* () {
           yield* forget(sessionId)
           const token = randomBytes(32).toString('base64url')
@@ -139,7 +142,7 @@ export const toolAccessLayer: Layer.Layer<ToolAccess, never, StderrSink> = Layer
             id,
             sessionId,
             agentProcess,
-            offered: offeredTools(mission),
+            offered,
             tokenInQuery,
           }
           byToken.set(token, grant)

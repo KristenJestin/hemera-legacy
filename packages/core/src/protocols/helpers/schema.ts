@@ -7,7 +7,7 @@
 import { z } from 'zod'
 
 import { MISSIONS } from '../../domain/session.ts'
-import { BUILDING, TOOL_NAMES } from '../../domain/tools.ts'
+import { BUILDING, HELPING, TOOL_NAMES } from '../../domain/tools.ts'
 
 /** The tools that change a file of the Workspace: what a read-only helper never holds. */
 export const WRITING_TOOLS = ['fs_write', 'fs_edit'] as const
@@ -45,6 +45,13 @@ export const helperDefinition = z
   })
   .superRefine((definition, context) => {
     for (const tool of definition.tools) {
+      if (HELPING.has(tool)) {
+        context.addIssue({
+          code: 'custom',
+          path: ['tools'],
+          message: `${tool} is given by the depth a helper stands at, never by its definition`,
+        })
+      }
       if (BUILDING.has(tool) && !definition.missions.includes('build')) {
         context.addIssue({
           code: 'custom',

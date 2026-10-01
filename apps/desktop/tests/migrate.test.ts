@@ -132,6 +132,13 @@ const SETUP_MIGRATION = '20260929153321_setup_proposals'
  */
 const REPRODUCTION_MIGRATION = '20260930124109_bug_reproduction'
 
+/**
+ * The migration of the helper agents (issue #77): child Sessions, how many may run at once per
+ * Project, and the files a build task holds — the one a profile that ran the replay's has never
+ * heard of.
+ */
+const HELPERS_MIGRATION = '20261001084701_helpers'
+
 /** A folder carrying the shipped migrations up to one of them, as an older version did. */
 function shippedUpTo(last: string): string {
   const folder = join(workspace, `shipped-${last}`)
@@ -569,6 +576,7 @@ describe('A profile of lot 6 is migrated to lot 19 (specs)', () => {
       RUN_TOLD_MIGRATION,
       SETUP_MIGRATION,
       REPRODUCTION_MIGRATION,
+      HELPERS_MIGRATION,
     ])
     expect(readdirSync(join(dataFolder, BACKUPS_FOLDER))).toEqual([`${SPECS_MIGRATION}.sqlite`])
 
@@ -948,6 +956,7 @@ describe('Un profil du lot 5 est migré vers le lot 6', () => {
       RUN_TOLD_MIGRATION,
       SETUP_MIGRATION,
       REPRODUCTION_MIGRATION,
+      HELPERS_MIGRATION,
     ])
     expect(readdirSync(join(dataFolder, BACKUPS_FOLDER))).toEqual([`${TOOLS_MIGRATION}.sqlite`])
 
@@ -1097,6 +1106,7 @@ describe('A profile of lot 19 is migrated to lot 20', () => {
       RUN_TOLD_MIGRATION,
       SETUP_MIGRATION,
       REPRODUCTION_MIGRATION,
+      HELPERS_MIGRATION,
     ])
     expect(readdirSync(join(dataFolder, BACKUPS_FOLDER))).toEqual([
       `${WORKSPACES_MIGRATION}.sqlite`,
@@ -1218,7 +1228,7 @@ describe('A profile of lot 19 is migrated to lot 20', () => {
       'profile.backed_up',
       'profile.migrated',
     ])
-    expect(JSON.parse(kept.events.at(-1)!.payload)).toEqual({ migration: REPRODUCTION_MIGRATION })
+    expect(JSON.parse(kept.events.at(-1)!.payload)).toEqual({ migration: HELPERS_MIGRATION })
   })
 
   test('a command of a word of lot 18, or a step of an unknown state, is refused', async () => {
@@ -1429,6 +1439,7 @@ describe('A profile that ran the Workspaces gains the choices of its Sessions', 
       RUN_TOLD_MIGRATION,
       SETUP_MIGRATION,
       REPRODUCTION_MIGRATION,
+      HELPERS_MIGRATION,
     ])
     expect(readdirSync(join(dataFolder, BACKUPS_FOLDER))).toEqual([`${CHOICES_MIGRATION}.sqlite`])
 
@@ -1466,7 +1477,7 @@ describe('A profile that ran the Workspaces gains the choices of its Sessions', 
  */
 function shippedWithoutTheBuild(): string {
   const folder = join(workspace, 'shipped-0.4')
-  const build = [BUILD_MIGRATION, REVIEW_MIGRATION, REPRODUCTION_MIGRATION]
+  const build = [BUILD_MIGRATION, REVIEW_MIGRATION, REPRODUCTION_MIGRATION, HELPERS_MIGRATION]
   for (const migration of readdirSync(SHIPPED)) {
     if (build.includes(migration)) continue
     cpSync(join(SHIPPED, migration), join(folder, migration), { recursive: true })
@@ -1499,7 +1510,12 @@ describe('A profile of 0.4 is migrated to the build lot', () => {
     )
 
     const standing = await on(dataFolder, openProfile(dataFolder, SHIPPED, '0.5.0'))
-    expect(standing.behind).toEqual([BUILD_MIGRATION, REVIEW_MIGRATION, REPRODUCTION_MIGRATION])
+    expect(standing.behind).toEqual([
+      BUILD_MIGRATION,
+      REVIEW_MIGRATION,
+      REPRODUCTION_MIGRATION,
+      HELPERS_MIGRATION,
+    ])
     expect(readdirSync(join(dataFolder, BACKUPS_FOLDER))).toEqual([`${BUILD_MIGRATION}.sqlite`])
 
     const schema = (await on(dataFolder, schemaOf)).join('\n')
@@ -1578,6 +1594,7 @@ describe('A profile of lot 20 is migrated to lot 22', () => {
       RUN_TOLD_MIGRATION,
       SETUP_MIGRATION,
       REPRODUCTION_MIGRATION,
+      HELPERS_MIGRATION,
     ])
     expect(readdirSync(join(dataFolder, BACKUPS_FOLDER))).toEqual([`${BUILD_MIGRATION}.sqlite`])
 
@@ -1905,6 +1922,7 @@ describe('A profile that ran the choices keeps a queued result across a quit', (
       RUN_TOLD_MIGRATION,
       SETUP_MIGRATION,
       REPRODUCTION_MIGRATION,
+      HELPERS_MIGRATION,
     ])
     expect(readdirSync(join(dataFolder, BACKUPS_FOLDER))).toEqual([`${BUILD_MIGRATION}.sqlite`])
 
@@ -1955,6 +1973,7 @@ describe('A profile that ran the queued results keeps its commands, none run at 
       RUN_TOLD_MIGRATION,
       SETUP_MIGRATION,
       REPRODUCTION_MIGRATION,
+      HELPERS_MIGRATION,
     ])
     expect(readdirSync(join(dataFolder, BACKUPS_FOLDER))).toEqual([
       `${RUN_AT_OPEN_MIGRATION}.sqlite`,
@@ -1999,6 +2018,7 @@ describe('A profile that ran the commands at open keeps what its Sessions were p
       RUN_TOLD_MIGRATION,
       SETUP_MIGRATION,
       REPRODUCTION_MIGRATION,
+      HELPERS_MIGRATION,
     ])
     expect(readdirSync(join(dataFolder, BACKUPS_FOLDER))).toEqual([
       `${CONTEXT_WORDS_MIGRATION}.sqlite`,
@@ -2045,7 +2065,12 @@ describe('A profile that ran the context notices keeps its runs, none owed to an
     )
 
     const standing = await on(dataFolder, openProfile(dataFolder, SHIPPED, '0.4.0'))
-    expect(standing.behind).toEqual([RUN_TOLD_MIGRATION, SETUP_MIGRATION, REPRODUCTION_MIGRATION])
+    expect(standing.behind).toEqual([
+      RUN_TOLD_MIGRATION,
+      SETUP_MIGRATION,
+      REPRODUCTION_MIGRATION,
+      HELPERS_MIGRATION,
+    ])
     expect(readdirSync(join(dataFolder, BACKUPS_FOLDER))).toEqual([`${RUN_TOLD_MIGRATION}.sqlite`])
 
     const runs = await on(
@@ -2088,7 +2113,7 @@ describe('A profile that ran the run told keeps its threads, and holds a setup p
     )
 
     const standing = await on(dataFolder, openProfile(dataFolder, SHIPPED, '0.4.0'))
-    expect(standing.behind).toEqual([SETUP_MIGRATION, REPRODUCTION_MIGRATION])
+    expect(standing.behind).toEqual([SETUP_MIGRATION, REPRODUCTION_MIGRATION, HELPERS_MIGRATION])
     expect(readdirSync(join(dataFolder, BACKUPS_FOLDER))).toEqual([`${SETUP_MIGRATION}.sqlite`])
 
     const entries = await on(
@@ -2130,7 +2155,7 @@ describe('A profile that ran the setup proposals keeps its builds, and holds a r
     )
 
     const standing = await on(dataFolder, openProfile(dataFolder, SHIPPED, '0.5.0'))
-    expect(standing.behind).toEqual([REPRODUCTION_MIGRATION])
+    expect(standing.behind).toEqual([REPRODUCTION_MIGRATION, HELPERS_MIGRATION])
     expect(readdirSync(join(dataFolder, BACKUPS_FOLDER))).toEqual([
       `${REPRODUCTION_MIGRATION}.sqlite`,
     ])
@@ -2162,5 +2187,88 @@ describe('A profile that ran the setup proposals keeps its builds, and holds a r
       held: [{ build_reproduction: null }],
       after: [{ reproduction: 'The total matches.', reproduction_gone: 1 }],
     })
+  })
+})
+
+describe('A profile that ran the replay gains helpers, kept whole', () => {
+  test('its Projects and Sessions are kept, three helpers at once by default, and a helper can be written', async () => {
+    const dataFolder = join(workspace, 'from-reproduction')
+    await on(dataFolder, openProfile(dataFolder, shippedUpTo(REPRODUCTION_MIGRATION), '0.5.0'))
+    await on(
+      dataFolder,
+      Effect.gen(function* () {
+        const sql = yield* SqliteClient
+        const at = '2026-09-30T10:00:00.000Z'
+        yield* sql`INSERT INTO projects (id, name, tone, created_at, updated_at, version)
+          VALUES ('atlas', 'Atlas', 'primary', ${at}, ${at}, 1)`
+        yield* sql`INSERT INTO sessions (id, project_id, title, title_source, provider, mission, build_phase, created_at, last_written_at, version)
+          VALUES ('build-1', 'atlas', 'Build ATL-9', 'derived', 'claude', 'build', 'execute', ${at}, ${at}, 1)`
+        yield* sql`INSERT INTO session_entries (id, session_id, seq, role, kind, body, payload, created_at)
+          VALUES ('entry-1', 'build-1', 1, 'hemera', 'mission_brief', 'Build it.', '{}', ${at})`
+      }),
+    )
+
+    const standing = await on(dataFolder, openProfile(dataFolder, SHIPPED, '0.5.0'))
+    expect(standing.behind).toEqual([HELPERS_MIGRATION])
+    expect(readdirSync(join(dataFolder, BACKUPS_FOLDER))).toEqual([`${HELPERS_MIGRATION}.sqlite`])
+
+    const kept = await on(
+      dataFolder,
+      Effect.gen(function* () {
+        const sql = yield* SqliteClient
+        const at = '2026-10-01T10:00:00.000Z'
+        yield* sql`INSERT INTO sessions (id, project_id, title, title_source, provider, mission, created_at, last_written_at, version, parent_session_id, helper, helper_depth, helper_task, helper_state)
+          VALUES ('helper-1', 'atlas', 'Test review', 'derived', 'claude', 'build', ${at}, ${at}, 1, 'build-1', 'review-tests', 1, 'T2', 'running')`
+        yield* sql`INSERT INTO build_claims (id, session_id, task, path, claimed_at)
+          VALUES ('claim-1', 'build-1', 'T2', 'src/reader.ts', ${at})`
+        const projects = yield* sql<{
+          helpers_at_once: number
+        }>`SELECT helpers_at_once FROM projects`
+        const sessions = yield* sql<{
+          id: string
+          parent_session_id: string | null
+          helper_state: string | null
+        }>`SELECT id, parent_session_id, helper_state FROM sessions ORDER BY id`
+        const entries = yield* sql<{ id: string }>`SELECT id FROM session_entries`
+        return { projects, sessions, entries }
+      }),
+    )
+    expect(kept).toEqual({
+      projects: [{ helpers_at_once: 3 }],
+      sessions: [
+        { id: 'build-1', parent_session_id: null, helper_state: null },
+        { id: 'helper-1', parent_session_id: 'build-1', helper_state: 'running' },
+      ],
+      entries: [{ id: 'entry-1' }],
+    })
+  })
+
+  test('a helper without a state, a state without a parent, or seven at once is refused', async () => {
+    const dataFolder = join(workspace, 'helpers-refused')
+    await on(dataFolder, openProfile(dataFolder, SHIPPED, '0.5.0'))
+    const refused = await on(
+      dataFolder,
+      Effect.gen(function* () {
+        const sql = yield* SqliteClient
+        const at = '2026-10-01T10:00:00.000Z'
+        yield* sql`INSERT INTO projects (id, name, tone, created_at, updated_at, version)
+          VALUES ('atlas', 'Atlas', 'primary', ${at}, ${at}, 1)`
+        yield* sql`INSERT INTO sessions (id, project_id, title, title_source, created_at, last_written_at, version)
+          VALUES ('build-1', 'atlas', 'Build', 'derived', ${at}, ${at}, 1)`
+        const attempts = [
+          sql`INSERT INTO sessions (id, project_id, title, title_source, created_at, last_written_at, version, parent_session_id, helper_depth)
+            VALUES ('h-1', 'atlas', 'Helper', 'derived', ${at}, ${at}, 1, 'build-1', 1)`,
+          sql`INSERT INTO sessions (id, project_id, title, title_source, created_at, last_written_at, version, helper_state)
+            VALUES ('h-2', 'atlas', 'Helper', 'derived', ${at}, ${at}, 1, 'running')`,
+          sql`INSERT INTO sessions (id, project_id, title, title_source, created_at, last_written_at, version, parent_session_id, helper_depth, helper_state)
+            VALUES ('h-3', 'atlas', 'Helper', 'derived', ${at}, ${at}, 1, 'build-1', 3, 'running')`,
+          sql`UPDATE projects SET helpers_at_once = 7`,
+        ]
+        return yield* Effect.forEach(attempts, (attempt) =>
+          attempt.pipe(Effect.match({ onFailure: () => 'refused', onSuccess: () => 'written' })),
+        )
+      }),
+    )
+    expect(refused).toEqual(['refused', 'refused', 'refused', 'refused'])
   })
 })

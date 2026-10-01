@@ -42,6 +42,9 @@ import {
   CHECK_WHERE,
   COMMAND_SCOPES,
   COMMAND_TYPES,
+  HELPERS_AT_ONCE,
+  HELPER_DEPTH,
+  HELPER_STATES,
   LAUNCH_STATES,
   MISSIONS,
   NATIVE_STATES,
@@ -136,9 +139,15 @@ export const projects = sqliteTable(
     version: integer('version').notNull().default(1),
     workspacesRoot: text('workspaces_root'),
     branchPrefix: text('branch_prefix'),
+    /** How many helpers of one build may run at once, at any depth (issue #77). */
+    helpersAtOnce: integer('helpers_at_once').notNull().default(HELPERS_AT_ONCE.initial),
   },
   (table) => [
     check('project_tone_is_known', sql`${table.tone} IN (${sql.raw(oneOf(PROJECT_TONES))})`),
+    check(
+      'project_helpers_at_once_in_range',
+      sql`${table.helpersAtOnce} BETWEEN ${sql.raw(String(HELPERS_AT_ONCE.least))} AND ${sql.raw(String(HELPERS_AT_ONCE.most))}`,
+    ),
   ],
 )
 
@@ -322,6 +331,13 @@ export const SESSION_ENTRY_ROLES = ['user', 'agent', 'hemera'] as const
  * are the replay of a `bug`'s reproduction the agent reported in the turn under way — what it
  * observed, and whether the incorrect behaviour is gone — held until the end checks that follow the
  * turn open their attempt, which takes them (issue #203).
+ *
+ * The helper columns are a helper's and null on every other Session (issue #77): a helper is a
+ * child Session, `parent_session_id` the Session that launched it — the build Session, or another
+ * helper — and its depth under the build; `helper` the defined helper it runs, by id, null for a
+ * free one; `helper_task` the label of the build task it was launched on; `helper_state` where it
+ * stands, `helper_result` what it handed back or why it ended, and `helper_ended_at` when. A
+ * Session with a parent is a helper, and a helper has a state: the check holds both together.
  */
 export const sessions = sqliteTable(
   'sessions',
@@ -356,6 +372,15 @@ export const sessions = sqliteTable(
     approachNote: text('approach_note'),
     buildReproduction: text('build_reproduction'),
     buildReproductionGone: integer('build_reproduction_gone', { mode: 'boolean' }),
+    parentSessionId: text('parent_session_id').references((): AnySQLiteColumn => sessions.id, {
+      onDelete: 'cascade',
+    }),
+    helper: text('helper'),
+    helperDepth: integer('helper_depth'),
+    helperTask: text('helper_task'),
+    helperState: text('helper_state'),
+    helperResult: text('helper_result'),
+    helperEndedAt: text('helper_ended_at'),
   },
   (table) => [
     check(
@@ -378,6 +403,20 @@ export const sessions = sqliteTable(
     ),
     // The list of a Project is read in one order, and it is this one: the index is the query.
     index('session_by_project').on(table.projectId, table.lastWrittenAt),
+    check(
+      'session_helper_state_is_known',
+      sql`${table.helperState} IS NULL OR ${table.helperState} IN (${sql.raw(oneOf(HELPER_STATES))})`,
+    ),
+    check(
+      'session_helper_has_a_parent',
+      sql`(${table.parentSessionId} IS NULL) = (${table.helperState} IS NULL) AND (${table.parentSessionId} IS NULL) = (${table.helperDepth} IS NULL)`,
+    ),
+    check(
+      'session_helper_depth_in_range',
+      sql`${table.helperDepth} IS NULL OR ${table.helperDepth} BETWEEN 1 AND ${sql.raw(String(HELPER_DEPTH))}`,
+    ),
+    // A build's helpers are read by their launcher, at every launch and every read (#77).
+    index('session_by_parent').on(table.parentSessionId, table.helperState),
   ],
 )
 
@@ -1378,4 +1417,26 @@ export const buildBlockers = sqliteTable(
     dismissedAt: text('dismissed_at'),
   },
   (table) => [index('blocker_by_session').on(table.sessionId, table.raisedAt)],
+)
+
+/**
+ * A file a build task holds while a helper works on it (issue #77): the safety net of helpers
+ * writing in one Workspace. A write through Hemera's tools to a path another task holds, while a
+ * helper runs on that task, is refused naming it; the first write of a helper on a task to a free
+ * path claims it. Kept when the helper ends, for the next one on the task. The path is relative
+ * to the Workspace root, and one task holds it in a build.
+ */
+export const buildClaims = sqliteTable(
+  'build_claims',
+  {
+    id: text('id').primaryKey(),
+    sessionId: text('session_id')
+      .notNull()
+      .references(() => sessions.id, { onDelete: 'cascade' }),
+    /** The task that holds it, by its label (T2). */
+    task: text('task').notNull(),
+    path: text('path').notNull(),
+    claimedAt: text('claimed_at').notNull(),
+  },
+  (table) => [unique('build_claim_once').on(table.sessionId, table.path)],
 )

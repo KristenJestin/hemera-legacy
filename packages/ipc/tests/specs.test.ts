@@ -150,6 +150,7 @@ describe('The Spec contract crosses the wire', () => {
       nativeState: 'none',
       workspaceId: null,
       workspaceFixed: false,
+      helper: null,
       mission: 'define',
       specId: 'spec-1',
       archivedAt: null,

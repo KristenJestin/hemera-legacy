@@ -36,8 +36,19 @@ export interface HelperPlace {
   readonly definition: string | null
   /** 1 for a helper of the main agent, 2 for a helper of a helper. */
   readonly depth: number
-  /** The build task it was launched on, or null for a helper tied to none. */
-  readonly taskId: string | null
+  /** The build task it was launched on, by its label (T2), or null for a helper tied to none. */
+  readonly task: string | null
+}
+
+/**
+ * A message written into a helper's Session: refused, because a helper is read-only for the user
+ * (issue #77). What the user has to say goes to the main agent, which dispatches it.
+ */
+export class HelperReadOnlyError extends Error {
+  constructor() {
+    super('A helper is read-only: write to the main agent instead.')
+    this.name = 'HelperReadOnlyError'
+  }
 }
 
 export class InvalidHelpersAtOnceError extends Error {

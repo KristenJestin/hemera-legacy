@@ -13,6 +13,7 @@
 import {
   COMMAND_SCOPES,
   COMMAND_TYPES,
+  HELPER_DEPTH,
   PHASE_IDS,
   RECIPE_KINDS,
   QUESTION_RULE,
@@ -24,6 +25,7 @@ import {
   SPEC_TYPES,
   TASK_EXECUTORS,
   type ToolName,
+  helpersFor,
 } from '@hemera/core'
 import { z } from 'zod'
 
@@ -102,6 +104,18 @@ export type ParsedCall =
   | {
       readonly tool: 'reproduction_replayed'
       readonly arguments: z.infer<(typeof TOOL_ARGUMENTS)['reproduction_replayed']>
+    }
+  | {
+      readonly tool: 'helper_launch'
+      readonly arguments: z.infer<(typeof TOOL_ARGUMENTS)['helper_launch']>
+    }
+  | {
+      readonly tool: 'helper_stop'
+      readonly arguments: z.infer<(typeof TOOL_ARGUMENTS)['helper_stop']>
+    }
+  | {
+      readonly tool: 'helper_read'
+      readonly arguments: z.infer<(typeof TOOL_ARGUMENTS)['helper_read']>
     }
 
 /**
@@ -603,6 +617,31 @@ export const TOOL_ARGUMENTS = {
       .max(SPEC_PAGE_CHARACTERS)
       .describe('what you did to replay it and what you observed, for the user who accepts'),
   }),
+  // An orchestrator's three (issue #77): a helper is named by the id its launch answered.
+  helper_launch: z.object({
+    helper: z
+      .string()
+      .min(1)
+      .optional()
+      .describe('a defined helper by its id, review-tests; a free helper without it'),
+    brief: z
+      .string()
+      .trim()
+      .min(1)
+      .max(SPEC_PAGE_CHARACTERS)
+      .describe('the one piece of work it does, written for an agent that knows nothing else'),
+    task: z
+      .string()
+      .min(1)
+      .optional()
+      .describe('the task it carries to task_finished, by its label: T2; none without it'),
+  }),
+  helper_stop: z.object({
+    id: z.string().min(1).describe('the helper, by the id its launch answered'),
+  }),
+  helper_read: z.object({
+    id: z.string().min(1).describe('the helper, by the id its launch answered'),
+  }),
 } as const
 
 /** What each tool is, in the words the agent reads before it asks. */
@@ -639,6 +678,11 @@ export const TOOL_DESCRIPTIONS: Record<ToolName, string> = {
     'Say a task contradicts the frozen Spec, by its label, with the reason. The task and the tasks that depend on it are suspended until the user decides; the others go on. Never for a task that is merely hard.',
   reproduction_replayed:
     "Report the replay of a bug's reproduction scenario, in the final checks of a bug Spec: whether the incorrect behaviour is gone, and what you did and observed. Hemera keeps the last one with the end checks that run once your turn is over, and the user cannot accept the build without it. Replay it and report it again after any fix.",
+  helper_launch: `Launch a helper agent to do one piece of work in this Workspace, with a fresh context: a defined helper by its id, or a free one when you name none, with the brief you write. Name a task by its label to have the helper carry it to task_finished itself. It answers at once with the helper's id and never waits for it: the helper's result comes back to you when it is done. A launch above the number of helpers the Project lets run at once is refused with the reason, never queued; helpers go ${HELPER_DEPTH} levels deep at most. The defined helpers of a build:\n${helpersFor('build')}`,
+  helper_stop:
+    'Stop a helper you launched, at once. A task it was on stays in progress, with its attempt and the files it holds, for you to hand again.',
+  helper_read:
+    'Where a helper you launched stands: running, done, stopped or failed, its last line, how long it has said nothing, and its result once it has one.',
 }
 
 /**
@@ -670,6 +714,9 @@ export const TOOL_BOUNDS: Record<ToolName, string> = {
   task_finished: "a signal Hemera answers with the Project's checks; never a task's state",
   task_blocked: 'a blocker the user decides; never a change to the Spec',
   reproduction_replayed: "a bug's final checks only; kept with the end checks that follow",
+  helper_launch: `the Project's helpers at once, ${HELPER_DEPTH} levels deep at most; refused above, never queued`,
+  helper_stop: 'a helper this Session launched',
+  helper_read: 'a helper this Session launched',
 }
 
 /** What one reading of the arguments answered. */
@@ -756,6 +803,12 @@ export function parseCall(tool: ToolName, raw: ToolArguments): ArgumentsDecision
       return decide(tool, read(TOOL_ARGUMENTS['task_blocked'], raw))
     case 'reproduction_replayed':
       return decide(tool, read(TOOL_ARGUMENTS['reproduction_replayed'], raw))
+    case 'helper_launch':
+      return decide(tool, read(TOOL_ARGUMENTS['helper_launch'], raw))
+    case 'helper_stop':
+      return decide(tool, read(TOOL_ARGUMENTS['helper_stop'], raw))
+    case 'helper_read':
+      return decide(tool, read(TOOL_ARGUMENTS['helper_read'], raw))
   }
 }
 

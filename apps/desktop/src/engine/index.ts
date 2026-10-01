@@ -37,6 +37,7 @@ import { discoveryLayer, machineEnvironmentLayer } from './agents/discovery.ts'
 import type { Discovery } from './agents/discovery.ts'
 import { StderrSink, hostProcessesLayer, processSupervisorLayer } from './agents/supervisor.ts'
 import { BuildNotices, type Builds, buildsLayer, recoveredBuilds } from './build/build.ts'
+import { type Helpers, helpersLayer, recoveredHelpers } from './helpers/helpers.ts'
 import { type Proposals, proposalsLayer } from './commands/proposals.ts'
 import { type Commands, commandsLayer } from './commands/service.ts'
 import { type SetupProposals, setupDeskLayer, setupProposalsLayer } from './setup/proposals.ts'
@@ -98,6 +99,7 @@ export const PUSHED: Record<
     | 'launch_changed'
     | 'workspace'
     | 'build_changed'
+    | 'helpers_changed'
     | 'agents_changed'
   >
 > = {
@@ -210,6 +212,13 @@ function buildNoticesTo(
         log(`pushing build.changed failed: ${named(died)}`)
       }
     },
+    helpers: (sessionId) => {
+      try {
+        port.postMessage({ event: 'helpers.changed', sessionId })
+      } catch (died) {
+        log(`pushing helpers.changed failed: ${named(died)}`)
+      }
+    },
   })
 }
 
@@ -244,6 +253,7 @@ export type EngineServices =
   | ProjectChecks
   | BuildChecks
   | Builds
+  | Helpers
   | DomainEvents
   | Database
   | SqliteClient
@@ -311,11 +321,12 @@ function servicesOf(
   )
   // The builds (D10-01): one service, which the catalogue asks before a call and the runtime
   // drives, over the machine's `git` for their snapshots and the Project's checks for verdicts.
-  const builds = buildsLayer.pipe(
-    Layer.provide(git),
-    Layer.provide(checks),
+  // The helpers of a build stand on it (issue #77): one service each, handed up together.
+  const builds = helpersLayer.pipe(
+    Layer.provideMerge(
+      buildsLayer.pipe(Layer.provide(git), Layer.provide(checks), Layer.provide(diagnostic)),
+    ),
     Layer.provide(buildNoticesTo(port, log)),
-    Layer.provide(diagnostic),
   )
   // Hemera's own tools, and the one loopback address they are served on (D6-01 to D6-05). The
   // server and the runtime are handed the very same book of tokens — `provideMerge` hands it up
@@ -484,6 +495,9 @@ if (process.parentPort !== undefined) {
           // What the last engine left going is not going any more: its runs are ended and its
           // steps wait for a resume (D8-05, D6-12).
           yield* Effect.provide(recovered, context)
+          // The helpers a stopped engine left running failed, their launchers told (issue #77),
+          // before the builds resume and hand them what was queued.
+          yield* Effect.provide(recoveredHelpers, context)
           // The builds a stopped engine left: their checks run again, their agents resume (D10-09).
           yield* Effect.provide(recoveredBuilds, context)
 

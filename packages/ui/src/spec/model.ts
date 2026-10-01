@@ -337,6 +337,14 @@ const OWN: Record<SpecType, SectionName> = {
 }
 
 /**
+ * What a Spec's parts are named after: its key, or "the provisional Spec" while it has none
+ * (issue #198), as the panel's small frame says it.
+ */
+export function specCalledOf(spec: Pick<SpecView, 'key' | 'provisional'>): string {
+  return spec.provisional === true ? 'the provisional Spec' : spec.key
+}
+
+/**
  * The sections `shape` writes, in order, for a type: the base, then the type's own.
  *
  * A section of another type is never drawn — a `bug` has no `Behaviour` — even when a type

@@ -541,6 +541,12 @@ export const FINAL_CHECKS_RED: BuildViewData = {
   ],
 }
 
+/** `verify` right after a red try, before the agent starts the next one. */
+export const FINAL_CHECKS_JUST_RED: BuildViewData = {
+  ...FINAL_CHECKS,
+  endAttempts: [END_RED],
+}
+
 /** `verify` green, nothing waiting for the user: Accept is offered. */
 export const READY_TO_ACCEPT: BuildViewData = {
   ...FINAL_CHECKS,

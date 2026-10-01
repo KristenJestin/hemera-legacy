@@ -283,8 +283,8 @@ const NAMED_STATES = new Map([
   ['build/review-card', ['WaitingForYourReview', 'OpeningTheChat']],
   ['build/build-spec-panel', ['ReadOnly', 'Tasks', 'Keyboard']],
   // Lot 22: the page of a `build` Session, `Complete` first for the UI gate, then one screen per
-  // moment of the build, then the paths through it: the panel folded to its band and the chat it
-  // pushes, and "Spec" opening the frozen revision in the view's place.
+  // moment of the build, then the paths through it: the panel folded to its small frame, the
+  // Spec's own since #77, and the chat it pushes, and "Spec" opening the frozen revision.
   [
     'build/build-panel',
     [
@@ -297,9 +297,17 @@ const NAMED_STATES = new Map([
       'FinalChecks',
       'Accepted',
       'Folded',
+      'SameFrameAsTheSpec',
+      'OverTheChat',
+      'HeadAboveThePanel',
+      'NoticesOverThePanel',
       'FoldPushesTheChat',
       'SpecOpen',
-      'SpecTakesTheViewsPlace',
+      'SpecBesideItsTasks',
+      'WideBuild',
+      'PickATask',
+      'Groupings',
+      'Returns',
       'NoticeOpensTheTask',
       'YoursAmongTheNotices',
       'ReviewAmongTheNotices',
@@ -585,6 +593,8 @@ describe('Catalogue, coquille et surfaces, et rien d’autre', () => {
       'RunCommand',
       // Issue #77: what a helper wears on its chip, and wherever it is named.
       'HelperAvatar',
+      // Issue #77: the row under a Session's head, the chat and the panel of its mission beside it.
+      'SessionRow',
       'ContextView',
       'BareModeState',
       'CommandList',

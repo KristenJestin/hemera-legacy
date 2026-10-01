@@ -299,6 +299,7 @@ const NAMED_STATES = new Map([
       'Folded',
       'SameFrameAsTheSpec',
       'OverTheChat',
+      'HeadAboveThePanel',
       'FoldPushesTheChat',
       'SpecOpen',
       'SpecTakesTheViewsPlace',

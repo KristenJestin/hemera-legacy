@@ -185,15 +185,35 @@ function askId(id: string): string {
   return `ask-${id}`
 }
 
-/** The chat of a Session: its head, its thread and its composer. */
-function Chat({ title, thread }: { title: string; thread: ScrollerEntry[] }): ReactNode {
+/**
+ * The page of a Session: its head across the whole page, over the chat and the panel alike (#77),
+ * and under it the row the panel stands in beside the chat.
+ */
+function Page({
+  title,
+  thread,
+  children,
+}: {
+  title: string
+  thread: ScrollerEntry[]
+  children?: ReactNode
+}): ReactNode {
+  return (
+    <div className="flex h-screen min-h-0 flex-col bg-background text-foreground">
+      <div className="shrink-0 px-6 pt-6 pb-1">
+        <SessionHeader title={title} onRename={fn()} onArchive={fn()} onOpenDetails={fn()} />
+      </div>
+      <SessionRow chat={<Chat thread={thread} />}>{children}</SessionRow>
+    </div>
+  )
+}
+
+/** The chat of a Session: its thread and its composer. */
+function Chat({ thread }: { thread: ScrollerEntry[] }): ReactNode {
   const [value, setValue] = useState('')
   const [files, setFiles] = useState<string[]>([])
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-      <div className="flex w-full flex-col px-6 pt-6 pb-4">
-        <SessionHeader title={title} onRename={fn()} onArchive={fn()} />
-      </div>
       <MessageScroller className="flex-1" label="The thread of this Session" entries={thread} />
       <div className="flex w-full flex-col px-6 pb-4">
         <Composer
@@ -229,10 +249,12 @@ function DefineSession({
   shown,
   reworkOpen,
   folded,
+  over,
 }: {
   shown: Screen
   reworkOpen: boolean
   folded: boolean
+  over: boolean
 }): ReactNode {
   const { spec, reader, actions } = useLiveSpec(shown.spec, shown.reader, ON)
   const asked: ScrollerEntry[] = (shown.asks ?? []).flatMap((id) => {
@@ -250,20 +272,19 @@ function DefineSession({
     ]
   })
   return (
-    <div className="flex h-screen min-h-0 flex-col bg-background text-foreground">
-      <SessionRow chat={<Chat title={shown.title} thread={[...shown.thread, ...asked]} />}>
-        <SpecPanel
-          spec={spec}
-          reader={reader}
-          defaultReworkOpen={reworkOpen}
-          defaultFolded={folded}
-          onMarkReady={actions.onMarkReady}
-          onRework={actions.onRework}
-          onPickRevision={actions.onPickRevision}
-          onTakeOver={actions.onTakeOver}
-        />
-      </SessionRow>
-    </div>
+    <Page title={shown.title} thread={[...shown.thread, ...asked]}>
+      <SpecPanel
+        spec={spec}
+        reader={reader}
+        defaultReworkOpen={reworkOpen}
+        defaultFolded={folded}
+        defaultOver={over}
+        onMarkReady={actions.onMarkReady}
+        onRework={actions.onRework}
+        onPickRevision={actions.onPickRevision}
+        onTakeOver={actions.onTakeOver}
+      />
+    </Page>
   )
 }
 
@@ -299,20 +320,18 @@ function FreeThenDefine(): ReactNode {
     },
   ]
   return (
-    <div className="flex h-screen min-h-0 flex-col bg-background text-foreground">
-      <SessionRow chat={<Chat title="Invoices for the accountants" thread={thread} />}>
-        {created !== null && (
-          <SpecPanel
-            spec={created}
-            arrives
-            onMarkReady={fn()}
-            onRework={fn()}
-            onPickRevision={fn()}
-            onTakeOver={fn()}
-          />
-        )}
-      </SessionRow>
-    </div>
+    <Page title="Invoices for the accountants" thread={thread}>
+      {created !== null && (
+        <SpecPanel
+          spec={created}
+          arrives
+          onMarkReady={fn()}
+          onRework={fn()}
+          onPickRevision={fn()}
+          onTakeOver={fn()}
+        />
+      )}
+    </Page>
   )
 }
 
@@ -321,18 +340,26 @@ function Screens({
   screen,
   reworkOpen = false,
   folded = true,
+  over = false,
 }: {
   screen: ScreenName
   reworkOpen?: boolean
   /** Whether the Spec opens folded to its small frame, as a Session opens it. */
   folded?: boolean
+  /** Whether the open Spec lies over the chat. */
+  over?: boolean
 }): ReactNode {
   return (
     <TooltipProvider>
       {screen === 'fromFree' ? (
         <FreeThenDefine />
       ) : (
-        <DefineSession shown={SCREENS[screen]} reworkOpen={reworkOpen} folded={folded} />
+        <DefineSession
+          shown={SCREENS[screen]}
+          reworkOpen={reworkOpen}
+          folded={folded}
+          over={over}
+        />
       )}
     </TooltipProvider>
   )
@@ -355,6 +382,7 @@ const meta = {
       control: 'boolean',
       description: 'Whether the Spec opens folded to its small frame.',
     },
+    over: { control: 'boolean', description: 'Whether the open Spec lies over the chat.' },
   },
 } satisfies Meta<typeof Screens>
 
@@ -477,6 +505,30 @@ export const FromAFreeSession: Story = {
     await expect(canvas.queryByText(/DEFINE ·/)).toBeNull()
     await expect(within(thread).getByRole('status')).toHaveTextContent('Created ATL-7')
     await expect(canvas.getByText(/Shall I write it down as a Spec/)).toBeVisible()
+  },
+}
+
+/**
+ * The head across the whole page (#77): above the chat and the panel alike, so with the Spec over
+ * the chat the head's ⓘ and `⋯` are still there to be pressed, and nothing of the panel covers
+ * them.
+ */
+export const HeadAcrossThePage: Story = {
+  args: { folded: false, over: true },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const details = canvas.getByRole('button', { name: 'Session details' })
+    const panel = canvas
+      .getByRole('region', { name: 'Spec ATL-7' })
+      .querySelector<HTMLElement>('[data-panel]')!
+    await expect(panel).toHaveAttribute('data-over')
+    const head = details.getBoundingClientRect()
+    const drawn = panel.getBoundingClientRect()
+    // Above the panel, and over it rather than over the chat alone: the head spans the page.
+    await expect(head.bottom).toBeLessThanOrEqual(drawn.top)
+    await expect(head.left).toBeGreaterThan(drawn.left)
+    await expect(details.closest('[inert]')).toBeNull()
+    await expect(canvas.getByRole('button', { name: 'Commands for Spec CSV' })).toBeVisible()
   },
 }
 

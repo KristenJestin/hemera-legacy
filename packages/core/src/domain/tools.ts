@@ -186,7 +186,7 @@ const SPEC_WRITING: ReadonlySet<ToolName> = new Set(['spec_read', 'spec_write'])
  * The build's own, which only a `build` Session is offered (D10-13): its three, and the replay of a
  * bug's reproduction its final checks wait for (issue #203).
  */
-const BUILDING: ReadonlySet<ToolName> = new Set([
+export const BUILDING: ReadonlySet<ToolName> = new Set([
   'build_read',
   'task_finished',
   'task_blocked',

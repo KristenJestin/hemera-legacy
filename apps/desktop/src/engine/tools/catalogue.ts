@@ -547,25 +547,39 @@ export const toolCatalogueLayer: Layer.Layer<
     ) =>
       Effect.gen(function* () {
         const id = crypto.randomUUID()
+        // A helper's question is its build's to answer (issue #77): the block, its answer and its
+        // decision are written in the build Session, among its notices, naming the helper; the
+        // helper's own view has nothing to answer with.
+        const answeredIn = yield* helpers.answeredIn(asked.sessionId)
+        const asking =
+          answeredIn === asked.sessionId
+            ? null
+            : yield* answered(sessions.one(asked.sessionId)).pipe(
+                Effect.map((read) => ({
+                  sessionId: asked.sessionId,
+                  name: read?.session.title ?? 'A helper',
+                })),
+              )
         // The block the window already draws for an agent's own permission is the one this is
         // read by: the same two options every time, because the question is always the same one
         // and nothing about it is remembered (D6-05). The request and the decision are two rows
         // under two correlations, so neither is written over the other.
+        const question = {
+          toolCallId: id,
+          options: OUTSIDE_OPTIONS,
+          tool: asked.tool,
+          named,
+          resolved: where,
+          root,
+          inside,
+          line,
+        }
         const request = (state: string) =>
-          inThread(asked.sessionId, {
+          inThread(answeredIn, {
             role: 'hemera',
             kind: 'permission_request',
             body,
-            payload: JSON.stringify({
-              toolCallId: id,
-              options: OUTSIDE_OPTIONS,
-              tool: asked.tool,
-              named,
-              resolved: where,
-              root,
-              inside,
-              line,
-            }),
+            payload: JSON.stringify(asking === null ? question : { ...question, helper: asking }),
             correlationId: `perm:${id}`,
             state,
           }).pipe(Effect.catch(() => Effect.void))
@@ -574,7 +588,8 @@ export const toolCatalogueLayer: Layer.Layer<
         const answer = yield* permissions
           .askOutside({
             id,
-            sessionId: asked.sessionId,
+            sessionId: answeredIn,
+            askedBy: asked.sessionId,
             tool: asked.tool,
             named: where,
             root,
@@ -585,7 +600,7 @@ export const toolCatalogueLayer: Layer.Layer<
             Effect.onInterrupt(() =>
               Effect.gen(function* () {
                 yield* request('cancelled')
-                yield* inThread(asked.sessionId, {
+                yield* inThread(answeredIn, {
                   role: 'hemera',
                   kind: 'permission_decision',
                   body: 'Withdrawn: the agent stopped waiting for this call',
@@ -611,7 +626,7 @@ export const toolCatalogueLayer: Layer.Layer<
           cancelled: { state: 'cancelled', said: 'Stopped' },
         }
         yield* request(closed[answer].state)
-        yield* inThread(asked.sessionId, {
+        yield* inThread(answeredIn, {
           role: 'user',
           kind: 'permission_decision',
           body: closed[answer].said,
@@ -986,7 +1001,8 @@ export const toolCatalogueLayer: Layer.Layer<
                     }
                     const oneOff = line ?? ''
                     if (place.inside) {
-                      const standing = yield* modes.standing(asked.sessionId)
+                      // A helper follows its build Session's mode (issue #77).
+                      const standing = yield* modes.standing(build)
                       if (standing !== null && !modeAsks(standing)) {
                         yield* unasked(asked, root, place.path, oneOff, standing.name)
                         return { allowed: true as const, path: place.path }

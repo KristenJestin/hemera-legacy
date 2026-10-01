@@ -8,11 +8,12 @@
  * helper, in the order they start. A helper is driven by its brief alone, as a build's agent is.
  */
 
-import { mkdtempSync, realpathSync, rmSync } from 'node:fs'
+import { mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import { Effect } from 'effect'
+import { z } from 'zod'
 import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
 
 import { fakeAgent, type FakeStep } from '#engine/agents/fake.ts'
@@ -460,5 +461,51 @@ describe('A restart fails the helpers the last engine left running', () => {
       expect.stringContaining('failed: Hemera quit while it ran. Its task T2 stays in progress'),
     ])
     expect(statesOf(seen.view).T2).toBe('in_progress')
+  })
+})
+
+describe("A helper's permission questions go to its build's notices", () => {
+  test('asked in the build Session, answered there, and never inside the helper’s own view', async () => {
+    const outside = join(dataFolder, 'outside.md')
+    writeFileSync(outside, 'Read me.\n')
+    const main = orchestrator([launch('Read the notes outside.')])
+    const helper = aHelper([
+      { does: 'uses', call: 'fs_read', arguments: { path: outside } },
+      { does: 'says', text: 'Read it.' },
+    ])
+    opened = await openWindow(dataFolder, main.agent, helper.agent)
+    const seen = await opened.running(
+      Effect.gen(function* () {
+        const spec = yield* aReadySpec(dataFolder, THREE)
+        const sessionId = yield* launched(spec.specId, spec.workspaceId)
+        const asked = yield* eventually(threadOf(sessionId), (thread) =>
+          thread.some((one) => one.kind === 'permission_request' && one.state === 'pending'),
+        )
+        const request = asked.find((one) => one.kind === 'permission_request')
+        const payload = z
+          .object({
+            toolCallId: z.string(),
+            helper: z.object({ sessionId: z.string(), name: z.string() }),
+          })
+          .parse(JSON.parse(request?.payload ?? '{}'))
+        const [running] = yield* helpersOf(sessionId)
+        const helperThread = yield* threadOf(running?.id ?? '')
+        yield* (yield* AgentRuntime).decide(sessionId, payload.toolCallId, 'allowed')
+        const helpers = yield* eventually(helpersOf(sessionId), (all) =>
+          all.some((one) => one.state === 'done'),
+        )
+        return { payload, helperThread, helpers, after: yield* threadOf(sessionId) }
+      }),
+    )
+    expect(seen.payload.helper).toEqual({
+      sessionId: seen.helpers[0]?.id,
+      name: 'Read the notes outside.',
+    })
+    expect(seen.helperThread.some((one) => one.kind === 'permission_request')).toBe(false)
+    // Answered in the build Session: the helper's call went through, and it went on.
+    expect(seen.after.some((one) => one.kind === 'permission_decision')).toBe(true)
+    expect(helper.agent.answers.used[0]).toMatchObject({ tool: 'fs_read', isError: false })
+    expect(helper.agent.answers.used[0]?.text).toContain('Read me.')
+    expect(seen.helpers).toMatchObject([{ state: 'done', lastLine: 'Read it.' }])
   })
 })

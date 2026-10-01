@@ -143,6 +143,17 @@ export {
   type SettingsProps,
 } from './settings/settings.tsx'
 export {
+  ClassifierSection,
+  CLASSIFIER_OPTIONS,
+  EVALUATION_ENGINES,
+  type ClassifierMode,
+  type ClassifierOption,
+  type ClassifierSectionProps,
+  type CredentialStatus,
+  type EvaluationEngineOption,
+  type EvaluatorStatus,
+} from './settings/classifier-section.tsx'
+export {
   NotificationBell,
   NotificationList,
   type NotificationBellProps,
@@ -387,6 +398,7 @@ export {
   type BlockedBannerProps,
   type EffortChoice,
   type ModeChoice,
+  type MenuClassifier,
   type ModeSelectorProps,
   type ModelChoice,
   type OfferedAgent,

@@ -7,6 +7,7 @@
  *
  *   pnpm --filter @hemera/desktop e2e
  *   pnpm --filter @hemera/desktop e2e:headless   (the same, with no window on screen)
+ *   HEMERA_E2E_SPEC=classifier.e2e.ts limits either run to one capability.
  */
 
 import { readdirSync, rmSync } from 'node:fs'
@@ -60,9 +61,14 @@ export function e2eDataOf(spec: string): string {
 }
 
 /** Every spec file of the suite, which is one capability and one data folder each. */
+const selectedSpec = process.env.HEMERA_E2E_SPEC
 const SPECS = readdirSync(join(application, 'e2e'))
   .filter((entry) => entry.endsWith('.e2e.ts'))
+  .filter((entry) => selectedSpec === undefined || entry === selectedSpec)
   .toSorted()
+if (selectedSpec !== undefined && SPECS.length !== 1) {
+  throw new Error(`Unknown e2e spec: ${selectedSpec}`)
+}
 
 // A terminal opened inside an Electron based editor exports ELECTRON_RUN_AS_NODE, and the
 // binary would then start as a plain Node process: no window for the suite to drive.

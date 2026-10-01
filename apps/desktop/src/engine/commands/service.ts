@@ -75,7 +75,14 @@ import {
   workspaces,
 } from '../storage/schema.ts'
 import { mutate } from '../transaction.ts'
-import { type Lookup, findOnPath, hostLookup, invocationOf } from './line.ts'
+import {
+  type Invocation,
+  type Lookup,
+  findOnPath,
+  hostLookup,
+  invocationOf,
+  programAt,
+} from './line.ts'
 
 /** How many runs `recent` hands back: what a panel draws, oldest ones out of sight. */
 const RECENT_RUNS = 8
@@ -346,6 +353,17 @@ export interface RunRequest {
   /** The variables it is given over the process's environment, the Workspace's last (D8-06). */
   readonly environment: Record<string, string>
   readonly startedBy: 'agent' | 'user'
+  /** Exact process the classifier checked; a changed resolution must never start. */
+  readonly expectedInvocation?: Invocation | undefined
+}
+
+/** The actual process the runner will start, after platform and Portless resolution. */
+export interface PlannedCommand {
+  readonly line: string
+  readonly invocation: Invocation | null
+  /** The file started for a line run without `cmd.exe`, null for a shim or a program not found. */
+  readonly resolved: string | null
+  readonly missingPortless: boolean
 }
 
 /** What a catalogue entry is written from. */
@@ -386,6 +404,8 @@ export interface CommandsService {
    * once per engine, the first time it is asked, and answered from then on.
    */
   readonly portless: () => Effect.Effect<{ readonly installed: boolean }>
+  /** Read-only preview for the classifier; run recomputes and compares before spawn. */
+  readonly preview: (asked: RunRequest) => Effect.Effect<PlannedCommand, DatabaseError>
   /** Starts a run, or hands back the one that is already going (D6-12). */
   readonly run: (asked: RunRequest) => Effect.Effect<RunView, DatabaseError>
   /**
@@ -935,6 +955,30 @@ export const commandsLayer = Layer.effect(
           ),
         )
 
+    const planned = (asked: RunRequest): Effect.Effect<PlannedCommand, DatabaseError> =>
+      Effect.gen(function* () {
+        const own = lineFor(asked, platform)
+        const wraps = asked.portless && !runsPortless(own)
+        const named = wraps ? yield* portlessNameOf(asked) : ''
+        const portless = wraps ? yield* portlessFound() : null
+        const line = wraps ? `portless ${named} ${own}` : own
+        const lookup = lookupIn(asked.cwd)
+        const invocation = invocationOf(
+          portless === null ? own : `"${portless}" ${named} ${own}`,
+          platform,
+          lookup,
+        )
+        return {
+          line,
+          invocation,
+          resolved:
+            invocation === null || invocation.verbatim
+              ? null
+              : programAt(invocation.command, lookup, platform),
+          missingPortless: wraps && portless === null,
+        }
+      })
+
     /** The Project a Session belongs to, and null for a Session this database does not hold. */
     const projectOf = (sessionId: string) =>
       database
@@ -1223,6 +1267,8 @@ export const commandsLayer = Layer.effect(
 
       portless: () => portlessFound().pipe(Effect.map((found) => ({ installed: found !== null }))),
 
+      preview: planned,
+
       run: (asked) =>
         Effect.gen(function* () {
           // A server is shared, not the Session's (D6-12): a second Session that asks for the
@@ -1245,15 +1291,11 @@ export const commandsLayer = Layer.effect(
           const id = crypto.randomUUID()
           const startedAt = new Date().toISOString()
           // The machine's own line when the command has one, and the run keeps the line it ran.
-          const own = lineFor(asked, platform)
-          const lookup = lookupIn(asked.cwd)
+          const prepared = yield* planned(asked)
           // A Portless command runs as `portless <name> <line>`, and `portless` is looked for
           // before anything starts (D8-10); a line that runs `portless` itself runs as written
           // (D8-10 as amended by recette 1).
-          const wraps = asked.portless && !runsPortless(own)
-          const named = wraps ? yield* portlessNameOf(asked) : ''
-          const portless = wraps ? yield* portlessFound() : null
-          const line = wraps ? `portless ${named} ${own}` : own
+          const line = prepared.line
           const record: Live = {
             sessionId: asked.sessionId,
             projectId: asked.projectId,
@@ -1290,7 +1332,7 @@ export const commandsLayer = Layer.effect(
           live.set(id, record)
 
           // Refused by name, and nothing started: the box says Portless, and there is none.
-          if (wraps && portless === null) {
+          if (prepared.missingPortless) {
             record.state = 'failed'
             record.kept = 'portless was not found on the PATH: nothing was started'
             record.endedAt = startedAt
@@ -1304,14 +1346,24 @@ export const commandsLayer = Layer.effect(
           // its arguments, a quoted one staying one. A line that needs a shell — a pipeline, a
           // variable — is a line the user writes in a script and names here. Portless is started
           // where it was found, so what runs is what was checked.
-          const invocation = invocationOf(
-            portless === null ? own : `"${portless}" ${named} ${own}`,
-            platform,
-            lookup,
-          )
+          const invocation = prepared.invocation
           if (invocation === null) {
             record.state = 'failed'
             record.kept = `Hemera has nothing to run: the line of ${asked.name} is empty`
+            record.endedAt = startedAt
+            yield* writeRow(id, record, 'command.run_ended')
+            yield* Deferred.succeed(record.ended, undefined)
+            live.delete(id)
+            return viewOf(id, record)
+          }
+          if (
+            asked.expectedInvocation !== undefined &&
+            (invocation.command !== asked.expectedInvocation.command ||
+              invocation.verbatim !== asked.expectedInvocation.verbatim ||
+              JSON.stringify(invocation.args) !== JSON.stringify(asked.expectedInvocation.args))
+          ) {
+            record.state = 'failed'
+            record.kept = 'the command changed after classification: nothing was started'
             record.endedAt = startedAt
             yield* writeRow(id, record, 'command.run_ended')
             yield* Deferred.succeed(record.ended, undefined)

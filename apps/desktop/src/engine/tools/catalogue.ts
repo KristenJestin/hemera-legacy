@@ -28,26 +28,37 @@ import {
   TOOL_NAMES,
   type ToolName,
   admitTool,
+  CLASSIFIER_POLICY_VERSION,
+  classifierHumanContext,
   commandPlace,
+  judgedByClassifier,
+  localClassifierVerdict,
   offeredTools,
   runsInMain,
+  type LocalAction,
+  type Mission,
 } from '@hemera/core'
-import { and, eq } from 'drizzle-orm'
+import { and, desc, eq } from 'drizzle-orm'
 import { Context, Deferred, Effect, Layer } from 'effect'
 import { mkdir, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises'
 import { basename, dirname, join, relative } from 'node:path'
 
 import { HeldWords } from '../agents/held.ts'
-import { SessionModes, modeAsks } from '../agents/modes.ts'
+import { HEMERA_AUTO, SessionModes, modeAsks } from '../agents/modes.ts'
 import { AgentNotices } from '../agents/notices.ts'
+import { StderrSink } from '../agents/supervisor.ts'
 import { Builds } from '../build/build.ts'
-import { Commands } from '../commands/service.ts'
+import { ClassifierSettings } from '../classifier/settings.ts'
+import { evaluateJev, type JevResult, JevTransportPort } from '../classifier/jev.ts'
+import { knownSecretValues, redactText } from '../classifier/redaction.ts'
+import { type Invocation, wordsOf } from '../commands/line.ts'
+import { Commands, Platform, type RunRequest } from '../commands/service.ts'
 import { Projects } from '../projects.ts'
 import { Sessions, type ThreadWrite } from '../sessions.ts'
 import { Specs } from '../specs/specs.ts'
 import type { DescribedWorkspace } from '../workspaces/described.ts'
 import { Database } from '../storage/database.ts'
-import { contextDeliveries } from '../storage/schema.ts'
+import { contextDeliveries, sessionEntries } from '../storage/schema.ts'
 import { Variables } from '../workspaces/variables.ts'
 import { SetupDesk } from '../setup/desk.ts'
 import { mutate } from '../transaction.ts'
@@ -156,12 +167,79 @@ interface Kept {
   readonly outcome: ToolOutcome
 }
 
+/** A verdict Jev gave: what a repeated call of the same turn reuses. */
+type JevVerdict = Extract<JevResult, { readonly kind: 'evaluated' }>
+
+interface Classified {
+  readonly verdict: 'allow' | 'ask' | 'deny'
+  readonly generation: number
+  readonly latestHumanSeq: number
+  readonly correlationId?: string
+  /** Who settled it: the rules, the judge, nobody (unavailable), or its expiry (cancelled). */
+  readonly source?: 'local' | 'jev' | 'unavailable' | 'cancelled'
+  readonly model?: string
+  /** The call as the diagnostic log says it: its line or its path, masked, never its content. */
+  readonly said?: string
+  /** How long Jev took to answer this call, when it was asked. */
+  readonly roundTripMs?: number | undefined
+  readonly scores?:
+    | {
+        readonly risk: number
+        readonly approval: number
+        readonly userRequested: number
+      }
+    | undefined
+}
+
+interface AuthorizedTarget {
+  readonly path: string
+  readonly decision: Classified
+}
+
+interface ClassifierDetail {
+  readonly arguments?: ParsedCall['arguments']
+  readonly resolvedTarget?: string
+  readonly line?: string
+  readonly cwd?: string
+  readonly invocation?: Invocation
+  readonly portless?: boolean
+  readonly environmentNames?: readonly string[]
+}
+
 /**
  * The arguments of a call as one text, the same whatever order the agent wrote them in: what a
  * retry is compared by.
  */
 function argumentsSent(sent: ToolArguments): string {
   return JSON.stringify(Object.entries(sent).sort(([left], [right]) => (left < right ? -1 : 1)))
+}
+
+/** Who settled a call of Hemera Auto's, as its line's details say. */
+const BY = {
+  local: 'rules',
+  jev: 'judge',
+  unavailable: 'nobody',
+  cancelled: 'expired',
+} as const
+
+/** A human's answer, as the diagnostic log says Hemera Auto's verdicts. */
+const HUMAN_VERDICT = { allowed: 'allow', refused: 'deny', cancelled: 'cancelled' } as const
+
+/** What changes files or starts a process: an allow of it leaves a line, even from the rules. */
+const ACTING_TOOLS: ReadonlySet<string> = new Set(['fs_write', 'fs_edit', 'commands_run'])
+
+function targetName(call: ParsedCall): string | null {
+  switch (call.tool) {
+    case 'fs_read':
+    case 'fs_write':
+    case 'fs_edit':
+      return call.arguments.path
+    case 'fs_list':
+    case 'search':
+      return call.arguments.path ?? '.'
+    default:
+      return null
+  }
 }
 
 /** What a tool hands back before it has been written down. */
@@ -280,7 +358,9 @@ export const toolCatalogueLayer: Layer.Layer<
   | Database
   | Variables
   | Builds
+  | ClassifierSettings
   | SetupDesk
+  | StderrSink
 > = Layer.effect(
   ToolCatalogue,
   Effect.gen(function* () {
@@ -296,7 +376,12 @@ export const toolCatalogueLayer: Layer.Layer<
     const variables = yield* Variables
     const specs = yield* Specs
     const builds = yield* Builds
+    const classifier = yield* ClassifierSettings
+    const jevTransport = yield* JevTransportPort
+    const platform = yield* Platform
     const desk = yield* SetupDesk
+    /** The engine's diagnostic log, where each Hemera Auto decision is told in one line. */
+    const diagnostic = yield* StderrSink
 
     /**
      * One entry of a call written into its Session's thread, below what the agent said before it.
@@ -500,10 +585,13 @@ export const toolCatalogueLayer: Layer.Layer<
       )
 
     /** Where a tool may act: inside the root, or wherever the human has just allowed. */
-    const allowed = (asked: ToolCall, root: string, named: string) =>
+    const allowed = (asked: ToolCall, root: string, named: string, guard?: AuthorizedTarget) =>
       Effect.gen(function* () {
         const place = yield* placeOf(root, named)
         if (place.inside === null) return { allowed: false as const, reason: place.reason }
+        if (guard !== undefined && place.path !== guard.path) {
+          return { allowed: false as const, reason: 'the target changed after classification' }
+        }
         if (place.inside) return { allowed: true as const, path: place.path }
         const answer = yield* askHuman(
           asked,
@@ -513,6 +601,7 @@ export const toolCatalogueLayer: Layer.Layer<
           false,
           `${asked.tool} asks to act outside the Workspace: ${place.path}`,
           null,
+          guard?.decision.verdict === 'ask' ? guard.decision : undefined,
         )
         // Asked again once the human answered: they can take their time, and a yes given to a
         // Session whose agent has gone since is a yes nobody is left to act on.
@@ -520,6 +609,16 @@ export const toolCatalogueLayer: Layer.Layer<
           return {
             allowed: false as const,
             reason: 'the Session ended before the user answered, so nothing was done',
+          }
+        }
+        if (
+          answer.allowed &&
+          guard !== undefined &&
+          !(yield* decisionIsCurrent(asked, guard.decision, true))
+        ) {
+          return {
+            allowed: false as const,
+            reason: 'the classifier decision expired before execution',
           }
         }
         return answer
@@ -541,6 +640,7 @@ export const toolCatalogueLayer: Layer.Layer<
       inside: boolean,
       body: string,
       line: string | null,
+      classified?: Classified,
     ) =>
       Effect.gen(function* () {
         const id = crypto.randomUUID()
@@ -623,6 +723,39 @@ export const toolCatalogueLayer: Layer.Layer<
           correlationId: `decision:${id}`,
           state: answer === 'allowed' ? 'completed' : answer,
         }).pipe(Effect.catch(() => Effect.void))
+        // A question Hemera Auto left to the human: their answer is its decision's last line.
+        if (classified !== undefined) {
+          yield* diagnostic.write(
+            `hemera-auto: ${asked.tool} ${classified.said ?? ''} by=human verdict=${HUMAN_VERDICT[answer]}`,
+          )
+        }
+        const current = yield* answered(sessions.one(asked.sessionId))
+        if (current !== undefined) {
+          yield* withDatabase(
+            mutate('recording a permission decision', () =>
+              Effect.succeed({
+                result: null,
+                events: [
+                  {
+                    type: 'tool.permission_decision',
+                    entityKind: 'session' as const,
+                    entityId: asked.sessionId,
+                    source: answer === 'cancelled' ? ('system' as const) : ('ui' as const),
+                    author: answer === 'cancelled' ? ('system' as const) : ('human' as const),
+                    projectId: current.session.projectId,
+                    sessionId: asked.sessionId,
+                    payload: {
+                      tool: asked.tool,
+                      answer,
+                      callId: id,
+                      classifier: classified?.correlationId ?? null,
+                    },
+                  },
+                ],
+              }),
+            ),
+          ).pipe(Effect.catch(() => Effect.void))
+        }
         if (answer === 'cancelled') {
           return {
             allowed: false as const,
@@ -640,6 +773,286 @@ export const toolCatalogueLayer: Layer.Layer<
         }
         // What was allowed is the place the human was shown, and that is where the tool acts.
         return { allowed: true as const, path: where }
+      })
+
+    /** The human context of a call, without messages when the Session's did not read. */
+    const humanContextOf = (
+      mission: Mission,
+      entries: Parameters<typeof classifierHumanContext>[1] | undefined,
+      frozen: Parameters<typeof classifierHumanContext>[2] = [],
+    ) => {
+      const context = classifierHumanContext(mission, entries ?? [], frozen)
+      return entries === undefined ? { ...context, latestHumanSeq: -1 } : context
+    }
+
+    /**
+     * Jev's verdicts of the turn each Session is in, by call: what an identical call of the same
+     * turn reuses (D59-14). A Session keeps the verdicts of one turn only, dropped when the next
+     * begins; nothing is kept across turns, and no human answer is ever kept.
+     */
+    const turnVerdicts = new Map<
+      string,
+      { readonly turn: string; readonly verdicts: Map<string, JevVerdict> }
+    >()
+    const verdictsIn = (sessionId: string, turn: string) => {
+      const kept = turnVerdicts.get(sessionId)
+      if (kept !== undefined && kept.turn === turn) return kept.verdicts
+      const verdicts = new Map<string, JevVerdict>()
+      turnVerdicts.set(sessionId, { turn, verdicts })
+      return verdicts
+    }
+
+    /**
+     * The turn a Session is in, named by the last turn that ended before it: every turn writes
+     * its end into the thread, so a call after that line belongs to the next one.
+     */
+    const turnOf = (sessionId: string) =>
+      database
+        .select({ id: sessionEntries.id })
+        .from(sessionEntries)
+        .where(and(eq(sessionEntries.sessionId, sessionId), eq(sessionEntries.kind, 'turn')))
+        .orderBy(desc(sessionEntries.seq))
+        .limit(1)
+        .pipe(
+          Effect.map((rows) => rows[0]?.id ?? ''),
+          // A turn that does not read is a turn nothing is reused in.
+          Effect.catch(() => Effect.succeed(crypto.randomUUID())),
+        )
+
+    /** A decision is scoped to this exact call, Session context and settings generation. */
+    const classify = (
+      asked: ToolCall,
+      made: Made,
+      mission: Mission,
+      action: LocalAction,
+      detail: ClassifierDetail,
+      knownSecrets: readonly string[] = [],
+    ): Effect.Effect<Classified> =>
+      Effect.gen(function* () {
+        const snapshot = yield* answered(classifier.current)
+        if (snapshot === undefined) return { verdict: 'ask', generation: -1, latestHumanSeq: -1 }
+        // Context that does not read is context the judge does not get: the call is judged
+        // without it, so nothing the user said can lift it, and what needs their word asks them
+        // (D59-05). Only unreadable settings refuse, above.
+        const entries = yield* answered(sessions.humanMessages(asked.sessionId))
+        const frozen =
+          mission === 'build' ? yield* answered(builds.view(asked.sessionId)) : undefined
+        const frozenSnapshot =
+          frozen === undefined
+            ? undefined
+            : yield* answered(specs.read(frozen.specId, frozen.revision))
+        const context = humanContextOf(
+          mission,
+          entries,
+          frozenSnapshot?.sections.map((section) => ({
+            label: section.name,
+            body: section.body,
+          })) ?? [],
+        )
+        let verdict: Classified['verdict'] = 'ask'
+        // What the diagnostic log says of the way to Jev: its round trip, and why it failed.
+        let jevMs: number | undefined
+        let failure: string | undefined =
+          snapshot.key === null ? 'no key' : snapshot.consent ? undefined : 'no consent'
+        let source: NonNullable<Classified['source']> = 'unavailable'
+        let model = ''
+        let scores:
+          | { readonly risk: number; readonly approval: number; readonly userRequested: number }
+          | undefined
+        const correlationId = `classifier:${crypto.randomUUID()}`
+        const local = localClassifierVerdict(action)
+        if (local !== 'defer') {
+          verdict = local
+          source = 'local'
+        } else if (snapshot.key !== null && snapshot.consent) {
+          const key = snapshot.key
+          // What the judge sees, without the key that only makes a retry harmless: two calls
+          // that differ by it alone are the same call.
+          const actionText = JSON.stringify({
+            ...detail,
+            arguments:
+              detail.arguments === undefined
+                ? undefined
+                : Object.fromEntries(
+                    Object.entries(detail.arguments).filter(([name]) => name !== 'key'),
+                  ),
+            tool: action.tool,
+            target: action.target,
+          })
+          // The same call judged earlier in this turn, with the same settings and the same word
+          // from the user, reuses Jev's verdict — never a human's answer (D59-14).
+          const verdicts = verdictsIn(asked.sessionId, yield* turnOf(asked.sessionId))
+          const judged = `${snapshot.generation}\u0000${context.latestHumanSeq}\u0000${actionText}`
+          const reused = verdicts.get(judged)
+          if (reused !== undefined) {
+            verdict = reused.verdict
+            source = 'jev'
+            model = reused.model
+            scores = reused.scores
+          }
+          if (reused === undefined) {
+            const evaluated = yield* Effect.tryPromise({
+              try: (signal) =>
+                evaluateJev(
+                  {
+                    action: actionText,
+                    userContext: context.items.map((item) => `${item.source}: ${item.text}`),
+                  },
+                  key,
+                  signal,
+                  jevTransport,
+                  knownSecrets,
+                ),
+              catch: () => 'unavailable',
+            }).pipe(Effect.catch(() => Effect.succeed({ kind: 'unavailable' as const })))
+            jevMs = 'ms' in evaluated ? evaluated.ms : undefined
+            if (evaluated.kind === 'evaluated') {
+              verdict = evaluated.verdict
+              source = 'jev'
+              model = evaluated.model
+              scores = evaluated.scores
+              verdicts.set(judged, evaluated)
+            } else {
+              const why = 'reason' in evaluated ? evaluated.reason : 'network'
+              const status = 'status' in evaluated ? evaluated.status : undefined
+              failure = why === 'http' ? `http ${String(status ?? '')}` : why
+            }
+          }
+        }
+        const [currentSettings, currentMessages] = yield* Effect.all([
+          answered(classifier.current),
+          answered(sessions.humanMessages(asked.sessionId)),
+        ])
+        const stale =
+          currentSettings?.mode !== 'hemera-auto' ||
+          currentSettings.generation !== snapshot.generation ||
+          humanContextOf(mission, currentMessages).latestHumanSeq !== context.latestHumanSeq ||
+          !(yield* access.live(asked.sessionId))
+        if (stale) {
+          verdict = 'deny'
+          source = 'cancelled'
+          scores = undefined
+        }
+        const decisionPayload = {
+          agent: made.agent,
+          verdict,
+          source,
+          model,
+          policy: CLASSIFIER_POLICY_VERSION,
+          generation: snapshot.generation,
+          correlationId,
+        }
+        if (scores !== undefined) {
+          Object.assign(decisionPayload, scores)
+        }
+        yield* journalled(asked, made, 'classifier.decision', decisionPayload)
+        // One line in the diagnostic log per decision, with what can be said safely: the call's
+        // line or path masked as it would be for Jev, never a file's content or a secret.
+        const said = redactText(detail.line ?? detail.resolvedTarget ?? detail.cwd ?? '', [
+          ...knownSecrets,
+          ...(snapshot.key === null ? [] : [snapshot.key]),
+        ]).slice(0, 200)
+        yield* diagnostic.write(
+          [
+            `hemera-auto: ${action.tool} ${said}`,
+            `by=${BY[source]} verdict=${verdict}`,
+            `policy=${CLASSIFIER_POLICY_VERSION} model=${model === '' ? '-' : model}`,
+            ...(scores === undefined
+              ? []
+              : [
+                  `risk=${String(scores.risk)} approval=${String(scores.approval)} userRequested=${String(scores.userRequested)}`,
+                ]),
+            ...(jevMs === undefined ? [] : [`jev=${String(jevMs)}ms`]),
+            ...(source === 'local' || failure === undefined ? [] : [`failure=${failure}`]),
+            ...(verdict === 'ask' ? ['fallback=ask'] : []),
+          ].join(' '),
+        )
+        return {
+          said,
+          roundTripMs: jevMs,
+          verdict,
+          generation: snapshot.generation,
+          latestHumanSeq: context.latestHumanSeq,
+          correlationId,
+          source,
+          model,
+          scores,
+        }
+      })
+
+    /**
+     * The quiet line Hemera Auto leaves where it settled a call on its own (#59): "ran without
+     * asking", as a mode that runs leaves one (#242), or a refusal. Who decided and on what — the
+     * rules or the judge, the policy, the model and its scores — is in its details. A contained
+     * read the rules let through leaves none, as it leaves none under Agent default; a call Hemera
+     * Auto could not settle leaves the permission block instead, which the notices list.
+     */
+    const settledByAuto = (
+      asked: ToolCall,
+      tool: string,
+      root: string,
+      where: string,
+      line: string | null,
+      decision: Classified,
+    ) => {
+      if (decision.verdict === 'ask') return Effect.void
+      const ran = decision.verdict === 'allow'
+      if (ran && decision.source === 'local' && !ACTING_TOOLS.has(tool)) return Effect.void
+      const id = crypto.randomUUID()
+      return inThread(asked.sessionId, {
+        role: 'hemera',
+        kind: 'permission_decision',
+        body: ran
+          ? `ran without asking, ${HEMERA_AUTO.name} mode`
+          : `refused by ${HEMERA_AUTO.name}`,
+        payload: JSON.stringify({
+          toolCallId: id,
+          optionId: ran ? 'allowed' : null,
+          tool,
+          named: where,
+          resolved: where,
+          root,
+          inside: true,
+          line,
+          mode: HEMERA_AUTO.name,
+          // No question was asked, so this answers none (#242).
+          unasked: true,
+          answer: ran ? 'allowed' : 'refused',
+          by: BY[decision.source ?? 'cancelled'],
+          policyVersion: CLASSIFIER_POLICY_VERSION,
+          model: decision.model === '' ? undefined : decision.model,
+          scores: decision.scores,
+          roundTripMs: decision.roundTripMs,
+          classifier: decision.correlationId,
+        }),
+        correlationId: `decision:${id}`,
+        state: ran ? 'completed' : 'refused',
+      }).pipe(Effect.catch(() => Effect.void))
+    }
+
+    /**
+     * Whether a decision still holds right before dispatch: same classifier, same settings, a
+     * Session still alive, and — for an automatic allow — no newer word from the user. A human who
+     * answered the question is that newer word: a message they wrote before answering does not
+     * take their answer back (D59-05, D59-07).
+     */
+    const decisionIsCurrent = (
+      asked: ToolCall,
+      decision: Classified,
+      humanAnswered: boolean,
+    ): Effect.Effect<boolean> =>
+      Effect.gen(function* () {
+        const [settings, entries] = yield* Effect.all([
+          answered(classifier.current),
+          answered(sessions.humanMessages(asked.sessionId)),
+        ])
+        return (
+          settings?.mode === 'hemera-auto' &&
+          settings.generation === decision.generation &&
+          (humanAnswered ||
+            humanContextOf('free', entries).latestHumanSeq === decision.latestHumanSeq) &&
+          (yield* access.live(asked.sessionId))
+        )
       })
 
     /**
@@ -717,11 +1130,14 @@ export const toolCatalogueLayer: Layer.Layer<
       projectName: string,
       repositories: readonly string[],
       call: ParsedCall,
+      made: Made,
+      mission: Mission,
+      guard?: AuthorizedTarget,
     ): Effect.Effect<Answer> =>
       Effect.gen(function* () {
         switch (call.tool) {
           case 'fs_read': {
-            const settled = yield* allowed(asked, root, call.arguments.path)
+            const settled = yield* allowed(asked, root, call.arguments.path, guard)
             if (!settled.allowed) return failed(settled.reason, settled.reason)
             const page = yield* attempt<Page>(() =>
               readPage(
@@ -750,7 +1166,7 @@ export const toolCatalogueLayer: Layer.Layer<
           }
 
           case 'fs_write': {
-            const settled = yield* allowed(asked, root, call.arguments.path)
+            const settled = yield* allowed(asked, root, call.arguments.path, guard)
             if (!settled.allowed) return failed(settled.reason, settled.reason)
             const written = yield* attempt(() =>
               mkdir(dirname(settled.path), { recursive: true }).then(() =>
@@ -778,7 +1194,7 @@ export const toolCatalogueLayer: Layer.Layer<
                 'the old and the new text are the same, so nothing was changed',
               )
             }
-            const settled = yield* allowed(asked, root, call.arguments.path)
+            const settled = yield* allowed(asked, root, call.arguments.path, guard)
             if (!settled.allowed) return failed(settled.reason, settled.reason)
             const current = yield* attempt(() => readFile(settled.path, 'utf8'))
             if (!current.ok) {
@@ -812,7 +1228,7 @@ export const toolCatalogueLayer: Layer.Layer<
 
           case 'fs_list': {
             const named = call.arguments.path ?? '.'
-            const settled = yield* allowed(asked, root, named)
+            const settled = yield* allowed(asked, root, named, guard)
             if (!settled.allowed) return failed(settled.reason, settled.reason)
             const listed = yield* attempt(() =>
               readdir(settled.path, { withFileTypes: true }).then(async (entries) =>
@@ -848,7 +1264,7 @@ export const toolCatalogueLayer: Layer.Layer<
             const within =
               call.arguments.path === undefined
                 ? { allowed: true as const, path: root }
-                : yield* allowed(asked, root, call.arguments.path)
+                : yield* allowed(asked, root, call.arguments.path, guard)
             if (!within.allowed) return failed(within.reason, within.reason)
             const found = yield* attempt((signal) =>
               searchIn({
@@ -961,41 +1377,216 @@ export const toolCatalogueLayer: Layer.Layer<
             if (home === undefined) {
               return failed("could not read the Project's main", 'the Workspace main did not read')
             }
+            const environment = (yield* answered(variables.givenFor(projectId, home.id))) ?? {}
+            const resolvedPlace = yield* placeOf(entry === undefined ? root : home.path, folder)
+            if (resolvedPlace.inside === null)
+              return failed(resolvedPlace.reason, resolvedPlace.reason)
+            const runRequest: RunRequest = {
+              sessionId: asked.sessionId,
+              projectId,
+              commandId: entry?.id ?? null,
+              name: entry?.name ?? named ?? (line ?? '').split(/\s+/)[0] ?? 'command',
+              line: entry?.line ?? line ?? '',
+              lineWindows: entry?.lineWindows ?? null,
+              lineLinux: entry?.lineLinux ?? null,
+              type: entry?.type ?? 'script',
+              scope: entry?.scope ?? 'workspace',
+              portless: entry?.portless ?? false,
+              portlessName: entry?.portlessName ?? null,
+              folder: folder === '.' ? null : folder,
+              cwd: resolvedPlace.path,
+              workspaceId: home.id,
+              workspaceName: home.name,
+              environment,
+              startedBy: 'agent',
+            }
+            const settings = yield* answered(classifier.current)
+            if (settings === undefined) {
+              return {
+                ...failed('classifier settings are unavailable', 'Nothing was started.'),
+                refused: true,
+              }
+            }
+            // Only Hemera Auto reads the process ahead: under Agent default a line goes the way it
+            // always went, and a run that cannot start is written failed by the runner itself.
+            const prepared =
+              settings.mode === 'hemera-auto' ? yield* answered(commands.preview(runRequest)) : null
+            if (prepared === undefined)
+              return failed('the command could not be resolved', 'nothing was started')
+            // Nothing can start — no Portless, nothing to run — so there is nothing to judge: the
+            // runner writes the run failed and says why, as it does under Agent default.
+            const invocation = prepared?.invocation ?? null
+            const judged =
+              prepared !== null && !prepared.missingPortless && invocation !== null
+                ? { prepared, invocation }
+                : null
+            const commandLine = prepared?.line ?? runRequest.line
+            // What the local rules read: the words of the line as the runner splits them, the file
+            // the runner starts, and whether the folder and every path the line names stay inside.
+            const [program = '', ...words] = wordsOf(commandLine)
+            const contained =
+              judged !== null &&
+              resolvedPlace.inside &&
+              (yield* Effect.forEach(
+                words.filter((word) => !word.startsWith('-')),
+                (word) => placeOf(resolvedPlace.path, word),
+              )).every((place) => place.inside === true)
+            // A program the Workspace itself holds is the Workspace's code, whatever it is named.
+            const programPlace =
+              judged?.prepared.resolved == null
+                ? null
+                : yield* placeOf(root, judged.prepared.resolved)
+            const auto =
+              judged !== null
+                ? yield* classify(
+                    asked,
+                    made,
+                    mission,
+                    {
+                      tool: 'commands_run',
+                      target: contained ? 'inside' : 'outside',
+                      command: {
+                        program,
+                        args: words,
+                        shell: judged.invocation.verbatim,
+                        platform,
+                        resolved: programPlace?.inside === false ? judged.prepared.resolved : null,
+                      },
+                    },
+                    {
+                      line: commandLine,
+                      cwd: resolvedPlace.path,
+                      invocation: judged.invocation,
+                      portless: entry?.portless ?? false,
+                      environmentNames: Object.keys(environment),
+                    },
+                    knownSecretValues(environment),
+                  )
+                : null
+            if (auto !== null && auto.generation < 0) {
+              return {
+                ...failed('classifier context is unavailable', 'Nothing was started.'),
+                refused: true,
+              }
+            }
+            if (auto?.verdict === 'deny') {
+              yield* settledByAuto(
+                asked,
+                'commands_run',
+                root,
+                resolvedPlace.path,
+                commandLine,
+                auto,
+              )
+              return {
+                ...failed(
+                  'Hemera Auto refused this command',
+                  'The classifier refused this command.',
+                ),
+                refused: true,
+              }
+            }
             // A catalogue command is the user's own line, and inside the root it runs on its own.
             // A one-off is a line the agent wrote: the human sees the line and decides before
             // anything runs (D5-09) — one question, not one per rule — unless it stays inside the
             // root and the Session's mode is one where the agent's own tools do not ask (#242).
             const inside =
-              entry !== undefined
-                ? folder === '.'
-                  ? { allowed: true as const, path: home.path }
-                  : yield* allowed(asked, home.path, folder)
-                : yield* Effect.gen(function* () {
-                    const place = yield* placeOf(root, folder)
-                    if (place.inside === null) {
-                      return { allowed: false as const, reason: place.reason }
-                    }
-                    const oneOff = line ?? ''
-                    if (place.inside) {
-                      const standing = yield* modes.standing(asked.sessionId)
-                      if (standing !== null && !modeAsks(standing)) {
-                        yield* unasked(asked, root, place.path, oneOff, standing.name)
+              prepared !== null && judged === null
+                ? // Under Hemera Auto, a line that cannot start asks nobody: the runner refuses it.
+                  { allowed: true as const, path: resolvedPlace.path }
+                : entry !== undefined
+                  ? folder === '.'
+                    ? auto?.verdict === 'ask'
+                      ? yield* askHuman(
+                          asked,
+                          home.path,
+                          folder,
+                          home.path,
+                          true,
+                          `commands_run asks to run ${commandLine} in ${home.path}`,
+                          commandLine,
+                          auto,
+                        )
+                      : { allowed: true as const, path: home.path }
+                    : auto?.verdict === 'ask' && resolvedPlace.inside
+                      ? yield* askHuman(
+                          asked,
+                          home.path,
+                          folder,
+                          resolvedPlace.path,
+                          true,
+                          `commands_run asks to run ${commandLine} in ${resolvedPlace.path}`,
+                          commandLine,
+                          auto,
+                        )
+                      : yield* allowed(
+                          asked,
+                          home.path,
+                          folder,
+                          auto === null ? undefined : { path: resolvedPlace.path, decision: auto },
+                        )
+                  : yield* Effect.gen(function* () {
+                      const place = yield* placeOf(root, folder)
+                      if (place.inside === null) {
+                        return { allowed: false as const, reason: place.reason }
+                      }
+                      const oneOff = line ?? ''
+                      if (auto?.verdict === 'allow' && place.inside) {
                         return { allowed: true as const, path: place.path }
                       }
-                    }
-                    return yield* askHuman(
-                      asked,
-                      root,
-                      folder,
-                      place.path,
-                      place.inside,
-                      place.inside
-                        ? `commands_run asks to run ${oneOff} in ${place.path}`
-                        : `commands_run asks to run ${oneOff} outside the Workspace, in ${place.path}`,
-                      oneOff,
-                    )
-                  })
+                      if (auto === null && place.inside) {
+                        const standing = yield* modes.standing(asked.sessionId)
+                        if (standing !== null && !modeAsks(standing)) {
+                          yield* unasked(asked, root, place.path, oneOff, standing.name)
+                          return { allowed: true as const, path: place.path }
+                        }
+                      }
+                      return yield* askHuman(
+                        asked,
+                        root,
+                        folder,
+                        place.path,
+                        place.inside,
+                        place.inside
+                          ? `commands_run asks to run ${oneOff} in ${place.path}`
+                          : `commands_run asks to run ${oneOff} outside the Workspace, in ${place.path}`,
+                        oneOff,
+                        auto ?? undefined,
+                      )
+                    })
             if (!inside.allowed) return failed(inside.reason, inside.reason)
+            if (inside.path !== resolvedPlace.path) {
+              return {
+                ...failed(
+                  'the command target changed',
+                  'Nothing was started after the target changed.',
+                ),
+                refused: true,
+              }
+            }
+            if (
+              auto !== null &&
+              !(yield* decisionIsCurrent(
+                asked,
+                auto,
+                auto.verdict !== 'allow' || !resolvedPlace.inside,
+              ))
+            ) {
+              if (auto.verdict === 'allow' && resolvedPlace.inside) {
+                yield* settledByAuto(asked, 'commands_run', root, resolvedPlace.path, commandLine, {
+                  ...auto,
+                  verdict: 'deny',
+                  source: 'cancelled',
+                })
+              }
+              return {
+                ...failed(
+                  'the classifier decision expired',
+                  'Nothing was started after the classifier decision expired.',
+                ),
+                refused: true,
+              }
+            }
             // Asked again right before the start: a call admitted while the Session was alive can
             // reach this point after the Session ended — the human took their time — and a run
             // started now would come after the sweep that stops a Session's runs, and outlive it.
@@ -1005,27 +1596,21 @@ export const toolCatalogueLayer: Layer.Layer<
                 'this Session no longer has an agent, so nothing was started',
               )
             }
+            // Hemera Auto let it through without asking anyone: its line, as a mode's (#242).
+            if (auto?.verdict === 'allow' && resolvedPlace.inside) {
+              yield* settledByAuto(
+                asked,
+                'commands_run',
+                root,
+                resolvedPlace.path,
+                commandLine,
+                auto,
+              )
+            }
             const started = yield* answered(
               commands.run({
-                sessionId: asked.sessionId,
-                projectId,
-                commandId: entry?.id ?? null,
-                name: entry?.name ?? named ?? (line ?? '').split(/\s+/)[0] ?? 'command',
-                line: entry?.line ?? line ?? '',
-                lineWindows: entry?.lineWindows ?? null,
-                lineLinux: entry?.lineLinux ?? null,
-                type: entry?.type ?? 'script',
-                scope: entry?.scope ?? 'workspace',
-                portless: entry?.portless ?? false,
-                portlessName: entry?.portlessName ?? null,
-                folder: folder === '.' ? null : folder,
-                cwd: inside.path,
-                // D8-08: the run belongs to the Workspace it runs in, which names it too.
-                workspaceId: home.id,
-                workspaceName: home.name,
-                // D8-06: the Project's variables overridden by that Workspace's, kept on the run.
-                environment: (yield* answered(variables.givenFor(projectId, home.id))) ?? {},
-                startedBy: 'agent',
+                ...runRequest,
+                expectedInvocation: auto === null ? undefined : judged?.invocation,
               }),
             )
             if (started === undefined) {
@@ -1349,15 +1934,112 @@ export const toolCatalogueLayer: Layer.Layer<
           // A monotonic clock, to the microsecond: a read inside the root takes less than a
           // millisecond, and a call recorded as taking none is a call that says nothing of itself.
           const began = performance.now()
-          const answer = yield* perform(
-            asked,
-            root,
-            workspace,
-            project.id,
-            project.name,
-            project.repositories,
-            parsed.call,
-          )
+          const answer = yield* Effect.gen(function* () {
+            let guard: AuthorizedTarget | undefined
+            const settings = yield* answered(classifier.current)
+            if (settings === undefined) {
+              return {
+                ...failed('classifier settings are unavailable', 'Nothing was executed.'),
+                refused: true,
+              }
+            }
+            if (
+              settings.mode === 'hemera-auto' &&
+              parsed.call.tool !== 'commands_run' &&
+              judgedByClassifier(parsed.call.tool)
+            ) {
+              const namedTarget = targetName(parsed.call)
+              const place =
+                namedTarget === null
+                  ? { inside: true as const, path: root }
+                  : yield* placeOf(root, namedTarget)
+              if (place.inside === null) {
+                return { ...failed(place.reason, place.reason), refused: true }
+              }
+              // The Workspace's credentials are masked in whatever a tool carries, not only in a
+              // command line: a `.env` value written by `fs_write` is the same secret (D59-06).
+              const environment =
+                (yield* answered(variables.givenFor(project.id, workspace.id))) ?? {}
+              const classified = yield* classify(
+                asked,
+                made,
+                session.mission,
+                { tool: named, target: place.inside ? 'inside' : 'outside' },
+                { arguments: parsed.call.arguments, resolvedTarget: place.path },
+                knownSecretValues(environment),
+              )
+              if (classified.generation < 0) {
+                return {
+                  ...failed('classifier context is unavailable', 'Nothing was executed.'),
+                  refused: true,
+                }
+              }
+              if (classified.verdict === 'deny') {
+                yield* settledByAuto(asked, named, root, place.path, null, classified)
+                return {
+                  ...failed(
+                    'Hemera Auto refused this action',
+                    'The classifier refused this action.',
+                  ),
+                  refused: true,
+                }
+              }
+              if (classified.verdict === 'ask' && place.inside) {
+                const question = yield* askHuman(
+                  asked,
+                  root,
+                  namedTarget ?? '.',
+                  place.path,
+                  true,
+                  `${named} asks to act on ${place.path}`,
+                  null,
+                  classified,
+                )
+                if (!question.allowed)
+                  return { ...failed(question.reason, question.reason), refused: true }
+              }
+              if (
+                !(yield* decisionIsCurrent(
+                  asked,
+                  classified,
+                  classified.verdict === 'ask' && place.inside,
+                ))
+              ) {
+                // An allow of its own that expired before it ran says so where it would have run.
+                if (classified.verdict === 'allow' && place.inside) {
+                  yield* settledByAuto(asked, named, root, place.path, null, {
+                    ...classified,
+                    verdict: 'deny',
+                    source: 'cancelled',
+                  })
+                }
+                return {
+                  ...failed(
+                    'the classifier decision expired',
+                    'Nothing was executed after the classifier decision expired.',
+                  ),
+                  refused: true,
+                }
+              }
+              // Hemera Auto let it through without asking anyone: its line, as a mode's (#242).
+              if (classified.verdict === 'allow' && place.inside) {
+                yield* settledByAuto(asked, named, root, place.path, null, classified)
+              }
+              guard = { path: place.path, decision: classified }
+            }
+            return yield* perform(
+              asked,
+              root,
+              workspace,
+              project.id,
+              project.name,
+              project.repositories,
+              parsed.call,
+              made,
+              session.mission,
+              guard,
+            )
+          })
           // A tool has no error channel on purpose: everything a tool can be told no by is
           // answered as a value, and what would remain is a defect the engine should hear about.
           return yield* settle(

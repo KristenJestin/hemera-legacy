@@ -40,6 +40,7 @@ import { acpTracesLayer } from '#engine/agents/trace.ts'
 import { type HeldWords, heldWordsLayer } from '#engine/agents/held.ts'
 import { sessionModesLayer } from '#engine/agents/modes.ts'
 import { type Commands, commandsLayer } from '#engine/commands/service.ts'
+import { classifierSettingsLayer, type ClassifierSettings } from '#engine/classifier/settings.ts'
 import { type Context as AgentContext, contextLayer } from '#engine/context/service.ts'
 import { type Journal, journalLayer } from '#engine/journal.ts'
 import { openProfile } from '#engine/migrate.ts'
@@ -221,6 +222,7 @@ export function application(
       | Sessions
       | Specs
       | Preferences
+      | ClassifierSettings
       | AgentRuntime
       | ToolAccess
       | Database
@@ -230,6 +232,7 @@ export function application(
       | AgentContext
     > = runtimeLayer.pipe(
       Layer.provideMerge(toolAccessLayer),
+      Layer.provideMerge(classifierSettingsLayer),
       Layer.provideMerge(contextLayer),
       // No build runs here: a Session that is none passes through the builds untouched.
       Layer.provide(idleBuilds),
@@ -269,6 +272,7 @@ export function application(
         | Sessions
         | Specs
         | Preferences
+        | ClassifierSettings
         | AgentRuntime
         | ToolAccess
         | Database
@@ -510,6 +514,7 @@ export function toolApplication(
     const places = setupPlaces(dataFolder)
     const tools = toolServerLayer.pipe(
       Layer.provideMerge(toolCatalogueLayer),
+      Layer.provideMerge(classifierSettingsLayer),
       // One build service, the catalogue's and the runtime's: the runtime drives what it holds.
       Layer.provideMerge(idleBuilds),
       Layer.provideMerge(toolAccessLayer),

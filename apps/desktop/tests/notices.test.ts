@@ -15,6 +15,7 @@ import {
   decidesARequest,
   NOTICE_KINDS,
   permissionStandingOf,
+  unaskedStandingOf,
   waitingAs,
 } from '#renderer/notices.ts'
 
@@ -138,6 +139,11 @@ describe('The thread keeps a quiet record of each permission', () => {
     expect(permissionStandingOf(asked('pending'), [asked('pending')])).toBe('pending')
     // Left by an agent that died with the question open: closed, and nothing decided.
     expect(permissionStandingOf(asked('cancelled'), [asked('cancelled')])).toBe('stopped')
+  })
+
+  test('a call nobody was asked about ran, or was refused by Hemera Auto', () => {
+    expect(unaskedStandingOf(decided('allowed'))).toBe('unasked')
+    expect(unaskedStandingOf(decided(null))).toBe('refused')
   })
 
   test('a decision is said by its request, unless a one-off went through without one', () => {

@@ -724,9 +724,16 @@ describe('The rule of the scale marks the recommended level', () => {
 
     expect(modelStage(announced)?.optionId).toBe('model')
     expect(effortStage(announced)?.optionId).toBe('effort')
-    expect(modeStage(announced)?.optionId).toBe('mode')
+    expect(modeStage(announced, 'claude')?.optionId).toBe('mode')
+    expect(modeStage(announced, 'claude')?.choices).toEqual([
+      { id: 'plan', label: 'plan', permission: false },
+    ])
     // Alone, it is none of the three: no stage, so no row in the menu.
-    expect([modelStage([fast]), effortStage([fast]), modeStage([fast])]).toEqual([null, null, null])
+    expect([modelStage([fast]), effortStage([fast]), modeStage([fast], 'claude')]).toEqual([
+      null,
+      null,
+      null,
+    ])
   })
 })
 
@@ -1073,5 +1080,36 @@ describe('A one-off run without asking answers no other question', () => {
     expect(answersAQuestion(unasked)).toBe(false)
     const answered = reported('e4', 'permission_decision', 'you allowed fs_write', 'completed')
     expect(answersAQuestion(answered)).toBe(true)
+  })
+})
+
+describe('Hemera Auto replaces native permission controls in the model menu', () => {
+  test("marks the permission modes each agent's table declares, never a plan or an agent", () => {
+    const mode = (values: readonly string[]): ConfigOption => ({
+      id: 'mode',
+      name: 'Mode',
+      category: 'mode',
+      values: values.map((value) => ({ value, name: value })),
+      current: values[0] ?? '',
+    })
+    const marked = (provider: string | null, values: readonly string[]) =>
+      modeStage([mode(values)], provider)?.choices.map((choice) => [choice.id, choice.permission])
+    expect(marked('claude', ['default', 'acceptEdits', 'plan', 'bypassPermissions'])).toEqual([
+      ['default', false],
+      ['acceptEdits', true],
+      ['plan', false],
+      ['bypassPermissions', true],
+    ])
+    expect(marked('codex', ['read-only', 'agent', 'agent-full-access'])).toEqual([
+      ['read-only', false],
+      ['agent', true],
+      ['agent-full-access', true],
+    ])
+    expect(marked('opencode', ['build', 'plan', 'hemera'])).toEqual([
+      ['build', false],
+      ['plan', false],
+      ['hemera', false],
+    ])
+    expect(marked(null, ['default'])).toEqual([['default', false]])
   })
 })

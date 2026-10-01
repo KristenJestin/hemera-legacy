@@ -128,6 +128,17 @@ export function findOnPath(program: string, lookup: Lookup, platform: string): s
   return null
 }
 
+/**
+ * The file a program started without `cmd.exe` is, and null when there is none: a name with a
+ * folder in it from the folder the line runs in, a bare name along the `PATH`.
+ */
+export function programAt(program: string, lookup: Lookup, platform: string): string | null {
+  if (platform === 'win32') return resolveOnWindows(program, lookup)
+  if (!program.includes('/')) return findOnPath(program, lookup, platform)
+  const candidate = isAbsolute(program) ? program : join(lookup.cwd, program)
+  return executable(candidate) ? candidate : null
+}
+
 /** How a line is started on this platform, and null for a line with nothing to run. */
 export function invocationOf(line: string, platform: string, lookup: Lookup): Invocation | null {
   const [program, ...args] = wordsOf(line)

@@ -1,5 +1,19 @@
 > The note on the maintainer's prototype of 22 September 2026 (`acp-chat`), compared with #18, kept as it was written.
 
+> **Later implementation (#59, 27 and 30 September 2026).** The recommendations and undecided
+> questions below describe the earlier prototype review. Hemera Auto is now an optional,
+> application-wide mode in App Settings, and a row of the permission-mode table Hemera's tools
+> follow. The catalogue classifies exact admitted calls that read or change files or start a
+> process with narrow local rules, then pinned Jev for unresolved calls when protected
+> credentials and consent are available; otherwise it asks the human once, in the Session's
+> notices. It preserves mission, Workspace and Session guards. It masks credential headers,
+> known token shapes and the Workspace's credential variables before evaluation, and records
+> sanitized verdicts, policy/model versions and available scores. A mode change revokes the
+> former agents' tool grants and cancels their turns; a Session on another permission mode than
+> its agent's neutral one is put back on it before a prompt. This covers Hemera's tools, not an
+> agent's unrelated external actions. The thresholds are initial policy defaults and have not
+> been calibrated with live Jev trials.
+
 # acp-chat prototype vs #18: tools, commands, permission classifier
 
 Written 2026-09-22. Sources: prototype `D:\Projects\hemera\inbox-2b\acp-chat` (8 commits, `6aba157`..`06975c7`; `P:` below = `src/main/`), branch `feature/18-agent-tools` in `D:\Projects\hemera\wt-18` (`B:` = `apps/desktop/src/engine/`), issue #18 (D6-01..D6-12, Spec, Decided), PR #50 comments, `docs/technical/bare-mode-2026-09.md` (read from `d013a06`), docs.typesafe.ai (fetched 2026-09-22).

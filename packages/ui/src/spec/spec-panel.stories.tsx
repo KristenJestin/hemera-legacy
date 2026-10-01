@@ -4,6 +4,7 @@ import { type ReactNode, useState } from 'react'
 import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
 
 import { atRest } from '../../.storybook/at-rest.ts'
+import { steadyClock } from '../../.storybook/clock.ts'
 import { journeyOf, readEveryFrame } from '../../.storybook/journey.ts'
 
 import { Button } from '../components/button/button.tsx'
@@ -808,12 +809,11 @@ export const SwapReplayed: Story = {
  * given its width back from the width it had reached, and is never pushed the rest of the way.
  *
  * The fold has to land while the panel is still on its way, and the panel comes in on a spring
- * that is most of the way in within a quarter of a second. On a machine busy with the rest of the
- * run a pointer's press can take longer than that, and land on a panel already in: nothing was
- * left to turn round, so the chat was, rightly, the whole panel narrower. So the fold is pressed
- * on the first frame the panel is part of the way in, the chat is read at the moment it lands,
- * and when less than a tenth of the way was left by then, the Spec is folded back and the gesture
- * done again, up to five times.
+ * that is most of the way in within a quarter of a second: a pointer's whole journey to the
+ * button, or one late frame of a busy runner, can outlast it. So the fold is pressed on the first
+ * frame the panel is part of the way in, the chat is read at the moment it lands, and the panel
+ * comes in on the play's own clock, which no frame moves on by more than a step: the frame the
+ * fold is pressed on is never more than that step past the one before it.
  */
 export const TurnsRoundMidWay: Story = {
   args: { defaultFolded: true },
@@ -822,8 +822,9 @@ export const TurnsRoundMidWay: Story = {
     const row = dockOf(canvasElement).parentElement!.getBoundingClientRect().width
     // The chat's width with the panel all the way in.
     const full = row * 0.55 - 12
-    const turn = async (tries: number): Promise<{ frames: Frame[]; reached: number }> => {
-      const start = measure(canvasElement).chat
+    const start = measure(canvasElement).chat
+    const clock = await steadyClock()
+    try {
       let reached = Number.NaN
       const frames = await framesOf(canvasElement, async () => {
         await userEvent.click(canvas.getByRole('button', { name: 'Unfold the Spec' }))
@@ -833,9 +834,7 @@ export const TurnsRoundMidWay: Story = {
           reached = measure(canvasElement).chat
         }
         fold.addEventListener('click', read, { capture: true, once: true })
-        // Part of the way in, and no further: pressed on the first frame the panel is 40 pixels
-        // in, rather than after a pointer's whole journey to the button, which a busy runner can
-        // stretch past the panel's own.
+        // Part of the way in, and no further: pressed on the first frame the panel is 40 pixels in.
         await new Promise<void>((resolve) => {
           const look = (): void => {
             if (measure(canvasElement).panel <= 40) {
@@ -849,18 +848,18 @@ export const TurnsRoundMidWay: Story = {
         })
       })
       await waitFor(() => expect(isStowed(canvasElement)).toBe(true))
-      if (reached - full > (start - full) / 10 || tries === 1) return { frames, reached }
-      return turn(tries - 1)
+      // Pressed with more than a tenth of the way still to go.
+      await expect(reached, 'the fold never landed while the panel was coming in').toBeGreaterThan(
+        full + (start - full) / 10,
+      )
+      const widths = frames.map((frame) => frame.chat)
+      // The panel's whole width was never taken from the chat.
+      await expect(Math.min(...widths)).toBeGreaterThan(full + 1)
+      await expect(widths.at(-1)).toBe(widths[0])
+      await expect(frames.at(-1)!.frame).toBe(1)
+    } finally {
+      clock.stop()
     }
-    const { frames, reached } = await turn(5)
-    await expect(reached, 'the fold never landed while the panel was coming in').toBeGreaterThan(
-      full + 1,
-    )
-    const widths = frames.map((frame) => frame.chat)
-    // The panel's whole width was never taken from the chat.
-    await expect(Math.min(...widths)).toBeGreaterThan(full + 1)
-    await expect(widths.at(-1)).toBe(widths[0])
-    await expect(frames.at(-1)!.frame).toBe(1)
   },
 }
 

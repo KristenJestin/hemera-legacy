@@ -516,10 +516,10 @@ export const Crowded: Story = {
     })
     await expect(cut).toEqual([])
     await expect(chips[1]).toHaveTextContent(/1204s$/)
-    // Helpers that share an initial wear two letters; the one alone with its own, one.
+    // Helpers that share an initial wear two letters, never the same two; the one alone, one.
     await expect(
       chips.slice(4).map((chip) => chip.querySelector('.rounded-full')?.textContent),
-    ).toEqual(['RE', 'RE', 'S'])
+    ).toEqual(['RV', 'RS', 'S'])
   },
 }
 

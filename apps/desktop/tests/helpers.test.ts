@@ -748,6 +748,43 @@ describe('Hemera keeps parallel helpers off each other’s files', () => {
     expect(statesOf(seen.view).T2).toBe('done')
   })
 
+  test('a helper that ended lets its files go: the next writer holds them', async () => {
+    const main = orchestrator([
+      launch('Write the exporter.', { task: 'T1' }),
+      launch('Write the reader.', { task: 'T2' }),
+    ])
+    const first = aHelper([write('src/shared.ts', 'one'), { does: 'says', text: 'Done.' }])
+    const reading = held()
+    const other = aHelper([{ does: 'says', text: 'Reading.' }], {
+      between: () => reading.promise,
+    })
+    opened = await openWindow(dataFolder, main.agent, first.agent, other.agent)
+    const seen = await opened.running(
+      Effect.gen(function* () {
+        const spec = yield* aReadySpec(dataFolder, THREE)
+        const sessionId = yield* launched(spec.specId, spec.workspaceId)
+        const all = yield* eventually(helpersOf(sessionId), (helpers) =>
+          helpers.some((one) => one.task === 'T1' && one.state === 'done'),
+        )
+        const sql = yield* SqliteClient
+        const left = yield* sql<{
+          task: string
+        }>`SELECT task FROM build_claims WHERE session_id = ${sessionId}`
+        const helpers = yield* Helpers
+        const reader = all.find((one) => one.task === 'T2')?.id ?? ''
+        // The reader's task writes the file next, and holds it from then on.
+        const taken = yield* helpers.claim(reader, 'src/shared.ts')
+        const refused = yield* helpers.claim(sessionId, 'src/shared.ts')
+        reading.carryOn()
+        return { left, taken, refused }
+      }),
+    )
+    expect(first.agent.answers.used[0]).toMatchObject({ tool: 'fs_write', isError: false })
+    expect(seen.left).toEqual([])
+    expect(seen.taken).toBeNull()
+    expect(seen.refused).toContain('src/shared.ts is held by T2')
+  })
+
   test('a red check while another helper is in the middle of a try is provisional', async () => {
     const runs: string[] = []
     const checks = scriptedChecks((request) => {

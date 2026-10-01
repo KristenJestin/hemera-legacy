@@ -117,7 +117,8 @@ export interface HelpersService {
   /**
    * A write of a Session through Hemera's tools to a path of the Workspace root (issue #77): null
    * when it may go, or why not — the path is held by another task a helper is working on. The
-   * first write of a helper on a task to a free path claims it for that task.
+   * first write of a helper on a task to a free path claims it for that task, until that helper
+   * ends.
    */
   readonly claim: (sessionId: string, path: string) => Effect.Effect<string | null>
 }
@@ -332,8 +333,19 @@ export const helpersLayer = Layer.effect(
                 .where(
                   and(eq(sessions.parentSessionId, row.id), eq(sessions.helperState, 'running')),
                 )
-                .returning({ id: sessions.id, title: sessions.title })
+                .returning({ id: sessions.id, title: sessions.title, task: sessions.helperTask })
                 .pipe(Effect.mapError(failed('stopping the helpers of the helper')))
+              // The files its task held, and its stopped helpers' tasks, go with it: the next
+              // writer of each holds it (issue #77). No other running helper is on those tasks.
+              const tasks = [row.helperTask, ...children.map((child) => child.task)].filter(
+                (task) => task !== null,
+              )
+              if (tasks.length > 0) {
+                yield* transaction
+                  .delete(buildClaims)
+                  .where(and(eq(buildClaims.sessionId, rootId), inArray(buildClaims.task, tasks)))
+                  .pipe(Effect.mapError(failed('letting the files of the helper go')))
+              }
               if (tells && parent !== null) {
                 yield* transaction
                   .insert(queuedResults)

@@ -93,7 +93,8 @@ export const Initial: Story = {
 
 /**
  * Two helpers that share an initial wear two letters each: the first two of a single word, the
- * first of each word otherwise. One that shares it with no one keeps its one letter.
+ * first of each word otherwise, and the first letter that differs when those are shared too
+ * (Reviewer and Researcher). One that shares it with no one keeps its one letter.
  */
 export const SharedInitial: Story = {
   parameters: { controls: { disable: true } },
@@ -113,7 +114,7 @@ export const SharedInitial: Story = {
     const letters = [...canvasElement.querySelectorAll('[data-avatar]')].map(
       (one) => one.textContent,
     )
-    await expect(letters).toEqual(['RE', 'RE', 'SR', 'SC', 'D'])
+    await expect(letters).toEqual(['RV', 'RS', 'SR', 'SC', 'D'])
   },
 }
 

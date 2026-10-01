@@ -1,16 +1,11 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
 import { MotionConfig } from 'motion/react'
-import { type ReactNode, useState } from 'react'
-import { expect, userEvent, waitFor, within } from 'storybook/test'
+import type { ReactNode } from 'react'
+import { expect, waitFor, within } from 'storybook/test'
 
-import { readEveryFrame } from '../../../.storybook/journey.ts'
-import {
-  AT_ONCE,
-  emulateReducedMotion,
-  movesLess,
-  withinFrames,
-} from '../../../.storybook/reduced-motion.ts'
-import { Button } from '../button/button.tsx'
+import { useBeat } from '../../../.storybook/beat.ts'
+import { type Reading, journeyOf, readEveryFrame } from '../../../.storybook/journey.ts'
+import { emulateReducedMotion, movesLess } from '../../../.storybook/reduced-motion.ts'
 import { type MarkState, StatusMark, type StatusMarkProps } from './status-mark.tsx'
 
 /**
@@ -48,25 +43,16 @@ function strokeOf(mark: Element, figure: string): Element | null {
   return mark.querySelector(`[data-figure="${figure}"]`)
 }
 
-/** A mark whose state and share are moved on by the buttons beside it. */
+/** A mark that takes each pose in turn, a beat each, and round again: the story plays it. */
 function Moving({
-  from,
-  steps,
+  poses,
+  every,
 }: {
-  from: StatusMarkProps
-  steps: readonly (StatusMarkProps & { press: string })[]
+  poses: readonly StatusMarkProps[]
+  every?: number | undefined
 }): ReactNode {
-  const [shown, setShown] = useState<StatusMarkProps>(from)
-  return (
-    <div className="flex items-center gap-3">
-      <StatusMark {...shown} />
-      {steps.map(({ press, ...step }) => (
-        <Button key={press} size="sm" variant="ghost" onClick={() => setShown(step)}>
-          {press}
-        </Button>
-      ))}
-    </div>
-  )
+  const step = useBeat(poses.length, every)
+  return <StatusMark {...poses[step]!} />
 }
 
 const meta = {
@@ -168,25 +154,25 @@ export const ProgressMoves: Story = {
   parameters: { controls: { disable: true } },
   render: () => (
     <Moving
-      from={{ state: 'progress', progress: 0.2, label: 'Checking' }}
-      steps={[{ state: 'progress', progress: 0.8, label: 'Checking', press: 'On' }]}
+      poses={[
+        { state: 'progress', progress: 0.2, label: 'Checking' },
+        { state: 'progress', progress: 0.8, label: 'Checking' },
+      ]}
     />
   ),
   play: async ({ canvasElement }) => {
-    const canvas = within(canvasElement)
-    const mark = canvas.getByRole('img', { name: 'Checking' })
+    const mark = within(canvasElement).getByRole('img', { name: 'Checking' })
     const ring = strokeOf(mark, 'ring')!
     await waitFor(() => expect(drawnOf(ring)).toBeCloseTo(0.2, 2))
-    const watch = readEveryFrame(() => drawnOf(ring))
-    await userEvent.click(canvas.getByRole('button', { name: 'On' }))
+    // In hundredths, which is the unit a journey of a share is told in.
+    const watch = readEveryFrame(() => drawnOf(ring) * 100)
     await waitFor(() => expect(drawnOf(ring)).toBeCloseTo(0.8, 2))
-    const shares = watch.stop().map((reading) => reading.value)
-    await expect(shares.filter((share) => share > 0.81)).toEqual([])
+    const readings = watch.stop()
+    const shares = readings.map((reading) => reading.value)
+    await expect(shares.filter((share) => share > 81)).toEqual([])
+    await expect(shares.filter((share, at) => at > 0 && share < shares[at - 1]! - 0.1)).toEqual([])
     if (movesLess()) return
-    await expect(shares.some((share) => share > 0.25 && share < 0.75)).toBe(true)
-    await expect(shares.filter((share, at) => at > 0 && share < shares[at - 1]! - 0.001)).toEqual(
-      [],
-    )
+    await expect(journeyOf(readings, 20, 80)).not.toBe('jumped')
   },
 }
 
@@ -198,31 +184,30 @@ export const Ends: Story = {
   parameters: { controls: { disable: true } },
   render: () => (
     <Moving
-      from={{ state: 'progress', label: 'Task' }}
-      steps={[
-        { state: 'done', label: 'Task', press: 'Done' },
-        { state: 'failed', label: 'Task', press: 'Failed' },
+      poses={[
+        { state: 'progress', label: 'Task' },
+        { state: 'done', label: 'Task' },
+        { state: 'progress', label: 'Task' },
+        { state: 'failed', label: 'Task' },
       ]}
     />
   ),
   play: async ({ canvasElement }) => {
-    const canvas = within(canvasElement)
-    const mark = canvas.getByRole('img', { name: 'Task' })
-    /** Presses `press` and reads how much of `figure` is drawn on every frame until it is whole. */
-    const drawing = async (press: string, figure: string): Promise<number[]> => {
+    const mark = within(canvasElement).getByRole('img', { name: 'Task' })
+    /** Reads how much of `figure` is drawn on every frame until its pose comes and it is whole. */
+    const drawing = async (figure: string): Promise<Reading[]> => {
       const stroke = strokeOf(mark, figure)!
-      const watch = readEveryFrame(() => drawnOf(stroke))
-      await userEvent.click(canvas.getByRole('button', { name: press }))
+      const watch = readEveryFrame(() => drawnOf(stroke) * 100)
       await waitFor(() => expect(drawnOf(stroke)).toBe(1))
-      return watch.stop().map((reading) => reading.value)
+      return watch.stop()
     }
-    const check = await drawing('Done', 'check')
-    const cross = await drawing('Failed', 'cross')
+    const check = await drawing('check')
+    const cross = await drawing('cross')
     await expect(mark).toHaveAttribute('data-mark', 'failed')
     await waitFor(() => expect(drawnOf(strokeOf(mark, 'check'))).toBe(0))
     if (movesLess()) return
-    await expect(check.some((share) => share > 0.05 && share < 0.95)).toBe(true)
-    await expect(cross.some((share) => share > 0.05 && share < 0.95)).toBe(true)
+    await expect(journeyOf(check, 0, 100)).not.toBe('jumped')
+    await expect(journeyOf(cross, 0, 100)).not.toBe('jumped')
   },
 }
 
@@ -246,8 +231,8 @@ export const Yours: Story = {
 }
 
 /**
- * Asked for less movement, every change is at its end the next frame: the share, the check, the
- * cross; and the arc stops turning.
+ * Asked for less movement, every change is at its end the next frame — the share, the check —
+ * never part of the way; and the arc stops turning.
  */
 export const ReducedMotion: Story = {
   parameters: { controls: { disable: true } },
@@ -256,10 +241,10 @@ export const ReducedMotion: Story = {
       <div className="flex items-center gap-3">
         <StatusMark state="progress" label="Turning" />
         <Moving
-          from={{ state: 'progress', progress: 0.2, label: 'Task' }}
-          steps={[
-            { state: 'progress', progress: 0.8, label: 'Task', press: 'On' },
-            { state: 'done', label: 'Task', press: 'Done' },
+          poses={[
+            { state: 'progress', progress: 0.2, label: 'Task' },
+            { state: 'progress', progress: 0.8, label: 'Task' },
+            { state: 'done', label: 'Task' },
           ]}
         />
       </div>
@@ -268,14 +253,17 @@ export const ReducedMotion: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     const mark = canvas.getByRole('img', { name: 'Task' })
-    await userEvent.click(canvas.getByRole('button', { name: 'On' }))
-    await expect(
-      await withinFrames(() => Math.abs(drawnOf(strokeOf(mark, 'ring')) - 0.8) < 0.005, AT_ONCE),
-    ).toBe(true)
-    await userEvent.click(canvas.getByRole('button', { name: 'Done' }))
-    await expect(await withinFrames(() => drawnOf(strokeOf(mark, 'check')) === 1, AT_ONCE)).toBe(
-      true,
+    const ring = readEveryFrame(() => drawnOf(strokeOf(mark, 'ring')))
+    const check = readEveryFrame(() => drawnOf(strokeOf(mark, 'check')))
+    await waitFor(() => expect(drawnOf(strokeOf(mark, 'check'))).toBe(1))
+    const shares = ring.stop().map((reading) => reading.value)
+    const ticks = check.stop().map((reading) => reading.value)
+    // Only the poses themselves, on every frame: nothing in between was ever drawn.
+    const between = shares.filter(
+      (share) => ![0.2, 0.8, 1].some((at) => Math.abs(share - at) < 0.005),
     )
+    await expect(between).toEqual([])
+    await expect(ticks.filter((share) => share !== 0 && share !== 1)).toEqual([])
     // The turn is the stylesheet's, which answers the system's own preference.
     if (!(await emulateReducedMotion())) return
     const turning = canvas.getByRole('img', { name: 'Turning' })
@@ -284,6 +272,18 @@ export const ReducedMotion: Story = {
     )
   },
 }
+
+/** The walk through every pose, and the stroke each one draws. */
+const WALK = [
+  { state: 'todo', progress: undefined, figure: 'dashed' },
+  { state: 'progress', progress: undefined, figure: 'ring' },
+  { state: 'yours', progress: undefined, figure: 'ring' },
+  { state: 'blocked', progress: undefined, figure: 'bar' },
+  { state: 'failed', progress: undefined, figure: 'cross' },
+  { state: 'progress', progress: 0.5, figure: 'ring' },
+  { state: 'done', progress: undefined, figure: 'check' },
+  { state: 'skipped', progress: undefined, figure: 'strike' },
+] as const
 
 /**
  * Every change in turn, one mark moving from each pose to the next in place: to do, in progress,
@@ -294,36 +294,17 @@ export const EveryChange: Story = {
   parameters: { controls: { disable: true } },
   render: () => (
     <Moving
-      from={{ state: 'todo', label: 'Task' }}
-      steps={[
-        { state: 'progress', label: 'Task', press: 'Start' },
-        { state: 'yours', label: 'Task', press: 'Hand over' },
-        { state: 'blocked', label: 'Task', press: 'Block' },
-        { state: 'failed', label: 'Task', press: 'Fail' },
-        { state: 'progress', progress: 0.5, label: 'Task', press: 'Half' },
-        { state: 'done', label: 'Task', press: 'Finish' },
-        { state: 'skipped', label: 'Task', press: 'Skip' },
-      ]}
+      every={1200}
+      poses={WALK.map((pose) => ({ state: pose.state, progress: pose.progress, label: 'Task' }))}
     />
   ),
   play: async ({ canvasElement }) => {
-    const canvas = within(canvasElement)
-    const mark = canvas.getByRole('img', { name: 'Task' })
+    const mark = within(canvasElement).getByRole('img', { name: 'Task' })
     const box = mark.getBoundingClientRect()
-    const walk = [
-      { press: 'Start', state: 'progress', figure: 'ring' },
-      { press: 'Hand over', state: 'yours', figure: 'ring' },
-      { press: 'Block', state: 'blocked', figure: 'bar' },
-      { press: 'Fail', state: 'failed', figure: 'cross' },
-      { press: 'Half', state: 'progress', figure: 'ring' },
-      { press: 'Finish', state: 'done', figure: 'check' },
-      { press: 'Skip', state: 'skipped', figure: 'strike' },
-    ] as const
     const reached: MarkState[] = []
     const step = async (at: number): Promise<void> => {
-      const next = walk[at]
+      const next = WALK[at]
       if (next === undefined) return
-      await userEvent.click(canvas.getByRole('button', { name: next.press }))
       await waitFor(() => {
         expect(mark).toHaveAttribute('data-mark', next.state)
         expect(drawnOf(strokeOf(mark, next.figure))).toBeGreaterThan(0.25)
@@ -331,8 +312,8 @@ export const EveryChange: Story = {
       reached.push(next.state)
       await step(at + 1)
     }
-    await step(0)
-    await expect(reached).toEqual(walk.map((one) => one.state))
+    await step(1)
+    await expect(reached).toEqual(WALK.slice(1).map((one) => one.state))
     const now = mark.getBoundingClientRect()
     await expect([now.width, now.height, now.left, now.top]).toEqual([
       box.width,

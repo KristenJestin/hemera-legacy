@@ -3,6 +3,7 @@ import type { ReactNode } from 'react'
 import { expect, fn, screen, userEvent, waitFor, within } from 'storybook/test'
 
 import { useBeat } from '../../.storybook/beat.ts'
+import { steadyClock } from '../../.storybook/clock.ts'
 import { journeyOf, readEveryFrame } from '../../.storybook/journey.ts'
 import { movesLess } from '../../.storybook/reduced-motion.ts'
 
@@ -514,20 +515,29 @@ export const TaskDone: Story = {
       name: /^T2\b/,
     })[0]!
     const mark = line.querySelector('[data-mark]')!
-    // In hundredths, which is the unit a journey of a share is told in.
-    const watch = readEveryFrame(
-      () =>
-        Math.min(
-          drawnOf(mark.querySelector('[data-figure="check"]')),
-          struckOf(line.querySelector('[data-strike]')),
-        ) * 100,
-    )
-    await waitFor(() => expect(mark).toHaveAttribute('data-mark', 'done'))
-    await waitFor(() => expect(struckOf(line.querySelector('[data-strike]'))).toBe(1))
-    await waitFor(() => expect(drawnOf(mark.querySelector('[data-figure="check"]'))).toBe(1))
-    const both = watch.stop().filter((reading) => !Number.isNaN(reading.value))
-    if (movesLess()) return
-    // The check and the stroke drew together, neither of them whole at once.
-    await expect(journeyOf(both, 0, 100)).not.toBe('jumped')
+    // The draw is a quarter of a second, which one late frame of a busy runner can step over
+    // whole: on the play's own clock, it is drawn on frames close enough to be seen, and the
+    // readings are timed by the clock it is drawn on.
+    const clock = await steadyClock()
+    try {
+      // In hundredths, which is the unit a journey of a share is told in.
+      const watch = readEveryFrame(
+        () =>
+          Math.min(
+            drawnOf(mark.querySelector('[data-figure="check"]')),
+            struckOf(line.querySelector('[data-strike]')),
+          ) * 100,
+        clock.now,
+      )
+      await waitFor(() => expect(mark).toHaveAttribute('data-mark', 'done'))
+      await waitFor(() => expect(struckOf(line.querySelector('[data-strike]'))).toBe(1))
+      await waitFor(() => expect(drawnOf(mark.querySelector('[data-figure="check"]'))).toBe(1))
+      const both = watch.stop().filter((reading) => !Number.isNaN(reading.value))
+      if (movesLess()) return
+      // The check and the stroke drew together, neither of them whole at once.
+      await expect(journeyOf(both, 0, 100)).toBe('travelled')
+    } finally {
+      clock.stop()
+    }
   },
 }

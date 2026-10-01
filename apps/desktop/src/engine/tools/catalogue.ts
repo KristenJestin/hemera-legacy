@@ -29,8 +29,8 @@ import {
   type ToolName,
   admitTool,
   commandPlace,
-  offeredTools,
   runsInMain,
+  sessionTools,
 } from '@hemera/core'
 import { and, eq } from 'drizzle-orm'
 import { Context, Deferred, Effect, Layer } from 'effect'
@@ -42,6 +42,7 @@ import { SessionModes, modeAsks } from '../agents/modes.ts'
 import { AgentNotices } from '../agents/notices.ts'
 import { Builds } from '../build/build.ts'
 import { Commands } from '../commands/service.ts'
+import { Helpers } from '../helpers/helpers.ts'
 import { Projects } from '../projects.ts'
 import { Sessions, type ThreadWrite } from '../sessions.ts'
 import { Specs } from '../specs/specs.ts'
@@ -280,6 +281,7 @@ export const toolCatalogueLayer: Layer.Layer<
   | Database
   | Variables
   | Builds
+  | Helpers
   | SetupDesk
 > = Layer.effect(
   ToolCatalogue,
@@ -296,6 +298,7 @@ export const toolCatalogueLayer: Layer.Layer<
     const variables = yield* Variables
     const specs = yield* Specs
     const builds = yield* Builds
+    const helpers = yield* Helpers
     const desk = yield* SetupDesk
 
     /**
@@ -708,7 +711,11 @@ export const toolCatalogueLayer: Layer.Layer<
         Effect.catch((reason) => Effect.succeed({ ok: false as const, reason })),
       )
 
-    /** One tool, one answer. The arguments are the ones `parseCall` already read. */
+    /**
+     * One tool, one answer. The arguments are the ones `parseCall` already read. `build` is the
+     * Session whose build a build tool acts on — the Session's own, or the build a helper works in —
+     * and `carries` the task a helper was launched on, the only one it signals about (issue #77).
+     */
     const perform = (
       asked: ToolCall,
       root: string,
@@ -717,6 +724,8 @@ export const toolCatalogueLayer: Layer.Layer<
       projectName: string,
       repositories: readonly string[],
       call: ParsedCall,
+      build: string,
+      carries: string | null,
     ): Effect.Effect<Answer> =>
       Effect.gen(function* () {
         switch (call.tool) {
@@ -1258,11 +1267,23 @@ export const toolCatalogueLayer: Layer.Layer<
           case 'spec_propose':
             return yield* spec(asked.sessionId, call)
 
-          case 'build_read':
           case 'task_finished':
-          case 'task_blocked':
+          case 'task_blocked': {
+            const named = call.arguments.task.trim().toUpperCase()
+            if (carries !== null && named !== carries) {
+              const reason = `you carry ${carries}, and ${named} is not yours: say so in your result instead`
+              return { ok: false, refused: true, summary: reason, text: reason, paths: [] }
+            }
+            return yield* builds.tool(build, call)
+          }
+          case 'build_read':
           case 'reproduction_replayed':
-            return yield* builds.tool(asked.sessionId, call)
+            return yield* builds.tool(build, call)
+
+          case 'helper_launch':
+          case 'helper_stop':
+          case 'helper_read':
+            return yield* helpers.tool(asked.sessionId, call)
         }
       })
 
@@ -1310,6 +1331,8 @@ export const toolCatalogueLayer: Layer.Layer<
           }
         }
         const root = workspace.path
+        // The build a helper works in is its build Session's, at any depth (issue #77).
+        const build = session.helper === null ? session.id : yield* helpers.answeredIn(session.id)
         // The agent of the Session is what the thread names as the caller, beside the digest of
         // the token: a Session without one is served all the same, and "agent" is what it says.
         const made = {
@@ -1324,8 +1347,8 @@ export const toolCatalogueLayer: Layer.Layer<
         }
         // What the token was minted with, and no more than the Session's mission offers now: a
         // `free` Session that turned `define` while its agent ran keeps none of the write tools it
-        // was lent, from its very next call (D7-14).
-        const mission = offeredTools(session.mission)
+        // was lent, from its very next call (D7-14). A helper holds its own (issue #77).
+        const mission = sessionTools(session)
         const decision = admitTool(
           asked.offered.filter((name) => mission.includes(name)),
           named,
@@ -1357,6 +1380,8 @@ export const toolCatalogueLayer: Layer.Layer<
             project.name,
             project.repositories,
             parsed.call,
+            build,
+            session.helper?.task ?? null,
           )
           // A tool has no error channel on purpose: everything a tool can be told no by is
           // answered as a value, and what would remain is a defect the engine should hear about.
@@ -1381,7 +1406,8 @@ export const toolCatalogueLayer: Layer.Layer<
             ),
           ),
         )
-        const run = builds.admitted(asked.sessionId, named, measured, (reason) =>
+        // A helper's call is its build's: a paused build starts nothing new, whoever asks (#77).
+        const run = builds.admitted(build, named, measured, (reason) =>
           refused(asked, made, reason),
         )
         if (asked.key === null) return yield* run

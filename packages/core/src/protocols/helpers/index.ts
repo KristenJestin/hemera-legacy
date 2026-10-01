@@ -1,6 +1,6 @@
 /**
  * Helper agents as data (issue #77): the defined helpers Hemera ships, one file each and one schema
- * for all, the brief a helper is handed and how its answer is read.
+ * for all, the tools a helper Session holds, the brief it is handed and how its answer is read.
  *
  * The inputs are plain data the engine fills from its rows: nothing here reads the database or
  * decides a state.
@@ -10,6 +10,7 @@ import { z } from 'zod'
 
 import { HELPER_DEPTH } from '../../domain/helpers.ts'
 import type { Session } from '../../domain/session.ts'
+import { BUILDING, HELPING, TOOL_NAMES, type ToolName, offeredTools } from '../../domain/tools.ts'
 import { type BriefTask, taskDefinition } from '../build/index.ts'
 import { FREE_RESULT, HELPER_MISSION_BRIEF, OWN_HELPERS } from './briefs.ts'
 import { DOCUMENTER } from './documenter.ts'
@@ -33,6 +34,44 @@ export const HELPERS: readonly HelperDefinition[] = [
 /** The defined helper of this id, or null for one Hemera does not ship. */
 export function helperNamed(id: string): HelperDefinition | null {
   return HELPERS.find((definition) => definition.id === id) ?? null
+}
+
+/** What a helper on a build task signals about it, beside reading the build. */
+const TASK_TOOLS: ReadonlySet<ToolName> = new Set(['build_read', 'task_finished', 'task_blocked'])
+
+/**
+ * What a free helper may never hold: a proposal goes to the user, and a helper never addresses
+ * them; the Spec does not move under a helper.
+ */
+const NEVER_FREE: ReadonlySet<ToolName> = new Set([
+  'commands_propose',
+  'setup_propose',
+  'spec_propose',
+  'spec_write',
+])
+
+/**
+ * The tools of a Session (D6-03, issue #77): its mission's for a Session the user started. A
+ * helper holds its definition's — or, free, its mission's code tools and no proposal — the build
+ * tools of the task it was launched on, and the helper tools while it stands below the depth cap.
+ * A definition Hemera no longer ships lends nothing of its own.
+ */
+export function sessionTools(session: Pick<Session, 'mission' | 'helper'>): readonly ToolName[] {
+  const mission = offeredTools(session.mission)
+  const place = session.helper
+  if (place === null) return mission
+  const definition = place.definition === null ? null : helperNamed(place.definition)
+  const own: readonly ToolName[] =
+    place.definition === null
+      ? mission.filter((name) => !BUILDING.has(name) && !HELPING.has(name) && !NEVER_FREE.has(name))
+      : (definition?.tools ?? [])
+  const onTask = place.task !== null && session.mission === 'build'
+  return TOOL_NAMES.filter(
+    (name) =>
+      own.includes(name) ||
+      (onTask && TASK_TOOLS.has(name)) ||
+      (HELPING.has(name) && place.depth < HELPER_DEPTH),
+  )
 }
 
 /** What a helper's brief is composed from. */

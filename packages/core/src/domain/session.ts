@@ -12,6 +12,8 @@
  * is a migration.
  */
 
+import type { HelperPlace } from './helpers.ts'
+
 /**
  * What a Session is for (design D7-07). `free` is the absence of a mission; `define` turns an
  * intention into a Spec; `build` is declared and not written yet.
@@ -137,6 +139,12 @@ export interface Session {
    * started there. The engine's rule, which a page reads rather than repeats.
    */
   workspaceFixed: boolean
+  /**
+   * What makes it a helper (issue #77): the Session that launched it, the definition it runs and
+   * how deep it stands; null on every Session the user started. A helper is hidden from the
+   * sidebar and read-only for the user.
+   */
+  helper: HelperPlace | null
   archivedAt: number | null
   createdAt: number
   /** When it was last written to — a message or a rename: what the list is sorted on. */

@@ -24,6 +24,7 @@ import { join } from 'node:path'
 import {
   ATTEMPTS_BEFORE_YOURS,
   type AttemptResult,
+  type BriefTask,
   type AttemptScope,
   type BuildPhase,
   type CheckVerdict,
@@ -248,6 +249,11 @@ export interface BuildAgent {
 /** Who hears that a build changed: the window, which reads its view again (`build.changed`). */
 export interface BuildNoticesService {
   readonly changed: (sessionId: string) => void
+  /**
+   * A helper of this build Session was launched or settled (issue #77): the line of what goes on
+   * reads its helpers again (`helpers.changed`).
+   */
+  readonly helpers: (sessionId: string) => void
 }
 
 export class BuildNotices extends Context.Service<BuildNotices, BuildNoticesService>()(
@@ -255,7 +261,10 @@ export class BuildNotices extends Context.Service<BuildNotices, BuildNoticesServ
 ) {}
 
 /** Nobody watching. */
-export const NoBuildNotices = Layer.succeed(BuildNotices, { changed: () => undefined })
+export const NoBuildNotices = Layer.succeed(BuildNotices, {
+  changed: () => undefined,
+  helpers: () => undefined,
+})
 
 /** What the user asked of a build is refused, with the sentence the window shows. */
 export class BuildRefusedError extends Data.TaggedError('BuildRefusedError')<{
@@ -291,6 +300,12 @@ export interface BuildAnswer {
   readonly summary: string
   readonly text: string
   readonly paths: readonly string[]
+}
+
+/** What a helper launched in a build receives beside its launcher's brief (issue #77). */
+export interface HelperInputs {
+  readonly spec: string
+  readonly task: BriefTask | null
 }
 
 /** What a paused build answers every new call with (D10-09). */
@@ -402,6 +417,15 @@ export interface BuildsService {
   ) => Effect.Effect<A>
   /** `build_read`, `task_finished`, `task_blocked` (D10-04, D10-13), `reproduction_replayed` (#203). */
   readonly tool: (sessionId: string, call: BuildCall) => Effect.Effect<BuildAnswer>
+  /**
+   * What a helper launched in this build receives (issue #77): the frozen Spec with its task
+   * labels, and the task named, as the briefs define it — or why none can be launched on it now:
+   * the build is closed or paused, or the task is not one that can be carried now.
+   */
+  readonly helperInputs: (
+    sessionId: string,
+    label: string | null,
+  ) => Effect.Effect<HelperInputs | { readonly refusal: string }>
   readonly view: (sessionId: string) => Effect.Effect<BuildView, BuildRefusal>
   /** D10-09: nothing new starts; the running Hemera call ends, then the turn stops. */
   readonly pause: (sessionId: string) => Effect.Effect<BuildView, BuildRefusal>
@@ -1854,6 +1878,28 @@ export const buildsLayer = Layer.effect(
       admitted,
       tool,
       view,
+
+      helperInputs: (sessionId, label) =>
+        Effect.gen(function* () {
+          const rows = yield* read(sessionId).pipe(Effect.orElseSucceed(() => null))
+          if (rows === null) {
+            return { refusal: 'a helper is launched in a build, and this Session runs none' }
+          }
+          if (!working(rows)) {
+            return {
+              refusal:
+                rows.phase === 'accepted' ? 'the build was accepted' : 'the build is stopped',
+            }
+          }
+          if (rows.session.buildPausedAt !== null) return { refusal: PAUSED }
+          const spec = renderSpecMarkdown(rows.snapshot, taskLabels(rows.snapshot.tasks))
+          if (label === null) return { spec, task: null }
+          const { task, refusal } = labelled(rows, label)
+          if (task === null) return { refusal }
+          const refused = signalRefusal(task)
+          if (refused !== null) return { refusal: refused }
+          return { spec, task: briefTask(rows, task) }
+        }),
 
       pause: (sessionId) =>
         Effect.gen(function* () {

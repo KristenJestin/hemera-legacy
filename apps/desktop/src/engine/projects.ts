@@ -3,6 +3,8 @@ import { isAbsolute, relative, sep } from 'node:path'
 
 import {
   type Project as DomainProject,
+  HELPERS_AT_ONCE,
+  InvalidHelpersAtOnceError,
   InvalidProjectNameError,
   InvalidRepositoryPathError,
   InvalidSpecPrefixError,
@@ -10,6 +12,7 @@ import {
   type ProjectTone,
   REPOSITORY_ICONS,
   type RepositoryIcon,
+  helpersAtOnce as helpersAtOnceOf,
   projectName,
   rankBetween,
   repositoryPath,
@@ -49,6 +52,8 @@ export interface Project extends DomainProject {
   workspacesRoot: string | null
   /** What their branches start with, and null for the Project's name as a slug (D8-04). */
   branchPrefix: string | null
+  /** How many helpers of one build may run at once, at any depth (issue #77). */
+  helpersAtOnce: number
   /** The repositories a dedicated Workspace gets a worktree of unless left out (D8-04). */
   included: string[]
   /** What its Spec keys start with, `PREFIX-n` (D7-02). */
@@ -166,6 +171,12 @@ export interface ProjectsService {
     version: number,
     prefix: string | null,
   ) => Effect.Effect<Project, Refusal | InvalidBranchPrefixError>
+  /** From 1 to 6: a launch above it is refused, never queued (issue #77). */
+  readonly setHelpersAtOnce: (
+    id: string,
+    version: number,
+    helpersAtOnce: number,
+  ) => Effect.Effect<Project, Refusal | InvalidHelpersAtOnceError>
   readonly setRepositoryIncluded: (
     id: string,
     version: number,
@@ -334,6 +345,7 @@ export const projectsLayer = Layer.effect(
             .map((one) => one.relativePath),
           workspacesRoot: row.workspacesRoot,
           branchPrefix: row.branchPrefix,
+          helpersAtOnce: row.helpersAtOnce,
           included: locations
             .filter((one) => one.projectId === row.id && one.includedByDefault === 1)
             .map((one) => one.relativePath),
@@ -376,6 +388,7 @@ export const projectsLayer = Layer.effect(
         archivedAt: string | null
         workspacesRoot: string | null
         branchPrefix: string | null
+        helpersAtOnce: number
       }>,
     ) =>
       Effect.gen(function* () {
@@ -461,6 +474,7 @@ export const projectsLayer = Layer.effect(
                 updatedAt: Date.parse(written),
                 archivedAt: null,
                 version: 1,
+                helpersAtOnce: HELPERS_AT_ONCE.initial,
                 mainPath,
                 repositories: [],
                 repositoryIcons: {},
@@ -747,6 +761,34 @@ export const projectsLayer = Layer.effect(
                     author: 'human',
                     projectId: id,
                     payload: { branchPrefix },
+                  },
+                ],
+              } satisfies Mutation<Project>
+            }),
+          ),
+        ),
+
+      setHelpersAtOnce: (id, version, wanted) =>
+        withDatabase(
+          mutate('choosing how many helpers run at once', (transaction) =>
+            Effect.gen(function* () {
+              const helpersAtOnce = yield* Effect.try({
+                try: () => helpersAtOnceOf(wanted),
+                catch: () => new InvalidHelpersAtOnceError(wanted),
+              })
+              yield* bump(transaction, id, version, { helpersAtOnce })
+              const project = yield* readOne(id)
+              return {
+                result: project,
+                events: [
+                  {
+                    type: 'project.updated',
+                    entityKind: 'project',
+                    entityId: id,
+                    source: 'ui',
+                    author: 'human',
+                    projectId: id,
+                    payload: { helpersAtOnce },
                   },
                 ],
               } satisfies Mutation<Project>

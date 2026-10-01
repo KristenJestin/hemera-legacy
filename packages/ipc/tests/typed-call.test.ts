@@ -82,6 +82,7 @@ describe('Appel typé nominal', () => {
       'repositories.update',
       'projects.setWorkspacesRoot',
       'projects.setBranchPrefix',
+      'projects.setHelpersAtOnce',
       'projects.setRepositoryIncluded',
       'journal.read',
       'journal.unseen',
@@ -181,6 +182,8 @@ describe('Appel typé nominal', () => {
       'checks.save',
       'checks.remove',
       'checks.acceptProposed',
+      'helpers.list',
+      'helpers.stop',
       'paths.entries',
       // Answered by the main process itself, because only it can.
       'dialog.pickFolder',
@@ -238,6 +241,7 @@ describe('Cas d’usage nommés du process dédié', () => {
       'repositories.update',
       'projects.setWorkspacesRoot',
       'projects.setBranchPrefix',
+      'projects.setHelpersAtOnce',
       'projects.setRepositoryIncluded',
       'journal.read',
       'journal.unseen',
@@ -334,6 +338,8 @@ describe('Cas d’usage nommés du process dédié', () => {
       'checks.save',
       'checks.remove',
       'checks.acceptProposed',
+      'helpers.list',
+      'helpers.stop',
       'paths.entries',
     ]
     expect(Object.keys(ENGINE_REQUESTS).toSorted()).toEqual(names.toSorted())

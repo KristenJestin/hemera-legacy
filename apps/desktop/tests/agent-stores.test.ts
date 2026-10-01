@@ -64,6 +64,7 @@ function session(id: string, version = 1): Session {
     nativeState: 'none',
     workspaceId: null,
     workspaceFixed: false,
+    helper: null,
     mission: 'free',
     specId: null,
     archivedAt: null,

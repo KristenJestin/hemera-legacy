@@ -61,6 +61,8 @@ export {
   SEARCH_SCAN_BYTES,
   SEARCH_SKIPS_LISTED,
   SPEC_PAGE_CHARACTERS,
+  BUILDING,
+  HELPING,
   TOOL_LABELS,
   TOOL_NAMES,
   admitTool,
@@ -303,6 +305,7 @@ export {
   HELPERS_AT_ONCE,
   HELPER_DEPTH,
   HELPER_STATES,
+  HelperReadOnlyError,
   InvalidHelpersAtOnceError,
   helpersAtOnce,
 } from './domain/helpers.ts'
@@ -317,5 +320,6 @@ export {
   helperNamed,
   helperResult,
   helpersFor,
+  sessionTools,
 } from './protocols/helpers/index.ts'
 export type { HelperBriefInput, HelperDefinition, HelperResult } from './protocols/helpers/index.ts'

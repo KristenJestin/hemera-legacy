@@ -208,6 +208,13 @@ export type {
   UserStory,
 } from './specs.ts'
 export {
+  HELPER_REQUESTS,
+  helperPlaceSchema,
+  helperStateSchema,
+  helperViewSchema,
+} from './helpers.ts'
+export type { HelperPlace, HelperState, HelperView } from './helpers.ts'
+export {
   BUILD_REQUESTS,
   attemptFileSchema,
   attemptResultSchema,

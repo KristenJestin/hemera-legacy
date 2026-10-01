@@ -75,6 +75,7 @@ export const CHANNELS = {
   'repositories.update': ENGINE_REQUESTS['repositories.update'],
   'projects.setWorkspacesRoot': ENGINE_REQUESTS['projects.setWorkspacesRoot'],
   'projects.setBranchPrefix': ENGINE_REQUESTS['projects.setBranchPrefix'],
+  'projects.setHelpersAtOnce': ENGINE_REQUESTS['projects.setHelpersAtOnce'],
   'projects.setRepositoryIncluded': ENGINE_REQUESTS['projects.setRepositoryIncluded'],
   'journal.read': ENGINE_REQUESTS['journal.read'],
   'journal.unseen': ENGINE_REQUESTS['journal.unseen'],
@@ -191,6 +192,9 @@ export const CHANNELS = {
   'checks.save': ENGINE_REQUESTS['checks.save'],
   'checks.remove': ENGINE_REQUESTS['checks.remove'],
   'checks.acceptProposed': ENGINE_REQUESTS['checks.acceptProposed'],
+  // The helpers of a build, read and stopped by the user; never launched from the window (#77).
+  'helpers.list': ENGINE_REQUESTS['helpers.list'],
+  'helpers.stop': ENGINE_REQUESTS['helpers.stop'],
 
   /**
    * The four the main process answers itself, because each of them is something only it can do.

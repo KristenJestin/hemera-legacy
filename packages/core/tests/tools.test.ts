@@ -10,6 +10,9 @@ import { TOOL_LABELS, TOOL_NAMES, offeredTools } from '#index.ts'
 /** The build's own tools (D10-13). */
 const BUILD_TOOLS = ['build_read', 'task_finished', 'task_blocked', 'reproduction_replayed']
 
+/** How an orchestrator reaches its helpers (#77). */
+const HELPER_TOOLS = ['helper_launch', 'helper_stop', 'helper_read']
+
 describe('Every tool has a label and a mark', () => {
   test('one of each per tool, and no two tools share either', () => {
     const labels = TOOL_NAMES.map((tool) => TOOL_LABELS[tool].label)
@@ -42,11 +45,13 @@ describe('Every tool has a label and a mark', () => {
 describe('A mission is offered its own tools', () => {
   test('a free Session is offered the code tools and spec_propose alone', () => {
     expect(offeredTools('free')).toEqual(
-      TOOL_NAMES.filter((tool) => !['spec_read', 'spec_write', ...BUILD_TOOLS].includes(tool)),
+      TOOL_NAMES.filter(
+        (tool) => !['spec_read', 'spec_write', ...BUILD_TOOLS, ...HELPER_TOOLS].includes(tool),
+      ),
     )
   })
 
-  test('a build Session is offered the code tools and the build tools, and no Spec tool', () => {
+  test('a build Session is offered the code, build and helper tools, and no Spec tool', () => {
     expect(offeredTools('build')).toEqual(
       TOOL_NAMES.filter((tool) => !['spec_read', 'spec_write', 'spec_propose'].includes(tool)),
     )
@@ -55,6 +60,13 @@ describe('A mission is offered its own tools', () => {
   test('no other mission is offered a build tool', () => {
     for (const mission of ['free', 'define'] as const) {
       for (const tool of BUILD_TOOLS) expect(offeredTools(mission)).not.toContain(tool)
+    }
+  })
+
+  test('only a build Session is an orchestrator: no other mission is offered a helper tool', () => {
+    for (const tool of HELPER_TOOLS) expect(offeredTools('build')).toContain(tool)
+    for (const mission of ['free', 'define'] as const) {
+      for (const tool of HELPER_TOOLS) expect(offeredTools(mission)).not.toContain(tool)
     }
   })
 })

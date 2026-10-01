@@ -37,6 +37,7 @@ import { clockLayer, poolLayer } from '#engine/agents/pool.ts'
 import { runtimeLayer } from '#engine/agents/runtime.ts'
 import { Agents } from '#engine/agents/service.ts'
 import { BuildNotices, buildsLayer } from '#engine/build/build.ts'
+import { helpersLayer } from '#engine/helpers/helpers.ts'
 import type { BuildChecks } from '#engine/build/checks.ts'
 import { StderrSink, hostProcessesLayer } from '#engine/agents/supervisor.ts'
 import { proposalsLayer } from '#engine/commands/proposals.ts'
@@ -167,15 +168,15 @@ async function openOver(
 
   // The builds, on the checks the suite scripts, and the window hearing that one changed: one
   // service, the catalogue's and the runtime's, as the engine builds it.
-  const builds = buildsLayer.pipe(
-    Layer.provide(gitLayer()),
-    Layer.provide(checks),
+  const builds = helpersLayer.pipe(
+    Layer.provideMerge(buildsLayer.pipe(Layer.provide(gitLayer()), Layer.provide(checks))),
     Layer.provide(
       Layer.succeed(BuildNotices, {
         changed: (sessionId) => {
           built.push(sessionId)
           push({ event: 'build.changed', sessionId })
         },
+        helpers: (sessionId) => push({ event: 'helpers.changed', sessionId }),
       }),
     ),
   )

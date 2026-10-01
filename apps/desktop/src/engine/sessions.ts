@@ -26,6 +26,7 @@ import {
   type SessionTitleSource,
   EmptyMessageError,
   EmptyTitleError,
+  HelperReadOnlyError,
   NEW_SESSION_TITLE,
   NoActiveProjectError,
   NoAgentError,
@@ -199,7 +200,10 @@ export interface SessionsService {
    * version is what a change to what the Session *is* is refused against — its name, its
    * archived state — and not what is written into it.
    */
-  readonly append: (id: string, body: string) => Effect.Effect<Written, Refusal | EmptyMessageError>
+  readonly append: (
+    id: string,
+    body: string,
+  ) => Effect.Effect<Written, Refusal | EmptyMessageError | HelperReadOnlyError>
   readonly read: (
     id: string,
     before?: number | undefined,
@@ -410,6 +414,16 @@ export function sessionOf(row: typeof sessions.$inferSelect & { spoken: number }
     // declares (design D7-07).
     mission: row.mission as Mission,
     specId: row.specId,
+    // A helper is a row with a parent, and the check holds its depth with it (issue #77).
+    helper:
+      row.parentSessionId === null
+        ? null
+        : {
+            parentSessionId: row.parentSessionId,
+            definition: row.helper,
+            depth: row.helperDepth ?? 1,
+            task: row.helperTask,
+          },
     archivedAt: row.archivedAt === null ? null : Date.parse(row.archivedAt),
     createdAt: Date.parse(row.createdAt),
     lastWrittenAt: Date.parse(row.lastWrittenAt),
@@ -586,6 +600,8 @@ export const sessionsLayer = Layer.effect(
               and(
                 eq(sessions.projectId, projectId),
                 archived ? sql`${sessions.archivedAt} IS NOT NULL` : isNull(sessions.archivedAt),
+                // A helper is never listed on its own: it is reached from its build (issue #77).
+                isNull(sessions.parentSessionId),
               ),
             )
             // The creation date breaks a tie, so two Sessions written in the same millisecond
@@ -637,6 +653,7 @@ export const sessionsLayer = Layer.effect(
                 workspaceId,
                 // Nothing has started in it yet: its Workspace can still be chosen (D8-08).
                 workspaceFixed: false,
+                helper: null,
                 archivedAt: null,
                 createdAt: Date.parse(at),
                 lastWrittenAt: Date.parse(at),
@@ -764,6 +781,8 @@ export const sessionsLayer = Layer.effect(
               // than a row nobody can read and nobody can delete.
               const text = yield* written(body)
               const session = yield* readOne(transaction, id)
+              // A helper's Session is read-only for the user: the main agent is who they talk to.
+              if (session.helper !== null) return yield* Effect.fail(new HelperReadOnlyError())
 
               // Asked of the table rather than counted: a thread that lost a row to a botched
               // delete would hand the same `seq` twice and refuse a message the user wrote.

@@ -24,6 +24,7 @@ import {
   projectChecksLayer,
 } from '#engine/build/checks.ts'
 import { gitLayer } from '#engine/git.ts'
+import { helpersLayer } from '#engine/helpers/helpers.ts'
 import { Projects } from '#engine/projects.ts'
 import { Sessions } from '#engine/sessions.ts'
 import { Specs } from '#engine/specs/specs.ts'
@@ -40,10 +41,12 @@ export const noChecks = Layer.succeed(BuildChecks, { run: () => Effect.succeed([
 /** The Project's checks as the engine runs them: real runs of its commands (D10-06). */
 export const projectChecks = buildChecksLayer.pipe(Layer.provideMerge(projectChecksLayer))
 
-/** The builds of a suite that runs none, over the database and the diagnostic it provides. */
-export const idleBuilds = buildsLayer.pipe(
-  Layer.provide(gitLayer()),
-  Layer.provide(noChecks),
+/**
+ * The builds of a suite that runs none, over the database and the diagnostic it provides, and the
+ * helpers standing on them (issue #77): handed up together, as the engine hands them.
+ */
+export const idleBuilds = helpersLayer.pipe(
+  Layer.provideMerge(buildsLayer.pipe(Layer.provide(gitLayer()), Layer.provide(noChecks))),
   Layer.provide(NoBuildNotices),
 )
 

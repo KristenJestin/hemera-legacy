@@ -16,10 +16,34 @@ describe('the letters of a helper’s avatar', () => {
   })
 
   test('two helpers that share an initial wear two letters each', () => {
-    expect(helperInitialsOf('Reviewer', ['Researcher'])).toBe('RE')
-    expect(helperInitialsOf('Researcher', ['Reviewer'])).toBe('RE')
+    expect(helperInitialsOf('Reviewer', ['Documenter', 'Rover'])).toBe('RE')
+    expect(helperInitialsOf('Rover', ['Reviewer'])).toBe('RO')
     // Two words: the first letter of each.
     expect(helperInitialsOf('Security reviewer', ['Scout'])).toBe('SR')
+  })
+
+  test('two helpers whose first two letters are shared too wear the first letter that differs', () => {
+    expect(helperInitialsOf('Reviewer', ['Researcher'])).toBe('RV')
+    expect(helperInitialsOf('Researcher', ['Reviewer'])).toBe('RS')
+  })
+
+  test('no two helpers of the line ever wear the same letters', () => {
+    const lines = [
+      ['Reviewer', 'Researcher', 'Security reviewer', 'Scout', 'Documenter'],
+      ['Tester', 'Test writer', 'Tracer'],
+      ['Planner', 'Planter', 'Plan checker'],
+      ['Ab', 'Ac', 'Ba'],
+      ['Explore', 'Explorer'],
+    ]
+    for (const names of lines) {
+      const worn = names.map((name) =>
+        helperInitialsOf(
+          name,
+          names.filter((other) => other !== name),
+        ),
+      )
+      expect(new Set(worn).size, names.join(', ')).toBe(names.length)
+    }
   })
 
   test('the initial is shared whatever its case', () => {

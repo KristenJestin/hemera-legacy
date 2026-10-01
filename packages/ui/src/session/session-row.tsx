@@ -1,4 +1,4 @@
-import { animate, motion, useMotionValue } from 'motion/react'
+import { AnimatePresence, animate, motion, useIsPresent, useMotionValue } from 'motion/react'
 import {
   type ReactNode,
   createContext,
@@ -12,7 +12,7 @@ import {
 import { IconButton } from '../components/button/button.tsx'
 import { Tooltip } from '../components/tooltip/tooltip.tsx'
 import { IconArrowsDiagonal, IconArrowsDiagonalMinimize2, IconChevronRight } from '../icons.ts'
-import { CROSSFADE, instant, onTheBeat, slide, swap, useTransition } from '../motion.ts'
+import { CROSSFADE, crossfade, instant, onTheBeat, slide, swap, useTransition } from '../motion.ts'
 
 /**
  * The row of a Session, under its head (issue #77): the chat, and beside it the panel of the
@@ -71,7 +71,7 @@ const Covering = createContext<(covers: boolean) => void>(() => undefined)
 export function SessionRow({ chat, children }: SessionRowProps): ReactNode {
   const [covered, setCovered] = useState(false)
   return (
-    <div className={ROW}>
+    <div data-session-row className={ROW}>
       <div inert={covered} aria-hidden={covered ? true : undefined} className={CHAT}>
         {chat}
       </div>
@@ -129,6 +129,9 @@ const FLOAT =
 const BODY =
   'relative flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border border-border bg-surface-body shadow-sm'
 
+/** What the body shows beside the chat or over it, cross-faded in the one place. */
+const LAYER = 'absolute inset-0 flex flex-col'
+
 export interface PanelDockProps {
   /** What the panel is called, by what it holds: `Spec ATL-7`, `Build ATL-7`. */
   label: string
@@ -136,8 +139,13 @@ export interface PanelDockProps {
   name: string
   /** The panel's head, before the fold at its end. */
   head: ReactNode
-  /** What the panel shows. */
+  /** What the panel shows beside the chat. */
   body: ReactNode
+  /**
+   * What it shows over the chat, when it shows more there: the width is for showing more, not the
+   * same thing spread out. The body when nothing else is said.
+   */
+  wide?: ReactNode
   /** What stands on the rim under the body, when the panel has anything there. */
   foot?: ReactNode
   /**
@@ -171,6 +179,7 @@ export function PanelDock({
   name,
   head,
   body,
+  wide,
   foot,
   notices,
   frame,
@@ -198,6 +207,7 @@ export function PanelDock({
   }
   const move = useTransition(swap.move)
   const fade = useTransition(swap.fade)
+  const swapBody = useTransition(crossfade)
   const still = move === instant
   // How far open the panel is, from its small frame (0) to its panel (1).
   const open = useMotionValue(folded ? 0 : 1)
@@ -359,7 +369,24 @@ export function PanelDock({
               </Tooltip>
             </span>
           </header>
-          <div className={BODY}>{body}</div>
+          <div className={BODY}>
+            {wide === undefined ? (
+              body
+            ) : (
+              <AnimatePresence initial={false}>
+                <motion.div
+                  key={over ? 'wide' : 'beside'}
+                  className={LAYER}
+                  initial={CROSSFADE.from}
+                  animate={CROSSFADE.to}
+                  exit={CROSSFADE.from}
+                  transition={swapBody}
+                >
+                  <Leaving>{over ? wide : body}</Leaving>
+                </motion.div>
+              </AnimatePresence>
+            )}
+          </div>
           {foot}
         </div>
       </div>
@@ -381,5 +408,19 @@ export function PanelDock({
         </div>
       )}
     </section>
+  )
+}
+
+/** What leaves the body, out of reach from the moment it starts leaving. */
+function Leaving({ children }: { children: ReactNode }): ReactNode {
+  const present = useIsPresent()
+  return (
+    <div
+      className="flex min-h-0 flex-1 flex-col"
+      inert={!present}
+      aria-hidden={present ? undefined : true}
+    >
+      {children}
+    </div>
   )
 }

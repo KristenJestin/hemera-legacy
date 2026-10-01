@@ -10,6 +10,7 @@ import { PanelDock } from '../session/session-row.tsx'
 import type { SpecView } from '../spec/model.ts'
 import { BuildSpecPanel } from './build-spec-panel.tsx'
 import { type BuildViewProps, BuildView } from './build-view.tsx'
+import { BuildWide, type Grouping } from './build-wide.tsx'
 import { waitsOf } from './model.ts'
 
 /**
@@ -24,7 +25,8 @@ import { waitsOf } from './model.ts'
  * is answered from.
  *
  * It opens unfolded. Folded, its small frame holds the unfold, the hammer, and a dot while
- * something in the build waits for the hand.
+ * something in the build waits for the hand. Laid over the chat, it shows the build in two columns
+ * (`build-wide.tsx`): the tasks, and the one picked or the frozen Spec beside them.
  */
 
 /** The build view and the frozen Spec, which takes its place while it is open. */
@@ -75,6 +77,9 @@ export function BuildPanel({
   const [folded, setFolded] = useState(defaultFolded)
   const [over, setOver] = useState(defaultOver)
   const [specOpen, setSpecOpen] = useState(defaultSpecOpen)
+  const [grouping, setGrouping] = useState<Grouping>('story')
+  // Whether the Spec laid the panel over the chat, which closing it takes back.
+  const laidOver = useRef(false)
   const stage = useRef<HTMLDivElement>(null)
   const fade = useTransition(crossfade)
   const closed = build.phase === 'accepted' || build.phase === 'stopped'
@@ -83,77 +88,109 @@ export function BuildPanel({
   // Where the keyboard goes once the Spec opened or closed: its Close, or back to what opened it.
   const toSpec = useRef<'open' | 'close' | null>(null)
 
+  // The frozen Spec is read beside the tasks it produced: opened beside the chat, it lays the panel
+  // over the chat, and closing it takes the panel back.
   function openSpec(): void {
     toSpec.current = 'open'
     setSpecOpen(true)
+    if (over) return
+    laidOver.current = true
+    setOver(true)
   }
 
   function closeSpec(): void {
     toSpec.current = 'close'
     setSpecOpen(false)
+    if (!laidOver.current) return
+    laidOver.current = false
+    setOver(false)
   }
 
-  // Once the view is out of reach or back, the keyboard goes where the control it was on stands.
+  /** The hand lays the panel over the chat or takes it back: closing the Spec leaves it there. */
+  function lay(next: boolean): void {
+    laidOver.current = false
+    setOver(next)
+  }
+
+  // Once the view is out of reach or back, the keyboard goes where the control it was on stands:
+  // the one in reach, while the view it left cross-fades out.
   useEffect(() => {
     const target = toSpec.current
     toSpec.current = null
     if (target === null) return
     const selector = target === 'open' ? '[aria-label="Close the Spec"]' : '[data-spec-toggle]'
-    stage.current?.querySelector<HTMLElement>(selector)?.focus()
+    const found = [...(stage.current?.querySelectorAll<HTMLElement>(selector) ?? [])]
+    found.find((one) => one.closest('[inert]') === null)?.focus()
   }, [specOpen])
 
+  const toggleSpec = (): void => (specOpen ? closeSpec() : openSpec())
+
   return (
-    <PanelDock
-      label={`Build ${build.specKey}`}
-      name="build"
-      folded={folded}
-      onFold={() => {
-        setFolded(true)
-        setOver(false)
-      }}
-      over={over}
-      onOver={setOver}
-      notices={notices}
-      head={
-        <h2 className={TITLE}>
-          <IconHammer size="sm" aria-hidden="true" />
-          Build
-        </h2>
-      }
-      body={
-        <div ref={stage} className={STAGE}>
-          {/* The view stays drawn under the Spec, so what was unfolded in it is there when the
+    // Laid out as if it were not there: what the keyboard is given back is looked for in it.
+    <div ref={stage} className="contents">
+      <PanelDock
+        label={`Build ${build.specKey}`}
+        name="build"
+        folded={folded}
+        onFold={() => {
+          setFolded(true)
+          lay(false)
+        }}
+        over={over}
+        onOver={lay}
+        notices={notices}
+        head={
+          <h2 className={TITLE}>
+            <IconHammer size="sm" aria-hidden="true" />
+            Build
+          </h2>
+        }
+        body={
+          <div className={STAGE}>
+            {/* The view stays drawn under the Spec, so what was unfolded in it is there when the
               Spec closes; it is out of reach while the Spec covers it. */}
-          <div
-            inert={specOpen}
-            aria-hidden={specOpen ? true : undefined}
-            className={specOpen ? VIEW_UNDER : VIEW}
-          >
-            <BuildView
-              {...view}
-              stories={spec.stories}
-              specOpen={specOpen}
-              onToggleSpec={() => (specOpen ? closeSpec() : openSpec())}
-            />
+            <div
+              inert={specOpen}
+              aria-hidden={specOpen ? true : undefined}
+              className={specOpen ? VIEW_UNDER : VIEW}
+            >
+              <BuildView
+                {...view}
+                stories={spec.stories}
+                specOpen={specOpen}
+                onToggleSpec={toggleSpec}
+              />
+            </div>
+            <AnimatePresence initial={false}>
+              {specOpen && (
+                <motion.div
+                  key="spec"
+                  className={OVER}
+                  initial={CROSSFADE.from}
+                  animate={CROSSFADE.to}
+                  exit={CROSSFADE.from}
+                  transition={fade}
+                >
+                  <BuildSpecPanel spec={spec} onClose={closeSpec} />
+                </motion.div>
+              )}
+            </AnimatePresence>
           </div>
-          <AnimatePresence initial={false}>
-            {specOpen && (
-              <motion.div
-                key="spec"
-                className={OVER}
-                initial={CROSSFADE.from}
-                animate={CROSSFADE.to}
-                exit={CROSSFADE.from}
-                transition={fade}
-              >
-                <BuildSpecPanel spec={spec} onClose={closeSpec} />
-              </motion.div>
-            )}
-          </AnimatePresence>
-        </div>
-      }
-      frame={<BuildFrame waits={waits} onUnfold={() => setFolded(false)} />}
-    />
+        }
+        wide={
+          <BuildWide
+            {...view}
+            spec={spec}
+            stories={spec.stories}
+            grouping={grouping}
+            onGrouping={setGrouping}
+            specOpen={specOpen}
+            onToggleSpec={toggleSpec}
+          />
+        }
+        frame={<BuildFrame waits={waits} onUnfold={() => setFolded(false)} />}
+      />
+    </div>
   )
 }
 

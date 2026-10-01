@@ -294,6 +294,24 @@ export const FinalChecks: Story = {
 }
 
 /**
+ * A build with no task yet, and no story to build: a quiet mark in the body rather than nothing,
+ * its words in its tooltip.
+ */
+export const NoTaskYet: Story = {
+  args: { build: { ...GETTING_READY, tasks: [], stories: [] } },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const body = canvas.getByRole('region', { name: 'The build of ATL-7' })
+    const mark = within(body).getByRole('img', { name: 'No task of the build yet' })
+    await expect(mark).toBeVisible()
+    await userEvent.hover(mark)
+    await waitFor(() =>
+      expect(screen.getByRole('tooltip')).toHaveTextContent('No task of the build yet'),
+    )
+  },
+}
+
+/**
  * Every task done and no final try yet: the final checks' head wears the mark of what is to do,
  * its words in its tooltip.
  */

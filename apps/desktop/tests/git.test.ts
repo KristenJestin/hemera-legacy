@@ -17,7 +17,7 @@ import {
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vite-plus/test'
-import { Effect } from 'effect'
+import { Effect, Fiber } from 'effect'
 
 import { Git, GitError, GitUnavailableError, gitLayer, spawnGit } from '#engine/git.ts'
 import type { GitSpawn } from '#engine/git.ts'
@@ -112,6 +112,35 @@ describe('A missing git is a named refusal', () => {
     expect(refused.message).toBe('git-that-does-not-exist-hemera was not found on the PATH')
   })
 })
+
+describe('An abandoned Git command is gone before its folder is removed', () => {
+  it('has exited by the time its interruption returns', async () => {
+    // A command that never ends by itself and writes down its process: Node stands for `git` here,
+    // handed `-C <folder>` like it — Node reads `-C` as a condition and runs the script after it.
+    const pidFile = join(folder, 'pid')
+    const forever = `require('node:fs').writeFileSync(${JSON.stringify(pidFile)}, String(process.pid)); setInterval(() => {}, 1000)`
+    const running = Effect.runFork(spawnGit(process.execPath, folder, ['-e', forever], 60_000))
+    const pidOf = () => (existsSync(pidFile) ? Number(readFileSync(pidFile, 'utf8')) : 0)
+    await expect.poll(pidOf).toBeGreaterThan(0)
+    const pid = pidOf()
+
+    await Effect.runPromise(Fiber.interrupt(running))
+
+    // Windows refuses to remove a folder a live process stands in or holds a file of (#279): an
+    // engine that closes hands its folder back only once the command it abandoned is gone.
+    expect(alive(pid)).toBe(false)
+  })
+})
+
+/** Whether a process of this machine is still there: signal 0 asks without sending anything. */
+function alive(pid: number): boolean {
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch {
+    return false
+  }
+}
 
 describe('A worktree is added, found and removed with the machine’s git', () => {
   it('makes the branch, keeps it after the worktree is removed, and tells a repository apart', async () => {

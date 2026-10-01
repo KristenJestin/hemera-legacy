@@ -181,6 +181,9 @@ describe('Appel typé nominal', () => {
       'checks.save',
       'checks.remove',
       'checks.acceptProposed',
+      'review.read',
+      'review.addFeedback',
+      'review.withdrawFeedback',
       'paths.entries',
       // Answered by the main process itself, because only it can.
       'dialog.pickFolder',
@@ -334,6 +337,9 @@ describe('Cas d’usage nommés du process dédié', () => {
       'checks.save',
       'checks.remove',
       'checks.acceptProposed',
+      'review.read',
+      'review.addFeedback',
+      'review.withdrawFeedback',
       'paths.entries',
     ]
     expect(Object.keys(ENGINE_REQUESTS).toSorted()).toEqual(names.toSorted())

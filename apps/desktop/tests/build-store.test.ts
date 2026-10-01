@@ -114,6 +114,7 @@ function build(sessionId = 'build', more: Partial<BuildView> = {}): BuildView {
     ],
     endAttempts: [],
     canAccept: false,
+    rounds: [],
     ...more,
   }
 }

@@ -10,7 +10,7 @@
  * Sessions are lot 5's; the Specs, their revisions and the mission of a Session are lot 19's
  * (design D7-01, D7-07); the Workspaces and the launches of a build are lot 20's (D8-01, D8-13);
  * the build itself — its tasks, attempts, evidence and the Project's checks — is lot 22's (D10-01,
- * D10-05, D10-06).
+ * D10-05, D10-06); the review rounds of a build and their feedback are 0.6's (issue #278).
  *
  * Two conventions run through all of it. An identifier is a `crypto.randomUUID()` in a text
  * column, because an identifier the database hands out is one that cannot be decided before the
@@ -42,6 +42,8 @@ import {
   CHECK_WHERE,
   COMMAND_SCOPES,
   COMMAND_TYPES,
+  DIFF_SIDES,
+  FEEDBACK_KINDS,
   LAUNCH_STATES,
   MISSIONS,
   NATIVE_STATES,
@@ -50,6 +52,8 @@ import {
   PROJECT_TONES,
   RECIPE_KINDS,
   REPOSITORY_ICONS,
+  ROUND_KINDS,
+  ROUND_STATES,
   SECTION_NAMES,
   SESSION_ENTRY_KINDS,
   SESSION_ENTRY_ORIGINS,
@@ -1378,4 +1382,140 @@ export const buildBlockers = sqliteTable(
     dismissedAt: text('dismissed_at'),
   },
   (table) => [index('blocker_by_session').on(table.sessionId, table.raisedAt)],
+)
+
+/**
+ * One review round of a `build` Session (issue #278): round 1, 2… of its build, numbered per
+ * Session, which the user reviews.
+ *
+ * `kind` is `spec` — the build checked against the stories and criteria of its frozen revision —
+ * or `code`, a review of the diff that nothing opens yet: the column and its value exist so that
+ * the rows need no rewrite the day it is. `state` only moves forward, `open`, `fixing`, `closed`,
+ * each move stamped. One round at most is not closed in a Session, which the partial index holds.
+ */
+export const reviewRounds = sqliteTable(
+  'review_rounds',
+  {
+    id: text('id').primaryKey(),
+    sessionId: text('session_id')
+      .notNull()
+      .references(() => sessions.id, { onDelete: 'cascade' }),
+    number: integer('number').notNull(),
+    kind: text('kind').notNull(),
+    state: text('state').notNull(),
+    openedAt: text('opened_at').notNull(),
+    fixingAt: text('fixing_at'),
+    closedAt: text('closed_at'),
+  },
+  (table) => [
+    check('round_kind_is_known', sql`${table.kind} IN (${sql.raw(oneOf(ROUND_KINDS))})`),
+    check('round_state_is_known', sql`${table.state} IN (${sql.raw(oneOf(ROUND_STATES))})`),
+    unique('round_number_in_session').on(table.sessionId, table.number),
+    uniqueIndex('round_once_unclosed_per_session')
+      .on(table.sessionId)
+      .where(sql`${table.state} <> 'closed'`),
+  ],
+)
+
+/**
+ * The checkpoint of one repository when its round opened (issue #278).
+ *
+ * `repository` is its path under the Workspace root, `''` for one at the root. `head` is the commit
+ * checked out; `tree` the snapshot of its working tree, staged, unstaged and untracked changes
+ * included, written as a Git tree with no commit and no ref (D10-05). `base` is the base its
+ * worktree was created from, as it was recorded, and null for a repository that has no worktree
+ * of Hemera's; `base_commit` is the commit the files are listed from — where the branch left that
+ * base, or `head` when there is none. `stale_at` is when its working tree was first found to differ
+ * from `tree`, and `stale_tree` what it was then; both null while it matches.
+ */
+export const reviewRoundRepositories = sqliteTable(
+  'review_round_repositories',
+  {
+    roundId: text('round_id')
+      .notNull()
+      .references(() => reviewRounds.id, { onDelete: 'cascade' }),
+    repository: text('repository').notNull(),
+    head: text('head').notNull(),
+    tree: text('tree').notNull(),
+    base: text('base'),
+    baseCommit: text('base_commit').notNull(),
+    staleAt: text('stale_at'),
+    staleTree: text('stale_tree'),
+  },
+  (table) => [primaryKey({ columns: [table.roundId, table.repository] })],
+)
+
+/**
+ * The files of a round, per repository, from its base to its tree, copied when it opened (issue
+ * #278) so the round stays readable once the Workspace is cleaned up and Git pruned its trees.
+ * The repository is in the key: two repositories with a file of the same name are two rows.
+ * `status` is Git's letter; `added` and `removed` are null for a binary file; `untracked` says the
+ * file was not known to Git in the working tree.
+ */
+export const reviewRoundFiles = sqliteTable(
+  'review_round_files',
+  {
+    roundId: text('round_id')
+      .notNull()
+      .references(() => reviewRounds.id, { onDelete: 'cascade' }),
+    repository: text('repository').notNull(),
+    path: text('path').notNull(),
+    status: text('status').notNull(),
+    added: integer('added'),
+    removed: integer('removed'),
+    untracked: integer('untracked', { mode: 'boolean' }).notNull().default(false),
+  },
+  (table) => [primaryKey({ columns: [table.roundId, table.repository, table.path] })],
+)
+
+/**
+ * One feedback the user left on a round (issue #278): its kind, its words, when it was written and
+ * when it was withdrawn. Only accumulated: adding one starts nothing.
+ *
+ * What it points at, when it points at anything, is in the anchor columns, one family or none. On a
+ * `spec` round, a story of the frozen revision (`anchor_story_id`, no foreign key: the revision is
+ * frozen and a later one never cascades into a review) and one of its criteria by its index among
+ * them (`anchor_criterion`, from zero). On a `code` round, reserved: a repository and a path, a
+ * range of lines, and the side of the diff they are on. Its screenshots are another table's.
+ */
+export const reviewFeedback = sqliteTable(
+  'review_feedback',
+  {
+    id: text('id').primaryKey(),
+    roundId: text('round_id')
+      .notNull()
+      .references(() => reviewRounds.id, { onDelete: 'cascade' }),
+    kind: text('kind').notNull(),
+    body: text('body').notNull(),
+    anchorStoryId: text('anchor_story_id'),
+    anchorCriterion: integer('anchor_criterion'),
+    anchorRepository: text('anchor_repository'),
+    anchorPath: text('anchor_path'),
+    anchorLineStart: integer('anchor_line_start'),
+    anchorLineEnd: integer('anchor_line_end'),
+    anchorSide: text('anchor_side'),
+    createdAt: text('created_at').notNull(),
+    withdrawnAt: text('withdrawn_at'),
+  },
+  (table) => [
+    check('feedback_kind_is_known', sql`${table.kind} IN (${sql.raw(oneOf(FEEDBACK_KINDS))})`),
+    check(
+      'feedback_side_is_known',
+      sql`${table.anchorSide} IS NULL OR ${table.anchorSide} IN (${sql.raw(oneOf(DIFF_SIDES))})`,
+    ),
+    // A criterion is one of a story's; a line range is whole; a side is the side of lines.
+    check(
+      'feedback_criterion_of_a_story',
+      sql`${table.anchorCriterion} IS NULL OR ${table.anchorStoryId} IS NOT NULL`,
+    ),
+    check(
+      'feedback_code_anchor_is_whole',
+      sql`(${table.anchorRepository} IS NULL) = (${table.anchorPath} IS NULL) AND (${table.anchorLineStart} IS NULL) = (${table.anchorLineEnd} IS NULL) AND (${table.anchorLineStart} IS NULL OR ${table.anchorPath} IS NOT NULL) AND (${table.anchorSide} IS NULL OR ${table.anchorLineStart} IS NOT NULL)`,
+    ),
+    check(
+      'feedback_one_anchor_at_most',
+      sql`${table.anchorStoryId} IS NULL OR ${table.anchorPath} IS NULL`,
+    ),
+    index('feedback_by_round').on(table.roundId, table.createdAt),
+  ],
 )

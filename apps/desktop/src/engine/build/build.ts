@@ -60,6 +60,7 @@ import {
 } from '../storage/schema.ts'
 import { failed, now, reading, specRow } from '../specs/snapshot.ts'
 import type { ParsedCall } from '../tools/arguments.ts'
+import { type ReviewRoundView, ReviewRounds } from '../review/round.ts'
 import { mutate } from '../transaction.ts'
 import { describedWorkspace } from '../workspaces/described.ts'
 import {
@@ -72,6 +73,7 @@ import {
   taken,
 } from './brief.ts'
 import { BuildChecks, type CheckOutcome } from './checks.ts'
+import { BuildNotices } from './notices.ts'
 import { changedFiles, snapshotTree } from './snapshots.ts'
 import {
   type AttemptRow,
@@ -228,6 +230,8 @@ export interface BuildView {
   readonly stories: readonly StoryView[]
   readonly endAttempts: readonly AttemptView[]
   readonly canAccept: boolean
+  /** Its review rounds, in their order, the open one checked against its repositories (#278). */
+  readonly rounds: readonly ReviewRoundView[]
 }
 
 /**
@@ -245,17 +249,7 @@ export interface BuildAgent {
   readonly stopTurn: (sessionId: string) => Effect.Effect<void>
 }
 
-/** Who hears that a build changed: the window, which reads its view again (`build.changed`). */
-export interface BuildNoticesService {
-  readonly changed: (sessionId: string) => void
-}
-
-export class BuildNotices extends Context.Service<BuildNotices, BuildNoticesService>()(
-  'BuildNotices',
-) {}
-
-/** Nobody watching. */
-export const NoBuildNotices = Layer.succeed(BuildNotices, { changed: () => undefined })
+export { BuildNotices, type BuildNoticesService, NoBuildNotices } from './notices.ts'
 
 /** What the user asked of a build is refused, with the sentence the window shows. */
 export class BuildRefusedError extends Data.TaggedError('BuildRefusedError')<{
@@ -573,8 +567,8 @@ function storyState(attempts: readonly AttemptRow[]): StoryView['state'] {
   return resultOf(last) === 'red' ? 'red' : 'green'
 }
 
-/** The build as the window reads it (D10-12). */
-export function viewOf(rows: BuildRows): BuildView {
+/** The build as the window reads it (D10-12), with its review rounds (issue #278). */
+export function viewOf(rows: BuildRows, rounds: readonly ReviewRoundView[]): BuildView {
   const labelOf = (taskId: string) =>
     rows.tasks.find((task) => task.taskId === taskId)?.label ?? taskId
   const byNumber = (left: AttemptRow, right: AttemptRow) => left.number - right.number
@@ -645,6 +639,7 @@ export function viewOf(rows: BuildRows): BuildView {
       .toSorted(byNumber)
       .map((attempt) => attemptView(rows, attempt)),
     canAccept: acceptRefusal(rows) === null,
+    rounds,
   }
 }
 
@@ -716,6 +711,7 @@ export const buildsLayer = Layer.effect(
     const checks = yield* BuildChecks
     const notices = yield* BuildNotices
     const diagnostic = yield* StderrSink
+    const rounds = yield* ReviewRounds
     /** The engine's own scope: the checks run in the background end when the engine does. */
     const scope = yield* Effect.scope
 
@@ -1125,6 +1121,12 @@ export const buildsLayer = Layer.effect(
               : `the build is stopped${row.buildDetail === null ? '' : `: ${row.buildDetail}`}`,
           )
         }
+        // An open review round holds the Workspace: what the user reviews stays what it froze.
+        const held = yield* rounds.refusal(sessionId, tool).pipe(Effect.result)
+        if (Result.isFailure(held)) {
+          return yield* refuse(`the review round could not be read: ${held.failure.message}`)
+        }
+        if (held.success !== null) return yield* refuse(held.success)
         // Read and counted in one step, with nothing yielded in between: a Pause either sees this
         // call running and waits for it, or this call sees the Pause and is refused (D10-09).
         if (row.buildPausedAt !== null || pausedNow.has(sessionId)) return yield* refuse(PAUSED)
@@ -1454,7 +1456,11 @@ export const buildsLayer = Layer.effect(
     const open = (sessionId: string) =>
       must(sessionId).pipe(Effect.flatMap((rows) => stillOpen(rows)))
 
-    const view = (sessionId: string) => must(sessionId).pipe(Effect.map(viewOf))
+    const view = (sessionId: string) =>
+      Effect.gen(function* () {
+        const rows = yield* must(sessionId)
+        return viewOf(rows, yield* rounds.read(sessionId))
+      })
 
     /** A change the user made, written with its line, then what follows it started. */
     const acted = (

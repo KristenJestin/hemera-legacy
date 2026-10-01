@@ -26,6 +26,7 @@ import { agentDirectoriesLayer } from '#engine/agents/bare.ts'
 import { acpTracesLayer } from '#engine/agents/trace.ts'
 import { heldWordsLayer } from '#engine/agents/held.ts'
 import type { Builds } from '#engine/build/build.ts'
+import type { ReviewRounds } from '#engine/review/round.ts'
 import { type ProjectChecks, projectChecksLayer } from '#engine/build/checks.ts'
 import { sessionModesLayer } from '#engine/agents/modes.ts'
 import { type Proposals, proposalsLayer } from '#engine/commands/proposals.ts'
@@ -110,6 +111,7 @@ function running<A, E>(
     | Proposals
     | ProjectChecks
     | Builds
+    | ReviewRounds
     | SetupProposals
     | Launches
   >,
@@ -235,6 +237,7 @@ function running<A, E>(
     | Launches
     | ProjectChecks
     | Builds
+    | ReviewRounds
     | Database
     | SqliteClient
   > = Layer.mergeAll(

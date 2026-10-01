@@ -10,6 +10,7 @@
 
 import { z } from 'zod'
 
+import { reviewRoundViewSchema } from './review.ts'
 import { specTypeSchema } from './specs.ts'
 
 /** Where a build stands (D10-01): its three phases, then accepted or stopped. */
@@ -174,6 +175,8 @@ export const buildViewSchema = z.object({
   stories: z.readonly(z.array(storyViewSchema)),
   endAttempts: z.readonly(z.array(attemptViewSchema)),
   canAccept: z.boolean(),
+  /** Its review rounds, in their order (issue #278). */
+  rounds: z.readonly(z.array(reviewRoundViewSchema)),
 })
 
 export type BuildView = z.infer<typeof buildViewSchema>

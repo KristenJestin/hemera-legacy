@@ -92,6 +92,9 @@ const BODY =
 
 const STORIES = 'flex flex-col gap-6'
 
+/** A build with nothing to draw yet: one quiet mark, its words in its tooltip. */
+const EMPTY = 'flex text-muted-foreground'
+
 /** One story of the Spec, and under it what the build made of it. */
 const STORY = 'flex min-w-0 flex-col gap-2'
 
@@ -606,6 +609,13 @@ export function BuildView({
       {!over && build.canAccept && <ReviewCard className={REVIEW} onOpenChat={onOpenChat} />}
       <Approach build={build} />
       <div className={BODY} role="region" tabIndex={0} aria-label={`The build of ${build.specKey}`}>
+        {rows.length === 0 && outside.length === 0 && !finals && (
+          <p className={EMPTY}>
+            <SaidMark label="No task of the build yet">
+              <StatusMark state="todo" />
+            </SaidMark>
+          </p>
+        )}
         {rows.length > 0 && (
           <ol aria-label={`Stories of ${build.specKey}`} className={STORIES}>
             {rows.map((story) => {

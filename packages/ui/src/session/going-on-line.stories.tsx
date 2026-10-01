@@ -357,7 +357,7 @@ export const FailedRunTakesTheLead: Story = {
 function Moving(props: GoingOnLineProps): ReactNode {
   const step = useBeat(2)
   return (
-    <div className={step === 1 ? 'pl-48' : 'pl-0'}>
+    <div className={step === 1 ? 'pl-sidebar' : 'pl-0'}>
       <Line {...props} />
     </div>
   )

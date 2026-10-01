@@ -105,6 +105,7 @@ import {
 import {
   contextListsOf,
   detailsTabsOf,
+  endedAgentOneOffs,
   goingOnOf,
   helperOf,
   lineOf,
@@ -112,7 +113,15 @@ import {
   overBefore,
   withHelpers,
 } from '../session-details.ts'
-import { linesSnapshot, marksOf, removeFromLine, subscribeToLines } from '../line-store.ts'
+import {
+  glanceClosed,
+  glanceOpened,
+  leaveOnTheirOwn,
+  linesSnapshot,
+  marksOf,
+  removeFromLine,
+  subscribeToLines,
+} from '../line-store.ts'
 import {
   helpersSnapshot,
   readHelperThread,
@@ -529,6 +538,10 @@ export function SessionPage({
     helping.sessionId === session.id
       ? helping.helpers.map((view) => helperOf(view, agentOf(view.id)))
       : []
+  // An agent's one-off leaves the line 30 s after it ends, as if its × had been pressed (#321).
+  useEffect(() => {
+    leaveOnTheirOwn(session.id, endedAgentOneOffs(commandRuns))
+  }, [session.id, commandRuns])
   // Whether this Session was free when the page opened it: its Spec panel, once there, is one the
   // proposal just made, and it arrives rather than standing there (issue #130). The page is
   // keyed by the Session, so this is read once per Session opened.
@@ -1117,6 +1130,10 @@ export function SessionPage({
                   context={readOnly}
                 />
               )}
+              onGlance={(id, glancing) => {
+                if (glancing) glanceOpened(session.id, id)
+                else glanceClosed(session.id, id)
+              }}
               onOpenUrl={onOpenUrl}
               onAddToCatalogue={(shown) => {
                 const run = commandRuns.find((one) => one.id === shown.id)

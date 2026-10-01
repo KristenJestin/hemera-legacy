@@ -21,7 +21,7 @@ const meta = {
       <TooltipProvider>
         <div className="@container flex h-screen min-h-0 bg-background text-foreground">
           <div className="flex-1 p-6 text-sm text-muted-foreground">The chat stands here.</div>
-          <div className="flex w-build-panel border-l border-border">
+          <div className="flex w-panel border-l border-border">
             <Story />
           </div>
         </div>

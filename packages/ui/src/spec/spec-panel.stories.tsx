@@ -8,6 +8,7 @@ import { journeyOf } from '../../.storybook/journey.ts'
 import { Button } from '../components/button/button.tsx'
 import { TooltipProvider } from '../components/tooltip/tooltip.tsx'
 import { swap } from '../motion.ts'
+import { SessionRow } from '../session/session-row.tsx'
 import { LiveSpecPanel } from './spec-harness.tsx'
 import {
   BUG,
@@ -46,7 +47,7 @@ function dockOf(canvasElement: HTMLElement): HTMLElement {
 
 /** The panel, which stays mounted folded as well as open. */
 function panelOf(canvasElement: HTMLElement): HTMLElement {
-  return dockOf(canvasElement).querySelector<HTMLElement>('[data-spec-panel]')!
+  return dockOf(canvasElement).querySelector<HTMLElement>('[data-panel]')!
 }
 
 /**
@@ -66,7 +67,7 @@ function isStowed(canvasElement: HTMLElement): boolean {
 
 /** What the small frame is laid in, which slides and fades as a whole. */
 function frameOf(canvasElement: HTMLElement): HTMLElement {
-  return dockOf(canvasElement).querySelector<HTMLElement>('[data-spec-frame]')!
+  return dockOf(canvasElement).querySelector<HTMLElement>('[data-panel-frame]')!
 }
 
 /** The panel's footer holding the build's actions, or `Mark ready`; null while it holds neither. */
@@ -445,7 +446,7 @@ export const Provisional: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     const dock = canvas.getByRole('region', { name: 'Provisional Spec' })
-    const panel = dock.querySelector<HTMLElement>('[data-spec-panel]')!
+    const panel = dock.querySelector<HTMLElement>('[data-panel]')!
     await waitFor(() => expect(panel).not.toHaveAttribute('data-stowed'))
     await expect(canvas.getByText('No key yet')).toBeVisible()
     // The key placeholder and the badge say it is not created; no sentence explains it (#209).
@@ -465,19 +466,24 @@ export const Provisional: Story = {
 function ProvisionalThenCreated(): ReactNode {
   const [created, setCreated] = useState(false)
   return (
-    <div className="@container flex h-screen min-h-0 bg-background text-foreground">
-      <div className="flex min-w-0 flex-1 flex-col items-start gap-3 p-6 text-sm text-muted-foreground">
-        <p>The chat of the Session, where the agent proposed the Spec.</p>
-        <Button onClick={() => setCreated(true)}>Create</Button>
-      </div>
-      <SpecPanel
-        spec={created ? { ...JUST_CREATED, focus: undefined } : PROVISIONAL}
-        arrives
-        onMarkReady={fn()}
-        onRework={fn()}
-        onPickRevision={fn()}
-        onTakeOver={fn()}
-      />
+    <div className="flex h-screen min-h-0 flex-col bg-background text-foreground">
+      <SessionRow
+        chat={
+          <div className="flex flex-col items-start gap-3 p-6 text-sm text-muted-foreground">
+            <p>The chat of the Session, where the agent proposed the Spec.</p>
+            <Button onClick={() => setCreated(true)}>Create</Button>
+          </div>
+        }
+      >
+        <SpecPanel
+          spec={created ? { ...JUST_CREATED, focus: undefined } : PROVISIONAL}
+          arrives
+          onMarkReady={fn()}
+          onRework={fn()}
+          onPickRevision={fn()}
+          onTakeOver={fn()}
+        />
+      </SessionRow>
     </div>
   )
 }
@@ -494,7 +500,7 @@ export const ProvisionalBecomesReal: Story = {
     const dock = canvas.getByRole('region', { name: 'Provisional Spec' })
     const row = dock.parentElement!.getBoundingClientRect().width
     await waitFor(() => expect(dock.getBoundingClientRect().width).toBeCloseTo(row * 0.45 + 12, 0))
-    const panel = dock.querySelector<HTMLElement>('[data-spec-panel]')!
+    const panel = dock.querySelector<HTMLElement>('[data-panel]')!
     const before = panel.getBoundingClientRect()
     await userEvent.click(canvas.getByRole('button', { name: 'Create' }))
     await expect(canvas.getByRole('region', { name: 'Spec ATL-7' })).toBe(dock)

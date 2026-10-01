@@ -14,11 +14,11 @@ import { PROGRESS_WORDS, type PhaseGroup, isWriting, phaseProgressOf } from './s
  * on its phase.
  *
  * A frame as every surface of Hemera is one (`components/frame/frame.tsx`): a rim, and a body
- * inside it. Its width is the theme's `spec-frame` rather than what it holds, because it is one
+ * inside it. Its width is the theme's `panel-frame` rather than what it holds, because it is one
  * end of the slot the swap moves.
  */
 
-const RIM = 'flex w-spec-frame flex-col rounded-xl border border-border bg-surface-rim p-1.5'
+const RIM = 'flex w-panel-frame flex-col rounded-xl border border-border bg-surface-rim p-1.5'
 
 /**
  * The unfold chevron, as far in from the frame's top and right edges as the fold chevron is from

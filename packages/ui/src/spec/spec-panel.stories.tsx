@@ -4,6 +4,7 @@ import { type ReactNode, useState } from 'react'
 import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
 
 import { atRest } from '../../.storybook/at-rest.ts'
+import { steadyClock } from '../../.storybook/clock.ts'
 import { journeyOf, readEveryFrame } from '../../.storybook/journey.ts'
 
 import { Button } from '../components/button/button.tsx'
@@ -626,15 +627,15 @@ function opacityOf(element: HTMLElement): number {
   return found === null ? 1 : Number(found[1])
 }
 
-/** The Spec and the chat on the frame this is called on. */
-function measure(canvasElement: HTMLElement): Frame {
+/** The Spec and the chat on the frame this is called on, timed by `now`. */
+function measure(canvasElement: HTMLElement, now = (): number => performance.now()): Frame {
   const dock = dockOf(canvasElement)
   const chat = dock.previousElementSibling!.getBoundingClientRect()
   const panel = panelOf(canvasElement)
   const box = panel.getBoundingClientRect()
   const clip = panel.parentElement!.getBoundingClientRect()
   return {
-    at: performance.now(),
+    at: now(),
     chat: chat.width,
     chatRight: chat.right,
     panel: isStowed(canvasElement) ? 0 : Math.max(0, clip.right - box.left),
@@ -645,19 +646,24 @@ function measure(canvasElement: HTMLElement): Frame {
 
 /**
  * The frames an action moves the row through: the one before it, every frame while it happens,
- * and every frame after it until nothing has moved for twenty.
+ * and every frame after it until nothing has moved for twenty, each timed by `now`.
  */
-async function framesOf(canvasElement: HTMLElement, action: () => Promise<void>): Promise<Frame[]> {
-  const frames = [measure(canvasElement)]
+async function framesOf(
+  canvasElement: HTMLElement,
+  action: () => Promise<void>,
+  now?: () => number,
+): Promise<Frame[]> {
+  const frames = [measure(canvasElement, now)]
   let acted = false
   const sampled = new Promise<Frame[]>((resolve) => {
     let still = 0
     const sample = (): void => {
-      const now = measure(canvasElement)
+      const frame = measure(canvasElement, now)
       const last = frames.at(-1)!
-      const same = last.chat === now.chat && last.frame === now.frame && last.panel === now.panel
+      const same =
+        last.chat === frame.chat && last.frame === frame.frame && last.panel === frame.panel
       still = acted && same ? still + 1 : 0
-      frames.push(now)
+      frames.push(frame)
       if (still < 20) requestAnimationFrame(sample)
       else resolve(frames)
     }
@@ -674,13 +680,13 @@ function moved(frames: Frame[]): number[] {
   return widths.slice(widths.findIndex((width) => width !== widths[0]) - 1)
 }
 
-/** Presses a button, and answers when the press landed, on the page's clock. */
-async function pressedAt(button: HTMLElement): Promise<number> {
+/** Presses a button, and answers when the press landed, on the clock `now` reads. */
+async function pressedAt(button: HTMLElement, now: () => number): Promise<number> {
   let at = Number.NaN
   button.addEventListener(
     'click',
     () => {
-      at = performance.now()
+      at = now()
     },
     { once: true },
   )
@@ -691,40 +697,9 @@ async function pressedAt(button: HTMLElement): Promise<number> {
 /** The swap's beat, in milliseconds: how long the panel waits for the frame to start leaving. */
 const BEAT = swap.beat * 1000
 
-/**
- * How long the frame and the panel are both there during a swap, at the least, in milliseconds:
- * the one leaving takes most of a `lead` spring's 300 ms to go, and the one arriving comes on the
- * beat, 80 ms in. A frame late by that much after the one before it can step over the whole of it.
- */
-const OVERLAP = 200
-
 /** Whether some frame saw the small frame and the panel there together. */
 function overlaps(frames: readonly Frame[]): boolean {
   return frames.some((frame) => frame.frame > 0 && frame.panel > 0)
-}
-
-/**
- * Whether the frames were too far apart to see what a swap has to be seen doing: the two there
- * together, and the chat on a width between its two. On a machine busy with the rest of the run
- * a frame can come late enough to step over either, and then nothing was seen either way — not a
- * swap that cut, and not one that overlapped. A cut, or a jump of the chat, seen between frames
- * close together is judged, and fails.
- */
-function unseen(frames: readonly Frame[]): boolean {
-  const late = (limit: number, changed: (before: Frame, after: Frame) => boolean): boolean =>
-    frames.slice(1).some((after, index) => {
-      const before = frames[index]!
-      return changed(before, after) && after.at - before.at >= limit
-    })
-  // The one frame the swap went from one of the two to the other, with neither seen together.
-  const cut =
-    !overlaps(frames) && late(OVERLAP, (before, after) => before.frame > 0 !== after.frame > 0)
-  const chat = journeyOf(
-    frames.map(({ at, chat: value }) => ({ at, value })),
-    frames[0]!.chat,
-    frames.at(-1)!.chat,
-  )
-  return cut || chat === 'unseen'
 }
 
 /**
@@ -733,73 +708,62 @@ function unseen(frames: readonly Frame[]): boolean {
  * frame is back while the panel is still going. On no frame is neither there. The chat is pushed
  * on every frame, never a jump, down one way and up the other, and the panel never stands over it.
  *
- * Each way is played again, up to five times, when its frames came too far apart to see it.
+ * The overlap is a fraction of a second, which one late frame of a busy runner can step over: the
+ * swap is played on the play's own clock, which no frame moves on by more than a step, and the
+ * frames and the press are timed by it.
  */
 export const SwapReplayed: Story = {
   args: { defaultFolded: true },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    const unfold = async (): Promise<{ frames: Frame[]; pressed: number }> => {
+    const clock = await steadyClock()
+    const now = clock.now
+    try {
       let pressed = Number.NaN
-      const frames = await framesOf(canvasElement, async () => {
-        pressed = await pressedAt(canvas.getByRole('button', { name: 'Unfold the Spec' }))
-      })
-      return { frames, pressed }
-    }
-    const fold = (): Promise<Frame[]> =>
-      framesOf(canvasElement, () =>
-        userEvent.click(canvas.getByRole('button', { name: 'Fold the Spec' })),
+      const opening = await framesOf(
+        canvasElement,
+        async () => {
+          pressed = await pressedAt(canvas.getByRole('button', { name: 'Unfold the Spec' }), now)
+        },
+        now,
       )
+      // Never neither: on every frame, some of the frame or some of the panel is there.
+      await expect(opening.filter((frame) => frame.frame === 0 && frame.panel === 0)).toEqual([])
+      // The frame goes first: the panel shows no sooner than a beat after the press, on the clock
+      // the beat is played on.
+      const coming = opening.find((frame) => frame.panel > 0)!
+      await expect(coming.at - pressed).toBeGreaterThanOrEqual(BEAT)
+      // And the two overlap: the panel is coming in while the frame is still there.
+      await expect(overlaps(opening)).toBe(true)
+      const narrowing = moved(opening)
+      const [full, first] = narrowing
+      const narrowest = narrowing.at(-1)!
+      await expect(narrowest).toBeLessThan(full!)
+      // Down on every frame, never back up, and through widths in between.
+      await expect(narrowing).toEqual(narrowing.toSorted((a, b) => b - a))
+      await expect(first).toBeGreaterThan(narrowest)
+      await expect(opening.filter((frame) => frame.panelLeft < frame.chatRight - 0.5)).toEqual([])
+      await expect(opening.at(-1)!.frame).toBe(0)
 
-    let opened = await unfold()
-    for (let tries = 4; tries > 0 && unseen(opened.frames); tries -= 1) {
-      // oxlint-disable-next-line no-await-in-loop -- one swap at a time: the replay is the point
-      await fold()
-      // oxlint-disable-next-line no-await-in-loop -- one swap at a time: the replay is the point
+      // Folding, the frame is back on the beat while the panel still has most of its way to go.
+      const closing = await framesOf(
+        canvasElement,
+        () => userEvent.click(canvas.getByRole('button', { name: 'Fold the Spec' })),
+        now,
+      )
+      await expect(closing.filter((frame) => frame.frame === 0 && frame.panel === 0)).toEqual([])
+      await expect(overlaps(closing)).toBe(true)
+      const widening = moved(closing)
+      const widest = widening.at(-1)!
+      await expect(widest).toBeGreaterThan(widening[0]!)
+      await expect(widening).toEqual(widening.toSorted((a, b) => a - b))
+      await expect(closing.filter((frame) => frame.panelLeft < frame.chatRight - 0.5)).toEqual([])
+      await expect(closing.at(-1)!.frame).toBe(1)
+      await expect(widest).toBe(full)
       await waitFor(() => expect(isStowed(canvasElement)).toBe(true))
-      // oxlint-disable-next-line no-await-in-loop -- one swap at a time: the replay is the point
-      opened = await unfold()
+    } finally {
+      clock.stop()
     }
-    const { frames: opening, pressed } = opened
-    // Never neither: on every frame, some of the frame or some of the panel is there.
-    await expect(opening.filter((frame) => frame.frame === 0 && frame.panel === 0)).toEqual([])
-    // The frame goes first: the panel shows no sooner than a beat after the press. Measured on
-    // the clock rather than against the frame's fade, which the compositor may start a frame or
-    // two late on a busy machine.
-    const coming = opening.find((frame) => frame.panel > 0)!
-    await expect(coming.at - pressed).toBeGreaterThanOrEqual(BEAT)
-    // And the two overlap: the panel is coming in while the frame is still there.
-    await expect(overlaps(opening)).toBe(true)
-    const narrowing = moved(opening)
-    const [full, first] = narrowing
-    const narrowest = narrowing.at(-1)!
-    await expect(narrowest).toBeLessThan(full!)
-    // Down on every frame, never back up, and through widths in between.
-    await expect(narrowing).toEqual(narrowing.toSorted((a, b) => b - a))
-    await expect(first).toBeGreaterThan(narrowest)
-    await expect(opening.filter((frame) => frame.panelLeft < frame.chatRight - 0.5)).toEqual([])
-    await expect(opening.at(-1)!.frame).toBe(0)
-
-    // Folding, the frame is back on the beat while the panel still has most of its way to go.
-    let closing = await fold()
-    for (let tries = 4; tries > 0 && unseen(closing); tries -= 1) {
-      // oxlint-disable-next-line no-await-in-loop -- one swap at a time: the replay is the point
-      await waitFor(() => expect(isStowed(canvasElement)).toBe(true))
-      // oxlint-disable-next-line no-await-in-loop -- one swap at a time: the replay is the point
-      await unfold()
-      // oxlint-disable-next-line no-await-in-loop -- one swap at a time: the replay is the point
-      closing = await fold()
-    }
-    await expect(closing.filter((frame) => frame.frame === 0 && frame.panel === 0)).toEqual([])
-    await expect(overlaps(closing)).toBe(true)
-    const widening = moved(closing)
-    const widest = widening.at(-1)!
-    await expect(widest).toBeGreaterThan(widening[0]!)
-    await expect(widening).toEqual(widening.toSorted((a, b) => a - b))
-    await expect(closing.filter((frame) => frame.panelLeft < frame.chatRight - 0.5)).toEqual([])
-    await expect(closing.at(-1)!.frame).toBe(1)
-    await expect(widest).toBe(full)
-    await waitFor(() => expect(isStowed(canvasElement)).toBe(true))
   },
 }
 
@@ -808,12 +772,11 @@ export const SwapReplayed: Story = {
  * given its width back from the width it had reached, and is never pushed the rest of the way.
  *
  * The fold has to land while the panel is still on its way, and the panel comes in on a spring
- * that is most of the way in within a quarter of a second. On a machine busy with the rest of the
- * run a pointer's press can take longer than that, and land on a panel already in: nothing was
- * left to turn round, so the chat was, rightly, the whole panel narrower. So the fold is pressed
- * on the first frame the panel is part of the way in, the chat is read at the moment it lands,
- * and when less than a tenth of the way was left by then, the Spec is folded back and the gesture
- * done again, up to five times.
+ * that is most of the way in within a quarter of a second: a pointer's whole journey to the
+ * button, or one late frame of a busy runner, can outlast it. So the fold is pressed on the first
+ * frame the panel is part of the way in, the chat is read at the moment it lands, and the panel
+ * comes in on the play's own clock, which no frame moves on by more than a step: the frame the
+ * fold is pressed on is never more than that step past the one before it.
  */
 export const TurnsRoundMidWay: Story = {
   args: { defaultFolded: true },
@@ -822,8 +785,9 @@ export const TurnsRoundMidWay: Story = {
     const row = dockOf(canvasElement).parentElement!.getBoundingClientRect().width
     // The chat's width with the panel all the way in.
     const full = row * 0.55 - 12
-    const turn = async (tries: number): Promise<{ frames: Frame[]; reached: number }> => {
-      const start = measure(canvasElement).chat
+    const start = measure(canvasElement).chat
+    const clock = await steadyClock()
+    try {
       let reached = Number.NaN
       const frames = await framesOf(canvasElement, async () => {
         await userEvent.click(canvas.getByRole('button', { name: 'Unfold the Spec' }))
@@ -833,9 +797,7 @@ export const TurnsRoundMidWay: Story = {
           reached = measure(canvasElement).chat
         }
         fold.addEventListener('click', read, { capture: true, once: true })
-        // Part of the way in, and no further: pressed on the first frame the panel is 40 pixels
-        // in, rather than after a pointer's whole journey to the button, which a busy runner can
-        // stretch past the panel's own.
+        // Part of the way in, and no further: pressed on the first frame the panel is 40 pixels in.
         await new Promise<void>((resolve) => {
           const look = (): void => {
             if (measure(canvasElement).panel <= 40) {
@@ -849,18 +811,18 @@ export const TurnsRoundMidWay: Story = {
         })
       })
       await waitFor(() => expect(isStowed(canvasElement)).toBe(true))
-      if (reached - full > (start - full) / 10 || tries === 1) return { frames, reached }
-      return turn(tries - 1)
+      // Pressed with more than a tenth of the way still to go.
+      await expect(reached, 'the fold never landed while the panel was coming in').toBeGreaterThan(
+        full + (start - full) / 10,
+      )
+      const widths = frames.map((frame) => frame.chat)
+      // The panel's whole width was never taken from the chat.
+      await expect(Math.min(...widths)).toBeGreaterThan(full + 1)
+      await expect(widths.at(-1)).toBe(widths[0])
+      await expect(frames.at(-1)!.frame).toBe(1)
+    } finally {
+      clock.stop()
     }
-    const { frames, reached } = await turn(5)
-    await expect(reached, 'the fold never landed while the panel was coming in').toBeGreaterThan(
-      full + 1,
-    )
-    const widths = frames.map((frame) => frame.chat)
-    // The panel's whole width was never taken from the chat.
-    await expect(Math.min(...widths)).toBeGreaterThan(full + 1)
-    await expect(widths.at(-1)).toBe(widths[0])
-    await expect(frames.at(-1)!.frame).toBe(1)
   },
 }
 

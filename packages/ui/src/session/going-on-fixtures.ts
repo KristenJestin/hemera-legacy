@@ -5,6 +5,19 @@ import type { GoingOnAgent, GoingOnItem, GoingOnRun, GoingOnShell } from './goin
  * Hemera runs, a check that failed, a one-off, the agent's own shell commands, and two sub-agents.
  */
 
+/** The moment the stories are drawn from, which the runs' seconds count from. */
+const NOW = Date.now()
+
+/** A run that started `seconds` ago and still runs. */
+function since(seconds: number): Pick<GoingOnRun, 'startedAt' | 'endedAt'> {
+  return { startedAt: NOW - seconds * 1000, endedAt: null }
+}
+
+/** A run that started `ago` seconds ago and took `seconds`. */
+function took(seconds: number, ago: number): Pick<GoingOnRun, 'startedAt' | 'endedAt'> {
+  return { startedAt: NOW - ago * 1000, endedAt: NOW - (ago - seconds) * 1000 }
+}
+
 const DEV: GoingOnRun = {
   kind: 'run',
   id: 'run-dev',
@@ -21,6 +34,7 @@ const DEV: GoingOnRun = {
   startedBy: 'user',
   environment: { PORT: '5173' },
   at: '10:31',
+  ...since(9 * 60),
 }
 
 const TEST: GoingOnRun = {
@@ -37,6 +51,7 @@ const TEST: GoingOnRun = {
   startedBy: 'agent',
   environment: {},
   at: '10:36',
+  ...since(84),
 }
 
 const LINT: GoingOnRun = {
@@ -53,6 +68,7 @@ const LINT: GoingOnRun = {
   startedBy: 'agent',
   environment: {},
   at: '10:40',
+  ...took(6, 300),
 }
 
 const TYPECHECK: GoingOnRun = {
@@ -70,6 +86,7 @@ const TYPECHECK: GoingOnRun = {
   startedBy: 'agent',
   environment: {},
   at: '10:44',
+  ...took(12, 60),
 }
 
 const ONE_OFF: GoingOnRun = {
@@ -86,6 +103,7 @@ const ONE_OFF: GoingOnRun = {
   startedBy: 'user',
   environment: {},
   at: '10:46',
+  ...since(20),
 }
 
 /** The same one-off, over and well: what a glance offers to run again or keep (issue #237). */
@@ -95,6 +113,7 @@ export const ONE_OFF_DONE: GoingOnRun = {
   state: 'finished',
   exitCode: 0,
   output: '✓ csv.stream (3 tests)',
+  ...took(18, 40),
 }
 
 /** A run in `v2`, which the Project declares as one of its repositories, at its base (#239). */
@@ -112,6 +131,7 @@ const IN_REPOSITORY: GoingOnRun = {
   startedBy: 'user',
   environment: {},
   at: '10:47',
+  ...since(31),
 }
 
 /** A run in `tools`, a folder of the Workspace that is none of the Project's repositories. */
@@ -128,6 +148,7 @@ const IN_FOLDER: GoingOnRun = {
   startedBy: 'user',
   environment: {},
   at: '10:48',
+  ...since(2),
 }
 
 const VITEST: GoingOnShell = {

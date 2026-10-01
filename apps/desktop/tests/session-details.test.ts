@@ -133,6 +133,27 @@ describe('The agent starts the app and the user opens it', () => {
     })
   })
 
+  test('the line counts a run’s seconds from when it started, and to when it ended', () => {
+    const running = aRun('r1', '/home/ana/atlas', 'running', 'c1')
+    const ended = {
+      ...aRun('r2', '/home/ana/atlas', 'exited', 'c2'),
+      endedAt: '2026-09-23T08:01:24.000Z',
+    }
+
+    expect(goingOnOf([running, ended], [], '/home/ana/atlas')).toEqual([
+      expect.objectContaining({
+        id: 'r1',
+        startedAt: Date.parse(running.startedAt),
+        endedAt: null,
+      }),
+      expect.objectContaining({
+        id: 'r2',
+        startedAt: Date.parse('2026-09-23T08:00:00.000Z'),
+        endedAt: Date.parse('2026-09-23T08:01:24.000Z'),
+      }),
+    ])
+  })
+
   test('the details open on the Activity when the turn has one, and on the Context otherwise', () => {
     expect(openingTabOf(detailsTabsOf(1, 0, null))).toBe('activity')
     expect(openingTabOf(detailsTabsOf(0, 0, null))).toBe('context')

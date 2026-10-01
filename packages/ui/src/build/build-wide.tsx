@@ -8,7 +8,7 @@ import { Tooltip } from '../components/tooltip/tooltip.tsx'
 import { IconCircleCheck, IconFlask, IconLayoutList, IconListTree, IconRobot } from '../icons.ts'
 import { CROSSFADE, crossfade, useTransition } from '../motion.ts'
 import type { SpecView } from '../spec/model.ts'
-import { BuildBar, BUCKET_OF, TASK_MARKS } from './build-progress.tsx'
+import { BuildBar, BUCKET_OF, TASK_MARKS, finalsMarkOf } from './build-progress.tsx'
 import { BuildSpecPanel } from './build-spec-panel.tsx'
 import {
   Approach,
@@ -420,7 +420,7 @@ function FinalsLine({
   onPick: () => void
 }): ReactNode {
   const last = lastAttempt(build.endAttempts)
-  const state = last === undefined ? 'todo' : last.result === 'green' ? 'done' : 'progress'
+  const state = finalsMarkOf(last)
   return (
     <button type="button" className={ROW} aria-pressed={picked} onClick={onPick}>
       <StatusMark state={state} />

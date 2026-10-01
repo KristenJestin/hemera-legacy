@@ -16,8 +16,9 @@ import { AgentText } from '../message/agent-text.tsx'
 import { check, useTransition } from '../motion.ts'
 import type { StoryView } from '../spec/model.ts'
 import { BlockerBlock } from './blocker-block.tsx'
-import { BuildBar, BuildCounts, TASK_MARKS } from './build-progress.tsx'
+import { BuildBar, BuildCounts, TASK_MARKS, finalsMarkOf } from './build-progress.tsx'
 import {
+  type BuildAttemptView,
   type BuildBlockerView,
   type BuildReproductionView,
   type BuildStoryProgress,
@@ -233,6 +234,15 @@ export function firstShown(build: BuildViewData): string | null {
   return build.tasks[0]?.id ?? null
 }
 
+/** What the final checks' mark says, for the tooltip and the screen reader. */
+function finalsLabelOf(final: BuildAttemptView): string {
+  const on = tryLabel(final.number).toLowerCase()
+  if (final.result === 'green') return 'Final checks green'
+  if (final.result === 'red') return `Final checks red on ${on}`
+  if (final.result === 'unverified') return 'Final checks not verified'
+  return `Final checks on ${on}`
+}
+
 /**
  * The one line under the title: the phase in words, how many tasks stand where and the bar of
  * them all (#77), and the final checks.
@@ -255,14 +265,7 @@ function StateLine({ build, now }: { build: BuildViewData; now: string }): React
       {build.phase === 'verify' && final !== undefined && (
         <span className={FINALS}>
           <IconFlask size="sm" aria-hidden="true" />
-          <StatusMark
-            state={final.result === 'green' ? 'done' : 'progress'}
-            label={
-              final.result === 'green'
-                ? 'Final checks green'
-                : `Final checks on ${tryLabel(final.number).toLowerCase()}`
-            }
-          />
+          <StatusMark state={finalsMarkOf(final)} label={finalsLabelOf(final)} />
         </span>
       )}
       {build.pausedAt !== null && !closed(build) && (

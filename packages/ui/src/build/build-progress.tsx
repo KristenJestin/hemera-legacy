@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react'
 
 import { type MarkState, StatusMark } from '../components/status-mark/status-mark.tsx'
-import type { BuildTaskState, BuildTaskView } from './model.ts'
+import type { BuildAttemptView, BuildTaskState, BuildTaskView } from './model.ts'
 
 /**
  * How far a build is, at a glance (#77): how many of its tasks are done, in progress, waiting for
@@ -33,6 +33,18 @@ export const TASK_MARKS: Record<BuildTaskState, MarkState> = {
   yours: 'yours',
   blocked: 'blocked',
   skipped: 'skipped',
+}
+
+/**
+ * Where the final checks stand, by their last try: not run yet, green, red, running — the arc only
+ * while a try is under way — or ended with nothing configured to judge them.
+ */
+export function finalsMarkOf(last: BuildAttemptView | undefined): MarkState {
+  if (last === undefined) return 'todo'
+  if (last.result === 'green') return 'done'
+  if (last.result === 'red') return 'failed'
+  if (last.result === 'unverified') return 'skipped'
+  return 'progress'
 }
 
 /** The buckets in the order they are counted and drawn, with their mark and their words. */

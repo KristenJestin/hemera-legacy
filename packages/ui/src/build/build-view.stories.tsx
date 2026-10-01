@@ -1,10 +1,10 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
-import { type ReactNode, useState } from 'react'
+import type { ReactNode } from 'react'
 import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
 
-import { readEveryFrame } from '../../.storybook/journey.ts'
+import { useBeat } from '../../.storybook/beat.ts'
+import { journeyOf, readEveryFrame } from '../../.storybook/journey.ts'
 import { movesLess } from '../../.storybook/reduced-motion.ts'
-import { Button } from '../components/button/button.tsx'
 
 import { STORIES as SPEC_STORIES } from '../spec/spec-fixtures.ts'
 import {
@@ -420,26 +420,19 @@ export const TaskMarks: Story = {
   },
 }
 
-/** The view, whose T2 is done once the press beside it says so. */
+/**
+ * The view, whose T2 is worked on for a beat, done for a beat, and worked on again: the story plays
+ * the change by itself, with nothing beside the view to drive it.
+ */
 function Finishing(props: BuildViewProps): ReactNode {
-  const [build, setBuild] = useState(props.build)
-  return (
-    <div className="flex h-full flex-col">
-      <Button
-        size="sm"
-        variant="ghost"
-        onClick={() =>
-          setBuild((was) => ({
-            ...was,
-            tasks: was.tasks.map((one) => (one.label === 'T2' ? { ...one, state: 'done' } : one)),
-          }))
-        }
-      >
-        Finish T2
-      </Button>
-      <BuildView {...props} build={build} />
-    </div>
-  )
+  const step = useBeat(2)
+  const build = {
+    ...props.build,
+    tasks: props.build.tasks.map((one) =>
+      one.label === 'T2' && step === 1 ? { ...one, state: 'done' as const } : one,
+    ),
+  }
+  return <BuildView {...props} build={build} />
 }
 
 /**
@@ -449,24 +442,24 @@ function Finishing(props: BuildViewProps): ReactNode {
 export const TaskDone: Story = {
   render: (args) => <Finishing {...args} />,
   play: async ({ canvasElement }) => {
-    const canvas = within(canvasElement)
     const line = within(storyOf(canvasElement, 'Export a month')).getAllByRole('button', {
       name: /^T2\b/,
     })[0]!
     const mark = line.querySelector('[data-mark]')!
-    const watch = readEveryFrame(() =>
-      Math.min(
-        drawnOf(mark.querySelector('[data-figure="check"]')),
-        struckOf(line.querySelector('[data-strike]')),
-      ),
+    // In hundredths, which is the unit a journey of a share is told in.
+    const watch = readEveryFrame(
+      () =>
+        Math.min(
+          drawnOf(mark.querySelector('[data-figure="check"]')),
+          struckOf(line.querySelector('[data-strike]')),
+        ) * 100,
     )
-    await userEvent.click(canvas.getByRole('button', { name: 'Finish T2' }))
     await waitFor(() => expect(mark).toHaveAttribute('data-mark', 'done'))
     await waitFor(() => expect(struckOf(line.querySelector('[data-strike]'))).toBe(1))
     await waitFor(() => expect(drawnOf(mark.querySelector('[data-figure="check"]'))).toBe(1))
-    const both = watch.stop().map((reading) => reading.value)
+    const both = watch.stop().filter((reading) => !Number.isNaN(reading.value))
     if (movesLess()) return
-    // A frame where both were part of the way: the check and the stroke drew together.
-    await expect(both.some((share) => share > 0.05 && share < 0.95)).toBe(true)
+    // The check and the stroke drew together, neither of them whole at once.
+    await expect(journeyOf(both, 0, 100)).not.toBe('jumped')
   },
 }

@@ -581,6 +581,8 @@ describe('Catalogue, coquille et surfaces, et rien d’autre', () => {
       // The Run at the end of that line: the catalogue matched as it is typed, and any other line
       // run once.
       'RunCommand',
+      // Issue #77: what a helper wears on its chip, and wherever it is named.
+      'HelperAvatar',
       'ContextView',
       'BareModeState',
       'CommandList',

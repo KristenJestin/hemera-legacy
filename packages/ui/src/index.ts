@@ -422,6 +422,7 @@ export {
 export { GoingOnLine, type GoingOnLineProps } from './session/going-on-line.tsx'
 export type { RunRepository } from './session/run-place.tsx'
 export { RunCommand, type RunCatalogueEntry, type RunCommandProps } from './session/run-command.tsx'
+export { HelperAvatar, type HelperAvatarProps, type HelperTone } from './session/helper-avatar.tsx'
 export {
   ContextView,
   type ContextCommand,

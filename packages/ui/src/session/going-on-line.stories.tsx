@@ -4,8 +4,7 @@ import { expect, fn, screen, userEvent, waitFor, within } from 'storybook/test'
 
 import { atRest } from '../../.storybook/at-rest.ts'
 import { useBeat } from '../../.storybook/beat.ts'
-import { journeyOf, readEveryFrame } from '../../.storybook/journey.ts'
-import { movesLess } from '../../.storybook/reduced-motion.ts'
+import { readEveryFrame } from '../../.storybook/journey.ts'
 import { TooltipProvider } from '../components/tooltip/tooltip.tsx'
 import { AgentText } from '../message/agent-text.tsx'
 import { GOING_ON, HELPERS, ONE_OFF_DONE } from './going-on-fixtures.ts'
@@ -372,22 +371,59 @@ export const RunEnds: Story = {
 }
 
 /**
- * What failed comes first: a run that fails while watched travels to the head of the line, frame
- * after frame, rather than jumping there; the chips it passes make room for it.
+ * What failed comes first: a run that fails while watched takes the head of the line in place,
+ * never projected over from where it stood (a projection only animates an element's own size).
  */
 export const FailedRunTakesTheLead: Story = {
   render: (args) => <Ending {...args} />,
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
+    const line = canvas.getByRole('group', { name: 'What goes on in this Session' })
     const chip = canvas.getByRole('button', { name: 'test, running' })
     const from = chip.getBoundingClientRect().left
-    const watch = readEveryFrame(() => chip.getBoundingClientRect().left)
+    const slots = [...line.children].filter((one) => one.tagName === 'SPAN')
+    const moved = readEveryFrame(() =>
+      slots.some((slot) => getComputedStyle(slot).transform !== 'none') ? 1 : 0,
+    )
     await waitFor(() => expect(canvas.getAllByRole('button')[0]).toBe(chip))
     await atRest(chip)
-    const to = chip.getBoundingClientRect().left
-    await expect(to).toBeLessThan(from)
-    if (movesLess()) return
-    await expect(journeyOf(watch.stop(), from, to)).not.toBe('jumped')
+    await expect(chip.getBoundingClientRect().left).toBeLessThan(from)
+    await expect(moved.stop().filter((reading) => reading.value === 1).length).toBe(0)
+  },
+}
+
+/** The line on a page whose side folds and unfolds by the beat, as the window's sidebar does. */
+function Moving(props: GoingOnLineProps): ReactNode {
+  const step = useBeat(2)
+  return (
+    <div className={step === 1 ? 'pl-sidebar' : 'pl-0'}>
+      <Line {...props} />
+    </div>
+  )
+}
+
+/**
+ * The line moves with its page — a sidebar folds, the window is resized — and its chips move with
+ * it in one piece: none slides over from where it stood on the page before, which a chip only
+ * would by a transform of its place.
+ */
+export const LineMoves: Story = {
+  render: (args) => <Moving {...args} />,
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const line = canvas.getByRole('group', { name: 'What goes on in this Session' })
+    const chip = canvas.getByRole('button', { name: 'test, running' })
+    await atRest(chip)
+    const from = chip.getBoundingClientRect().left
+    const slots = [...line.children].filter((one) => one.tagName === 'SPAN')
+    const moved = readEveryFrame(() =>
+      slots.some((slot) => getComputedStyle(slot).transform !== 'none') ? 1 : 0,
+    )
+    await waitFor(() => expect(chip.getBoundingClientRect().left).not.toBe(from), {
+      timeout: 5000,
+    })
+    await atRest(chip)
+    await expect(moved.stop().filter((reading) => reading.value === 1).length).toBe(0)
   },
 }
 

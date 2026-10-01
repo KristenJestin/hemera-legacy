@@ -454,6 +454,22 @@ export const helpersLayer = Layer.effect(
         const refusal = yield* withDatabase(
           mutate('launching a helper', (transaction) =>
             Effect.gen(function* () {
+              // A helper stopped, or ended, while its launch was on its way launches nothing:
+              // nobody would be left to hand its helper's result to, or to stop it.
+              if (caller.parentSessionId !== null) {
+                const launcher = yield* transaction
+                  .select({ helperState: sessions.helperState })
+                  .from(sessions)
+                  .where(eq(sessions.id, callerId))
+                  .pipe(Effect.mapError(failed('reading the launcher')))
+                const state = launcher[0]?.helperState ?? null
+                if (state !== 'running') {
+                  return {
+                    result: `you are ${state ?? 'gone'} and launch nothing more: say what you have`,
+                    events: [],
+                  }
+                }
+              }
               // Counted in the very transaction that writes the helper: two launches at once are
               // serialised by it, and never both let past the number the Project allows.
               const project = yield* transaction

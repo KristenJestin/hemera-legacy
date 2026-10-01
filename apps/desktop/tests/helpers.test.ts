@@ -279,6 +279,33 @@ describe('The main agent reads a helper and stops it', () => {
     expect(main.handed.find(isResult)).toContain('The user stopped Write the reader.')
   })
 
+  test('a helper stopped while its launch is on its way launches nothing', async () => {
+    const main = orchestrator([launch('Write the reader.')])
+    const gate = gated(0)
+    const helper = aHelper([{ does: 'says', text: 'Working.' }], { between: gate.between })
+    opened = await openWindow(dataFolder, main.agent, helper.agent)
+    const seen = await opened.running(
+      Effect.gen(function* () {
+        const spec = yield* aReadySpec(dataFolder, THREE)
+        const sessionId = yield* launched(spec.specId, spec.workspaceId)
+        const [running] = yield* eventually(helpersOf(sessionId), (all) => all.length === 1)
+        const id = running?.id ?? ''
+        const helpers = yield* Helpers
+        // The user's × lands first; the helper's own launch arrives after it.
+        yield* helpers.stop(id)
+        const launching = yield* helpers.tool(id, {
+          tool: 'helper_launch',
+          arguments: { brief: 'Count the rows.' },
+        })
+        gate.carryOn()
+        return { launching, helpers: yield* helpersOf(sessionId) }
+      }),
+    )
+    expect(seen.launching).toMatchObject({ ok: false, refused: true })
+    expect(seen.launching.text).toContain('stopped')
+    expect(seen.helpers).toMatchObject([{ state: 'stopped' }])
+  })
+
   test('a helper whose agent dies fails, its task stays in progress, and the main agent is told', async () => {
     const main = orchestrator([launch('Write the reader.', { task: 'T2' })])
     const gate = gated(1)

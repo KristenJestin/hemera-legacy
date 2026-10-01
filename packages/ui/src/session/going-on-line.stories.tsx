@@ -3,6 +3,7 @@ import { type ReactNode, useState } from 'react'
 import { expect, fn, screen, userEvent, waitFor, within } from 'storybook/test'
 
 import { atRest } from '../../.storybook/at-rest.ts'
+import { useBeat } from '../../.storybook/beat.ts'
 import { journeyOf, readEveryFrame } from '../../.storybook/journey.ts'
 import { movesLess } from '../../.storybook/reduced-motion.ts'
 import { TooltipProvider } from '../components/tooltip/tooltip.tsx'
@@ -243,29 +244,23 @@ export const RemovedByHand: Story = {
   },
 }
 
-/** The line, whose test can be ended in failure by a press beside it. */
+/**
+ * The line, whose test runs for a beat, fails for a beat, and runs again: the story plays the
+ * change by itself, with nothing beside the line to drive it.
+ */
 function Ending(props: GoingOnLineProps): ReactNode {
-  const [items, setItems] = useState(props.items)
-  return (
-    <>
-      <Line {...props} items={items} />
-      <button
-        type="button"
-        className="mx-6 mt-3 text-xs underline"
-        onClick={() =>
-          setItems((before) =>
-            before.map((one) =>
-              one.kind === 'run' && one.id === 'run-test'
-                ? { ...one, state: 'failed', exitCode: 1, endedAt: Date.now() }
-                : one,
-            ),
-          )
-        }
-      >
-        End the test
-      </button>
-    </>
+  const step = useBeat(2)
+  const [shown, setShown] = useState<{ step: number; endedAt: number | null }>({
+    step: 0,
+    endedAt: null,
+  })
+  if (shown.step !== step) setShown({ step, endedAt: step === 0 ? null : Date.now() })
+  const items = props.items.map((one) =>
+    one.kind === 'run' && one.id === 'run-test' && step === 1
+      ? { ...one, state: 'failed' as const, exitCode: 1, endedAt: shown.endedAt }
+      : one,
   )
+  return <Line {...props} items={items} />
 }
 
 /** A line that takes out what its glance's ✕ asks it to, as the page does. */
@@ -328,9 +323,10 @@ export const RunEnds: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     const chip = canvas.getByRole('button', { name: 'test, running' })
-    await userEvent.click(canvas.getByRole('button', { name: 'End the test' }))
-    await waitFor(() => expect(chip).toHaveAccessibleName('test, failed'))
-    await expect(chip.querySelector('[data-wipe]')).toHaveClass('bg-destructive-muted')
+    await waitFor(() =>
+      expect(chip.querySelector('[data-wipe]')).toHaveClass('bg-destructive-muted'),
+    )
+    await expect(chip).toHaveAccessibleName('test, failed')
     await waitFor(() => expect(chip.querySelector('[data-end="failed"]')).not.toBeNull())
     await waitFor(() => expect(chip.querySelector('[data-wipe]')).toBeNull())
   },
@@ -347,7 +343,6 @@ export const FailedRunTakesTheLead: Story = {
     const chip = canvas.getByRole('button', { name: 'test, running' })
     const from = chip.getBoundingClientRect().left
     const watch = readEveryFrame(() => chip.getBoundingClientRect().left)
-    await userEvent.click(canvas.getByRole('button', { name: 'End the test' }))
     await waitFor(() => expect(canvas.getAllByRole('button')[0]).toBe(chip))
     await atRest(chip)
     const to = chip.getBoundingClientRect().left

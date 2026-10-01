@@ -370,7 +370,9 @@ export const GettingReady: Story = {
   args: { screen: 'gettingReady' },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    await expect(canvas.getByText(/Waiting for the agent's approach/)).toBeVisible()
+    await expect(
+      canvas.getByRole('img', { name: /^Waiting for the agent's approach/ }),
+    ).toBeVisible()
   },
 }
 
@@ -448,13 +450,13 @@ export const Blocked: Story = {
   },
 }
 
-/** Paused: the band under the view's head, Resume where Pause was. */
+/** Paused: the head says it, Resume where Pause was. */
 export const Paused: Story = {
   args: { screen: 'paused' },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     await expect(canvas.getByRole('button', { name: 'Resume' })).toBeVisible()
-    await expect(canvas.getByText(/nothing new starts until you resume/)).toBeVisible()
+    await expect(canvas.getByText('Paused')).toBeVisible()
   },
 }
 
@@ -464,16 +466,16 @@ export const FinalChecks: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     await expect(canvas.getByRole('region', { name: 'Final checks' })).toBeVisible()
-    await expect(canvas.getByText('final checks on try 2 of 3')).toBeVisible()
+    await expect(canvas.getByRole('img', { name: 'Final checks on try 2 of 3' })).toBeVisible()
   },
 }
 
-/** Accepted: over and readable, the branch and the files left in the Workspace. */
+/** Accepted: over and readable, the head says it, and nothing is left to stop. */
 export const Accepted: Story = {
   args: { screen: 'accepted' },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    await expect(canvas.getByText(/delivering them comes next/)).toBeVisible()
+    await expect(canvas.getByText('Accepted')).toBeVisible()
     await expect(canvas.queryByRole('button', { name: 'Stop build' })).toBeNull()
   },
 }

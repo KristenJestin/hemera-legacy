@@ -108,12 +108,22 @@ export const GettingReady: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     await expect(canvas.getByText('Getting ready')).toBeVisible()
+    // A turning mark waits for the approach, its words the tooltip's (#77): no sentence.
     await expect(
-      canvas.getByText("Waiting for the agent's approach: no task starts before it."),
+      canvas.getByRole('img', {
+        name: "Waiting for the agent's approach: no task starts before it",
+      }),
     ).toBeVisible()
+    await expect(canvas.queryByText(/no task starts before it/)).toBeNull()
     await expect(storiesList(canvasElement).children).toHaveLength(2)
-    await expect(storyOf(canvasElement, 'Export a month')).toHaveTextContent('to do')
-    await expect(storyOf(canvasElement, 'Credit notes in the same file')).toHaveTextContent('to do')
+    await expect(
+      within(storyOf(canvasElement, 'Export a month')).getByRole('img', { name: 'to do' }),
+    ).toBeVisible()
+    await expect(
+      within(storyOf(canvasElement, 'Credit notes in the same file')).getByRole('img', {
+        name: 'to do',
+      }),
+    ).toBeVisible()
     const one = storyOf(canvasElement, 'Export a month')
     await expect(within(one).getByRole('button', { name: /^T1\b/ })).toHaveAttribute(
       'aria-expanded',
@@ -147,7 +157,7 @@ export const Building: Story = {
     await expect(canvas.getByRole('img', { name: 'Where each task stands' })).toBeVisible()
     await expect(canvas.getByRole('heading', { name: 'CSV invoice export' })).toBeVisible()
     const one = storyOf(canvasElement, 'Export a month')
-    await expect(one).toHaveTextContent('in progress')
+    await expect(within(one).getByRole('img', { name: 'in progress' })).toBeVisible()
     await expect(within(one).getByText(/As an accountant closing a month/)).toBeVisible()
     await expect(within(one).getByRole('list', { name: 'Criteria of S1' })).toHaveTextContent(
       'An empty month downloads the header row only.',
@@ -230,17 +240,20 @@ export const Blocked: Story = {
     const one = storyOf(canvasElement, 'Export a month')
     await userEvent.click(within(one).getByRole('button', { name: 'Tasks · 3' }))
     await userEvent.click(within(one).getByRole('button', { name: /^T4 / }))
-    await expect(canvas.getByText(/Waits on T3/)).toBeVisible()
+    await expect(
+      canvas.getByRole('img', { name: 'Waits on T3, which the agent says contradicts the Spec' }),
+    ).toBeVisible()
   },
 }
 
-/** Paused: the band says nothing new starts, and Resume stands where Pause was. */
+/** Paused: the head says it, with how long since, and Resume stands where Pause was. */
 export const Paused: Story = {
   args: { build: PAUSED },
   play: async ({ canvasElement, args }) => {
     const canvas = within(canvasElement)
     await expect(canvas.getByText('Paused', { selector: 'span' })).toBeVisible()
-    await expect(canvas.getByRole('status')).toHaveTextContent(/nothing new starts/)
+    await expect(canvas.getByText(/^since /)).toBeVisible()
+    await expect(canvas.queryByRole('status')).toBeNull()
     await expect(canvas.queryByRole('button', { name: 'Pause' })).toBeNull()
     await userEvent.click(canvas.getByRole('button', { name: 'Resume' }))
     await expect(args.onResume).toHaveBeenCalled()
@@ -253,10 +266,12 @@ export const FinalChecks: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     await expect(canvas.getByText('Final checks', { selector: 'span' })).toBeVisible()
-    await expect(canvas.getByText('final checks on try 1 of 3')).toBeVisible()
+    await expect(canvas.getByRole('img', { name: 'Final checks on try 1 of 3' })).toBeVisible()
     await expect(canvas.getByRole('heading', { name: 'Final checks' })).toBeVisible()
     await expect(canvas.getByRole('list', { name: 'Tries of the final checks' })).toBeVisible()
-    await expect(storyOf(canvasElement, 'Export a month')).toHaveTextContent('done')
+    await expect(
+      within(storyOf(canvasElement, 'Export a month')).getByRole('img', { name: 'done' }),
+    ).toBeVisible()
   },
 }
 
@@ -265,7 +280,7 @@ export const FinalChecksRed: Story = {
   args: { build: FINAL_CHECKS_RED },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    await expect(canvas.getByText('final checks on try 2 of 3')).toBeVisible()
+    await expect(canvas.getByRole('img', { name: 'Final checks on try 2 of 3' })).toBeVisible()
     await userEvent.click(canvas.getByRole('button', { name: /^Try 1 of 3/ }))
     await expect(await canvas.findByText('exited with 1')).toBeVisible()
   },
@@ -276,7 +291,7 @@ export const ReadyToAccept: Story = {
   args: { build: READY_TO_ACCEPT },
   play: async ({ canvasElement, args }) => {
     const canvas = within(canvasElement)
-    await expect(canvas.getByText('final checks green')).toBeVisible()
+    await expect(canvas.getByRole('img', { name: 'Final checks green' })).toBeVisible()
     await expect(canvas.queryByRole('button', { name: 'Pause' })).toBeNull()
     await userEvent.click(canvas.getByRole('button', { name: 'Accept' }))
     await expect(args.onAccept).toHaveBeenCalled()
@@ -303,19 +318,20 @@ export const BugNotReplayed: Story = {
   args: { build: BUG_NOT_REPLAYED },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    await expect(canvas.getByText('final checks green')).toBeVisible()
+    await expect(canvas.getByRole('img', { name: 'Final checks green' })).toBeVisible()
     const replay = within(canvas.getByRole('region', { name: 'Reproduction' }))
     await expect(replay.getByRole('img', { name: 'Not replayed' })).toBeVisible()
     await expect(canvas.queryByRole('button', { name: 'Accept' })).toBeNull()
   },
 }
 
-/** Accepted: over and readable; only the Spec button is left. */
+/** Accepted: over and readable, the head says it; only the Spec button is left. */
 export const Accepted: Story = {
   args: { build: ACCEPTED },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    await expect(canvas.getByRole('status')).toHaveTextContent(/stay in the Workspace/)
+    await expect(canvas.getByText('Accepted')).toBeVisible()
+    await expect(canvas.queryByText(/stay in the Workspace/)).toBeNull()
     await expect(canvas.queryByRole('button', { name: 'Stop build' })).toBeNull()
     await expect(canvas.getByRole('button', { name: 'Spec' })).toBeVisible()
   },
@@ -326,7 +342,8 @@ export const Stopped: Story = {
   args: { build: STOPPED },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    await expect(canvas.getByRole('status')).toHaveTextContent('You stopped the build.')
+    await expect(canvas.getByText('Stopped')).toBeVisible()
+    await expect(canvas.getByText('You stopped the build.')).toBeVisible()
     await expect(canvas.queryByRole('button', { name: 'Resume' })).toBeNull()
     const two = storyOf(canvasElement, 'Credit notes in the same file')
     await userEvent.click(within(two).getByRole('button', { name: 'Tasks · 1' }))

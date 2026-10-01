@@ -283,6 +283,7 @@ export {
   type SessionHeaderProps,
   type SessionRenaming,
 } from './session/session.tsx'
+export { SessionRow, type SessionRowProps } from './session/session-row.tsx'
 
 /** A turn with an agent, drawn as it happens: what it thought, what it called, what it ran, and
  * what it changed. These are the blocks the thread of a Session with an agent is made of. */

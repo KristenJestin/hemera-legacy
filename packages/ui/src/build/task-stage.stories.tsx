@@ -1,7 +1,8 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
-import { expect, userEvent, within } from 'storybook/test'
+import { expect, screen, userEvent, waitFor, within } from 'storybook/test'
 
 import {
+  GETTING_READY,
   NOW,
   T1_DONE,
   T1_NOT_VERIFIED,
@@ -18,6 +19,18 @@ import { TaskStage } from './task-stage.tsx'
  * engine's short reason, their output folded under them — and the files it changed per
  * repository. The blocks a task that needs the user wears on top are stories of their own.
  */
+/**
+ * What a mark or an icon standing for a sentence says: its words, in the tooltip the pointer
+ * brings up on it, as well as to the screen reader.
+ */
+async function saysInItsTooltip(canvasElement: HTMLElement, words: string): Promise<void> {
+  const mark = within(canvasElement).getByRole('img', { name: words })
+  await userEvent.hover(mark)
+  await waitFor(() => expect(screen.getByRole('tooltip')).toHaveTextContent(words))
+  await userEvent.unhover(mark)
+  await waitFor(() => expect(screen.queryByRole('tooltip')).toBeNull())
+}
+
 const meta = {
   title: 'Blocks/Build/TaskStage',
   component: TaskStage,
@@ -42,7 +55,10 @@ type Story = StoryObj<typeof meta>
 export const Working: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    await expect(canvas.getByText('Working')).toBeVisible()
+    // Where it stands is a mark, its word the tooltip's and the screen reader's (#77): no badge.
+    // The head's mark, and the dot of the try being worked on.
+    await expect(canvas.getAllByRole('img', { name: 'Working' })).toHaveLength(2)
+    await expect(canvas.queryByText('Working')).toBeNull()
     await expect(canvas.getByText('Try 2 of 3 · for 28 min')).toBeVisible()
     const tries = within(canvas.getByRole('list', { name: 'Tries of T2' }))
     // Newest first.
@@ -50,7 +66,10 @@ export const Working: Story = {
       'Try 2 of 3',
       'Try 1 of 3',
     ])
-    await expect(canvas.getByText('The checks run once the agent says it finished.')).toBeVisible()
+    await expect(
+      canvas.getByRole('img', { name: 'The checks run once the agent says it finished' }),
+    ).toBeVisible()
+    await saysInItsTooltip(canvasElement, 'The checks run once the agent says it finished')
     // The older try is folded: its checks show once it is opened.
     await userEvent.click(canvas.getByRole('button', { name: /^Try 1 of 3/ }))
     await expect(await canvas.findByText('exited with 1')).toBeVisible()
@@ -68,7 +87,7 @@ export const Checking: Story = {
   args: { task: T3_CHECKING_TASK },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    await expect(canvas.getByText('Checking', { selector: 'span' })).toBeVisible()
+    await expect(canvas.getAllByRole('img', { name: 'Checking' })[0]).toBeVisible()
     await expect(canvas.getByRole('img', { name: 'Green' })).toBeVisible()
     await expect(canvas.getByRole('list', { name: 'Files changed in sources/api' })).toBeVisible()
   },
@@ -82,23 +101,30 @@ export const Done: Story = {
   args: { task: T1_DONE },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    await expect(canvas.getByText('took 9 min')).toBeVisible()
+    await expect(canvas.getByRole('img', { name: 'Done' })).toBeVisible()
+    await expect(canvas.getAllByText('took 9 min')[0]).toBeVisible()
     await expect(canvas.getAllByRole('img', { name: 'Green' })).toHaveLength(4)
     await expect(canvas.getByRole('img', { name: 'Skipped' })).toBeVisible()
     await expect(canvas.getByText('no changed file matched e2e/**/*.e2e.ts')).toBeVisible()
+    // A check that printed nothing says so by an icon, its words in its tooltip.
+    await userEvent.click(canvas.getByRole('button', { name: /^Skipped e2e written/ }))
+    await saysInItsTooltip(canvasElement, 'It printed nothing')
     const files = within(canvas.getByRole('list', { name: 'Files changed in sources/api' }))
     await expect(files.getAllByRole('listitem')).toHaveLength(3)
     await expect(files.getByText('+48')).toBeVisible()
   },
 }
 
-/** Done with no check configured: the badge says nothing judged it. */
+/** Done with no check configured: the warning's sign beside the done mark says nothing judged it. */
 export const DoneNotVerified: Story = {
   args: { task: T1_NOT_VERIFIED },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    await expect(canvas.getByText('Done, not verified')).toBeVisible()
-    await expect(canvas.getByText('No check is configured: nothing judged this try.')).toBeVisible()
+    await expect(canvas.getByRole('img', { name: 'Done, not verified' })).toBeVisible()
+    await expect(
+      canvas.getByRole('img', { name: 'No check is configured: nothing judged this try.' }),
+    ).toBeVisible()
+    await saysInItsTooltip(canvasElement, 'No check is configured: nothing judged this try.')
   },
 }
 
@@ -109,9 +135,15 @@ export const Waiting: Story = {
     const canvas = within(canvasElement)
     await expect(canvas.getByText('after T2, T3')).toBeVisible()
     await expect(
-      canvas.getByText('Yours to do: the agent does not work on it and no check runs.'),
+      canvas.getByRole('img', {
+        name: 'Yours to do: the agent does not work on it and no check runs',
+      }),
     ).toBeVisible()
     await expect(canvas.getByText('You')).toBeVisible()
+    await saysInItsTooltip(
+      canvasElement,
+      'Yours to do: the agent does not work on it and no check runs',
+    )
   },
 }
 
@@ -120,7 +152,27 @@ export const Skipped: Story = {
   args: { task: T3_SKIPPED },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    await expect(canvas.getByText(/^Skipped: Credit notes wait/)).toBeVisible()
-    await expect(canvas.getByText('The tasks that depend on it go on without it.')).toBeVisible()
+    await expect(canvas.getAllByRole('img', { name: 'Skipped' })[0]).toBeVisible()
+    await expect(canvas.getByText(/^Credit notes wait/)).toBeVisible()
+    await expect(
+      canvas.getByRole('img', { name: 'The tasks that depend on it go on without it' }),
+    ).toBeVisible()
+    await saysInItsTooltip(canvasElement, 'The tasks that depend on it go on without it')
+  },
+}
+
+/** Skipped by the user, its dependants left waiting: a lock, its words in its tooltip. */
+export const SkippedHoldingItsDependants: Story = {
+  args: { task: { ...T3_SKIPPED, skipUnblocks: false } },
+  play: async ({ canvasElement }) => {
+    await saysInItsTooltip(canvasElement, 'The tasks that depend on it wait')
+  },
+}
+
+/** The agent's task, not started yet: no try, the mark of what is to do, its words in its tooltip. */
+export const NotStarted: Story = {
+  args: { task: GETTING_READY.tasks[0]! },
+  play: async ({ canvasElement }) => {
+    await saysInItsTooltip(canvasElement, 'Not started yet')
   },
 }

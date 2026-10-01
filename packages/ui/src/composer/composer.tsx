@@ -365,8 +365,9 @@ export function Composer({
       {blocked}
       {/* The box and what is attached to its top edge: one stacking of their own, the notices
           under the box, so what rises from behind its edge is hidden there until it has. The
-          notices' room lets the pointer through to the row it stands over, but for the pill. */}
-      <div className="relative isolate">
+          notices' room lets the pointer through to the row it stands over, but for the pill. Its
+          top edge is where they float too, over a panel that covers the chat (#77). */}
+      <div className="notices-edge relative isolate">
         {notices !== undefined && (
           <div className="pointer-events-none absolute inset-x-0 bottom-full -z-10 flex justify-center">
             {notices}

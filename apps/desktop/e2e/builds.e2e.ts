@@ -242,7 +242,8 @@ describe('A human task waits for the user', () => {
 })
 
 describe('The Spec is read only in a build', () => {
-  it('opens the frozen revision beside the view, with no edit control', async () => {
+  it('opens the frozen revision beside its tasks, over the chat, with no edit control', async () => {
+    // "Spec" lays the build over the chat and reads the frozen revision beside its tasks (#77).
     await pressExactly('Spec')
     await awaits('read only')
     const panel = `section[aria-label="Spec ${KEY}"]`
@@ -257,8 +258,18 @@ describe('The Spec is read only in a build', () => {
     expect(await region(panel)).not.toContain('Mark ready')
     expect(await region(panel)).not.toContain('Rework')
 
+    expect(await region(`[role="region"][aria-label="Tasks of ${KEY}"]`)).toContain('T1')
+
+    // Closed, the Spec takes the build back beside the chat, where the next files find it.
     await pressIn(panel, 'Close the Spec')
-    expect(await region(panel)).toBe('')
+    await browser.waitUntil(async () => (await region(panel)) === '', {
+      timeout: 5000,
+      timeoutMsg: 'the frozen Spec never closed',
+    })
+    await browser.waitUntil(
+      async () => (await region('ol[aria-label^="Stories of"]')).includes(STORY.title),
+      { timeout: 5000, timeoutMsg: 'the build never came back beside the chat' },
+    )
   })
 })
 

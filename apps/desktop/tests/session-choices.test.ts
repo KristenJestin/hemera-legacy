@@ -23,6 +23,7 @@ import {
 } from '#engine/agents/fake.ts'
 import { IDLE_AFTER_MS } from '#engine/agents/pool.ts'
 import { AgentRuntime } from '#engine/agents/runtime.ts'
+import { ClassifierSettings } from '#engine/classifier/settings.ts'
 import { Journal, journalLayer } from '#engine/journal.ts'
 import { Specs } from '#engine/specs/specs.ts'
 import { application, aSession, machine, pause } from './application.ts'
@@ -84,6 +85,31 @@ const onDefaults = (script: Partial<FakeScript> = {}): FakeAgent => {
   })
 }
 
+const onDefaultPermission = (): FakeAgent => {
+  let mode = 'default'
+  const now = () => [
+    {
+      id: 'mode',
+      type: 'select' as const,
+      name: 'Permission mode',
+      category: 'mode' as const,
+      currentValue: mode,
+      options: [
+        { value: 'default', name: 'Default' },
+        { value: 'acceptEdits', name: 'Accept edits' },
+      ],
+    },
+  ]
+  return fakeAgent({
+    continues: true,
+    configOptions: now(),
+    onChoice: (choice) => {
+      if (choice.id === 'mode') mode = choice.value
+      return now()
+    },
+  })
+}
+
 /** The model and the effort a Session reads, as the composer at its foot draws them. */
 const standing = (sessionId: string) =>
   Effect.gen(function* () {
@@ -130,6 +156,29 @@ const chosen = Effect.gen(function* () {
 })
 
 describe("A Session's model and effort survive a restart of its agent", () => {
+  test('a remembered native permission mode is not replayed under Hemera Auto', async () => {
+    const first = onDefaultPermission()
+    const second = onDefaultPermission()
+    await twoStarts(
+      first,
+      second,
+    )(
+      Effect.gen(function* () {
+        const runtime = yield* AgentRuntime
+        const session = yield* aSession(workingDirectory)
+        yield* runtime.setOption(session.id, 'mode', 'acceptEdits')
+        yield* runtime.prompt(session.id, 'start')
+        expect(first.answers.choices).toContain('mode=acceptEdits')
+
+        yield* (yield* ClassifierSettings).select('hemera-auto')
+        yield* runtime.releaseWhenIdle(session.id)
+        yield* endedBy(first, false)
+        yield* runtime.prompt(session.id, 'continue')
+        expect(second.answers.choices).toEqual([])
+      }),
+    )
+  })
+
   test('an agent let go of after its idle time is started again on them', async () => {
     const first = onDefaults()
     const second = onDefaults()

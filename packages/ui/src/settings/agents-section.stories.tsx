@@ -72,7 +72,7 @@ updated 1 package and audited 2 packages in 3.812s`
 const meta = {
   title: 'Surfaces/Settings/Agents',
   component: AgentsSection,
-  tags: ['autodocs'],
+  tags: ['autodocs', 'updated'],
   parameters: { layout: 'padded' },
   args: {
     agents: [CLAUDE, CODEX, OPENCODE],
@@ -99,10 +99,17 @@ export const FoundNotInstalledAndNotSignedIn: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     await expect(canvas.getByText(/nothing is picked for you/)).toBeVisible()
-    await expect(canvas.getByText('Found')).toBeVisible()
-    await expect(canvas.getByText('Not installed')).toBeVisible()
-    await expect(canvas.getByText('Not signed in')).toBeVisible()
-    await expect(canvas.queryByText('no version reported')).not.toBeInTheDocument()
+    // Each standing is a dot: its word is the dot's name and its hover, never drawn.
+    for (const word of ['Found', 'Not installed', 'Not signed in']) {
+      const dot = canvas.getByRole('img', { name: word })
+      expect(dot).toBeVisible()
+      expect(dot).toHaveAttribute('title', word)
+      expect(canvas.queryByText(word)).not.toBeInTheDocument()
+    }
+    // Signed in or not is an icon, named yes or no.
+    await expect(canvas.getAllByRole('img', { name: 'yes' })).toHaveLength(1)
+    await expect(canvas.getAllByRole('img', { name: 'no' })).toHaveLength(2)
+    await expect(canvas.queryByRole('img', { name: 'No version reported' })).not.toBeInTheDocument()
   },
 }
 
@@ -118,8 +125,11 @@ export const UpdateAvailable: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     await expect(canvas.getByText('2.0.31')).toBeVisible()
-    await expect(canvas.getByText('Update available 2.0.35')).toBeVisible()
-    await expect(canvas.getByText('Up to date')).toBeVisible()
+    // An arrow says an update is waiting, beside the version it would go to.
+    await expect(canvas.getByRole('img', { name: 'Update available' })).toBeVisible()
+    await expect(canvas.getByText('2.0.35')).toBeVisible()
+    await expect(canvas.getByRole('img', { name: 'Up to date' })).toBeVisible()
+    await expect(canvas.queryByText(/Update available|Up to date/)).not.toBeInTheDocument()
     await expect(canvas.getByRole('button', { name: /update to 2\.0\.35/i })).toBeVisible()
     await expect(canvas.getAllByRole('button', { name: /update to/i })).toHaveLength(1)
     const gone = ['Published', 'Installed with', 'Bare mode'].filter(
@@ -137,7 +147,7 @@ export const UpdateAvailableWithNoKnownInstaller: Story = {
   args: { agents: [{ ...CLAUDE, installer: 'unknown' }] },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    await expect(canvas.getByText('Update available 2.0.35')).toBeVisible()
+    await expect(canvas.getByRole('img', { name: 'Update available' })).toBeVisible()
     await expect(canvas.queryByRole('button', { name: /update to/i })).not.toBeInTheDocument()
   },
 }
@@ -156,7 +166,7 @@ export const UpToDate: Story = {
   args: { agents: [{ ...CLAUDE, version: '2.0.35' }] },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    await expect(canvas.getByText('Up to date')).toBeVisible()
+    await expect(canvas.getByRole('img', { name: 'Up to date' })).toBeVisible()
     await expect(canvas.queryByRole('button', { name: /update to/i })).not.toBeInTheDocument()
     await expect(canvas.getAllByText('2.0.35')).toHaveLength(1)
   },
@@ -167,7 +177,8 @@ export const MissingSaysHowToGetIt: Story = {
   args: { agents: [OPENCODE] },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    await expect(canvas.getByText('not on this machine')).toBeVisible()
+    await expect(canvas.getByRole('img', { name: 'Not on this machine' })).toBeVisible()
+    await expect(canvas.queryByText(/not on this machine/i)).not.toBeInTheDocument()
     await expect(canvas.getByText('npm i -g opencode-ai')).toBeVisible()
     // Nothing is installed, so there is no version to compare and no line about updates.
     await expect(canvas.queryByText('Updates')).not.toBeInTheDocument()
@@ -189,8 +200,8 @@ export const AheadOfTheRegistry: Story = {
   },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    await expect(canvas.getAllByText('Up to date')).toHaveLength(2)
-    await expect(canvas.queryByText(/Update available/)).not.toBeInTheDocument()
+    await expect(canvas.getAllByRole('img', { name: 'Up to date' })).toHaveLength(2)
+    await expect(canvas.queryByRole('img', { name: 'Update available' })).not.toBeInTheDocument()
     await expect(canvas.queryByRole('button', { name: /update to/i })).not.toBeInTheDocument()
   },
 }
@@ -216,7 +227,7 @@ export const NoVersionReported: Story = {
   args: { agents: [{ ...CODEX, version: null }] },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    await expect(canvas.getByText('no version reported')).toBeVisible()
+    await expect(canvas.getByRole('img', { name: 'No version reported' })).toBeVisible()
     await expect(canvas.getByText('Latest 0.9.4')).toBeVisible()
     await expect(canvas.queryByRole('button', { name: /update to/i })).not.toBeInTheDocument()
   },
@@ -227,12 +238,12 @@ export const InstalledButNotSignedIn: Story = {
   args: { agents: [CODEX] },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    await expect(canvas.getByText('Not signed in')).toBeVisible()
+    await expect(canvas.getByRole('img', { name: 'Not signed in' })).toBeVisible()
     // The one command that would fix it, in the agent's own words (D5-21).
     await expect(canvas.getByText('codex login')).toBeVisible()
     // The version it is on, and the one line that says nothing newer was published.
     await expect(canvas.getByText('0.9.4')).toBeVisible()
-    await expect(canvas.getByText('Up to date')).toBeVisible()
+    await expect(canvas.getByRole('img', { name: 'Up to date' })).toBeVisible()
   },
 }
 
@@ -302,7 +313,7 @@ export const Checking: Story = {
   args: { checked: false, agents: UNANSWERED },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    await expect(canvas.getAllByText('Checking…')).toHaveLength(2)
+    await expect(canvas.getAllByRole('img', { name: 'Checking…' })).toHaveLength(2)
     await expect(canvas.getByText(/Asking each registry what it published/)).toBeVisible()
     await expect(canvas.queryByRole('button', { name: /update to/i })).not.toBeInTheDocument()
   },
@@ -316,8 +327,9 @@ export const CouldNotCheck: Story = {
   args: { checked: true, agents: UNANSWERED },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    await expect(canvas.getAllByText('Could not check')).toHaveLength(2)
-    await expect(canvas.queryByText('Up to date')).not.toBeInTheDocument()
+    await expect(canvas.getAllByRole('img', { name: 'Could not check' })).toHaveLength(2)
+    await expect(canvas.queryByText('Could not check')).not.toBeInTheDocument()
+    await expect(canvas.queryByRole('img', { name: 'Up to date' })).not.toBeInTheDocument()
     await expect(canvas.queryByRole('button', { name: /update to/i })).not.toBeInTheDocument()
   },
 }
@@ -336,6 +348,11 @@ export const RunsWithHemerasToolsOnly: Story = {
     ).toBeInTheDocument()
     const fold = canvas.getByRole('button', { name: "Claude Code: Runs with Hemera's tools only" })
     await expect(fold).toHaveAttribute('aria-expanded', 'false')
+    // The line is a shield and a dot; its words are the fold's name and the dot's hover.
+    await expect(fold.querySelector('[title="Runs with Hemera\'s tools only"]')).not.toBeNull()
+    for (const said of canvas.getAllByText(/Runs with Hemera's tools only/)) {
+      expect(said).toHaveClass('sr-only')
+    }
     await expect(canvas.queryByText(/~\/\.claude\.json/)).not.toBeInTheDocument()
 
     await userEvent.click(fold)

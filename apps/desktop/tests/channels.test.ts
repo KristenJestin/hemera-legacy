@@ -55,6 +55,10 @@ describe('Tout canal déclaré est branché', () => {
     expect(Object.keys(CHANNELS).filter((channel) => !known.has(channel))).toEqual([])
   })
 
+  test('Hemera Auto decisions reach the engine, relayed and not answered here', () => {
+    expect(wired().has('classifier.decisions')).toBe(true)
+  })
+
   test('the option a Home sets on the agent it is offered reaches the engine', () => {
     expect(wired().has('agents.offerSet')).toBe(true)
   })

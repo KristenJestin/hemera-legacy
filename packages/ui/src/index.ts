@@ -141,7 +141,30 @@ export {
   type ProfileFacts,
   type ProfileSectionProps,
   type SettingsProps,
+  type SettingsSection,
 } from './settings/settings.tsx'
+export {
+  DecisionsPanel,
+  DeveloperSection,
+  DiagnosticsPanel,
+  type DecisionBy,
+  type DecisionLine,
+  type DecisionVerdict,
+  type DecisionsPanelProps,
+  type DeveloperSectionProps,
+  type DiagnosticsPanelProps,
+} from './settings/developer-section.tsx'
+export {
+  ClassifierSection,
+  CLASSIFIER_OPTIONS,
+  EVALUATION_ENGINES,
+  type ClassifierMode,
+  type ClassifierOption,
+  type ClassifierSectionProps,
+  type CredentialStatus,
+  type EvaluationEngineOption,
+  type EvaluatorStatus,
+} from './settings/classifier-section.tsx'
 export {
   NotificationBell,
   NotificationList,
@@ -387,6 +410,7 @@ export {
   type BlockedBannerProps,
   type EffortChoice,
   type ModeChoice,
+  type MenuClassifier,
   type ModeSelectorProps,
   type ModelChoice,
   type OfferedAgent,

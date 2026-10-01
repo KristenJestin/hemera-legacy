@@ -331,6 +331,8 @@ interface PageProps {
   openOn?: SessionDetailsTab | undefined
   /** Whether nothing has been written yet: no thread, no turn running, nothing spent. */
   fresh?: boolean | undefined
+  entries?: ScrollerEntry[] | undefined
+  classifier?: Parameters<typeof AgentModelMenu>[0]['classifier']
 }
 
 /**
@@ -348,6 +350,8 @@ function Page({
   context = CONTEXT,
   openOn = 'activity',
   fresh = false,
+  entries = THREAD,
+  classifier,
 }: PageProps): ReactNode {
   // Whether the reader has the details open: the same state the renderer's page holds, and only
   // the head's button sets it.
@@ -417,7 +421,7 @@ function Page({
               <MessageScroller
                 className="flex-1"
                 label="The thread of this Session"
-                entries={THREAD}
+                entries={entries}
               />
             </>
           )}
@@ -486,6 +490,7 @@ function Page({
                   modes={MODES}
                   mode={mode}
                   onModeChange={setMode}
+                  classifier={classifier}
                 />
               }
             />
@@ -776,5 +781,44 @@ export const Empty: Story = {
       expect(within(document.body).queryByRole('dialog')).toBeNull()
     })
     await expect(canvas.getByRole('button', { name: 'Session details' })).toBeVisible()
+  },
+}
+
+/**
+ * The complete Session surface under Hemera Auto: what it settled leaves the same quiet lines a
+ * mode leaves, "ran without asking" or a refusal, and the model menu says who decides.
+ */
+function AutoPermissionPage(): ReactNode {
+  const entries: ScrollerEntry[] = [
+    ...THREAD.filter((entry) => entry.id !== 'permission' && entry.id !== 'decision'),
+    {
+      id: 'auto-allowed',
+      content: <DecisionSummary answer="ran without asking, Hemera Auto mode" at="10:42" />,
+    },
+    {
+      id: 'auto-refused',
+      content: <DecisionSummary answer="refused by Hemera Auto" at="10:43" refused />,
+    },
+  ]
+  return (
+    <Page
+      entries={entries}
+      classifier={{ mode: 'hemera-auto', status: 'unavailable', onOpenSettings: fn() }}
+    />
+  )
+}
+
+export const HemeraAutoPermissionJourney: Story = {
+  render: () => <AutoPermissionPage />,
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await expect(await canvas.findByText('ran without asking, Hemera Auto mode')).toBeVisible()
+    await expect(canvas.getByText('refused by Hemera Auto')).toBeVisible()
+    await userEvent.click(canvas.getByRole('button', { name: /Hemera Auto/ }))
+    await waitFor(() =>
+      expect(
+        within(document.body).getByText('Evaluator unavailable · calls ask you'),
+      ).toBeVisible(),
+    )
   },
 }

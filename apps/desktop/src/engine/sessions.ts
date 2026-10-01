@@ -33,11 +33,12 @@ import {
   sessionTitle,
   titleAfterMessage,
 } from '@hemera/core'
-import { and, desc, eq, getColumns, isNull, lt, sql } from 'drizzle-orm'
+import { and, desc, eq, getColumns, isNull, like, lt, or, sql } from 'drizzle-orm'
 import { Context, Effect, Layer } from 'effect'
 import { z } from 'zod'
 
 import { StderrSink } from './agents/supervisor.ts'
+import { redactRecord } from './classifier/redaction.ts'
 import { InvalidCursorError, PAGE, type NewEvent } from './journal.ts'
 import { UnknownProjectError } from './projects.ts'
 import {
@@ -205,6 +206,8 @@ export interface SessionsService {
     before?: number | undefined,
     limit?: number | undefined,
   ) => Effect.Effect<ThreadPage, Refusal | InvalidCursorError>
+  /** Only persisted human-origin words, for a classifier's authorization context (D59-05). */
+  readonly humanMessages: (id: string) => Effect.Effect<DomainSessionEntry[], DatabaseError>
   /**
    * Chooses the agent of a Session, and the model it is asked for.
    *
@@ -304,7 +307,22 @@ export interface SessionsService {
    * agent writing in a thread changes nothing about what the Session is.
    */
   readonly write: (id: string, entry: ThreadWrite) => Effect.Effect<Written, Refusal>
+  /**
+   * Hemera Auto's latest decisions across every Session, newest first, with the Session each
+   * was taken in (#294): the `permission_decision` entries that say who decided. Read only, and
+   * masked as a credential is masked before it leaves the machine.
+   */
+  readonly decisions: (limit?: number | undefined) => Effect.Effect<DecisionRead[], DatabaseError>
 }
+
+/** One of Hemera Auto's decisions, as `decisions` reads it. */
+export interface DecisionRead {
+  readonly entry: SessionEntry
+  readonly session: { readonly id: string; readonly title: string; readonly projectId: string }
+}
+
+/** How many decisions are read when no limit is asked for. */
+const DECISIONS = 100
 
 export class Sessions extends Context.Service<Sessions, SessionsService>()('Sessions') {}
 
@@ -1194,6 +1212,51 @@ export const sessionsLayer = Layer.effect(
               nextBefore: rows.length > held ? (page.at(-1)?.seq ?? null) : null,
             } satisfies ThreadPage
           }),
+        ),
+      humanMessages: (id) =>
+        withDatabase(
+          database
+            .select()
+            .from(sessionEntries)
+            .where(
+              and(
+                eq(sessionEntries.sessionId, id),
+                eq(sessionEntries.role, 'user'),
+                eq(sessionEntries.origin, 'live'),
+                or(eq(sessionEntries.kind, 'message'), eq(sessionEntries.kind, 'spec_answer')),
+              ),
+            )
+            .orderBy(desc(sessionEntries.seq))
+            .limit(6)
+            .pipe(
+              Effect.map((rows) => rows.map(entryOf).reverse()),
+              Effect.mapError(failed('reading the human context')),
+            ),
+        ),
+      decisions: (limit) =>
+        withDatabase(
+          database
+            .select({ entry: sessionEntries, title: sessions.title, projectId: sessions.projectId })
+            .from(sessionEntries)
+            .innerJoin(sessions, eq(sessions.id, sessionEntries.sessionId))
+            .where(
+              and(
+                eq(sessionEntries.kind, 'permission_decision'),
+                // Hemera Auto's decisions say who decided; the agent's own permissions do not.
+                like(sessionEntries.payload, '%"by":%'),
+              ),
+            )
+            .orderBy(desc(sessionEntries.createdAt), desc(sessionEntries.seq))
+            .limit(limit ?? DECISIONS)
+            .pipe(
+              Effect.map((rows) =>
+                rows.map(({ entry, title, projectId }): DecisionRead => ({
+                  entry: { ...entryOf(entry), payload: redactRecord(entry.payload) },
+                  session: { id: entry.sessionId, title, projectId },
+                })),
+              ),
+              Effect.mapError(failed('reading Hemera Auto decisions')),
+            ),
         ),
     } satisfies SessionsService
   }),

@@ -3,54 +3,43 @@ import { useState } from 'react'
 import { expect, within } from 'storybook/test'
 
 import { emulateReducedMotion } from '../../../.storybook/reduced-motion.ts'
-import { DeliverDialog, HeldDeliveryRun } from './delivery-run.tsx'
+import { HeldDelivery } from './delivery-run.tsx'
 import {
-  BITBUCKET_REPOSITORIES,
   type CliState,
   type DeliveryRules,
   type DeliveryRun,
   RULES,
-  RUN_ASKS,
+  RULES_PLAIN,
+  RUN_CHANGES,
   RUN_DELIVERED,
-  RUN_MISSING,
+  RUN_FAILED,
+  RUN_NEEDS_YOU,
   RUN_NOTHING,
-  RUN_REFUSED,
-  RUN_REVIEW,
+  RUN_RELEASE,
   RUN_RUNNING,
-  RUN_SIGNED_OUT,
+  RUN_START,
   atlasRun,
-  stepsOf,
+  configOf,
 } from './model.ts'
 import { SettingsPage } from './parts.tsx'
-import { PolicyVariant } from './variant-policy.tsx'
-import { PresetsVariant } from './variant-presets.tsx'
-import { StepsVariant } from './variant-steps.tsx'
+import { RulesEditor } from './rules-editor.tsx'
+import type { Editing } from './step-dialog.tsx'
 
 /**
- * Delivery rules per Project (design exploration of 30 September 2026, issue #76). Storybook only:
- * nothing here is wired, and no component of the design system changed for it.
+ * Delivery rules per Project, and the end of a build Session (design exploration of 30 September
+ * and 1 October 2026, issues #76, #288 and #290). Storybook only: nothing here is wired, and no
+ * component of the design system changed for it.
  *
- * Delivery is set per Project the way the creation of a Workspace is: a forge and a remote per
- * repository, then an ordered list of steps — push, pull request, team review, merge — each
- * starting by itself or on a click, and the closure of the Spec and the cleanup of the Workspace
- * last, always on a click (core.md, "External actions and delivery"; D8-14). GitHub through `gh`,
- * Bitbucket through `bkt`; GitLab is listed and not offered yet. A push is Git's own; the three
- * other steps are the forge's command line.
+ * Rules · — Project settings, Delivery. A preset sets the Project's base; the table reads the base
+ * down its first column and each repository across, in delivery order. A cell is where the step
+ * stands there: ✓ as the base, a dot and its own value when changed, a dashed circle when left
+ * out, + for a step of its own. A repository's head has a dot when it changes anything, and the
+ * repository it delivers after.
  *
- * Three ways of setting the rules:
- *
- * - A · Policy — one choice among the five policies, the fields of the one chosen growing under
- *   it; one "starts" for every step.
- * - B · Steps — the ordered list of the preparation: a row per step read as a sentence, its mark
- *   for how it starts, moved, edited in one dialog.
- * - C · Presets — the five policies as presets, and B's list folded under them; a list changed by
- *   hand is the sixth tile, Custom.
- *
- * Then the end of a build: Accept opens the plan of the delivery, as a Workspace's plan opens,
- * with this build's pull request filled from the templates; the steps run in order, repository by
- * repository, each with its dot. A refused push keeps Git's own words and offers Retry; the pull
- * request shows its link and a dot per reviewer. A forge command line that is missing or signed
- * out is said once, over the steps it holds, with the one way to fix it.
+ * End · — the build Session once its result is accepted, in the window: the head line holds what
+ * is being waited on (CI, a review, a release), the thread what happened, the notices pill what
+ * needs you (a click, a confirmation, a refusal, a signed-out forge, then Close and Clean up), and
+ * the build panel the delivery's view, each repository in delivery order.
  */
 
 const meta = {
@@ -66,39 +55,27 @@ export default meta
 
 type Story = StoryObj<typeof meta>
 
-type Variant = 'policy' | 'steps' | 'presets'
+// ——— The rules, in the Project settings ———
 
 /** The Delivery section of a Project, held so that everything changed lands. */
-function HeldSettings({
-  variant,
+function HeldRules({
   rules: start,
   cli = 'ready',
-  stepsOpen,
   dialogOn,
 }: {
-  variant: Variant
   rules: DeliveryRules
   cli?: CliState
-  stepsOpen?: boolean
-  dialogOn?: string
+  dialogOn?: Editing
 }) {
   const [rules, setRules] = useState(start)
-  const onChange = (next: Partial<DeliveryRules>) => setRules((was) => ({ ...was, ...next }))
   return (
     <SettingsPage>
-      {variant === 'policy' && <PolicyVariant rules={rules} cli={cli} onChange={onChange} />}
-      {variant === 'steps' && (
-        <StepsVariant rules={rules} cli={cli} onChange={onChange} dialogOn={dialogOn} />
-      )}
-      {variant === 'presets' && (
-        <PresetsVariant
-          rules={rules}
-          cli={cli}
-          onChange={onChange}
-          stepsOpen={stepsOpen}
-          dialogOn={dialogOn}
-        />
-      )}
+      <RulesEditor
+        rules={rules}
+        cli={cli}
+        onChange={(next) => setRules((was) => ({ ...was, ...next }))}
+        dialogOn={dialogOn}
+      />
     </SettingsPage>
   )
 }
@@ -106,209 +83,192 @@ function HeldSettings({
 function settings(
   name: string,
   description: string,
-  props: Parameters<typeof HeldSettings>[0],
+  props: Parameters<typeof HeldRules>[0],
 ): Story {
   return {
     name,
-    render: () => <HeldSettings {...props} />,
+    render: () => <HeldRules {...props} />,
     parameters: { docs: { description: { story: description } } },
   }
 }
 
-// ——— The settings: three variants ———
-
-export const PolicyReview = settings(
-  'A · Policy',
-  'A · Policy — one choice among five; the pull request and the review fields grow under it.',
-  { variant: 'policy', rules: RULES },
+export const RulesBase = settings(
+  'Rules · Base only',
+  'Merge chosen, no repository changes anything: every cell is ✓.',
+  { rules: RULES_PLAIN },
 )
 
-export const PolicyMerge = settings(
-  'A · Policy, merge',
-  'A · Policy — Merge chosen: every field of the chain is open, the merge method last.',
-  { variant: 'policy', rules: { ...RULES, steps: stepsOf('merge') } },
+export const RulesPerRepository = settings(
+  'Rules · Per repository',
+  'The kit pulls into main, adds a changeset and a release job by hand; the front comes after the kit, waits for its version, bumps it, adds screenshots and wants two approvals; the docs leave CI and review out.',
+  { rules: RULES },
 )
 
-export const PolicyNothing = settings(
-  'A · Policy, nothing',
-  'A · Policy — Nothing: the fields fold away, the closure stays.',
-  { variant: 'policy', rules: { ...RULES, steps: stepsOf('nothing') } },
+RulesPerRepository.play = async ({ canvasElement }) => {
+  await emulateReducedMotion()
+  const canvas = within(canvasElement)
+  await expect(canvas.getByRole('button', { name: 'front: Review, changed' })).toBeVisible()
+  await expect(canvas.getByRole('button', { name: 'docs: CI, left out' })).toBeVisible()
+  await expect(canvas.getByRole('button', { name: 'api: Push, as the base' })).toBeVisible()
+  await expect(canvas.getByRole('img', { name: 'After kit' })).toBeVisible()
+}
+
+const FRONT_REVIEW: Editing = {
+  scope: 'front',
+  step: {
+    id: 'review',
+    mode: 'auto',
+    config: { kind: 'review', reviewers: ['@acme/web', '@acme/design'], approvals: 2 },
+  },
+  added: false,
+  base: { id: 'review', mode: 'auto', config: configOf('review') },
+  after: null,
+}
+
+export const RulesChangedStep = settings(
+  'Rules · The front’s review',
+  'A base step opened on one repository: what differs from the base has a dot, and the way back.',
+  { rules: RULES, dialogOn: FRONT_REVIEW },
 )
 
-export const Steps = settings(
-  'B · Steps',
-  'B · Steps — the ordered list of the preparation: push, pull request, review, each with how it starts.',
-  { variant: 'steps', rules: RULES },
-)
-
-export const StepsDialog = settings(
-  'B · Steps, dialog',
-  'B · Steps — the dialog of a step: what it does, how it starts, and the fields of its kind.',
-  { variant: 'steps', rules: RULES, dialogOn: 'pull-request' },
-)
-
-export const Presets = settings(
-  'C · Presets',
-  'C · Presets — one press for a policy, the steps it amounts to folded under it.',
-  { variant: 'presets', rules: RULES },
-)
-
-export const PresetsOpen = settings(
-  'C · Presets, steps open',
-  'C · Presets — the steps unfolded: the same list as B.',
-  { variant: 'presets', rules: RULES, stepsOpen: true },
-)
-
-export const PresetsCustom = settings(
-  'C · Presets, custom',
-  'C · Presets — a list changed by hand (no review, a merge on a click) is the sixth tile, Custom.',
+export const RulesOwnStep = settings(
+  'Rules · The front’s release',
+  'A step of the front’s own: wait for the kit’s version on the registry, a tag, or your word.',
   {
-    variant: 'presets',
-    rules: {
-      ...RULES,
-      steps: [
-        { id: 'push', kind: 'push', mode: 'auto' },
-        { id: 'pull-request', kind: 'pull-request', mode: 'auto' },
-        { id: 'merge', kind: 'merge', mode: 'ask' },
-      ],
+    rules: RULES,
+    dialogOn: {
+      scope: 'front',
+      step: { id: 'release', mode: 'auto', config: configOf('release') },
+      added: false,
+      base: null,
+      after: null,
     },
   },
 )
 
-export const SettingsSignedOut = settings(
-  'Settings · gh signed out',
-  'The forge command line is signed out: said once in the Forge card, with the command that fixes it.',
-  { variant: 'presets', rules: RULES, cli: 'signed-out' },
-)
-
-export const SettingsMissing = settings(
-  'Settings · gh missing',
-  'The forge command line is not installed: said once, with where to get it.',
-  { variant: 'presets', rules: RULES, cli: 'missing' },
-)
-
-export const SettingsBitbucket = settings(
-  'Settings · Bitbucket',
-  'A Project on Bitbucket with one repository, through `bkt`.',
+export const RulesAddStep = settings(
+  'Rules · Add a step for the front',
+  'A new step for one repository: its kind, how it starts, after which step, and its fields.',
   {
-    variant: 'presets',
-    rules: {
-      ...RULES,
-      forge: 'bitbucket',
-      repositories: BITBUCKET_REPOSITORIES,
-      base: 'main',
-      reviewers: ['nadia'],
-      approvals: 1,
-      steps: stepsOf('pull-request'),
+    rules: RULES,
+    dialogOn: {
+      scope: 'front',
+      step: { id: 'front-new', mode: 'auto', config: configOf('agent') },
+      added: true,
+      base: null,
+      after: 'pull-request',
     },
   },
 )
 
-// ——— The end of a build ———
+export const RulesSignedOut = settings(
+  'Rules · gh signed out',
+  'The forge’s command line is signed out: said once in the Forge card, with the command that fixes it.',
+  { rules: RULES, cli: 'signed-out' },
+)
 
-function end(name: string, description: string, run: DeliveryRun, live = false): Story {
+// ——— The end of a build Session ———
+
+function end(
+  name: string,
+  description: string,
+  run: DeliveryRun,
+  options: { noticesOpen?: boolean; live?: boolean; planOpen?: boolean } = {},
+): Story {
   return {
     name,
-    render: () => <HeldDeliveryRun run={run} live={live} />,
+    render: () => (
+      <HeldDelivery
+        run={run}
+        live={options.live}
+        noticesOpen={options.noticesOpen}
+        rules={RULES}
+        planOpen={options.planOpen}
+      />
+    ),
     parameters: { docs: { description: { story: description } } },
   }
 }
 
-function PlanOpen() {
-  const [open, setOpen] = useState(true)
-  return (
-    <>
-      <HeldDeliveryRun run={atlasRun()} />
-      <DeliverDialog open={open} onOpenChange={setOpen} rules={RULES} onDeliver={() => undefined} />
-    </>
-  )
-}
-
-export const EndPlan: Story = {
-  name: 'End · Plan',
-  render: () => <PlanOpen />,
-  parameters: {
-    docs: {
-      description: {
-        story:
-          'Accept opens the plan: the branches, the steps with how each starts, and this build’s pull request filled from the templates.',
-      },
-    },
-  },
-}
+export const EndPlan = end(
+  'End · Plan',
+  'Accept opens the plan over the Session: each repository in order, its steps, and this build’s pull request.',
+  atlasRun(),
+  { planOpen: true },
+)
 
 export const EndRunning = end(
   'End · Running',
-  'The api is pushed and its pull request is being opened; the rest waits.',
+  'The kit’s CI and the api’s review are live chips on the head line; the front waits for the kit.',
   RUN_RUNNING,
+)
+
+EndRunning.play = async ({ canvasElement }) => {
+  await emulateReducedMotion()
+  const canvas = within(canvasElement)
+  await expect(canvas.getByLabelText('kit: CI, 3 of 5')).toBeVisible()
+  await expect(canvas.getByRole('region', { name: 'Delivery' })).toBeVisible()
+}
+
+export const EndRelease = end(
+  'End · Waiting for the kit’s version',
+  'The kit is merged; the front waits for @acme/kit to be published, then bumps it.',
+  RUN_RELEASE,
+)
+
+export const EndNeedsYou = end(
+  'End · Needs you',
+  'The notices hold the kit’s release job, done by hand, and the api’s merge, on a click.',
+  RUN_NEEDS_YOU,
+  { noticesOpen: true },
 )
 
 export const EndRefused = end(
   'End · Push refused',
-  'The front’s push is refused: Git’s own words under the line, and Retry. The api goes on.',
-  RUN_REFUSED,
+  'The api’s push is refused and gh is signed out: both in the notices, Git’s words in the thread and the panel.',
+  RUN_FAILED,
+  { noticesOpen: true },
 )
 
 EndRefused.play = async ({ canvasElement }) => {
   await emulateReducedMotion()
-  const canvas = within(canvasElement)
-  await expect(canvas.getByText(/\[rejected\]/)).toBeVisible()
-  await expect(canvas.getByRole('button', { name: /^Retry: push/ })).toBeEnabled()
-  await expect(canvas.getByRole('button', { name: 'Close' })).toBeDisabled()
+  const page = within(canvasElement.ownerDocument.body)
+  await expect(await page.findByRole('button', { name: 'Retry' })).toBeEnabled()
+  await expect(page.getByRole('button', { name: 'Check again' })).toBeEnabled()
+  await expect(page.queryByRole('button', { name: 'Close' })).toBeNull()
 }
 
-export const EndReview = end(
-  'End · In review',
-  'Both pull requests are open: a dot per reviewer; the front has changes requested.',
-  RUN_REVIEW,
+export const EndChanges = end(
+  'End · Changes requested',
+  'The front’s review asks for changes: one dot per reviewer in the panel, and the request in the notices.',
+  RUN_CHANGES,
+  { noticesOpen: true },
 )
 
 export const EndDelivered = end(
   'End · Delivered',
-  'Every step is done: Close and Clean up are offered, each its own click.',
+  'Every step is done: Close and Clean up wait in the notices, each its own click.',
   RUN_DELIVERED,
+  { noticesOpen: true },
 )
 
 EndDelivered.play = async ({ canvasElement }) => {
   await emulateReducedMotion()
-  const canvas = within(canvasElement)
-  await expect(canvas.getByRole('button', { name: 'Close' })).toBeEnabled()
-  await expect(canvas.getByRole('button', { name: 'Clean up' })).toBeEnabled()
+  const page = within(canvasElement.ownerDocument.body)
+  await expect(await page.findByRole('button', { name: 'Close' })).toBeEnabled()
+  await expect(page.getByRole('button', { name: 'Clean up' })).toBeEnabled()
 }
-
-export const EndClosed = end(
-  'End · Closed',
-  'The Spec closed and the Workspace cleaned up, each on its click.',
-  { ...RUN_DELIVERED, closed: true, cleaned: true },
-)
-
-export const EndOnClick = end(
-  'End · On a click',
-  'A Bitbucket Project whose merge waits for a click: the pull request is open, Merge is offered.',
-  RUN_ASKS,
-)
 
 export const EndNothing = end(
   'End · Nothing',
-  'A Project whose policy is nothing: no step, the closure offered at once.',
+  'A Project whose rules are nothing: the branch stays local, Close and Clean up are offered at once.',
   RUN_NOTHING,
-)
-
-export const EndSignedOut = end(
-  'End · gh signed out',
-  'gh is signed out: the pushes went through (Git), the forge steps wait; said once, with the fix.',
-  RUN_SIGNED_OUT,
-)
-
-export const EndMissing = end(
-  'End · gh missing',
-  'gh is not installed: said once, with where to get it.',
-  RUN_MISSING,
+  { noticesOpen: true },
 )
 
 export const EndLive = end(
   'End · Live',
-  'Played live: the api pushes and opens its pull request, the front’s push is refused; press Retry and the rest follows, reviews included.',
-  atlasRun(),
-  true,
+  'Played through: answer the notices — Retry the api’s push, Merge the kit, confirm its release job — and the rest follows.',
+  RUN_START,
+  { live: true },
 )

@@ -4,6 +4,7 @@ import { type ReactNode, useState } from 'react'
 import { expect, fn, screen, userEvent, waitFor, within } from 'storybook/test'
 
 import { useBeat } from '../../../.storybook/beat.ts'
+import { steadyClock } from '../../../.storybook/clock.ts'
 import { journeyOf, readEveryFrame } from '../../../.storybook/journey.ts'
 import { AT_ONCE, emulateReducedMotion, movesLess } from '../../../.storybook/reduced-motion.ts'
 import { IconChecklist, IconFlask, IconHammer, IconServer } from '../../icons.ts'
@@ -365,25 +366,32 @@ export const EndsInFailure: Story = {
     const chip = canvas.getByRole('button', { name: 'test, running' })
     const shaken = chip.closest('[data-live-chip]')
     await expect(shaken).not.toBeNull()
-    // Every frame's shift, kept as it is read, so the wait below sees the shake as it comes.
-    const shifts: number[] = []
-    const watch = readEveryFrame(() => {
-      const shift = shiftOf(shaken!)
-      shifts.push(shift)
-      return shift
-    })
-    await expect(await wipeOf(chip)).toHaveClass('bg-destructive-muted')
-    await waitFor(() => expect(chip.querySelector('[data-wipe]')).toBeNull())
-    await waitFor(() =>
-      expect(chip.querySelector('[data-end="failed"]')).toHaveClass('text-destructive'),
-    )
-    // One shake, both ways, and back to its place.
-    await waitFor(() => {
-      expect(Math.min(...shifts)).toBeLessThan(-1)
-      expect(Math.max(...shifts)).toBeGreaterThan(1)
-      expect(shiftOf(shaken!)).toBe(0)
-    })
-    watch.stop()
+    // The shake is four tenths of a second: on the page's clock, a busy runner's frames can step
+    // over both of its ways. On the play's own, every frame of it is drawn and read.
+    const clock = await steadyClock()
+    try {
+      // Every frame's shift, kept as it is read, so the wait below sees the shake as it comes.
+      const shifts: number[] = []
+      const watch = readEveryFrame(() => {
+        const shift = shiftOf(shaken!)
+        shifts.push(shift)
+        return shift
+      })
+      await expect(await wipeOf(chip)).toHaveClass('bg-destructive-muted')
+      await waitFor(() => expect(chip.querySelector('[data-wipe]')).toBeNull())
+      await waitFor(() =>
+        expect(chip.querySelector('[data-end="failed"]')).toHaveClass('text-destructive'),
+      )
+      // One shake, both ways, and back to its place.
+      await waitFor(() => {
+        expect(Math.min(...shifts)).toBeLessThan(-1)
+        expect(Math.max(...shifts)).toBeGreaterThan(1)
+        expect(shiftOf(shaken!)).toBe(0)
+      })
+      watch.stop()
+    } finally {
+      clock.stop()
+    }
   },
 }
 

@@ -122,26 +122,33 @@ interface Standing {
 }
 
 /**
+ * A mark or an icon standing where a sentence would (#77): its words for the tooltip and the screen
+ * reader, focusable so the keyboard reaches its tooltip as the pointer does. What it holds is
+ * decoration, hidden from the screen reader.
+ */
+export function SaidMark({ label, children }: { label: string; children: ReactNode }): ReactNode {
+  return (
+    <Tooltip label={label}>
+      <i role="img" tabIndex={0} aria-label={label} className={MARK}>
+        {children}
+      </i>
+    </Tooltip>
+  )
+}
+
+/**
  * A task's state as its mark, the words for the tooltip and the screen reader (#77): "Done, not
  * verified" adds the warning's sign beside the done mark, since nothing judged it.
  */
 export function TaskStateMark({ task }: { task: BuildTaskView }): ReactNode {
   const said = taskStateLabel(task)
   return (
-    <Tooltip label={said}>
-      <i
-        role="img"
-        // Focusable so the keyboard reaches its tooltip as the pointer does.
-        tabIndex={0}
-        aria-label={said}
-        className={MARK}
-      >
-        <StatusMark state={TASK_MARKS[task.state]} />
-        {said === 'Done, not verified' && (
-          <IconAlertTriangle size="sm" aria-hidden="true" className="text-warning" />
-        )}
-      </i>
-    </Tooltip>
+    <SaidMark label={said}>
+      <StatusMark state={TASK_MARKS[task.state]} />
+      {said === 'Done, not verified' && (
+        <IconAlertTriangle size="sm" aria-hidden="true" className="text-warning" />
+      )}
+    </SaidMark>
   )
 }
 
@@ -187,7 +194,9 @@ function CheckResult({ check, open }: { check: BuildCheckView; open: boolean }):
         <p className={RAN}>{check.line}</p>
         {check.outputTail === '' ? (
           <p className={NOTE}>
-            <IconCircleDashed size="sm" role="img" aria-label="It printed nothing" />
+            <SaidMark label="It printed nothing">
+              <IconCircleDashed size="sm" aria-hidden="true" />
+            </SaidMark>
           </p>
         ) : (
           <TerminalOutput
@@ -311,16 +320,19 @@ export function BuildTries({
                 {attempt.checks.length === 0 ? (
                   <p className={NOTE}>
                     {attempt.result === 'unverified' ? (
-                      <IconCircleDashed size="sm" role="img" aria-label={unchecked} />
+                      <SaidMark label={unchecked}>
+                        <IconCircleDashed size="sm" aria-hidden="true" />
+                      </SaidMark>
                     ) : (
-                      <StatusMark
-                        state="progress"
+                      <SaidMark
                         label={
                           attempt.endedAt === null
                             ? 'The checks run once the agent says it finished'
                             : 'No check has answered yet'
                         }
-                      />
+                      >
+                        <StatusMark state="progress" />
+                      </SaidMark>
                     )}
                   </p>
                 ) : (
@@ -385,22 +397,22 @@ export function TaskStage({ task, now, attention }: TaskStageProps): ReactNode {
 
       {task.state === 'skipped' && (
         <div className={SKIPPED}>
-          <StatusMark state="skipped" label="Skipped" />
+          <SaidMark label="Skipped">
+            <StatusMark state="skipped" />
+          </SaidMark>
           <p className="min-w-0 flex-1">{task.skipReason ?? 'no reason given'}</p>
           {task.skipUnblocks === true ? (
-            <IconPlayerSkipForward
-              size="sm"
-              role="img"
-              aria-label="The tasks that depend on it go on without it"
-              className="text-muted-foreground"
-            />
+            <SaidMark label="The tasks that depend on it go on without it">
+              <IconPlayerSkipForward
+                size="sm"
+                aria-hidden="true"
+                className="text-muted-foreground"
+              />
+            </SaidMark>
           ) : (
-            <IconLock
-              size="sm"
-              role="img"
-              aria-label="The tasks that depend on it wait"
-              className="text-muted-foreground"
-            />
+            <SaidMark label="The tasks that depend on it wait">
+              <IconLock size="sm" aria-hidden="true" className="text-muted-foreground" />
+            </SaidMark>
           )}
         </div>
       )}
@@ -429,13 +441,13 @@ export function TaskStage({ task, now, attention }: TaskStageProps): ReactNode {
             {task.attempts.length === 0 ? (
               <p className={NOTE}>
                 {human ? (
-                  <IconUser
-                    size="sm"
-                    role="img"
-                    aria-label="Yours to do: the agent does not work on it and no check runs"
-                  />
+                  <SaidMark label="Yours to do: the agent does not work on it and no check runs">
+                    <IconUser size="sm" aria-hidden="true" />
+                  </SaidMark>
                 ) : (
-                  <StatusMark state="todo" label="Not started yet" />
+                  <SaidMark label="Not started yet">
+                    <StatusMark state="todo" />
+                  </SaidMark>
                 )}
               </p>
             ) : (

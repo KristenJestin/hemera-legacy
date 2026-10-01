@@ -1,6 +1,6 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
 import type { ReactNode } from 'react'
-import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
+import { expect, fn, screen, userEvent, waitFor, within } from 'storybook/test'
 
 import { useBeat } from '../../.storybook/beat.ts'
 import { journeyOf, readEveryFrame } from '../../.storybook/journey.ts'
@@ -116,6 +116,16 @@ export const GettingReady: Story = {
       }),
     ).toBeVisible()
     await expect(canvas.queryByText(/no task starts before it/)).toBeNull()
+    const waiting = canvas.getByRole('img', {
+      name: "Waiting for the agent's approach: no task starts before it",
+    })
+    await userEvent.hover(waiting)
+    await waitFor(() =>
+      expect(screen.getByRole('tooltip')).toHaveTextContent(
+        "Waiting for the agent's approach: no task starts before it",
+      ),
+    )
+    await userEvent.unhover(waiting)
     await expect(storiesList(canvasElement).children).toHaveLength(2)
     await expect(
       within(storyOf(canvasElement, 'Export a month')).getByRole('img', { name: 'to do' }),
@@ -241,9 +251,16 @@ export const Blocked: Story = {
     const one = storyOf(canvasElement, 'Export a month')
     await userEvent.click(within(one).getByRole('button', { name: 'Tasks · 3' }))
     await userEvent.click(within(one).getByRole('button', { name: /^T4 / }))
-    await expect(
-      canvas.getByRole('img', { name: 'Waits on T3, which the agent says contradicts the Spec' }),
-    ).toBeVisible()
+    const waits = canvas.getByRole('img', {
+      name: 'Waits on T3, which the agent says contradicts the Spec',
+    })
+    await expect(waits).toBeVisible()
+    await userEvent.hover(waits)
+    await waitFor(() =>
+      expect(screen.getByRole('tooltip')).toHaveTextContent(
+        'Waits on T3, which the agent says contradicts the Spec',
+      ),
+    )
   },
 }
 
@@ -273,6 +290,22 @@ export const FinalChecks: Story = {
     await expect(
       within(storyOf(canvasElement, 'Export a month')).getByRole('img', { name: 'done' }),
     ).toBeVisible()
+  },
+}
+
+/**
+ * Every task done and no final try yet: the final checks' head wears the mark of what is to do,
+ * its words in its tooltip.
+ */
+export const FinalChecksNotRun: Story = {
+  args: { build: { ...FINAL_CHECKS, endAttempts: [] } },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const mark = canvas.getByRole('img', { name: 'They run once every task is done' })
+    await userEvent.hover(mark)
+    await waitFor(() =>
+      expect(screen.getByRole('tooltip')).toHaveTextContent('They run once every task is done'),
+    )
   },
 }
 

@@ -86,7 +86,7 @@ async function listed(projectId: string): Promise<Session[]> {
 }
 
 /** The whole thread of a Session, oldest first, read from the end backwards. */
-async function threadOf(sessionId: string): Promise<SessionEntry[]> {
+export async function threadOf(sessionId: string): Promise<SessionEntry[]> {
   const pages: SessionEntry[][] = []
   let before: number | undefined
   for (let page = 0; page < PAGES; page += 1) {

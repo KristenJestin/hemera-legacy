@@ -331,7 +331,7 @@ export const helpersLayer = Layer.effect(
                 .where(
                   and(eq(sessions.parentSessionId, row.id), eq(sessions.helperState, 'running')),
                 )
-                .returning({ id: sessions.id })
+                .returning({ id: sessions.id, title: sessions.title })
                 .pipe(Effect.mapError(failed('stopping the helpers of the helper')))
               if (tells && parent !== null) {
                 yield* transaction
@@ -354,6 +354,7 @@ export const helpersLayer = Layer.effect(
                   projectId: row.projectId,
                   sessionId: rootId,
                   payload: {
+                    name: row.title,
                     helper: row.helper,
                     task: row.helperTask,
                     result: result.slice(0, 400),
@@ -367,7 +368,7 @@ export const helpersLayer = Layer.effect(
                   author: 'hemera',
                   projectId: row.projectId,
                   sessionId: rootId,
-                  payload: { because: row.id },
+                  payload: { name: child.title, because: row.id, result: 'Its launcher ended.' },
                 })),
               ]
               const stopped: readonly string[] = children.map((child) => child.id)
@@ -507,7 +508,7 @@ export const helpersLayer = Layer.effect(
                 author: 'agent',
                 projectId: caller.projectId,
                 sessionId: rootId,
-                payload: { parent: callerId, helper: definition?.id ?? null, task, depth },
+                payload: { name, parent: callerId, helper: definition?.id ?? null, task, depth },
               }
               return { result: null, events: [launched] }
             }),

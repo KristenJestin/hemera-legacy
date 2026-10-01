@@ -33,6 +33,8 @@ export interface NoticeRowProps {
   name: string
   /** What it is about, cut to one line: the line to run, a command's name. */
   head: ReactNode
+  /** What stands before the head, unfolded or not: whose question it is. */
+  lead?: ReactNode
   /** Whether the head is a line to run, set in the terminal's letters. */
   mono?: boolean | undefined
   /** Whether the head is read whole, with nothing to unfold: a question. */
@@ -56,6 +58,8 @@ export interface NoticeRowProps {
 const ROW = 'flex min-w-0 flex-col'
 
 const FIRST = 'flex min-h-control-sm min-w-0 items-center gap-2'
+
+const LEAD = 'flex shrink-0'
 
 /** The head's one line, where the cut text and the title trade places. */
 const HEAD = 'relative min-w-0 flex-1'
@@ -83,6 +87,7 @@ const BODY = 'pt-1'
 export function NoticeRow({
   name,
   head,
+  lead,
   mono = false,
   wrap = false,
   title,
@@ -100,6 +105,7 @@ export function NoticeRow({
   return (
     <div role="group" aria-label={name} className={ROW}>
       <div className={FIRST}>
+        {lead !== undefined && <span className={LEAD}>{lead}</span>}
         {wrap ? (
           <div className={WRAPPED}>{head}</div>
         ) : (

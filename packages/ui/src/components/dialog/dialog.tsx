@@ -70,6 +70,8 @@ const FOOTER = 'flex shrink-0 justify-end gap-2 border-t border-border pt-4'
 
 export interface DialogProps {
   title: string
+  /** What stands before the title in the head: a face, a mark of whose dialog it is. */
+  lead?: ReactNode
   /** A line under the title saying what the dialog is for. */
   description?: string | undefined
   /** What the dialog holds, between its description and its actions. */
@@ -88,6 +90,7 @@ export interface DialogProps {
 
 export function Dialog({
   title,
+  lead,
   description,
   children,
   actions,
@@ -109,6 +112,7 @@ export function Dialog({
         <BaseDialog.Backdrop className={BACKDROP} />
         <BaseDialog.Popup className={cn(POPUP, SIZE[size])}>
           <div className="flex items-start gap-2">
+            {lead !== undefined && <div className="flex shrink-0 items-center">{lead}</div>}
             <div className="flex flex-col gap-1">
               <BaseDialog.Title className="text-lg font-medium">{title}</BaseDialog.Title>
               {description !== undefined && (

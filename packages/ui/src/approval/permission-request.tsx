@@ -2,6 +2,7 @@ import type { ReactNode } from 'react'
 
 import { type NoticeAnswer, NoticeRecord } from '../activity/notice-record.tsx'
 import { IconShield } from '../icons.ts'
+import { HelperAvatar } from '../session/helper-avatar.tsx'
 import { type NoticeAnswerButton, NoticeRow } from '../session/notice-row.tsx'
 import { RepositoryGlyph, type RunRepository } from '../session/run-place.tsx'
 import { DecisionSummary } from './decision-summary.tsx'
@@ -112,6 +113,12 @@ export interface PermissionRequestProps {
    * standing rule the reader cannot name is a rule they will be surprised by later.
    */
   scope?: string | undefined
+  /**
+   * The helper whose call asks, when it is not the Session's own agent (issue #77): its avatar leads
+   * the row, and the question is named as asked by it. A helper's view has nothing to answer with,
+   * so its questions wait among its build's notices.
+   */
+  helper?: string | undefined
   onDecide: (option: PermissionOption) => void
 }
 
@@ -144,6 +151,7 @@ export function PermissionRequest({
   diff,
   options,
   scope,
+  helper,
   onDecide,
 }: PermissionRequestProps): ReactNode {
   const named = (option: PermissionOption): NoticeAnswerButton => ({
@@ -171,10 +179,11 @@ export function PermissionRequest({
     ) : undefined
   return (
     <NoticeRow
-      name={`Permission for ${label ?? toolName}`}
+      name={`Permission for ${label ?? toolName}${helper === undefined ? '' : `, asked by ${helper}`}`}
       mono={what === undefined}
       // Unfolded, what the call is takes the head's place, and the whole line opens under it.
       title={what ?? 'Run command'}
+      lead={helper === undefined ? undefined : <HelperAvatar name={helper} />}
       head={
         what === undefined ? (
           (command ?? toolName)

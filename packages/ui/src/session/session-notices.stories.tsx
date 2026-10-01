@@ -35,7 +35,7 @@ import { TurnLine } from './turn-line.tsx'
 
 /** Something waiting, as the page would hand it: its kind and what it is about. */
 type Waiting =
-  | { id: string; kind: 'permission'; line: string }
+  | { id: string; kind: 'permission'; line: string; helper?: string }
   | { id: string; kind: 'proposal'; name: string; line: string; type: CommandType }
   | { id: string; kind: 'spec'; title: string }
   | { id: string; kind: 'question'; question: SpecQuestionView }
@@ -116,6 +116,7 @@ function Answer({
           parameters={[{ label: 'In', value: 'api', repository: { path: 'api', icon: 'server' } }]}
           command={waiting.line}
           options={ONCE}
+          helper={waiting.helper}
           onDecide={answer}
         />
       )
@@ -703,6 +704,33 @@ export const SetupChanges: Story = {
     ).toBeVisible()
     await expect(
       canvas.getByRole('button', { name: 'Waiting for your answer: Permissions 1' }),
+    ).toBeVisible()
+  },
+}
+
+/** A helper's question (issue #77): among its build's notices, its avatar leading the row. */
+export const HelperAsks: Story = {
+  args: {
+    waiting: [
+      ASK,
+      {
+        id: 'helper-ask',
+        kind: 'permission',
+        line: 'pnpm --filter @atlas/api vitest run src/reader.spec.ts',
+        helper: 'Write the reader',
+      },
+    ],
+    defaultOpen: true,
+  },
+  play: async () => {
+    const panel = await screen.findByRole('dialog', { name: 'Waiting for your answer' })
+    const asked = within(panel).getByRole('group', {
+      name: 'Permission for Run command, asked by Write the reader',
+    })
+    await expect(within(asked).getByText('W')).toBeVisible()
+    // The main agent's own question names nobody.
+    await expect(
+      within(panel).getByRole('group', { name: 'Permission for Run command' }),
     ).toBeVisible()
   },
 }

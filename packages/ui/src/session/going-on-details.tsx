@@ -6,10 +6,10 @@ import { Button } from '../components/button/button.tsx'
 import { Dialog } from '../components/dialog/dialog.tsx'
 import { StatusDot, type StatusTone } from '../components/status-dot/status-dot.tsx'
 import { IconBookmarkPlus, IconPlayerStop } from '../icons.ts'
-import { AgentText } from '../message/agent-text.tsx'
 import { ServiceUrl } from '../workspace/service-list.tsx'
 import { RepositoryGlyph } from './run-place.tsx'
 import {
+  type GoingOnAgent,
   type GoingOnItem,
   type GoingOnRun,
   type GoingOnShell,
@@ -19,11 +19,11 @@ import {
 
 /**
  * Everything about one thing that goes on in a Session, laid the same way whatever its kind
- * (issue #219): a grid of facts in the same order and words, then what it printed — or, for a
- * sub-agent, its steps and what it last said.
+ * (issue #219): a grid of facts in the same order and words, then what it printed. A helper has
+ * its own dialog, its live thread (`HelperDialog`).
  *
  * No badge. Whose it is, is a fact (Started); how it stands is the line's own dot, with beside it
- * only what the dot cannot say — since when it runs, what it exited with, how far a sub-agent got.
+ * only what the dot cannot say — since when it runs, what it exited with.
  * What a run's type adds joins the same grid: its type, a server's address, and that a one-off is
  * not in the catalogue, which the footer then offers to keep there.
  */
@@ -66,14 +66,16 @@ interface Fact {
   wide?: boolean | undefined
 }
 
-/** What stands beside the dot: since when it runs, what it exited with, how far it got. */
-function besideOf(item: GoingOnItem): string {
-  if (item.kind === 'agent') return `${String(item.steps.length)} steps`
+/** What a command's details are about: a run Hemera holds, or a line of the agent's shell. */
+export type CommandItem = Exclude<GoingOnItem, GoingOnAgent>
+
+/** What stands beside the dot: since when it runs, what it exited with. */
+function besideOf(item: CommandItem): string {
   if (goingOnStateOf(item) === 'running') return `since ${item.at}`
   return item.exitCode === undefined ? 'over' : `exit ${String(item.exitCode)}`
 }
 
-function StateFact({ item }: { item: GoingOnItem }): ReactNode {
+function StateFact({ item }: { item: CommandItem }): ReactNode {
   const state = goingOnStateOf(item)
   return (
     <span className="flex items-center gap-1.5">
@@ -98,15 +100,8 @@ function TypeFact({ run }: { run: GoingOnRun }): ReactNode {
 }
 
 /** Every kind's facts, in the same order and the same words wherever they apply. */
-function factsOf(item: GoingOnItem, onOpenUrl: (url: string) => void): Fact[] {
+function factsOf(item: CommandItem, onOpenUrl: (url: string) => void): Fact[] {
   const state: Fact = { term: 'State', value: <StateFact item={item} /> }
-  if (item.kind === 'agent') {
-    return [
-      { term: 'Task', value: item.task, wide: true },
-      { term: 'Started', value: `${item.at}, by the agent` },
-      state,
-    ]
-  }
   if (item.kind === 'shell') {
     return [
       { term: 'Line', value: item.command, mono: true },
@@ -183,9 +178,8 @@ interface Heading {
   description?: string | undefined
 }
 
-function headingOf(item: GoingOnItem): Heading {
+function headingOf(item: CommandItem): Heading {
   if (item.kind === 'run') return { title: item.name }
-  if (item.kind === 'agent') return { title: `Sub-agent · ${item.name}` }
   return {
     title: item.command,
     description: 'Hemera shows what the agent’s tool reported, and holds no process it could stop.',
@@ -193,7 +187,7 @@ function headingOf(item: GoingOnItem): Heading {
 }
 
 export interface GoingOnDetailsProps {
-  item: GoingOnItem
+  item: CommandItem
   /** Whether the dialog is open; drawn closed, it plays its way in and out. */
   open?: boolean | undefined
   onClose: () => void
@@ -246,24 +240,7 @@ export function GoingOnDetails({
             </div>
           ))}
         </dl>
-        {item.kind === 'agent' ? (
-          <>
-            <div className="flex flex-col gap-1">
-              <p className={TERM}>Steps</p>
-              <ol className="flex list-decimal flex-col gap-1 pl-5 text-sm">
-                {item.steps.map((step) => (
-                  <li key={step}>{step}</li>
-                ))}
-              </ol>
-            </div>
-            <div className="flex flex-col gap-1">
-              <p className={TERM}>Last said</p>
-              <AgentText text={item.last} />
-            </div>
-          </>
-        ) : (
-          <GoingOnOutput item={item} />
-        )}
+        <GoingOnOutput item={item} />
       </div>
     </Dialog>
   )

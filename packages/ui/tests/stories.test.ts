@@ -298,6 +298,7 @@ const NAMED_STATES = new Map([
       'Accepted',
       'Folded',
       'SameFrameAsTheSpec',
+      'OverTheChat',
       'FoldPushesTheChat',
       'SpecOpen',
       'SpecTakesTheViewsPlace',

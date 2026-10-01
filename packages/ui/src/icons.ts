@@ -27,6 +27,8 @@ import {
   IconArchiveFilled as TablerArchiveFilled,
   IconArrowDown as TablerArrowDown,
   IconArrowUp as TablerArrowUp,
+  IconArrowsDiagonal as TablerArrowsDiagonal,
+  IconArrowsDiagonalMinimize2 as TablerArrowsDiagonalMinimize2,
   IconAt as TablerAt,
   IconBell as TablerBell,
   IconBellFilled as TablerBellFilled,
@@ -234,6 +236,17 @@ export const IconArchive = catalogued(TablerArchiveFilled, TablerArchive, 'IconA
    both weights, which is what a line pointing somewhere looks like anyway. */
 export const IconArrowDown = catalogued(TablerArrowDown, TablerArrowDown, 'IconArrowDown')
 export const IconArrowUp = catalogued(TablerArrowUp, TablerArrowUp, 'IconArrowUp')
+/** A Session's panel laid over the chat, and taken back beside it (#77). */
+export const IconArrowsDiagonal = catalogued(
+  TablerArrowsDiagonal,
+  TablerArrowsDiagonal,
+  'IconArrowsDiagonal',
+)
+export const IconArrowsDiagonalMinimize2 = catalogued(
+  TablerArrowsDiagonalMinimize2,
+  TablerArrowsDiagonalMinimize2,
+  'IconArrowsDiagonalMinimize2',
+)
 export const IconAt = catalogued(TablerAt, TablerAt, 'IconAt')
 export const IconBell = catalogued(TablerBellFilled, TablerBell, 'IconBell')
 /* The flash of effort: what the composer marks the level an agent is asked to think at with.

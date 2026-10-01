@@ -52,6 +52,8 @@ export interface BuildPanelProps extends Omit<BuildViewProps, 'specOpen' | 'onTo
   spec: SpecView
   /** Whether the panel starts folded to its small frame, which it does not unless told. */
   defaultFolded?: boolean | undefined
+  /** Whether the open panel starts over the chat, for the stories that show it. */
+  defaultOver?: boolean | undefined
   /** Whether the frozen Spec is open in place of the view, for the story that shows it. */
   defaultSpecOpen?: boolean | undefined
 }
@@ -59,16 +61,18 @@ export interface BuildPanelProps extends Omit<BuildViewProps, 'specOpen' | 'onTo
 export function BuildPanel({
   spec,
   defaultFolded = false,
+  defaultOver = false,
   defaultSpecOpen = false,
   ...view
 }: BuildPanelProps): ReactNode {
   const { build } = view
   const [folded, setFolded] = useState(defaultFolded)
+  const [over, setOver] = useState(defaultOver)
   const [specOpen, setSpecOpen] = useState(defaultSpecOpen)
   const stage = useRef<HTMLDivElement>(null)
   const fade = useTransition(crossfade)
-  const over = build.phase === 'accepted' || build.phase === 'stopped'
-  const waits = !over && waitsOf(build)
+  const closed = build.phase === 'accepted' || build.phase === 'stopped'
+  const waits = !closed && waitsOf(build)
 
   // Where the keyboard goes once the Spec opened or closed: its Close, or back to what opened it.
   const toSpec = useRef<'open' | 'close' | null>(null)
@@ -97,7 +101,12 @@ export function BuildPanel({
       label={`Build ${build.specKey}`}
       name="build"
       folded={folded}
-      onFold={() => setFolded(true)}
+      onFold={() => {
+        setFolded(true)
+        setOver(false)
+      }}
+      over={over}
+      onOver={setOver}
       head={
         <h2 className={TITLE}>
           <IconHammer size="sm" aria-hidden="true" />

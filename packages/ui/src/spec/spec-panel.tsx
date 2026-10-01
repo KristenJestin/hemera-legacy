@@ -61,6 +61,8 @@ export interface SpecPanelProps {
   defaultReworkOpen?: boolean | undefined
   /** Whether the Spec starts folded to its small frame, which it does unless told otherwise. */
   defaultFolded?: boolean | undefined
+  /** Whether the open Spec starts over the chat, for the stories that show it. */
+  defaultOver?: boolean | undefined
   /** Told each time the panel folds or unfolds, by the hand or because the agent writes. */
   onFoldChange?: ((folded: boolean) => void) | undefined
   /**
@@ -86,6 +88,7 @@ export function SpecPanel({
   reader,
   defaultReworkOpen = false,
   defaultFolded = true,
+  defaultOver = false,
   onFoldChange,
   arrives = false,
   onMarkReady,
@@ -96,6 +99,7 @@ export function SpecPanel({
 }: SpecPanelProps): ReactNode {
   const startsFolded = arrives ? false : defaultFolded
   const [folded, setFolded] = useState(startsFolded)
+  const [over, setOver] = useState(defaultOver)
   const [reworking, setReworking] = useState(defaultReworkOpen)
   // Where the keyboard lands once the hand unfolded the Spec on a phase: that phase's heading.
   const [landing, setLanding] = useState<string | undefined>(undefined)
@@ -120,6 +124,8 @@ export function SpecPanel({
     onPhase.current = next ? null : phase
     isFolded.current = next
     setFolded(next)
+    // Folded, the Spec comes back beside the chat: it unfolds where it always does.
+    if (next) setOver(false)
     onFoldChange?.(next)
   }
 
@@ -180,6 +186,8 @@ export function SpecPanel({
         name="Spec"
         folded={folded}
         onFold={() => fold(true, true)}
+        over={over}
+        onOver={setOver}
         arrives={arrives}
         landing={landing}
         head={

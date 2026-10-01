@@ -23,7 +23,7 @@ import { Projects } from '#engine/projects.ts'
 import { Sessions } from '#engine/sessions.ts'
 import { SqliteClient } from '#engine/storage/database.ts'
 
-import { gated, threadOf } from './application.ts'
+import { gated, held, threadOf } from './application.ts'
 import {
   THREE,
   aReadySpec,
@@ -32,9 +32,10 @@ import {
   eventually,
   finished,
   launched,
+  scriptedChecks,
   statesOf,
 } from './build-harness.ts'
-import { type OpenWindow, openWindow } from './window.ts'
+import { type OpenWindow, openWindow, openWindowChecked } from './window.ts'
 
 let dataFolder: string
 let opened: OpenWindow | undefined
@@ -507,5 +508,119 @@ describe("A helper's permission questions go to its build's notices", () => {
     expect(helper.agent.answers.used[0]).toMatchObject({ tool: 'fs_read', isError: false })
     expect(helper.agent.answers.used[0]?.text).toContain('Read me.')
     expect(seen.helpers).toMatchObject([{ state: 'done', lastLine: 'Read it.' }])
+  })
+})
+
+/** `fs_write`, as an agent calls it. */
+const write = (path: string, key: string): FakeStep => ({
+  does: 'uses',
+  call: 'fs_write',
+  arguments: { path, content: `// ${key}\n`, key },
+})
+
+describe('Hemera keeps parallel helpers off each other’s files', () => {
+  test('a write to a file another running task holds is refused, naming that task', async () => {
+    // The main agent launches both, then is held before its own write: its note, two launches.
+    const mainGate = gated(3)
+    const main = buildAgent(
+      {
+        execute: (_labels, handed) =>
+          isResult(handed)
+            ? []
+            : [
+                launch('Write the exporter.', { task: 'T1' }),
+                launch('Write the reader.', { task: 'T2' }),
+                write('src/shared.ts', 'main'),
+              ],
+      },
+      { between: mainGate.between },
+    )
+    // The first helper writes its file, then holds; the second waits for the suite to let it go.
+    const first = aHelper([write('src/shared.ts', 'one'), { does: 'says', text: 'Done.' }], {
+      between: gated(1).between,
+    })
+    const second = held()
+    const other = aHelper(
+      [write('src/shared.ts', 'two'), write('src/reader.ts', 'three'), finished('T2')],
+      { between: () => second.promise },
+    )
+    opened = await openWindow(dataFolder, main.agent, first.agent, other.agent)
+    const seen = await opened.running(
+      Effect.gen(function* () {
+        const spec = yield* aReadySpec(dataFolder, THREE)
+        const sessionId = yield* launched(spec.specId, spec.workspaceId)
+        yield* eventually(
+          Effect.sync(() => first.agent.answers.used),
+          (used) => used.length === 1,
+        )
+        mainGate.carryOn()
+        yield* eventually(
+          Effect.sync(() => main.agent.answers.used),
+          (used) => used.length === 3,
+        )
+        second.carryOn()
+        yield* eventually(
+          Effect.sync(() => other.agent.answers.used),
+          (used) => used.length === 3,
+        )
+        return { view: yield* buildOf(sessionId), helpers: yield* helpersOf(sessionId) }
+      }),
+    )
+    expect(first.agent.answers.used[0]).toMatchObject({ tool: 'fs_write', isError: false })
+    // The second helper's task holds none of it: refused, naming the task that does.
+    expect(other.agent.answers.used[0]).toMatchObject({ tool: 'fs_write', isError: true })
+    expect(other.agent.answers.used[0]?.text).toContain('src/shared.ts is held by T1')
+    expect(other.agent.answers.used[1]).toMatchObject({ tool: 'fs_write', isError: false })
+    // The main agent is refused the same way: a running task holds the file.
+    expect(main.agent.answers.used[2]).toMatchObject({ tool: 'fs_write', isError: true })
+    expect(main.agent.answers.used[2]?.text).toContain('held by T1')
+    expect(statesOf(seen.view).T2).toBe('done')
+  })
+
+  test('a red check while another helper is in the middle of a try is provisional', async () => {
+    const runs: string[] = []
+    const checks = scriptedChecks((request) => {
+      if (request.when !== 'task' || request.label === null) return []
+      runs.push(request.label)
+      // Red the first time, while the other helper writes; green once it is done.
+      const red = runs.filter((one) => one === request.label).length === 1
+      return [{ name: 'test', verdict: red ? 'red' : 'green' }]
+    })
+    const main = orchestrator([
+      launch('Write the exporter.', { task: 'T1' }),
+      launch('Write the reader.', { task: 'T2' }),
+    ])
+    const first = aHelper([finished('T1'), { does: 'says', text: 'T1 is finished.' }])
+    const writing = held()
+    const other = aHelper([{ does: 'says', text: 'Still on the reader.' }], {
+      between: () => writing.promise,
+    })
+    opened = await openWindowChecked(dataFolder, checks, main.agent, first.agent, other.agent)
+    const seen = await opened.running(
+      Effect.gen(function* () {
+        const spec = yield* aReadySpec(dataFolder, THREE)
+        const sessionId = yield* launched(spec.specId, spec.workspaceId)
+        yield* eventually(
+          Effect.sync(() => runs),
+          (all) => all.includes('T1'),
+        )
+        // Red, but the other helper is in the middle of T2: nothing counts yet.
+        const during = yield* eventually(helpersOf(sessionId), (all) =>
+          all.some((one) => one.task === 'T1' && one.state === 'done'),
+        )
+        const checking = yield* buildOf(sessionId)
+        writing.carryOn()
+        const after = yield* eventually(buildOf(sessionId), (view) => statesOf(view).T1 === 'done')
+        return { during, checking, after }
+      }),
+    )
+    expect(statesOf(seen.checking).T1).toBe('checking')
+    expect(seen.checking.tasks[0]?.attempts.map((attempt) => attempt.result)).toEqual([null])
+    // Run again once no helper was in the middle of a try, and only that verdict counts.
+    expect(runs.filter((one) => one === 'T1')).toEqual(['T1', 'T1'])
+    expect(seen.after.tasks[0]?.attempts.map((attempt) => attempt.result)).toEqual(['green'])
+    expect(seen.after.tasks[0]?.attempts[0]?.checks.map((check) => check.verdict)).toEqual([
+      'green',
+    ])
   })
 })

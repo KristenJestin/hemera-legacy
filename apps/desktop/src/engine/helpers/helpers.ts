@@ -30,7 +30,13 @@ import { Context, Effect, Layer } from 'effect'
 import { BuildNotices, Builds } from '../build/build.ts'
 import type { NewEvent } from '../journal.ts'
 import { Database, type DatabaseError, type EngineTransaction } from '../storage/database.ts'
-import { projects, queuedResults, sessionEntries, sessions } from '../storage/schema.ts'
+import {
+  buildClaims,
+  projects,
+  queuedResults,
+  sessionEntries,
+  sessions,
+} from '../storage/schema.ts'
 import type { ParsedCall } from '../tools/arguments.ts'
 import { failed, now } from '../specs/snapshot.ts'
 import { mutate } from '../transaction.ts'
@@ -107,6 +113,12 @@ export interface HelpersService {
   readonly answeredIn: (sessionId: string) => Effect.Effect<string>
   /** At the engine's start: a helper the last engine left running failed, and its build is told. */
   readonly recover: Effect.Effect<void, DatabaseError>
+  /**
+   * A write of a Session through Hemera's tools to a path of the Workspace root (issue #77): null
+   * when it may go, or why not — the path is held by another task a helper is working on. The
+   * first write of a helper on a task to a free path claims it for that task.
+   */
+  readonly claim: (sessionId: string, path: string) => Effect.Effect<string | null>
 }
 
 export class Helpers extends Context.Service<Helpers, HelpersService>()('Helpers') {}
@@ -373,6 +385,8 @@ export const helpersLayer = Layer.effect(
           if (tells && parent !== null) yield* agent.handOver(parent.id)
         }
         notices.helpers(rootId)
+        // One fewer helper in the middle of a try: a red check held as provisional may count now.
+        if (drives) yield* builds.rejudge(rootId)
         return true
       })
 
@@ -631,6 +645,56 @@ export const helpersLayer = Layer.effect(
         Effect.gen(function* () {
           const row = yield* rowOf(sessionId)
           return row === null ? sessionId : yield* rootOf(row)
+        }),
+
+      claim: (sessionId, path) =>
+        Effect.gen(function* () {
+          const row = yield* rowOf(sessionId)
+          if (row === null) return null
+          const rootId = yield* rootOf(row)
+          const mine = row.helperState === 'running' ? row.helperTask : null
+          return yield* withDatabase(
+            mutate('claiming a file', (transaction) =>
+              Effect.gen(function* () {
+                if (mine !== null) {
+                  yield* transaction
+                    .insert(buildClaims)
+                    .values({
+                      id: crypto.randomUUID(),
+                      sessionId: rootId,
+                      task: mine,
+                      path,
+                      claimedAt: now(),
+                    })
+                    .onConflictDoNothing()
+                    .pipe(Effect.mapError(failed('claiming the file')))
+                }
+                const found = yield* transaction
+                  .select()
+                  .from(buildClaims)
+                  .where(and(eq(buildClaims.sessionId, rootId), eq(buildClaims.path, path)))
+                  .pipe(Effect.mapError(failed('reading the files held')))
+                const claim = found[0]
+                if (claim === undefined || claim.task === mine) return { result: null, events: [] }
+                // Held by a task no helper works on now: the claim waits for the next one.
+                const holder = (yield* under(transaction, rootId)).find(
+                  (one) => one.helperState === 'running' && one.helperTask === claim.task,
+                )
+                if (holder === undefined) return { result: null, events: [] }
+                return {
+                  result: `${path} is held by ${claim.task}, which ${holder.title} (helper ${holder.id}) is working on: leave it to that task`,
+                  events: [],
+                }
+              }),
+            ),
+          ).pipe(
+            // A safety net that cannot be read holds: the write waits for one that can.
+            Effect.catch(() =>
+              Effect.succeed(
+                `the files held in this build could not be read, so ${path} was not written`,
+              ),
+            ),
+          )
         }),
 
       recover: Effect.gen(function* () {

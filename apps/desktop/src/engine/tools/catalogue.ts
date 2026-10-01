@@ -35,7 +35,7 @@ import {
 import { and, eq } from 'drizzle-orm'
 import { Context, Deferred, Effect, Layer } from 'effect'
 import { mkdir, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises'
-import { basename, dirname, join, relative } from 'node:path'
+import { basename, dirname, isAbsolute, join, relative, sep } from 'node:path'
 
 import { HeldWords } from '../agents/held.ts'
 import { SessionModes, modeAsks } from '../agents/modes.ts'
@@ -692,6 +692,26 @@ export const toolCatalogueLayer: Layer.Layer<
       }).pipe(Effect.catch(() => Effect.void))
     }
 
+    /**
+     * Whether a write may go where it goes (issue #77): a path inside the root another task holds,
+     * while a helper works on it, is refused naming that task; a write outside the root, which the
+     * human allowed, holds nothing. Null when it may go.
+     */
+    const claimed = (asked: ToolCall, root: string, path: string) => {
+      const inside = relative(root, path)
+      if (inside.startsWith('..') || isAbsolute(inside)) return Effect.succeed(null)
+      return helpers.claim(asked.sessionId, inside.split(sep).join('/'))
+    }
+
+    /** A write refused because another task holds its file. */
+    const heldElsewhere = (reason: string): Answer => ({
+      ok: false,
+      refused: true,
+      summary: reason,
+      text: reason,
+      paths: [],
+    })
+
     /** Which run a call means, when it named none: the only one this Session has going. */
     /**
      * Which run a call is about: the one it names, else the only one running, else — when the
@@ -776,6 +796,8 @@ export const toolCatalogueLayer: Layer.Layer<
           case 'fs_write': {
             const settled = yield* allowed(asked, root, call.arguments.path)
             if (!settled.allowed) return failed(settled.reason, settled.reason)
+            const holder = yield* claimed(asked, root, settled.path)
+            if (holder !== null) return heldElsewhere(holder)
             const written = yield* attempt(() =>
               mkdir(dirname(settled.path), { recursive: true }).then(() =>
                 replaceFile(settled.path, call.arguments.content),
@@ -804,6 +826,8 @@ export const toolCatalogueLayer: Layer.Layer<
             }
             const settled = yield* allowed(asked, root, call.arguments.path)
             if (!settled.allowed) return failed(settled.reason, settled.reason)
+            const holder = yield* claimed(asked, root, settled.path)
+            if (holder !== null) return heldElsewhere(holder)
             const current = yield* attempt(() => readFile(settled.path, 'utf8'))
             if (!current.ok) {
               return failed(`could not read ${call.arguments.path}`, current.reason)

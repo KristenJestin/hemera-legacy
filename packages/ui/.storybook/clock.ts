@@ -60,10 +60,25 @@ export async function steadyClock(): Promise<Clock> {
     const animation = animate.apply(this, args)
     animation.pause()
     held.set(animation, at)
+    // motion starts what it hands the browser at the time of its own frame, which is this clock's
+    // and not the page's: on the page's, it would be long over, and finished on the spot.
+    Object.defineProperty(animation, 'startTime', {
+      configurable: true,
+      get: () => held.get(animation) ?? null,
+      set: (start: number) => {
+        if (held.has(animation)) held.set(animation, start)
+      },
+    })
     return animation
   }
   MotionGlobalConfig.useManualTiming = true
   frameData.timestamp = at
+
+  /** Lets an animation go: it is over, and its start is the page's again. */
+  const release = (animation: Animation): void => {
+    held.delete(animation)
+    Reflect.deleteProperty(animation, 'startTime')
+  }
 
   const tick = (page: number): void => {
     if (!running) return
@@ -72,12 +87,12 @@ export async function steadyClock(): Promise<Clock> {
     frameData.timestamp = at
     for (const [animation, from] of held) {
       if (animation.playState === 'idle' || animation.playState === 'finished') {
-        held.delete(animation)
+        release(animation)
         continue
       }
       const end = Number(animation.effect?.getComputedTiming().endTime ?? 0)
       if (at - from >= end) {
-        held.delete(animation)
+        release(animation)
         animation.finish()
         continue
       }
@@ -92,12 +107,12 @@ export async function steadyClock(): Promise<Clock> {
     if (!running) return
     running = false
     Element.prototype.animate = animate
-    MotionGlobalConfig.useManualTiming = manual
+    MotionGlobalConfig.useManualTiming = manual ?? false
     for (const [animation, from] of held) {
+      release(animation)
       animation.currentTime = at - from
       animation.play()
     }
-    held.clear()
   }
 
   const runner = await import('vitest/browser').catch(() => null)

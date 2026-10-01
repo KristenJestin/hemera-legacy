@@ -1,11 +1,14 @@
 import { cn } from 'cn'
+import { AnimatePresence, motion } from 'motion/react'
 import { type ReactNode, useId, useState } from 'react'
 
 import { Disclosure } from '../activity/disclosure.tsx'
 import { Button } from '../components/button/button.tsx'
 import { StatusDot, type StatusTone } from '../components/status-dot/status-dot.tsx'
+import { type MarkState, StatusMark } from '../components/status-mark/status-mark.tsx'
 import { IconCheck, IconFileDescription, IconPlayerPause, IconPlayerPlay } from '../icons.ts'
 import { AgentText } from '../message/agent-text.tsx'
+import { check, useTransition } from '../motion.ts'
 import type { StoryView } from '../spec/model.ts'
 import { BlockerBlock } from './blocker-block.tsx'
 import {
@@ -13,6 +16,7 @@ import {
   type BuildReproductionView,
   type BuildStoryProgress,
   type BuildStoryRow,
+  type BuildTaskState,
   type BuildTaskView,
   type BuildViewData,
   PHASE_LABELS,
@@ -115,7 +119,56 @@ const TASK_LABEL = 'shrink-0 font-mono text-xs'
 
 const TASK_TITLE = 'min-w-0 flex-1 truncate'
 
+/** A done task's title: quiet, and struck through. */
+const TASK_TITLE_DONE = 'min-w-0 flex-1 truncate text-muted-foreground'
+
+/** The stroke across a done task's title, drawn from its start. */
+const STRIKE = 'absolute inset-0 flex origin-left items-center'
+
 const TASK_META = 'shrink-0 text-xs text-muted-foreground'
+
+/** Where a task stands, as the mark that leads its line and changes in place with it (#77). */
+const TASK_MARKS: Record<BuildTaskState, MarkState> = {
+  waiting: 'todo',
+  ready: 'todo',
+  in_progress: 'progress',
+  checking: 'progress',
+  done: 'done',
+  yours: 'yours',
+  blocked: 'blocked',
+  skipped: 'skipped',
+}
+
+/**
+ * A task's title, struck through once it is done: the stroke draws itself across it on the beat
+ * the mark's check draws on.
+ */
+function TaskTitle({ done, children }: { done: boolean; children: ReactNode }): ReactNode {
+  const drawing = useTransition(check.draw)
+  return (
+    <span className={done ? TASK_TITLE_DONE : TASK_TITLE}>
+      <span className="relative">
+        {children}
+        <AnimatePresence initial={false}>
+          {done && (
+            <motion.span
+              key="strike"
+              aria-hidden="true"
+              className={STRIKE}
+              data-strike
+              initial={{ scaleX: 0 }}
+              animate={{ scaleX: 1 }}
+              exit={{ scaleX: 0 }}
+              transition={drawing}
+            >
+              <span className="w-full border-t border-current" />
+            </motion.span>
+          )}
+        </AnimatePresence>
+      </span>
+    </span>
+  )
+}
 
 /** Where a story stands, as the one dot its line wears. */
 const PROGRESS_TONES: Record<BuildStoryProgress, StatusTone> = {
@@ -434,9 +487,10 @@ export function BuildView({
               onOpenChange={(next) => choose(next ? one.id : null)}
               summary={
                 <span className={TASK}>
+                  <StatusMark state={TASK_MARKS[one.state]} />
                   <span className={TASK_LABEL}>{one.label}</span>
                   <span className="sr-only">{', '}</span>
-                  <span className={TASK_TITLE}>{one.title}</span>
+                  <TaskTitle done={one.state === 'done'}>{one.title}</TaskTitle>
                   <span className="sr-only">{', '}</span>
                   <span className={TASK_META}>
                     {`${taskStateLabel(one)}, ${taskTime(one, now)}`}

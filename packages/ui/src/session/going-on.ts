@@ -48,6 +48,9 @@ export interface GoingOnRun {
   environment: Readonly<Record<string, string>>
   /** When it was started. */
   at: string
+  /** When it was started and when it ended, in milliseconds, which its chip counts seconds from. */
+  startedAt: number
+  endedAt: number | null
 }
 
 export interface GoingOnShell {

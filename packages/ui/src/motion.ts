@@ -532,3 +532,36 @@ export const pop: Transition = {
   ease: easing,
   times: [0, 0.4, 0.75, 1],
 }
+
+/**
+ * The `wipe` kind: a tint crossing something once, from its left edge out through its right — a
+ * live chip saying how its run ended (issue #77).
+ *
+ * `WIPE.before` is the tint wholly out on the left, `WIPE.past` wholly out on the right, so it is
+ * gone once it has crossed and nothing tinted stays. A tween on the theme's `slow` beat that sets
+ * off and leaves at the same pace, rather than a spring: a spring's long settle leaves the last
+ * sliver of the tint standing on the right edge, where it reads as a coloured border.
+ */
+export const WIPE = {
+  before: { x: '-100%' },
+  past: { x: '100%' },
+} as const
+export const wipe: Transition = { duration: durations.slow, ease: [0.65, 0, 0.35, 1] }
+
+/**
+ * The `shake` kind: one short shake sideways, once, for what has just failed — a live chip whose
+ * run ended red (issue #77).
+ *
+ * Out to `SHAKE_REACH` pixels to the left, past its place to the right, a smaller step back, and
+ * still, on the theme's `slow` beat: read as a flinch, not as an alarm going on. A translation and
+ * nothing else, so nothing beside the chip moves with it. A tween and not a spring, because it
+ * passes through several values and a spring only goes to one. A reader asking for less movement
+ * is answered `instant` by `useTransition`, and the component then does not shake at all.
+ */
+export const SHAKE_REACH = 3
+export const SHAKE = { x: [0, -SHAKE_REACH, SHAKE_REACH, -SHAKE_REACH / 2, 0] }
+export const shake: Transition = {
+  duration: durations.slow,
+  ease: easing,
+  times: [0, 0.25, 0.5, 0.75, 1],
+}

@@ -14,6 +14,7 @@ import type { CommandRun } from '@hemera/ipc'
 import {
   glanceClosed,
   glanceOpened,
+  glancesLeft,
   leaveOnTheirOwn,
   marksOf,
   removeFromLine,
@@ -136,6 +137,26 @@ describe('An agent’s one-off leaves the line 30 s after it ends', () => {
     vi.advanceTimersByTime(ONE_OFF_LINGERS_MS + 5_000)
     expect(onTheLine(run)).toBe(true)
     glanceClosed(sessionId, 'r5')
+    expect(onTheLine(run)).toBe(false)
+  })
+
+  test('the page leaves with a glance open: it leaves at its 30 s all the same', () => {
+    const run = aRun('r9')
+    leaveOnTheirOwn(sessionId, endedAgentOneOffs([run]))
+    glanceOpened(sessionId, 'r9')
+    // The Session's page is closed with the glance open: no glance is left to close.
+    glancesLeft(sessionId)
+    vi.advanceTimersByTime(ONE_OFF_LINGERS_MS)
+    expect(onTheLine(run)).toBe(false)
+  })
+
+  test('the page leaves after its 30 s with a glance open: it leaves then', () => {
+    const run = aRun('r10')
+    leaveOnTheirOwn(sessionId, endedAgentOneOffs([run]))
+    glanceOpened(sessionId, 'r10')
+    vi.advanceTimersByTime(ONE_OFF_LINGERS_MS + 5_000)
+    expect(onTheLine(run)).toBe(true)
+    glancesLeft(sessionId)
     expect(onTheLine(run)).toBe(false)
   })
 

@@ -356,3 +356,26 @@ export const FailedRunTakesTheLead: Story = {
     await expect(journeyOf(watch.stop(), from, to)).not.toBe('jumped')
   },
 }
+
+/**
+ * A one-off's whole line is its name: on the line it ends in "…" at the chip's widest, its seconds
+ * whole beside it; its glance and its tooltip say all of it.
+ */
+export const LongName: Story = {
+  args: { items: GOING_ON.oneOff },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const chip = canvas.getByRole('button', { name: /^pnpm vitest run csv\.stream/ })
+    const name = within(chip).getByText('pnpm vitest run csv.stream --reporter verbose')
+    await expect(name.scrollWidth).toBeGreaterThan(name.clientWidth)
+    const time = chip.lastElementChild!
+    await expect(time).toHaveTextContent(/^\d+s$/)
+    await expect(time.getBoundingClientRect().right).toBeLessThanOrEqual(
+      chip.getBoundingClientRect().right,
+    )
+    await userEvent.hover(chip)
+    await expect(await screen.findByRole('tooltip')).toHaveTextContent(
+      'pnpm vitest run csv.stream --reporter verbose',
+    )
+  },
+}

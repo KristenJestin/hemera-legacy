@@ -10,7 +10,8 @@ import {
   movesLess,
   withinFrames,
 } from '../../../.storybook/reduced-motion.ts'
-import { IconFlask, IconServer } from '../../icons.ts'
+import { IconChecklist, IconFlask, IconHammer, IconServer } from '../../icons.ts'
+import { HelperAvatar } from '../../session/helper-avatar.tsx'
 import { Button } from '../button/button.tsx'
 import { TooltipProvider } from '../tooltip/tooltip.tsx'
 import { LiveChip, type LiveChipProps, type LiveState } from './live-chip.tsx'
@@ -443,5 +444,116 @@ export const Keyboard: Story = {
     await userEvent.keyboard('{Escape}')
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
     await expect(chip).toHaveFocus()
+  },
+}
+
+/** The helpers of the crowded row, whose names decide their letters. */
+const HELPERS = ['Reviewer', 'Researcher', 'Security reviewer of the CSV export and its ledger']
+
+/** A helper's chip: its avatar in the slot, among the others of the Session. */
+function helper(name: string): Pick<LiveChipProps, 'name' | 'icon'> {
+  return {
+    name,
+    icon: <HelperAvatar name={name} others={HELPERS.filter((other) => other !== name)} />,
+  }
+}
+
+/**
+ * A crowded row, as a busy Session's head has it: runs and helpers side by side, working and
+ * ended, long names among them. Every chip is one height and no wider than its widest; a long
+ * name ends in "…" and its seconds stand whole; a helper wears its letters where a run wears its
+ * type.
+ */
+export const Crowded: Story = {
+  parameters: { controls: { disable: true } },
+  render: (args) => (
+    <div className="flex w-menu-wide flex-wrap items-center gap-1.5">
+      <LiveChip {...args} name="dev" icon={<IconServer size="sm" aria-hidden="true" />} />
+      <LiveChip
+        {...args}
+        name="pnpm --filter @hemera/desktop exec vitest run tests/build-protocol.test.ts"
+        state="failed"
+        {...lasted(1204)}
+      />
+      <LiveChip
+        {...args}
+        name="build"
+        icon={<IconHammer size="sm" aria-hidden="true" />}
+        state="finished"
+        {...lasted(48)}
+      />
+      <LiveChip
+        {...args}
+        name="lint"
+        icon={<IconChecklist size="sm" aria-hidden="true" />}
+        state="stopped"
+        {...lasted(3)}
+      />
+      {HELPERS.map((name) => (
+        <LiveChip key={name} {...args} {...helper(name)} />
+      ))}
+    </div>
+  ),
+  play: async ({ canvasElement }) => {
+    const chips = within(canvasElement).getAllByRole('button')
+    await expect(chips).toHaveLength(7)
+    const heights = new Set(chips.map((chip) => chip.getBoundingClientRect().height))
+    await expect(heights.size).toBe(1)
+    const widest = Number.parseFloat(getComputedStyle(chips[0]!).maxWidth)
+    await expect(chips.filter((chip) => chip.getBoundingClientRect().width > widest)).toEqual([])
+    // The seconds of every chip stand whole, inside it.
+    const cut = chips.filter((chip) => {
+      const time = chip.lastElementChild!
+      return (
+        time.scrollWidth > time.clientWidth ||
+        time.getBoundingClientRect().right > chip.getBoundingClientRect().right
+      )
+    })
+    await expect(cut).toEqual([])
+    await expect(chips[1]).toHaveTextContent(/1204s$/)
+    // Helpers that share an initial wear two letters; the one alone with its own, one.
+    await expect(
+      chips.slice(4).map((chip) => chip.querySelector('.rounded-full')?.textContent),
+    ).toEqual(['RE', 'RE', 'S'])
+  },
+}
+
+/**
+ * A helper's chip and its glance: the step it is on and what it said last; × asks before it stops
+ * the helper, whose main agent is told and decides what comes next.
+ */
+export const Helper: Story = {
+  args: {
+    ...helper('Reviewer'),
+    step: 'Read src/export/csv.stream.ts',
+    children: (
+      <p className="text-sm">No row is written twice: the cursor advances after each flush.</p>
+    ),
+    defaultOpen: true,
+  },
+  play: async ({ args }) => {
+    const glance = await screen.findByRole('dialog', { name: 'Reviewer, running' })
+    await expect(within(glance).getByText('Read src/export/csv.stream.ts')).toBeVisible()
+    await userEvent.click(within(glance).getByRole('button', { name: 'Stop Reviewer' }))
+    const asked = await within(glance).findByRole('group', { name: 'Stop Reviewer?' })
+    await userEvent.click(within(asked).getByRole('button', { name: 'Stop' }))
+    await expect(args.onStop).toHaveBeenCalledTimes(1)
+  },
+}
+
+/** A helper that has finished gives its avatar up for the plain check, as a run gives its icon. */
+export const HelperEnds: Story = {
+  parameters: { controls: { disable: true } },
+  render: (args) => <Ending {...args} {...helper('Reviewer')} to="finished" />,
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const chip = canvas.getByRole('button', { name: 'Reviewer, running' })
+    await userEvent.click(canvas.getByRole('button', { name: 'End' }))
+    await expect(chip.querySelector('[data-wipe]')).toHaveClass('bg-success-muted')
+    await waitFor(() => expect(chip.querySelector('[data-end="finished"]')).not.toBeNull())
+    // The avatar keeps its room under the check, so nothing on the line moves.
+    const avatar = chip.querySelector('.rounded-full')!
+    await expect(avatar.getBoundingClientRect().width).toBeGreaterThan(0)
+    await waitFor(() => expect(getComputedStyle(avatar.parentElement!).filter).toBe('opacity(0)'))
   },
 }

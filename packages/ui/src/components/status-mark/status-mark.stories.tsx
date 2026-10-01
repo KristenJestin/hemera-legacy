@@ -284,3 +284,61 @@ export const ReducedMotion: Story = {
     )
   },
 }
+
+/**
+ * Every change in turn, one mark moving from each pose to the next in place: to do, in progress,
+ * waits for you, blocked, failed, in progress again, done, and skipped. It keeps its box the whole
+ * way, so nothing beside it moves.
+ */
+export const EveryChange: Story = {
+  parameters: { controls: { disable: true } },
+  render: () => (
+    <Moving
+      from={{ state: 'todo', label: 'Task' }}
+      steps={[
+        { state: 'progress', label: 'Task', press: 'Start' },
+        { state: 'yours', label: 'Task', press: 'Hand over' },
+        { state: 'blocked', label: 'Task', press: 'Block' },
+        { state: 'failed', label: 'Task', press: 'Fail' },
+        { state: 'progress', progress: 0.5, label: 'Task', press: 'Half' },
+        { state: 'done', label: 'Task', press: 'Finish' },
+        { state: 'skipped', label: 'Task', press: 'Skip' },
+      ]}
+    />
+  ),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const mark = canvas.getByRole('img', { name: 'Task' })
+    const box = mark.getBoundingClientRect()
+    const walk = [
+      { press: 'Start', state: 'progress', figure: 'ring' },
+      { press: 'Hand over', state: 'yours', figure: 'ring' },
+      { press: 'Block', state: 'blocked', figure: 'bar' },
+      { press: 'Fail', state: 'failed', figure: 'cross' },
+      { press: 'Half', state: 'progress', figure: 'ring' },
+      { press: 'Finish', state: 'done', figure: 'check' },
+      { press: 'Skip', state: 'skipped', figure: 'strike' },
+    ] as const
+    const reached: MarkState[] = []
+    const step = async (at: number): Promise<void> => {
+      const next = walk[at]
+      if (next === undefined) return
+      await userEvent.click(canvas.getByRole('button', { name: next.press }))
+      await waitFor(() => {
+        expect(mark).toHaveAttribute('data-mark', next.state)
+        expect(drawnOf(strokeOf(mark, next.figure))).toBeGreaterThan(0.25)
+      })
+      reached.push(next.state)
+      await step(at + 1)
+    }
+    await step(0)
+    await expect(reached).toEqual(walk.map((one) => one.state))
+    const now = mark.getBoundingClientRect()
+    await expect([now.width, now.height, now.left, now.top]).toEqual([
+      box.width,
+      box.height,
+      box.left,
+      box.top,
+    ])
+  },
+}

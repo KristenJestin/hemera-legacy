@@ -300,6 +300,7 @@ const NAMED_STATES = new Map([
       'SameFrameAsTheSpec',
       'OverTheChat',
       'HeadAboveThePanel',
+      'NoticesOverThePanel',
       'FoldPushesTheChat',
       'SpecOpen',
       'SpecTakesTheViewsPlace',

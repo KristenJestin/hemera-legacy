@@ -3,6 +3,8 @@ import { MotionConfig } from 'motion/react'
 import { type ReactNode, useState } from 'react'
 import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
 
+import { atRest } from '../../.storybook/at-rest.ts'
+
 import { HemeraToolCall } from '../activity/hemera-tool-call.tsx'
 import { PermissionRecord, PermissionRequest } from '../approval/permission-request.tsx'
 import { Composer } from '../composer/composer.tsx'
@@ -248,24 +250,19 @@ function Screen({
     onDismissBlocker,
     onOpenChat,
   }
+  // The one pill of the Session's notices: on the composer's edge, and over the panel while it
+  // covers the chat.
+  const notices = (
+    <SessionNotices groups={[...(asking ? [PERMISSIONS] : []), buildNotices(view, setSelected)]} />
+  )
   return (
     <TooltipProvider>
       <div className="flex h-screen min-h-0 flex-col bg-background text-foreground">
         <Head />
-        <SessionRow
-          chat={
-            <Chat
-              thread={thread}
-              notices={
-                <SessionNotices
-                  groups={[...(asking ? [PERMISSIONS] : []), buildNotices(view, setSelected)]}
-                />
-              }
-            />
-          }
-        >
+        <SessionRow chat={<Chat thread={thread} notices={notices} />}>
           <BuildPanel
             {...view}
+            notices={notices}
             selected={selected}
             onSelect={setSelected}
             spec={READY}
@@ -571,6 +568,38 @@ export const HeadAboveThePanel: Story = {
     await userEvent.keyboard('{Escape}')
     await waitFor(() => expect(page.queryByRole('dialog')).toBeNull())
     await waitFor(() => expect(details).toHaveFocus())
+  },
+}
+
+/**
+ * The notices over the panel (#77): with the build over the chat, the pill of what waits for the
+ * user floats over the panel's content at the very height it stood over the chat — on the
+ * composer's edge, which the panel covers — and never in a band of its own; it opens as it does
+ * there.
+ */
+export const NoticesOverThePanel: Story = {
+  args: { screen: 'blocked' },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const name = 'Waiting for your answer: Build 1'
+    const besideChat = await canvas.findByRole('button', { name })
+    await atRest(besideChat)
+    const height = besideChat.getBoundingClientRect().bottom
+    await userEvent.click(canvas.getByRole('button', { name: 'Over the chat' }))
+    const floated = canvasElement.querySelector<HTMLElement>('[data-notices-over]')
+    await waitFor(() => expect(floated).not.toBeNull())
+    const pill = await within(floated!).findByRole('button', { name })
+    await atRest(pill)
+    await expect(pill.getBoundingClientRect().bottom).toBeCloseTo(height, 0)
+    const panel = canvas
+      .getByRole('region', { name: 'Build ATL-7' })
+      .querySelector<HTMLElement>('[data-panel]')!
+    // Over the panel's body, which reaches the row's foot under it: no band was made for it.
+    await expect(panel.getBoundingClientRect().bottom).toBeGreaterThan(height)
+    await expect(canvas.getAllByRole('button', { name })).toHaveLength(1)
+    await userEvent.click(pill)
+    const blocker = await within(document.body).findByRole('group', { name: 'Blocker on T3' })
+    await waitFor(() => expect(blocker).toBeVisible())
   },
 }
 

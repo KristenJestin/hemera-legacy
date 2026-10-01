@@ -605,6 +605,20 @@
   );
 }
 
+/* The edge the Session's notices stand on: the composer's top, named so that they can stand on it
+   from elsewhere (#77). */
+@utility notices-edge {
+  anchor-name: --notices-edge;
+}
+
+/* Where the Session's notices float while the panel covers the chat (#77): on the composer's top
+   edge, under the panel, where they stand over the chat. Anchored to it by the browser, so nothing
+   is measured: the height is the one the theme laid the composer at. */
+@utility notices-over {
+  position-anchor: --notices-edge;
+  bottom: anchor(top);
+}
+
 /* The open panel, drawn from the same shares as its slot: out past its clip by its whole width
    and the margin it keeps at the content's edge folded, or not arrived yet, and in place open. One
    value moves both, so the panel and the chat it pushes never fall out of step and never overlap,

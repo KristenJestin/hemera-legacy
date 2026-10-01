@@ -39,7 +39,10 @@ import { CROSSFADE, instant, onTheBeat, slide, swap, useTransition } from '../mo
  * takes it back: arrows out while it is beside the chat, arrows in while it is over it. Over the
  * chat and not pushing it: the chat keeps its width under the panel and nothing in it reflows, so
  * what moves is the panel's own left edge, on the swap's spring. The chat is out of reach while it
- * is covered. Folding the panel takes it back beside the chat.
+ * is covered. Folding the panel takes it back beside the chat. The Session's notices come up over
+ * the panel while it covers the chat: floated over its content where they stood over the chat —
+ * on the composer's top edge, the same height from the row's foot — rising out of that edge and
+ * popping as they do there, and never in a band of their own.
  *
  * The caller hands the panel its head, its body, its foot and its small frame, and decides whether
  * it is folded and whether it is over the chat: the dock holds nothing of what it shows, only how
@@ -114,6 +117,14 @@ const HEAD = 'flex shrink-0 items-start gap-1.5 pt-1 pr-1.5 pb-2.5 pl-2.5'
 /** The end of the head: as tall as a control, so the chevron stays where the unfold's is. */
 const END = 'flex min-h-control-md shrink-0 items-center gap-1'
 
+/**
+ * The notices over a panel that covers the chat: across the row, their foot anchored on the
+ * composer's top edge under the panel — nothing measured — which clips them so they rise out of it
+ * as they rise out of the composer, and room above for their pop to be seen whole.
+ */
+const FLOAT =
+  'pointer-events-none absolute inset-x-0 notices-over flex justify-center overflow-hidden pt-4'
+
 /** The body: what the panel shows, taking the rest of its height. */
 const BODY =
   'relative flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border border-border bg-surface-body shadow-sm'
@@ -129,6 +140,11 @@ export interface PanelDockProps {
   body: ReactNode
   /** What stands on the rim under the body, when the panel has anything there. */
   foot?: ReactNode
+  /**
+   * The Session's notices, the chat's own, floated over the panel while it covers the chat, on the
+   * edge the chat's composer marks as theirs (`notices-edge`).
+   */
+  notices?: ReactNode
   /** The small frame the panel folds to, its unfold button marked `data-unfold`. */
   frame: ReactNode
   folded: boolean
@@ -156,6 +172,7 @@ export function PanelDock({
   head,
   body,
   foot,
+  notices,
   frame,
   folded,
   onFold,
@@ -358,6 +375,11 @@ export function PanelDock({
       >
         <div className="pointer-events-auto">{frame}</div>
       </motion.div>
+      {covers && notices !== undefined && (
+        <div className={FLOAT} data-notices-over>
+          {notices}
+        </div>
+      )}
     </section>
   )
 }

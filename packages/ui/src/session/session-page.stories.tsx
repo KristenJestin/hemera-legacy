@@ -8,6 +8,7 @@ import { MessageDaySeparator, MessageGroup } from '../message/message.tsx'
 import type { MessageLine, MessageState } from '../message/model.ts'
 import { MessageScroller, type ScrollerEntry } from '../message/scroller/scroller.tsx'
 import { ActivityRow, type ActivityRowProps } from './activity-row.tsx'
+import { SessionRow } from './session-row.tsx'
 import { SessionEmpty, SessionHeader } from './session.tsx'
 
 /**
@@ -101,7 +102,7 @@ function Page({
   return (
     <TooltipProvider>
       <div className="flex h-screen flex-col">
-        <div className="mx-auto flex w-full max-w-3xl flex-col gap-4 px-6 pt-6 pb-4">
+        <div className="shrink-0 px-6 pt-6 pb-1">
           <SessionHeader
             title={name}
 
@@ -110,33 +111,39 @@ function Page({
             archiveDisabled={empty}
           />
         </div>
-        {empty ? (
-          <div className="mx-auto flex min-h-0 w-full max-w-3xl flex-1 flex-col px-6">
-            <SessionEmpty />
-          </div>
-        ) : (
-          <MessageScroller
-            className="flex-1"
-            label="The thread of this Session"
-            entries={entries}
-          />
-        )}
-        <div className="mx-auto flex w-full max-w-3xl flex-col gap-2 px-6 pb-4">
-          {activity !== undefined && <ActivityRow {...activity} />}
-          <Composer
-            running={running}
-            onStop={fn()}
-            value={value}
-            onValueChange={setValue}
-            files={files}
-            onFilesChange={setFiles}
-            onSearchFiles={() => Promise.resolve([])}
-            variant="inline"
-            action="Send"
-            placeholder="Write to this Session…"
-            onSend={send}
-          />
-        </div>
+        <SessionRow
+          chat={
+            <>
+              {empty ? (
+                <div className="mx-auto flex min-h-0 w-full max-w-3xl flex-1 flex-col px-6">
+                  <SessionEmpty />
+                </div>
+              ) : (
+                <MessageScroller
+                  className="flex-1"
+                  label="The thread of this Session"
+                  entries={entries}
+                />
+              )}
+              <div className="mx-auto flex w-full max-w-3xl flex-col gap-2 px-6 pb-4">
+                {activity !== undefined && <ActivityRow {...activity} />}
+                <Composer
+                  running={running}
+                  onStop={fn()}
+                  value={value}
+                  onValueChange={setValue}
+                  files={files}
+                  onFilesChange={setFiles}
+                  onSearchFiles={() => Promise.resolve([])}
+                  variant="inline"
+                  action="Send"
+                  placeholder="Write to this Session…"
+                  onSend={send}
+                />
+              </div>
+            </>
+          }
+        />
       </div>
     </TooltipProvider>
   )

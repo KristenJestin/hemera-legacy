@@ -1,5 +1,4 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
-import { AnimatePresence, motion } from 'motion/react'
 import { type ReactNode, useState } from 'react'
 import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
 
@@ -8,7 +7,7 @@ import { TooltipProvider } from '../components/tooltip/tooltip.tsx'
 import { AgentText } from '../message/agent-text.tsx'
 import { MessageGroup } from '../message/message.tsx'
 import { MessageScroller, type ScrollerEntry } from '../message/scroller/scroller.tsx'
-import { crossfade, useTransition } from '../motion.ts'
+import { SessionRow } from '../session/session-row.tsx'
 import { SessionHeader } from '../session/session.tsx'
 import { CreateSpecProposal, type ProposalState } from './create-spec-proposal.tsx'
 import { MissionBrief } from './mission-brief.tsx'
@@ -186,15 +185,35 @@ function askId(id: string): string {
   return `ask-${id}`
 }
 
-/** The chat of a Session: its head, its thread and its composer. */
-function Chat({ title, thread }: { title: string; thread: ScrollerEntry[] }): ReactNode {
+/**
+ * The page of a Session: its head across the whole page, over the chat and the panel alike (#77),
+ * and under it the row the panel stands in beside the chat.
+ */
+function Page({
+  title,
+  thread,
+  children,
+}: {
+  title: string
+  thread: ScrollerEntry[]
+  children?: ReactNode
+}): ReactNode {
+  return (
+    <div className="flex h-screen min-h-0 flex-col bg-background text-foreground">
+      <div className="shrink-0 px-6 pt-6 pb-1">
+        <SessionHeader title={title} onRename={fn()} onArchive={fn()} onOpenDetails={fn()} />
+      </div>
+      <SessionRow chat={<Chat thread={thread} />}>{children}</SessionRow>
+    </div>
+  )
+}
+
+/** The chat of a Session: its thread and its composer. */
+function Chat({ thread }: { thread: ScrollerEntry[] }): ReactNode {
   const [value, setValue] = useState('')
   const [files, setFiles] = useState<string[]>([])
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-      <div className="flex w-full flex-col px-6 pt-6 pb-4">
-        <SessionHeader title={title} onRename={fn()} onArchive={fn()} />
-      </div>
       <MessageScroller className="flex-1" label="The thread of this Session" entries={thread} />
       <div className="flex w-full flex-col px-6 pb-4">
         <Composer
@@ -230,10 +249,12 @@ function DefineSession({
   shown,
   reworkOpen,
   folded,
+  over,
 }: {
   shown: Screen
   reworkOpen: boolean
   folded: boolean
+  over: boolean
 }): ReactNode {
   const { spec, reader, actions } = useLiveSpec(shown.spec, shown.reader, ON)
   const asked: ScrollerEntry[] = (shown.asks ?? []).flatMap((id) => {
@@ -251,30 +272,28 @@ function DefineSession({
     ]
   })
   return (
-    // The row is the container the unfolded panel's width is a share of.
-    <div className="@container flex h-screen min-h-0 bg-background text-foreground">
-      <Chat title={shown.title} thread={[...shown.thread, ...asked]} />
+    <Page title={shown.title} thread={[...shown.thread, ...asked]}>
       <SpecPanel
         spec={spec}
         reader={reader}
         defaultReworkOpen={reworkOpen}
         defaultFolded={folded}
+        defaultOver={over}
         onMarkReady={actions.onMarkReady}
         onRework={actions.onRework}
         onPickRevision={actions.onPickRevision}
         onTakeOver={actions.onTakeOver}
       />
-    </div>
+    </Page>
   )
 }
 
 /**
  * A `free` Session whose agent proposes a Spec: on `Create` the Session becomes `define`, the
- * Spec exists, and the panel arrives beside the thread — a cross-fade, nothing travelling — while
- * the thread stays exactly as it was.
+ * Spec exists, and the panel arrives beside the thread, opening from nothing (#130), while the
+ * thread stays exactly as it was: it is the row's first child either way (#77).
  */
 function FreeThenDefine(): ReactNode {
-  const transition = useTransition(crossfade)
   const [state, setState] = useState<ProposalState>('proposed')
   const [created, setCreated] = useState<SpecView | null>(null)
   const thread: ScrollerEntry[] = [
@@ -301,28 +320,18 @@ function FreeThenDefine(): ReactNode {
     },
   ]
   return (
-    <div className="@container flex h-screen min-h-0 bg-background text-foreground">
-      <Chat title="Invoices for the accountants" thread={thread} />
-      <AnimatePresence initial={false}>
-        {created !== null && (
-          <motion.div
-            key="panel"
-            className="flex shrink-0"
-            initial={{ filter: 'opacity(0)' }}
-            animate={{ filter: 'opacity(1)' }}
-            transition={transition}
-          >
-            <SpecPanel
-              spec={created}
-              onMarkReady={fn()}
-              onRework={fn()}
-              onPickRevision={fn()}
-              onTakeOver={fn()}
-            />
-          </motion.div>
-        )}
-      </AnimatePresence>
-    </div>
+    <Page title="Invoices for the accountants" thread={thread}>
+      {created !== null && (
+        <SpecPanel
+          spec={created}
+          arrives
+          onMarkReady={fn()}
+          onRework={fn()}
+          onPickRevision={fn()}
+          onTakeOver={fn()}
+        />
+      )}
+    </Page>
   )
 }
 
@@ -331,18 +340,26 @@ function Screens({
   screen,
   reworkOpen = false,
   folded = true,
+  over = false,
 }: {
   screen: ScreenName
   reworkOpen?: boolean
   /** Whether the Spec opens folded to its small frame, as a Session opens it. */
   folded?: boolean
+  /** Whether the open Spec lies over the chat. */
+  over?: boolean
 }): ReactNode {
   return (
     <TooltipProvider>
       {screen === 'fromFree' ? (
         <FreeThenDefine />
       ) : (
-        <DefineSession shown={SCREENS[screen]} reworkOpen={reworkOpen} folded={folded} />
+        <DefineSession
+          shown={SCREENS[screen]}
+          reworkOpen={reworkOpen}
+          folded={folded}
+          over={over}
+        />
       )}
     </TooltipProvider>
   )
@@ -365,6 +382,7 @@ const meta = {
       control: 'boolean',
       description: 'Whether the Spec opens folded to its small frame.',
     },
+    over: { control: 'boolean', description: 'Whether the open Spec lies over the chat.' },
   },
 } satisfies Meta<typeof Screens>
 
@@ -386,6 +404,22 @@ async function unfold(canvasElement: HTMLElement): Promise<void> {
   const canvas = within(canvasElement)
   await userEvent.click(canvas.getByRole('button', { name: 'Unfold the Spec' }))
   await canvas.findByRole('region', { name: 'Contents of ATL-7' })
+}
+
+/**
+ * The one text of the page in reach: the panel keeps both its views drawn, beside the chat and over
+ * it, the one not shown out of reach.
+ */
+function textInReach(
+  canvasElement: HTMLElement,
+  text: string | RegExp,
+  selector?: string,
+): HTMLElement {
+  const found = within(canvasElement)
+    .getAllByText(text, selector === undefined ? undefined : { selector })
+    .filter((one) => one.closest('[inert]') === null)
+  if (found.length !== 1) throw new Error(`${String(found.length)} "${String(text)}" in reach`)
+  return found[0]!
 }
 
 /** The heading of a phase in the open panel's column, named with where the phase stands. */
@@ -434,7 +468,7 @@ export const MidPlanNotReadyYet: Story = {
     await expect(canvas.queryByRole('alert')).toBeNull()
     const column = canvas.getByRole('region', { name: 'Contents of ATL-7' })
     await expect(within(column).getByRole('heading', { name: /^Tasks · 0/ })).toBeVisible()
-    await expect(canvas.getByText(/Tasks are written in Decompose/)).toBeVisible()
+    await expect(textInReach(canvasElement, /Tasks are written in Decompose/)).toBeVisible()
   },
 }
 
@@ -469,7 +503,7 @@ export const Bug: Story = {
 
 /**
  * Screen 3 · from a free Session: the agent proposes the Spec in the thread, `Create` makes the
- * Session `define`, and the Spec arrives beside the thread, folded to its small frame, while the
+ * Session `define`, and the Spec arrives beside the thread, opening from nothing, while the
  * thread stays.
  */
 export const FromAFreeSession: Story = {
@@ -477,13 +511,40 @@ export const FromAFreeSession: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     await expect(canvas.queryByRole('region', { name: 'Spec ATL-7' })).toBeNull()
+    const thread = canvas.getByRole('log', { name: 'The thread of this Session' })
     await userEvent.click(canvas.getByRole('button', { name: 'Start' }))
     await expect(await canvas.findByRole('region', { name: 'Spec ATL-7' })).toBeVisible()
-    await expect(canvas.getByRole('button', { name: 'Unfold the Spec' })).toBeVisible()
+    await waitFor(() => expect(canvas.getByRole('button', { name: 'Fold the Spec' })).toBeVisible())
+    // The thread is the one that was there: nothing of it was drawn again.
+    await expect(canvas.getByRole('log', { name: 'The thread of this Session' })).toBe(thread)
     // The head names the Project and nothing more: the mission is the panel (issue #149).
     await expect(canvas.queryByText(/DEFINE ·/)).toBeNull()
-    await expect(canvas.getByRole('status')).toHaveTextContent('Created ATL-7')
+    await expect(within(thread).getByRole('status')).toHaveTextContent('Created ATL-7')
     await expect(canvas.getByText(/Shall I write it down as a Spec/)).toBeVisible()
+  },
+}
+
+/**
+ * The head across the whole page (#77): above the chat and the panel alike, so with the Spec over
+ * the chat the head's ⓘ and `⋯` are still there to be pressed, and nothing of the panel covers
+ * them.
+ */
+export const HeadAcrossThePage: Story = {
+  args: { folded: false, over: true },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const details = canvas.getByRole('button', { name: 'Session details' })
+    const panel = canvas
+      .getByRole('region', { name: 'Spec ATL-7' })
+      .querySelector<HTMLElement>('[data-panel]')!
+    await expect(panel).toHaveAttribute('data-over')
+    const head = details.getBoundingClientRect()
+    const drawn = panel.getBoundingClientRect()
+    // Above the panel, and over it rather than over the chat alone: the head spans the page.
+    await expect(head.bottom).toBeLessThanOrEqual(drawn.top)
+    await expect(head.left).toBeGreaterThan(drawn.left)
+    await expect(details.closest('[inert]')).toBeNull()
+    await expect(canvas.getByRole('button', { name: 'Commands for Spec CSV' })).toBeVisible()
   },
 }
 
@@ -529,7 +590,7 @@ export const LastQuestionAnswered: Story = {
       'Negative rows, marked by a type column.{Enter}',
     )
     await expect(
-      canvas.getByText('Negative rows, marked by a type column.', { selector: 'p' }),
+      textInReach(canvasElement, 'Negative rows, marked by a type column.', 'p'),
     ).toBeVisible()
     const mark = await canvas.findByRole('button', { name: 'Mark ready' })
     mark.focus()
@@ -596,7 +657,7 @@ export const Reader: Story = {
   args: { screen: 'reader', folded: false },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    await expect(canvas.getByText('« Spec CSV »')).toBeVisible()
+    await expect(textInReach(canvasElement, '« Spec CSV »')).toBeVisible()
     await expect(canvas.getByRole('button', { name: 'Take over' })).toBeVisible()
     await expect(phaseHeading(canvasElement, /^Decompose phase/)).toBeVisible()
   },
@@ -647,8 +708,8 @@ function sideways(canvasElement: HTMLElement): number {
 async function neverSideways(canvasElement: HTMLElement): Promise<void> {
   const canvas = within(canvasElement)
   const dock = canvas.getByRole('region', { name: 'Spec ATL-7' })
-  const frame = dock.querySelector<HTMLElement>('[data-spec-frame]')!
-  const panel = dock.querySelector<HTMLElement>('[data-spec-panel]')!
+  const frame = dock.querySelector<HTMLElement>('[data-panel-frame]')!
+  const panel = dock.querySelector<HTMLElement>('[data-panel]')!
   await expect(sideways(canvasElement)).toBe(0)
   await unfold(canvasElement)
   await waitFor(() => expect(getComputedStyle(frame).filter).toBe('opacity(0)'))

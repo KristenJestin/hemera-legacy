@@ -31,7 +31,6 @@ const meta = {
     revisions: [{ number: 1, detail: 'Latest · draft' }],
     onPickRevision: fn(),
     onRework: fn(),
-    onFold: fn(),
   },
   argTypes: {
     specKey: { control: 'text', description: 'The human key, `PREFIX-n`.' },
@@ -46,7 +45,6 @@ const meta = {
     superseded: { control: 'boolean', description: 'Whether an older revision is shown.' },
     onPickRevision: { description: 'Shows another revision.' },
     onRework: { description: 'Opens the rework of a `ready` Spec.' },
-    onFold: { description: 'Folds the panel to its band.' },
   },
 } satisfies Meta<typeof SpecHead>
 
@@ -56,18 +54,17 @@ type Story = StoryObj<typeof meta>
 
 /**
  * A first draft: no revision named, no picker, no Rework, no `Mark ready` — the footer holds it
- * (issue #150) — and the fold at the end of the line.
+ * (issue #150) — and no fold: the panel draws its own after the head (#77).
  */
 export const Draft: Story = {
-  play: async ({ canvasElement, args }) => {
+  play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     await expect(canvas.getByRole('heading', { name: 'CSV invoice export' })).toBeVisible()
     await expect(canvas.getByRole('img', { name: 'Draft' })).toBeVisible()
     await expect(canvas.queryByRole('button', { name: /rev/ })).toBeNull()
     await expect(canvas.queryByRole('button', { name: 'Rework' })).toBeNull()
     await expect(canvas.queryByRole('button', { name: 'Mark ready' })).toBeNull()
-    await userEvent.click(canvas.getByRole('button', { name: 'Fold the Spec' }))
-    await expect(args.onFold).toHaveBeenCalled()
+    await expect(canvas.queryByRole('button', { name: 'Fold the Spec' })).toBeNull()
   },
 }
 

@@ -181,6 +181,17 @@ function labelOf(entry: JournalEntry): string {
       return 'Build accepted'
     case 'build.stopped':
       return `Build stopped${because('reason')}`
+    // A build's helpers (issue #77): launched by its agent, then done, failed or stopped.
+    case 'helper.launched':
+      return (payload.task ?? null) === null
+        ? `Helper ${said('name')} launched`
+        : `Helper ${said('name')} launched on ${said('task')}`
+    case 'helper.done':
+      return `Helper ${said('name')} done`
+    case 'helper.failed':
+      return `Helper ${said('name')} failed${because('result')}`
+    case 'helper.stopped':
+      return `Helper ${said('name')} stopped${because('result')}`
     case 'spec.in_progress':
       return 'Spec in progress: its first task started'
     case 'task.ready':

@@ -559,11 +559,14 @@ const CATALOGUE: readonly (readonly [string, string, HemeraToolMark, string | nu
     null,
     'The bug is gone',
   ],
+  ['helper_launch', 'Launch helper', 'launch-helper', 'Test review', 'Launched Test review'],
+  ['helper_stop', 'Stop helper', 'stop-helper', 'Test review', 'Stopped Test review'],
+  ['helper_read', 'Read helper', 'read-helper', 'Test review', 'Test review is running'],
 ]
 
 /**
- * The catalogue as the thread reads it (recette 3 of 23 September 2026): twenty-one tools since
- * the replay of a bug's reproduction (issue #203), twenty-one marks and twenty-one labels, and what each call is about where it
+ * The catalogue as the thread reads it (recette 3 of 23 September 2026): twenty-four tools since
+ * the helper tools (issue #77), twenty-four marks and twenty-four labels, and what each call is about where it
  * is about something. A mark per kind of tool drew `fs_list` as `fs_read` and the four commands
  * as one.
  */

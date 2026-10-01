@@ -6,16 +6,28 @@ import { atRest } from '../../.storybook/at-rest.ts'
 import { useBeat } from '../../.storybook/beat.ts'
 import { readEveryFrame } from '../../.storybook/journey.ts'
 import { TooltipProvider } from '../components/tooltip/tooltip.tsx'
-import { GOING_ON, ONE_OFF_DONE } from './going-on-fixtures.ts'
+import { AgentText } from '../message/agent-text.tsx'
+import { GOING_ON, HELPERS, ONE_OFF_DONE } from './going-on-fixtures.ts'
+import type { GoingOnAgent } from './going-on.ts'
 import { GoingOnLine, type GoingOnLineProps } from './going-on-line.tsx'
 
 /**
  * What goes on in a Session, as a line right under its title (issue #219, the fourth round of its
  * exploration): the commands Hemera runs on a solid edge, the ones the agent runs in its own shell
- * on a dashed one, sub-agents with a robot. How each stands is its dot; what failed comes first,
- * then what runs, then what is over; four chips and a `+N` for the rest. A chip opens a glance, its
- * ⓘ the Details, laid the same way for every kind.
+ * on a dashed one, the helpers the agent launched with their avatar (issue #77). What failed comes
+ * first, then what runs, then what is over; four chips and a `+N` for the rest. A chip opens a
+ * glance; its ⓘ the Details of a command, or a helper's live thread, read-only.
  */
+
+/** A helper's thread, as the page would draw it: what it said, one block each. */
+function threadOf(helper: GoingOnAgent): ReactNode {
+  return (
+    <>
+      <AgentText text="Reading `src/export/csv.stream.ts` to see how the rows are written." />
+      <AgentText text={helper.last ?? 'Starting.'} />
+    </>
+  )
+}
 
 function Line(props: GoingOnLineProps): ReactNode {
   return (
@@ -43,6 +55,9 @@ const meta = {
     onAddToCatalogue: fn(),
     onRunAgain: fn(),
     onRemove: fn(),
+    onStopHelper: fn(),
+    onGlance: fn(),
+    helperThread: threadOf,
   },
 } satisfies Meta<typeof Line>
 
@@ -84,7 +99,21 @@ export const RunGlance: Story = { args: { defaultOpen: 'run-test' } }
 
 export const ShellGlance: Story = { args: { defaultOpen: 'shell-vitest' } }
 
-export const AgentGlance: Story = { args: { items: GOING_ON.many, defaultOpen: 'agent-explore' } }
+/** A helper's glance: what it is doing, and what it last said; ⓘ and × in its head. */
+export const HelperGlance: Story = {
+  args: { items: HELPERS.running, defaultOpen: 'helper-reader' },
+  play: async () => {
+    const glanced = await screen.findByRole('dialog', { name: 'Helper Write the reader, running' })
+    await expect(within(glanced).getByText('Editing a file')).toBeVisible()
+    await expect(within(glanced).getByText(/now the/)).toBeVisible()
+    await expect(
+      within(glanced).getByRole('button', { name: 'Details of Write the reader' }),
+    ).toBeVisible()
+    await expect(
+      within(glanced).getByRole('button', { name: 'Stop Write the reader' }),
+    ).toBeVisible()
+  },
+}
 
 export const Everything: Story = { args: { items: GOING_ON.many, defaultOpen: 'more' } }
 
@@ -94,8 +123,18 @@ export const ServerDetails: Story = { args: { defaultDetail: 'run-dev' } }
 
 export const ShellDetails: Story = { args: { defaultDetail: 'shell-vitest' } }
 
-export const AgentDetails: Story = {
-  args: { items: GOING_ON.many, defaultDetail: 'agent-explore' },
+/**
+ * A helper's dialog: its live thread, read-only — no composer, nothing to answer with — under a
+ * head its live face leads.
+ */
+export const HelperThread: Story = {
+  args: { items: HELPERS.running, defaultDetail: 'helper-reader' },
+  play: async () => {
+    const dialog = await screen.findByRole('dialog', { name: 'Write the reader' })
+    await waitFor(() => expect(within(dialog).getByText(/csv\.stream\.ts/)).toBeVisible())
+    await expect(within(dialog).getByRole('img', { name: /writing/i })).toBeVisible()
+    await expect(within(dialog).queryByRole('textbox')).toBeNull()
+  },
 }
 
 export const OneOffDetails: Story = {
@@ -174,10 +213,10 @@ export const ManyRoundTrip: Story = {
     await userEvent.click(canvas.getByRole('button', { name: '4 more' }))
     const list = await screen.findByRole('dialog', { name: 'Everything in this Session' })
     await userEvent.click(
-      within(list).getByRole('button', { name: 'Sub-agent Review, done, details' }),
+      within(list).getByRole('button', { name: 'Helper Test review, done, details' }),
     )
-    const details = await screen.findByRole('dialog', { name: 'Sub-agent · Review' })
-    await waitFor(() => expect(within(details).getByText(/No row is written twice/)).toBeVisible())
+    const details = await screen.findByRole('dialog', { name: 'Test review' })
+    await waitFor(() => expect(within(details).getByText(/Every criterion of T1/)).toBeVisible())
     await userEvent.keyboard('{Escape}')
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
   },
@@ -301,7 +340,7 @@ export const RemovedFromItsGlance: Story = {
 /**
  * The runs Hemera holds are live chips (issue #77): their type's icon, no dot, their seconds, a
  * faint breath while they run, and the plain mark they ended on. The agent's own shell commands
- * and the sub-agents keep their dot.
+ * keep their dot.
  */
 export const LiveRuns: Story = {
   args: { items: GOING_ON.many },
@@ -408,5 +447,92 @@ export const LongName: Story = {
     await expect(await screen.findByRole('tooltip')).toHaveTextContent(
       'pnpm vitest run csv.stream --reporter verbose',
     )
+  },
+}
+
+/** Helpers at work: a live chip each, their avatar in the slot, a breath, their seconds. */
+export const HelpersRunning: Story = {
+  args: { items: HELPERS.running },
+  play: async ({ canvasElement }) => {
+    const chip = within(canvasElement).getByRole('button', {
+      name: 'Helper Write the reader, running',
+    })
+    await expect(chip).toHaveTextContent(/^WWrite the reader\d+s$/)
+    await expect(chip.querySelector('[data-breath]')).not.toBeNull()
+  },
+}
+
+/** Helpers over: done, failed, stopped — the plain mark each ended on, and their seconds kept. */
+export const HelpersEnded: Story = {
+  args: { items: HELPERS.ended },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    // What failed comes first.
+    await expect(canvas.getAllByRole('button')[0]).toHaveAccessibleName(
+      'Helper Security review, failed',
+    )
+    await expect(
+      canvas.getByRole('button', { name: 'Helper Test review, done' }).querySelector('[data-end]'),
+    ).toHaveAttribute('data-end', 'finished')
+    await expect(
+      canvas.getByRole('button', { name: 'Helper Documenter, done' }).querySelector('[data-end]'),
+    ).toHaveAttribute('data-end', 'stopped')
+  },
+}
+
+/** Helpers among the runs: one line, four chips and the rest behind `+N`. */
+export const HelpersCrowded: Story = {
+  args: { items: HELPERS.crowded },
+  play: async ({ canvasElement }) => {
+    await expect(within(canvasElement).getByRole('button', { name: '3 more' })).toBeVisible()
+  },
+}
+
+/**
+ * Two helpers share an initial: each avatar takes two letters, never the same two — the first
+ * letter where their names differ, once their words' initials are shared too.
+ */
+export const SharedInitials: Story = {
+  args: { items: HELPERS.sharedInitials },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await expect(
+      canvas.getByRole('button', { name: 'Helper Write the reader, running' }),
+    ).toHaveTextContent(/^WR/)
+    await expect(
+      canvas.getByRole('button', { name: 'Helper Wire them, running' }),
+    ).toHaveTextContent(/^WI/)
+  },
+}
+
+/** A free helper's brief is its name: cut on the line, its seconds whole, all of it in its glance. */
+export const HelperLongName: Story = {
+  args: { items: HELPERS.longName },
+  play: async ({ canvasElement }) => {
+    const chip = within(canvasElement).getByRole('button', { name: /^Helper Find every place/ })
+    const name = within(chip).getByText(/^Find every place/)
+    await expect(name.scrollWidth).toBeGreaterThan(name.clientWidth)
+    await expect(chip.lastElementChild).toHaveTextContent(/^\d+s$/)
+  },
+}
+
+/** × stops a helper once the reader said so: `Stop <name>?` in its glance, then Stop. */
+export const HelperStop: Story = {
+  args: { items: HELPERS.running },
+  play: async ({ canvasElement, args }) => {
+    await userEvent.click(
+      within(canvasElement).getByRole('button', { name: 'Helper Write the reader, running' }),
+    )
+    const glanced = await screen.findByRole('dialog', { name: 'Helper Write the reader, running' })
+    await expect(args.onGlance).toHaveBeenCalledWith('helper-reader', true)
+    await userEvent.click(within(glanced).getByRole('button', { name: 'Stop Write the reader' }))
+    await expect(args.onStopHelper).not.toHaveBeenCalled()
+    const asked = await within(glanced).findByRole('group', { name: 'Stop Write the reader?' })
+    await userEvent.click(within(asked).getByRole('button', { name: 'Stop' }))
+    await expect(args.onStopHelper).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'helper-reader' }),
+    )
+    await userEvent.keyboard('{Escape}')
+    await waitFor(() => expect(args.onGlance).toHaveBeenCalledWith('helper-reader', false))
   },
 }

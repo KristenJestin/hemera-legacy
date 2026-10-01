@@ -78,6 +78,29 @@ function built(
   }
 }
 
+describe('The Journal names a build’s helpers (#77)', () => {
+  test('a helper launched, done, failed and stopped each read as what happened', () => {
+    const labels = [
+      built('helper.launched', { name: 'Write the reader', task: 'T2', depth: 1 }, 'session'),
+      built('helper.launched', { name: 'Test review', task: null, depth: 2 }, 'session'),
+      built('helper.done', { name: 'Write the reader', result: 'Done.' }, 'session'),
+      built(
+        'helper.failed',
+        { name: 'Test review', result: 'Hemera quit while it ran.' },
+        'session',
+      ),
+      built('helper.stopped', { name: 'Documenter', result: 'Stopped by the user.' }, 'session'),
+    ].map((entry) => lineOf(entry).label)
+    expect(labels).toEqual([
+      'Helper Write the reader launched on T2',
+      'Helper Test review launched',
+      'Helper Write the reader done',
+      'Helper Test review failed: Hemera quit while it ran.',
+      'Helper Documenter stopped: Stopped by the user.',
+    ])
+  })
+})
+
 describe('The Journal shows each step of a build in plain words', () => {
   test('a phase, a task moving, a check run and the user’s acts each read as what happened', () => {
     const labels = [

@@ -447,6 +447,7 @@ describe('Aucune suppression', () => {
       'removeRepository',
       'restore',
       'setBranchPrefix',
+      'setHelpersAtOnce',
       'setRepositoryIncluded',
       'setWorkspacesRoot',
       'update',

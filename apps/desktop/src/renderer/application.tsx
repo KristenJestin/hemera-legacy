@@ -170,6 +170,7 @@ import {
   openSpec,
 } from './spec-store.ts'
 import { closeBuild, listenToBuilds, openBuild } from './build-store.ts'
+import { closeHelpers, listenToHelpers, openHelpers } from './helpers-store.ts'
 import {
   closeJournal,
   filterJournal,
@@ -631,14 +632,20 @@ export function Application() {
   // wherever the user is (D10-08).
   useEffect(() => listenToBuilds(), [])
 
-  // The build of the Session on screen, opened when that Session is a `build` one (D10-12).
-  const openBuildId = open?.mission === 'build' ? open.id : null
+  // The helpers of the build on screen, read again whenever one is launched or settles (#77).
+  useEffect(() => listenToHelpers(), [])
+
+  // The build of the Session on screen, opened when that Session is a `build` one (D10-12) — and
+  // never a helper's, which works in a build without being one (issue #77) — with its helpers.
+  const openBuildId = open?.mission === 'build' && open.helper === null ? open.id : null
   useEffect(() => {
     if (openBuildId === null) {
       closeBuild()
+      closeHelpers()
       return
     }
     void openBuild(openBuildId)
+    void openHelpers(openBuildId)
   }, [openBuildId])
 
   // The Spec of the Session on screen, opened when that Session defines one (D7-07).

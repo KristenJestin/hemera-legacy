@@ -60,6 +60,7 @@ function session(nativeState: Session['nativeState']): Session {
     nativeState,
     workspaceId: null,
     workspaceFixed: nativeState !== 'none',
+    helper: null,
     mission: 'free',
     specId: null,
     archivedAt: null,

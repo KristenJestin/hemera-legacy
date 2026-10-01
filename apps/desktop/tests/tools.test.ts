@@ -29,7 +29,13 @@ import { Deferred, Effect, Fiber, Layer } from 'effect'
 import type { Scope } from 'effect'
 import { z } from 'zod'
 
-import { READ_PAGE_BYTES, SEARCH_MATCH_LIMIT, TOOL_NAMES, type ToolName } from '@hemera/core'
+import {
+  offeredTools,
+  READ_PAGE_BYTES,
+  SEARCH_MATCH_LIMIT,
+  TOOL_NAMES,
+  type ToolName,
+} from '@hemera/core'
 
 import {
   StderrSink,
@@ -191,7 +197,7 @@ const opened = Effect.gen(function* () {
   const session = yield* sessions.create(project.id, 'claude')
   // An agent holds the Session's token, as it does once `session/new` has answered.
   const access = yield* ToolAccess
-  yield* access.granted(session.id, 'agent-1', 'free')
+  yield* access.granted(session.id, 'agent-1', offeredTools('free'))
   return { projectId: project.id, sessionId: session.id }
 })
 

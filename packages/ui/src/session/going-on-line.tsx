@@ -7,7 +7,7 @@ import { LiveChip } from '../components/live-chip/live-chip.tsx'
 import { Popover } from '../components/popover/popover.tsx'
 import { StatusDot } from '../components/status-dot/status-dot.tsx'
 import { Tooltip } from '../components/tooltip/tooltip.tsx'
-import { IconBookmarkPlus, IconInfoCircle, IconRobot, IconTerminal2, IconX } from '../icons.ts'
+import { IconBookmarkPlus, IconInfoCircle, IconTerminal2, IconX } from '../icons.ts'
 import { AgentText } from '../message/agent-text.tsx'
 import { fold, useTransition } from '../motion.ts'
 import { ServiceUrl } from '../workspace/service-list.tsx'
@@ -21,11 +21,14 @@ import {
   rankedGoingOn,
 } from './going-on.ts'
 import {
+  type CommandItem,
   GOING_ON_TONES,
   GOING_ON_WORDS,
   GoingOnDetails,
   GoingOnOutput,
 } from './going-on-details.tsx'
+import { HelperAvatar } from './helper-avatar.tsx'
+import { HelperDialog } from './helper-dialog.tsx'
 import { RunPlace } from './run-place.tsx'
 
 /**
@@ -37,14 +40,16 @@ import { RunPlace } from './run-place.tsx'
  * type's icon, its name and its seconds, no dot — a faint breath while it runs, the plain mark it
  * ended on after — and its glance says where it runs, its address once a server answers, and what
  * it printed. A command of the agent's own shell has a terminal and a dashed edge, since Hemera
- * holds no process it could stop; a sub-agent a robot; how each of those stands is its dot. What
- * failed comes first, then what runs, then what is over; four chips, and a `+N` for the rest,
- * which opens the whole list grouped by kind.
+ * holds no process it could stop, and its dot says how it stands. A helper the agent launched is a
+ * live chip too (issue #77), its avatar in the slot: its glance says what it is doing and what it
+ * last said, its ⓘ opens its live thread read-only (`HelperDialog`), and × stops it once the reader
+ * said so. What failed comes first, then what runs, then what is over; four chips, and a `+N` for
+ * the rest, which opens the whole list grouped by kind.
  *
- * A chip of the shell or of a sub-agent opens a glance: one line — icon, dot, name, where it runs,
- * the ⓘ of its Details — and what it printed or last said under it. The Details are a dialog laid
- * the same way for every kind (`GoingOnDetails`). The line ends on `end`, where the page puts the
- * way to start a command.
+ * A chip of the shell opens a glance: one line — icon, dot, name, where it runs, the ⓘ of its
+ * Details — and what it printed under it. The Details are a dialog laid the same way for the
+ * commands (`GoingOnDetails`). The line ends on `end`, where the page puts the way to start a
+ * command.
  *
  * What the line holds is the page's to decide (issue #237: what runs, what failed and is not seen
  * yet, the catalogue's shortcuts); the glance is where the reader acts on it — Run again, or Stop
@@ -64,6 +69,15 @@ export interface GoingOnLineProps {
   onRunAgain?: ((run: GoingOnRun) => void) | undefined
   /** Takes the chip out of the line; what it was stays in the history. */
   onRemove?: ((item: GoingOnItem) => void) | undefined
+  /** Stops a helper, once the reader said so in its glance (issue #77). */
+  onStopHelper?: ((helper: GoingOnAgent) => void) | undefined
+  /** A helper's thread as the page draws one, read-only: what its dialog holds. */
+  helperThread?: ((helper: GoingOnAgent) => ReactNode) | undefined
+  /**
+   * A chip's glance opened, or finished closing (issue #321): what leaves the line on its own waits
+   * for the reader to put its glance away.
+   */
+  onGlance?: ((id: string, open: boolean) => void) | undefined
   /** The glance open as the line is drawn: an item's id, `more` for the list, or none. */
   defaultOpen?: string | null | undefined
   /** The item whose Details are open as the line is drawn. */
@@ -71,9 +85,6 @@ export interface GoingOnLineProps {
 }
 
 const LINE = 'flex min-w-0 flex-wrap items-center gap-y-1.5'
-
-const CHIP =
-  'inline-flex h-control-sm max-w-menu-side min-w-0 items-center gap-1.5 rounded-md border border-border bg-card px-2 text-xs outline-none hover:bg-accent focus-ring data-popup-open:bg-accent'
 
 /** A command of the agent's own shell: the same chip, on a dashed edge Hemera does not hold. */
 const SHELL_CHIP =
@@ -107,7 +118,7 @@ const ROW =
 const KINDS = {
   run: 'Commands',
   shell: 'Run by the agent',
-  agent: 'Sub-agents',
+  agent: 'Helpers',
 } as const
 
 /** What a chip and a row say: an icon, a label, and an address once a server answers. */
@@ -139,7 +150,7 @@ function faceOf(item: GoingOnItem): ItemFace {
     }
   }
   return {
-    icon: <IconRobot size="sm" aria-hidden="true" />,
+    icon: <HelperAvatar name={item.name} />,
     label: item.name,
     address: null,
     mono: false,
@@ -150,7 +161,7 @@ function faceOf(item: GoingOnItem): ItemFace {
 function nameOf(item: GoingOnItem): string {
   const words = GOING_ON_WORDS[goingOnStateOf(item)]
   if (item.kind === 'shell') return `${item.command}, run by the agent, ${words}`
-  if (item.kind === 'agent') return `Sub-agent ${item.name}, ${words}`
+  if (item.kind === 'agent') return `Helper ${item.name}, ${words}`
   const address = faceOf(item).address
   return address === null ? `${item.name}, ${words}` : `${item.name}, ${words} on ${address}`
 }
@@ -168,10 +179,9 @@ function ItemLine({ item }: { item: GoingOnItem }): ReactNode {
   )
 }
 
-/** Where the agent's shell ran it, or how far a sub-agent got: the quiet words after its name. */
-function whereOf(item: GoingOnShell | GoingOnAgent): string {
-  if (item.kind === 'shell') return `${item.folder} · the agent’s shell`
-  return `${String(item.steps.length)} steps`
+/** Where the agent's shell ran it: the quiet words after its name. */
+function whereOf(item: GoingOnShell): string {
+  return `${item.folder} · the agent’s shell`
 }
 
 /** An icon action of a glance, named by its tooltip: never a word-button beside a run. */
@@ -223,16 +233,13 @@ function Slot({ children }: { children: ReactNode }): ReactNode {
   )
 }
 
-/**
- * A glance at a command of the agent's shell or a sub-agent: one line with its tools, and what it
- * printed or last said under it.
- */
+/** A glance at a command of the agent's shell: one line with its tools, and what it printed. */
 function Glance({
   item,
   onDetails,
   onRemove,
 }: {
-  item: GoingOnShell | GoingOnAgent
+  item: GoingOnShell
   onDetails: () => void
   onRemove?: (() => void) | undefined
 }): ReactNode {
@@ -260,14 +267,7 @@ function Glance({
           )}
         </span>
       </div>
-      {item.kind === 'agent' ? (
-        <div className="flex flex-col gap-1 text-sm">
-          <p>{item.task}</p>
-          <AgentText text={item.last} />
-        </div>
-      ) : (
-        <GoingOnOutput item={item} />
-      )}
+      <GoingOnOutput item={item} />
     </div>
   )
 }
@@ -339,6 +339,52 @@ function RunChip({
   )
 }
 
+/**
+ * A helper, as a live chip (issue #77): its avatar in the slot — two letters when another helper
+ * shares its initial — its name and its seconds; in its glance, what it is doing and what it last
+ * said; its ⓘ opens its thread, × stops it once the reader said so, and once it has ended × takes
+ * it off the line.
+ */
+function HelperChip({
+  helper,
+  others,
+  open,
+  onOpenChange,
+  onClosed,
+  onDetails,
+  onStop,
+  onRemove,
+}: {
+  helper: GoingOnAgent
+  others: readonly string[]
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  onClosed: () => void
+  onDetails: () => void
+  onStop?: (() => void) | undefined
+  onRemove?: (() => void) | undefined
+}): ReactNode {
+  return (
+    <LiveChip
+      name={helper.name}
+      icon={<HelperAvatar name={helper.name} others={others} />}
+      state={helper.state}
+      startedAt={helper.startedAt}
+      endedAt={helper.endedAt}
+      label={nameOf(helper)}
+      step={helper.step}
+      open={open}
+      onOpenChange={onOpenChange}
+      onClosed={onClosed}
+      onDetails={onDetails}
+      onStop={onStop}
+      onRemove={onRemove}
+    >
+      {helper.last !== null && <AgentText text={helper.last} />}
+    </LiveChip>
+  )
+}
+
 export function GoingOnLine({
   items,
   end,
@@ -347,6 +393,9 @@ export function GoingOnLine({
   onAddToCatalogue,
   onRunAgain,
   onRemove,
+  onStopHelper,
+  helperThread,
+  onGlance,
   defaultOpen = null,
   defaultDetail = null,
 }: GoingOnLineProps): ReactNode {
@@ -365,20 +414,33 @@ export function GoingOnLine({
   const lastDetailed = useRef<GoingOnItem | undefined>(undefined)
   const detailed = items.find((item) => item.id === detail) ?? lastDetailed.current
   lastDetailed.current = detailed
+  // The helpers' names, which decide whether an avatar needs a second letter.
+  const othersOf = (helper: GoingOnAgent) =>
+    items.flatMap((item) => (item.kind === 'agent' && item.id !== helper.id ? [item.name] : []))
 
   function details(id: string): void {
-    setOpen(null)
+    glance(null)
     setDetail(id)
     requestAnimationFrame(() => setDetailOpen(true))
+  }
+
+  /** Opens one glance, or none, and says which opened (issue #321). */
+  function glance(id: string | null): void {
+    setOpen(id)
+    if (id !== null && id !== 'more') onGlance?.(id, true)
   }
 
   return (
     <div role="group" aria-label="What goes on in this Session" className={LINE}>
       <AnimatePresence initial={false}>
         {chips.map((item) => {
-          const glanced = (next: boolean) => setOpen(next ? item.id : null)
+          const glanced = (next: boolean) => {
+            if (next) glance(item.id)
+            else if (open === item.id) setOpen(null)
+          }
           // The glance closes first, with its own motion, and the chip leaves once it is gone.
           const closed = () => {
+            onGlance?.(item.id, false)
             if (leaving?.id !== item.id) return
             setLeaving(null)
             onRemove?.(item)
@@ -390,9 +452,9 @@ export function GoingOnLine({
                   setLeaving(item)
                   setOpen(null)
                 }
-          return (
-            <Slot key={item.id}>
-              {item.kind === 'run' ? (
+          const chip = (): ReactNode => {
+            if (item.kind === 'run') {
+              return (
                 <RunChip
                   run={item}
                   open={open === item.id}
@@ -405,29 +467,41 @@ export function GoingOnLine({
                   onAddToCatalogue={onAddToCatalogue}
                   onRemove={remove}
                 />
-              ) : (
-                <Popover
-                  side="bottom"
-                  align="start"
-                  label={nameOf(item)}
+              )
+            }
+            if (item.kind === 'agent') {
+              return (
+                <HelperChip
+                  helper={item}
+                  others={othersOf(item)}
                   open={open === item.id}
                   onOpenChange={glanced}
                   onClosed={closed}
-                  trigger={
-                    <button
-                      type="button"
-                      className={item.kind === 'shell' ? SHELL_CHIP : CHIP}
-                      aria-label={nameOf(item)}
-                    >
-                      <ItemLine item={item} />
-                    </button>
-                  }
-                >
-                  <Glance item={item} onDetails={() => details(item.id)} onRemove={remove} />
-                </Popover>
-              )}
-            </Slot>
-          )
+                  onDetails={() => details(item.id)}
+                  onStop={onStopHelper === undefined ? undefined : () => onStopHelper(item)}
+                  onRemove={remove}
+                />
+              )
+            }
+            return (
+              <Popover
+                side="bottom"
+                align="start"
+                label={nameOf(item)}
+                open={open === item.id}
+                onOpenChange={glanced}
+                onClosed={closed}
+                trigger={
+                  <button type="button" className={SHELL_CHIP} aria-label={nameOf(item)}>
+                    <ItemLine item={item} />
+                  </button>
+                }
+              >
+                <Glance item={item} onDetails={() => details(item.id)} onRemove={remove} />
+              </Popover>
+            )
+          }
+          return <Slot key={item.id}>{chip()}</Slot>
         })}
       </AnimatePresence>
       {rest > 0 && (
@@ -437,7 +511,7 @@ export function GoingOnLine({
             align="start"
             title="Everything in this Session"
             open={open === 'more'}
-            onOpenChange={(next) => setOpen(next ? 'more' : null)}
+            onOpenChange={(next) => glance(next ? 'more' : null)}
             trigger={
               <button type="button" className={MORE} aria-label={`${String(rest)} more`}>
                 {`+${String(rest)}`}
@@ -470,9 +544,20 @@ export function GoingOnLine({
         </span>
       )}
       {end}
-      {detailed !== undefined && (
+      {detailed?.kind === 'agent' && (
+        <HelperDialog
+          helper={detailed}
+          open={detailOpen}
+          onOpenChange={(next) => {
+            if (!next) setDetailOpen(false)
+          }}
+        >
+          {helperThread?.(detailed)}
+        </HelperDialog>
+      )}
+      {detailed !== undefined && detailed.kind !== 'agent' && (
         <GoingOnDetails
-          item={detailed}
+          item={detailed satisfies CommandItem}
           open={detailOpen}
           onClose={() => setDetailOpen(false)}
           onStop={onStop}

@@ -57,6 +57,8 @@ import { type Variables, variablesLayer } from '#engine/workspaces/variables.ts'
 import { type Workspaces, WorkspacesRoot, workspacesLayer } from '#engine/workspaces/workspaces.ts'
 
 import { threadOf, until } from './application.ts'
+import type { Helpers } from '#engine/helpers/helpers.ts'
+
 import { idleBuilds } from './build-harness.ts'
 import { repository } from './repositories.ts'
 
@@ -110,6 +112,7 @@ function running<A, E>(
     | Proposals
     | ProjectChecks
     | Builds
+    | Helpers
     | SetupProposals
     | Launches
   >,
@@ -235,6 +238,7 @@ function running<A, E>(
     | Launches
     | ProjectChecks
     | Builds
+    | Helpers
     | Database
     | SqliteClient
   > = Layer.mergeAll(

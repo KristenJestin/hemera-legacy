@@ -24,6 +24,7 @@ import { join } from 'node:path'
 import {
   ATTEMPTS_BEFORE_YOURS,
   type AttemptResult,
+  type BriefTask,
   type AttemptScope,
   type BuildPhase,
   type CheckVerdict,
@@ -248,6 +249,11 @@ export interface BuildAgent {
 /** Who hears that a build changed: the window, which reads its view again (`build.changed`). */
 export interface BuildNoticesService {
   readonly changed: (sessionId: string) => void
+  /**
+   * A helper of this build Session was launched or settled (issue #77): the line of what goes on
+   * reads its helpers again (`helpers.changed`).
+   */
+  readonly helpers: (sessionId: string) => void
 }
 
 export class BuildNotices extends Context.Service<BuildNotices, BuildNoticesService>()(
@@ -255,7 +261,10 @@ export class BuildNotices extends Context.Service<BuildNotices, BuildNoticesServ
 ) {}
 
 /** Nobody watching. */
-export const NoBuildNotices = Layer.succeed(BuildNotices, { changed: () => undefined })
+export const NoBuildNotices = Layer.succeed(BuildNotices, {
+  changed: () => undefined,
+  helpers: () => undefined,
+})
 
 /** What the user asked of a build is refused, with the sentence the window shows. */
 export class BuildRefusedError extends Data.TaggedError('BuildRefusedError')<{
@@ -291,6 +300,12 @@ export interface BuildAnswer {
   readonly summary: string
   readonly text: string
   readonly paths: readonly string[]
+}
+
+/** What a helper launched in a build receives beside its launcher's brief (issue #77). */
+export interface HelperInputs {
+  readonly spec: string
+  readonly task: BriefTask | null
 }
 
 /** What a paused build answers every new call with (D10-09). */
@@ -402,6 +417,20 @@ export interface BuildsService {
   ) => Effect.Effect<A>
   /** `build_read`, `task_finished`, `task_blocked` (D10-04, D10-13), `reproduction_replayed` (#203). */
   readonly tool: (sessionId: string, call: BuildCall) => Effect.Effect<BuildAnswer>
+  /**
+   * Runs again the task checks a red held as provisional, now that no helper of the build is in
+   * the middle of a try on another task (issue #77). Nothing when none is held.
+   */
+  readonly rejudge: (sessionId: string) => Effect.Effect<void>
+  /**
+   * What a helper launched in this build receives (issue #77): the frozen Spec with its task
+   * labels, and the task named, as the briefs define it — or why none can be launched on it now:
+   * the build is closed or paused, or the task is not one that can be carried now.
+   */
+  readonly helperInputs: (
+    sessionId: string,
+    label: string | null,
+  ) => Effect.Effect<HelperInputs | { readonly refusal: string }>
   readonly view: (sessionId: string) => Effect.Effect<BuildView, BuildRefusal>
   /** D10-09: nothing new starts; the running Hemera call ends, then the turn stops. */
   readonly pause: (sessionId: string) => Effect.Effect<BuildView, BuildRefusal>
@@ -735,6 +764,13 @@ export const buildsLayer = Layer.effect(
     const running = new Map<string, number>()
     const over = new Map<string, Deferred.Deferred<void>>()
 
+    /**
+     * The task attempts whose red was provisional, per build (issue #77): judged while a helper was
+     * in the middle of a try on another task, so the red may be that task's half-written work. Held
+     * in memory: a restart runs a task left checking again anyway (D10-09).
+     */
+    const provisional = new Map<string, Set<string>>()
+
     /** How many check jobs of each Session are running. */
     const checkingNow = new Map<string, number>()
     /** And the fibers running them, which a Stop or an Accept interrupts: its runs stop with them. */
@@ -919,6 +955,26 @@ export const buildsLayer = Layer.effect(
             .filter((one) => one.attemptId === judged.id && !answered.has(one.id))
             .map(verdictOf),
         ])
+        // A red while a helper is in the middle of a try on another task is provisional (#77):
+        // that task's half-written work may be what is red. Nothing counts yet: the try stays
+        // checking, what the checks said is let go of, and they run again once none is.
+        if (judged.scope === 'task' && result === 'red') {
+          const label = before.tasks.find((task) => task.id === judged.buildTaskId)?.label ?? null
+          if (yield* othersWriting(sessionId, before, label)) {
+            const said = outcomes.map((outcome) => outcome.id)
+            if (said.length > 0) {
+              yield* database
+                .delete(buildCheckResults)
+                .where(inArray(buildCheckResults.id, said))
+                .pipe(Effect.ignore)
+            }
+            const held = provisional.get(sessionId) ?? new Set<string>()
+            held.add(judged.id)
+            provisional.set(sessionId, held)
+            yield* told(sessionId)
+            return
+          }
+        }
         // The three tries are three red ones (D10-07): the task's red tries, this one included.
         const reds =
           before.attempts.filter(
@@ -999,6 +1055,65 @@ export const buildsLayer = Layer.effect(
         yield* runJobs(sessionId, jobs)
         yield* told(sessionId)
         yield* wake(sessionId)
+      })
+
+    /**
+     * Whether a helper of this build is in the middle of a try on another task than this one
+     * (issue #77): running, on a task that is in progress, at any depth under the build.
+     */
+    const othersWriting = (sessionId: string, rows: BuildRows, label: string | null) =>
+      database
+        .select({ task: sessions.helperTask })
+        .from(sessions)
+        .where(
+          and(
+            eq(sessions.helperState, 'running'),
+            or(
+              eq(sessions.parentSessionId, sessionId),
+              inArray(
+                sessions.parentSessionId,
+                database
+                  .select({ id: sessions.id })
+                  .from(sessions)
+                  .where(eq(sessions.parentSessionId, sessionId)),
+              ),
+            ),
+          ),
+        )
+        .pipe(
+          Effect.map((helpers) =>
+            helpers.some(
+              (one) =>
+                one.task !== null &&
+                one.task !== label &&
+                rows.tasks.some(
+                  (task) => task.label === one.task && stateOf(task) === 'in_progress',
+                ),
+            ),
+          ),
+          Effect.orElseSucceed(() => false),
+        )
+
+    const rejudge = (sessionId: string) =>
+      Effect.gen(function* () {
+        const held = provisional.get(sessionId)
+        if (held === undefined || held.size === 0) return
+        const rows = yield* read(sessionId).pipe(Effect.orElseSucceed(() => null))
+        if (rows === null || !working(rows)) {
+          provisional.delete(sessionId)
+          return
+        }
+        for (const attemptId of [...held]) {
+          const attempt = rows.attempts.find((one) => one.id === attemptId)
+          const label = rows.tasks.find((task) => task.id === attempt?.buildTaskId)?.label ?? null
+          if (attempt === undefined) {
+            held.delete(attemptId)
+            continue
+          }
+          if (yield* othersWriting(sessionId, rows, label)) continue
+          held.delete(attemptId)
+          yield* runJobs(sessionId, [{ attemptId, when: 'task' }])
+        }
       })
 
     /** The first Hemera call after a delivery handed tasks starts them (D10-04, D10-10). */
@@ -1305,6 +1420,8 @@ export const buildsLayer = Layer.effect(
         )
         if (!accepted) return refusedAnswer(`${task.label} is no longer in progress`)
         yield* runJobs(sessionId, [{ attemptId: attempt.id, when: 'task' }])
+        // Its try is over: a red held as provisional while it was being written may count now.
+        yield* rejudge(sessionId)
         yield* told(sessionId)
         return completed(
           `${task.label} finished: Hemera is checking it`,
@@ -1365,6 +1482,7 @@ export const buildsLayer = Layer.effect(
           ),
         )
         if (held === null) return refusedAnswer(`${task.label} can no longer be blocked`)
+        yield* rejudge(sessionId)
         yield* told(sessionId)
         const along = held.length === 0 ? '' : `, and ${held.join(', ')} with it`
         return completed(
@@ -1854,6 +1972,29 @@ export const buildsLayer = Layer.effect(
       admitted,
       tool,
       view,
+      rejudge,
+
+      helperInputs: (sessionId, label) =>
+        Effect.gen(function* () {
+          const rows = yield* read(sessionId).pipe(Effect.orElseSucceed(() => null))
+          if (rows === null) {
+            return { refusal: 'a helper is launched in a build, and this Session runs none' }
+          }
+          if (!working(rows)) {
+            return {
+              refusal:
+                rows.phase === 'accepted' ? 'the build was accepted' : 'the build is stopped',
+            }
+          }
+          if (rows.session.buildPausedAt !== null) return { refusal: PAUSED }
+          const spec = renderSpecMarkdown(rows.snapshot, taskLabels(rows.snapshot.tasks))
+          if (label === null) return { spec, task: null }
+          const { task, refusal } = labelled(rows, label)
+          if (task === null) return { refusal }
+          const refused = signalRefusal(task)
+          if (refused !== null) return { refusal: refused }
+          return { spec, task: briefTask(rows, task) }
+        }),
 
       pause: (sessionId) =>
         Effect.gen(function* () {

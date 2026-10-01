@@ -61,6 +61,8 @@ export {
   SEARCH_SCAN_BYTES,
   SEARCH_SKIPS_LISTED,
   SPEC_PAGE_CHARACTERS,
+  BUILDING,
+  HELPING,
   TOOL_LABELS,
   TOOL_NAMES,
   admitTool,
@@ -287,6 +289,7 @@ export {
   BUILD_PHASE_BRIEFS,
   BUILD_PROTOCOL,
   composeBuildBrief,
+  taskDefinition,
 } from './protocols/build/index.ts'
 export type {
   BriefAttempt,
@@ -298,3 +301,25 @@ export type {
   BriefTask,
   BuildBriefInput,
 } from './protocols/build/index.ts'
+export {
+  HELPERS_AT_ONCE,
+  HELPER_DEPTH,
+  HELPER_STATES,
+  HelperReadOnlyError,
+  InvalidHelpersAtOnceError,
+  helpersAtOnce,
+} from './domain/helpers.ts'
+export type { HelperPlace, HelperState } from './domain/helpers.ts'
+export {
+  HELPERS,
+  HELPER_INPUTS,
+  HELPER_MISSION_BRIEF,
+  WRITING_TOOLS,
+  composeHelperBrief,
+  helperDefinition,
+  helperNamed,
+  helperResult,
+  helpersFor,
+  sessionTools,
+} from './protocols/helpers/index.ts'
+export type { HelperBriefInput, HelperDefinition, HelperResult } from './protocols/helpers/index.ts'

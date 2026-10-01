@@ -8,7 +8,7 @@
  * what was kept.
  */
 
-import { offeredTools } from '@hemera/core'
+import { sessionTools } from '@hemera/core'
 import type { ContextView } from '@hemera/ipc'
 import { Effect } from 'effect'
 
@@ -28,7 +28,7 @@ export const contextOf = (sessionId: string) =>
     const catalogue = yield* commands.list(session.projectId)
     // The set of the Session's mission (D6-03, D7-14), read through the same function the grant
     // of its agent is, so the view shows what the guard admits.
-    const tools = offeredTools(session.mission).map((name) => ({ name, bound: TOOL_BOUNDS[name] }))
+    const tools = sessionTools(session).map((name) => ({ name, bound: TOOL_BOUNDS[name] }))
     const view: ContextView = {
       provided: provided.map((one) => ({
         kind: one.kind,

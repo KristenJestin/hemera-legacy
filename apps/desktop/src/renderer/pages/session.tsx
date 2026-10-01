@@ -60,6 +60,7 @@ import {
 } from '@hemera/ui/icons'
 
 import {
+  agentOf,
   hasEnded,
   hasTrace,
   heardSince,
@@ -105,12 +106,30 @@ import {
 import {
   contextListsOf,
   detailsTabsOf,
+  endedAgentOneOffs,
   goingOnOf,
+  helperOf,
   lineOf,
   openingTabOf,
   overBefore,
+  withHelpers,
 } from '../session-details.ts'
-import { linesSnapshot, marksOf, removeFromLine, subscribeToLines } from '../line-store.ts'
+import {
+  glanceClosed,
+  glanceOpened,
+  glancesLeft,
+  leaveOnTheirOwn,
+  linesSnapshot,
+  marksOf,
+  removeFromLine,
+  subscribeToLines,
+} from '../line-store.ts'
+import {
+  helpersSnapshot,
+  readHelperThread,
+  stopHelper,
+  subscribeToHelpers,
+} from '../helpers-store.ts'
 import { openSessions, type OfferedWorkspace } from '../sessions-store.ts'
 import { selectEntry } from '../shell-store.ts'
 import { type DefinedSpec, questionMarkOf } from '../spec-entries.ts'
@@ -189,6 +208,34 @@ function together(read: readonly SessionEntry[], live: readonly SessionEntry[]):
     ...read.map((entry) => since.get(entry.id) ?? entry),
     ...live.filter((entry) => !known.has(entry.id)),
   ]
+}
+
+/**
+ * A helper's thread, read-only, as its dialog holds it (issue #77): read back once the dialog
+ * opens, with what its agent has said since, drawn block by block as any thread is. Nothing in it
+ * answers anything: a helper's questions wait among its build's notices.
+ */
+function HelperThread({
+  helperId,
+  read,
+  context,
+}: {
+  helperId: string
+  read: readonly SessionEntry[]
+  context: AgentContext
+}): ReactNode {
+  useEffect(() => {
+    void readHelperThread(helperId)
+  }, [helperId])
+  const thread = together(read, agentOf(helperId).entries)
+  return thread.map((entry, at) => {
+    const block = drawEntry(entry, {
+      ...context,
+      nextAt: thread[at + 1]?.createdAt ?? null,
+      spec: { ...context.spec, thread },
+    })
+    return block === null ? null : <Fragment key={entry.id}>{block}</Fragment>
+  })
 }
 
 /** How often a running turn's silence is measured again: the line counts it by fives. */
@@ -487,6 +534,18 @@ export function SessionPage({
   // over by then is not news (issue #237).
   const lines = useSyncExternalStore(subscribeToLines, linesSnapshot, linesSnapshot)
   const opened = useRef(Date.now())
+  // The helpers the build's agent launched, each a chip of the line (issue #77).
+  const helping = useSyncExternalStore(subscribeToHelpers, helpersSnapshot, helpersSnapshot)
+  const helpers =
+    helping.sessionId === session.id
+      ? helping.helpers.map((view) => helperOf(view, agentOf(view.id)))
+      : []
+  // An agent's one-off leaves the line 30 s after it ends, as if its × had been pressed (#321).
+  useEffect(() => {
+    leaveOnTheirOwn(session.id, endedAgentOneOffs(commandRuns))
+  }, [session.id, commandRuns])
+  // A glance open as the page goes holds its chip no longer: nothing is left to close it.
+  useEffect(() => () => glancesLeft(session.id), [session.id])
   // Whether this Session was free when the page opened it: its Spec panel, once there, is one the
   // proposal just made, and it arrives rather than standing there (issue #130). The page is
   // keyed by the Session, so this is read once per Session opened.
@@ -730,7 +789,8 @@ export function SessionPage({
   // The build's data and its handlers, which both readings of it need: the panel's view, and the
   // Session's notices, whose Open puts a task on the view's stage (D10-12).
   const buildView: Omit<BuildViewProps, 'specOpen' | 'onToggleSpec'> | null =
-    session.mission !== 'build' || build === null
+    // A helper works in a build without being one: it never shows a build (issue #77).
+    session.mission !== 'build' || session.helper !== null || build === null
       ? null
       : {
           build: buildViewDataOf(build),
@@ -914,6 +974,35 @@ export function SessionPage({
    */
   const activity = turnRowOf(thread, agent.running, agent.latest, waitsFor)
 
+  /** What a helper's thread is drawn with in its dialog: the page's own, answering nothing. */
+  const readOnly: AgentContext = {
+    now,
+    nextAt: null,
+    onDecide: () => undefined,
+    runs: [],
+    workspace: workspace?.name,
+    root,
+    repositories,
+    onOpenUrl,
+    onHandOver: () => undefined,
+    callLink: () => undefined,
+    reportedCall: () => undefined,
+    onAcceptProposal: () => undefined,
+    onDeclineProposal: () => undefined,
+    onAcceptSetup: () => undefined,
+    onDeclineSetup: () => undefined,
+    spec: {
+      thread: [],
+      specId: null,
+      defined: null,
+      asked: null,
+      onAnswer: () => undefined,
+      onCreate: () => undefined,
+      onJoin: () => undefined,
+      onDecline: () => undefined,
+    },
+  }
+
   // What the agent is on is the agent's own answer, read back after every change: this page
   // draws what it was told and never a value it remembers (D5-13).
   const model = modelStage(options)
@@ -1037,13 +1126,25 @@ export function SessionPage({
           onOpenDetails={() => setDetailsOpen(true)}
         >
           <GoingOnLine
-            items={lineOf(goingOn, {
+            items={lineOf(withHelpers(goingOn, helpers), {
               ...marksOf(session.id, lines),
-              before: overBefore(commandRuns, shells, opened.current),
+              before: overBefore(commandRuns, shells, opened.current, helpers),
             })}
             onStop={(run) => onStopRun(run.id)}
             onRunAgain={(run) => onRunAgain(run.id)}
             onRemove={(item) => removeFromLine(session.id, item.id)}
+            onStopHelper={(helper) => void stopHelper(helper.id)}
+            helperThread={(helper) => (
+              <HelperThread
+                helperId={helper.id}
+                read={helping.threads.get(helper.id) ?? []}
+                context={readOnly}
+              />
+            )}
+            onGlance={(id, glancing) => {
+              if (glancing) glanceOpened(session.id, id)
+              else glanceClosed(session.id, id)
+            }}
             onOpenUrl={onOpenUrl}
             onAddToCatalogue={(shown) => {
               const run = commandRuns.find((one) => one.id === shown.id)

@@ -41,6 +41,7 @@ function project(id: string, name: string, version = 1): Project {
     repositories: [],
     workspacesRoot: null,
     branchPrefix: null,
+    helpersAtOnce: 3,
     included: [],
     specPrefix: 'SPEC',
     repositoryIcons: {},

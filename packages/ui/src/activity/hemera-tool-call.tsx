@@ -6,7 +6,9 @@ import {
   IconBookmarkPlus,
   IconBug,
   IconCircleCheck,
+  IconCircleX,
   IconClipboardList,
+  IconEye,
   IconFileDescription,
   IconFilePlus,
   IconFileText,
@@ -20,6 +22,7 @@ import {
   IconPencil,
   IconPlayerPlay,
   IconPlayerStop,
+  IconRobot,
   IconSearch,
   IconTerminal2,
   IconWriting,
@@ -112,6 +115,9 @@ export type HemeraToolMark =
   | 'finish-task'
   | 'block-task'
   | 'replay-reproduction'
+  | 'launch-helper'
+  | 'stop-helper'
+  | 'read-helper'
 
 const HEMERA_MARKS: Record<HemeraToolMark, ReactNode> = {
   'read-file': <IconFileText size="sm" aria-hidden="true" />,
@@ -138,6 +144,10 @@ const HEMERA_MARKS: Record<HemeraToolMark, ReactNode> = {
   'block-task': <IconHandStop size="sm" aria-hidden="true" />,
   // The replay of a bug's reproduction, which the final checks of a `bug` wait for (issue #203).
   'replay-reproduction': <IconBug size="sm" aria-hidden="true" />,
+  // An orchestrator's three (issue #77): a helper launched, stopped, and read.
+  'launch-helper': <IconRobot size="sm" aria-hidden="true" />,
+  'stop-helper': <IconCircleX size="sm" aria-hidden="true" />,
+  'read-helper': <IconEye size="sm" aria-hidden="true" />,
 }
 
 /** Where the mark sits on the line, in the tone a native call's mark is drawn in. */

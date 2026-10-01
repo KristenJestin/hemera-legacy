@@ -15,7 +15,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vite-plus/test'
 import { Deferred, Effect, Layer } from 'effect'
 import type { Scope } from 'effect'
 
-import { type ToolName } from '@hemera/core'
+import { offeredTools, type ToolName } from '@hemera/core'
 
 import {
   StderrSink,
@@ -191,7 +191,7 @@ const aSessionWithAToken = Effect.gen(function* () {
   const access = yield* ToolAccess
   const project = yield* projects.create({ name: 'Atlas', tone: 'primary', mainPath: root })
   const session = yield* sessions.create(project.id, 'claude')
-  const granted = yield* access.granted(session.id, 'agent-1', 'free')
+  const granted = yield* access.granted(session.id, 'agent-1', offeredTools('free'))
   return { session, granted }
 })
 
@@ -556,7 +556,12 @@ describe('the token of a Session', () => {
         const server = yield* ToolServer
         const access = yield* ToolAccess
         const held = yield* aSessionWithAToken
-        const inQuery = yield* access.granted(held.session.id, 'agent-2', 'free', true)
+        const inQuery = yield* access.granted(
+          held.session.id,
+          'agent-2',
+          offeredTools('free'),
+          true,
+        )
         const address = server.forAgent(inQuery)
         return { address, answer: yield* listedAt(address) }
       }),

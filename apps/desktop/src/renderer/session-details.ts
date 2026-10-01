@@ -1,10 +1,12 @@
 import { MAIN_WORKSPACE, PHASE_IDS } from '@hemera/core'
-import type { CommandRun, ContextView, Provided } from '@hemera/ipc'
+import type { CommandRun, ContextView, HelperView, Provided } from '@hemera/ipc'
 import type {
   ContextCommand,
   ContextEntry,
   ContextTool,
   ContextWorkspace,
+  FaceState,
+  GoingOnAgent,
   GoingOnItem,
   GoingOnRun,
   GoingOnShell,
@@ -12,6 +14,7 @@ import type {
   SessionDetailsTab,
 } from '@hemera/ui'
 
+import { type AgentSessionState, activityOf, hasEnded, sessionFaceOf } from './agent-store.ts'
 import { type AgentShellCall, runFactsOf } from './agent-tool-payloads.ts'
 import { runPlaceOf } from './run-place.ts'
 
@@ -83,6 +86,53 @@ function shellOf(call: AgentShellCall, workspace: string): GoingOnShell {
   }
 }
 
+/** How a helper stands, as its chip says it (issue #77). */
+const HELPER_STATES = {
+  running: 'running',
+  done: 'finished',
+  failed: 'failed',
+  stopped: 'stopped',
+} as const
+
+/** The face a helper that is over wears: done, failed, or at rest once stopped. */
+const ENDED_FACES: Record<Exclude<HelperView['state'], 'running'>, FaceState> = {
+  done: 'done',
+  failed: 'error',
+  stopped: 'asleep',
+}
+
+/** The last line of a text that says something, or null for none. */
+function lastLineOf(text: string): string | null {
+  const lines = text.split('\n').map((line) => line.trim())
+  return lines.findLast((line) => line !== '') ?? null
+}
+
+/**
+ * A helper of the build Session, as its chip and its dialog read it (issue #77): how it stands as
+ * the engine said it, and — while it works — what it is doing, what it last said and the face it
+ * wears, from what this window has heard of its own Session.
+ */
+export function helperOf(view: HelperView, heard: AgentSessionState): GoingOnAgent {
+  const running = view.state === 'running'
+  const read = activityOf(heard.entries, heard.latest)
+  const said = heard.entries.findLast((entry) => entry.kind === 'message' && entry.role === 'agent')
+  const live = sessionFaceOf(heard)
+  return {
+    kind: 'agent',
+    id: view.id,
+    name: view.name,
+    state: HELPER_STATES[view.state],
+    step: running && !hasEnded(read) ? (read.doing ?? read.detail) : undefined,
+    last: (said === undefined ? null : lastLineOf(said.body)) ?? view.lastLine,
+    // At work, whatever this window heard of its turn: a helper running is never asleep.
+    face:
+      view.state === 'running' ? (live === 'asleep' ? 'thinking' : live) : ENDED_FACES[view.state],
+    at: clockOf(Date.parse(view.startedAt)),
+    startedAt: Date.parse(view.startedAt),
+    endedAt: view.endedAt === null ? null : Date.parse(view.endedAt),
+  }
+}
+
 /**
  * What goes on in a Session, as the line under its title lists it: its runs and the agent's own
  * shell commands, in the order they began, which is the order the line ranks from.
@@ -105,6 +155,26 @@ export function goingOnOf(
 }
 
 /**
+ * The helpers a build's agent launched among what goes on (issue #77), each in the place its
+ * launch gives it, which is the order the line ranks from.
+ */
+export function withHelpers(
+  items: readonly GoingOnItem[],
+  helpers: readonly GoingOnAgent[],
+): GoingOnItem[] {
+  const merged = [...items]
+  for (const helper of helpers) {
+    // A command of the agent's shell carries no moment of its own: a helper goes before the first
+    // run or helper that began after it.
+    const at = merged.findIndex(
+      (item) => item.kind !== 'shell' && item.startedAt > helper.startedAt,
+    )
+    merged.splice(at === -1 ? merged.length : at, 0, helper)
+  }
+  return merged
+}
+
+/**
  * What the reader did to the line of a Session (issue #237): the chips they took out by hand; and
  * what was already over when the Session was opened. Reading a chip — its glance, its details —
  * is not taking it out (review of #250).
@@ -114,9 +184,9 @@ export interface LineMarks {
   readonly before: ReadonlySet<string>
 }
 
-/** How an item stands, as its dot says it: a run the reader stopped is over. */
+/** How an item stands, as its dot says it: a run or a helper that was stopped is over. */
 function standingOf(item: GoingOnItem): 'running' | 'finished' | 'failed' {
-  if (item.kind !== 'run') return item.state
+  if (item.kind === 'shell') return item.state
   if (item.state === 'running') return 'running'
   return item.state === 'failed' ? 'failed' : 'finished'
 }
@@ -167,17 +237,42 @@ export function lineOf(items: readonly GoingOnItem[], marks: LineMarks): GoingOn
   })
 }
 
-/** What was over when the Session was opened: its runs ended, and its shell commands done. */
+/** How long an agent's one-off stays on the line once it ended, success or failure (#321). */
+export const ONE_OFF_LINGERS_MS = 30_000
+
+/**
+ * The one-offs the agent started that ended, and when (issue #321): what leaves the line on its
+ * own, 30 s after its end. A command of the catalogue stays as the shortcut it is, and a one-off
+ * the user started keeps the rule of #237.
+ */
+export function endedAgentOneOffs(
+  runs: readonly CommandRun[],
+): { readonly id: string; readonly endedAt: number }[] {
+  return runs.flatMap((run) =>
+    run.commandId === null && run.startedBy === 'agent' && run.endedAt !== null
+      ? [{ id: run.id, endedAt: Date.parse(run.endedAt) }]
+      : [],
+  )
+}
+
+/**
+ * What was over when the Session was opened: its runs ended, its shell commands done, and its
+ * helpers settled.
+ */
 export function overBefore(
   runs: readonly CommandRun[],
   shells: readonly AgentShellCall[],
   opened: number,
+  helpers: readonly GoingOnAgent[] = [],
 ): ReadonlySet<string> {
   return new Set([
     ...runs
       .filter((run) => run.endedAt !== null && Date.parse(run.endedAt) < opened)
       .map((run) => run.id),
     ...shells.filter((call) => call.state !== 'running' && call.at < opened).map((call) => call.id),
+    ...helpers
+      .filter((helper) => helper.endedAt !== null && helper.endedAt < opened)
+      .map((helper) => helper.id),
   ])
 }
 

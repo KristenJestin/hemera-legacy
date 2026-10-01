@@ -38,9 +38,13 @@ export function waitingAs(
 ): NoticeKind | null {
   if (entry.kind === 'permission_request') {
     // Open, undecided, and in a turn that still runs: a request a turn left behind when it ended
-    // — the agent gave up on the call, the engine never rewrote it — waits for nobody.
+    // — the agent gave up on the call, the engine never rewrote it — waits for nobody. A helper's
+    // request waits in its build's thread, whose turns are not the helper's: it waits until it is
+    // answered or withdrawn (issue #77).
     const open = questionOpen(entry) && decisionOf(entry, thread) === null
-    return open && !endedAfter(entry, thread) ? 'permission' : null
+    return open && (helperAsking(entry) !== null || !endedAfter(entry, thread))
+      ? 'permission'
+      : null
   }
   if (entry.kind === 'command_proposal') {
     return commandProposalOf(entry)?.state === 'pending' ? 'proposal' : null
@@ -69,6 +73,17 @@ export function setupBatchesWaiting(thread: readonly SessionEntry[]): string[] {
     if (drawn?.state === 'pending' && !batches.includes(drawn.batchId)) batches.push(drawn.batchId)
   }
   return batches
+}
+
+/** What a helper's question carries beside the block: the helper that asks (issue #77). */
+const helperAskingSchema = z.object({
+  helper: z.object({ sessionId: z.string(), name: z.string() }),
+})
+
+/** The helper a permission request was asked by, or null for the Session's own agent (#77). */
+export function helperAsking(entry: SessionEntry): { sessionId: string; name: string } | null {
+  if (entry.kind !== 'permission_request') return null
+  return read(helperAskingSchema, entry.payload)?.helper ?? null
 }
 
 /** Whether a turn ended after this entry was written: what it belonged to is over. */

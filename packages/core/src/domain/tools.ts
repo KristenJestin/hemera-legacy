@@ -45,6 +45,9 @@ export const TOOL_NAMES = [
   'task_finished',
   'task_blocked',
   'reproduction_replayed',
+  'helper_launch',
+  'helper_stop',
+  'helper_read',
 ] as const
 
 export type ToolName = (typeof TOOL_NAMES)[number]
@@ -76,6 +79,9 @@ export type ToolMark =
   | 'finish-task'
   | 'block-task'
   | 'replay-reproduction'
+  | 'launch-helper'
+  | 'stop-helper'
+  | 'read-helper'
 
 /** What a reader calls a tool, the mark it wears, and what the turn is doing while it runs. */
 export interface ToolLabel {
@@ -133,6 +139,9 @@ export const TOOL_LABELS: Readonly<Record<ToolName, ToolLabel>> = {
     mark: 'replay-reproduction',
     doing: 'Replaying the reproduction',
   },
+  helper_launch: { label: 'Launch helper', mark: 'launch-helper', doing: 'Launching a helper' },
+  helper_stop: { label: 'Stop helper', mark: 'stop-helper', doing: 'Stopping a helper' },
+  helper_read: { label: 'Read helper', mark: 'read-helper', doing: 'Reading a helper' },
 }
 
 /** The most `fs_read` hands back in one call, and the page a long file is read in. */
@@ -186,11 +195,21 @@ const SPEC_WRITING: ReadonlySet<ToolName> = new Set(['spec_read', 'spec_write'])
  * The build's own, which only a `build` Session is offered (D10-13): its three, and the replay of a
  * bug's reproduction its final checks wait for (issue #203).
  */
-const BUILDING: ReadonlySet<ToolName> = new Set([
+export const BUILDING: ReadonlySet<ToolName> = new Set([
   'build_read',
   'task_finished',
   'task_blocked',
   'reproduction_replayed',
+])
+
+/**
+ * How an orchestrator reaches its helpers (issue #77): launch one, stop one, read where one
+ * stands. Only a `build` Session is offered them, and a helper that stands above the depth cap.
+ */
+export const HELPING: ReadonlySet<ToolName> = new Set([
+  'helper_launch',
+  'helper_stop',
+  'helper_read',
 ])
 
 /** What a `define` Session reads the code with: nothing that writes a file or runs a command. */
@@ -214,13 +233,16 @@ const READ_ONLY_CODE_TOOLS = [
  * Spec (D10-13): the code tools, the setup tools, and the build's own — `build_read` reads the frozen Spec and
  * where the build stands, `task_finished` and `task_blocked` are the agent's only words about a
  * task, and Hemera decides its state; `reproduction_replayed` says what the replay of a bug's
- * reproduction showed (issue #203). No Spec tool: the contract does not move during a build.
- * Neither of the other two missions is offered a build tool.
+ * reproduction showed (issue #203). No Spec tool: the contract does not move during a build. The
+ * build's main agent is an orchestrator: it launches, stops and reads helpers (issue #77). Neither
+ * of the other two missions is offered a build tool or a helper tool.
  */
 export function offeredTools(mission: Mission): readonly ToolName[] {
   switch (mission) {
     case 'free':
-      return TOOL_NAMES.filter((name) => !SPEC_WRITING.has(name) && !BUILDING.has(name))
+      return TOOL_NAMES.filter(
+        (name) => !SPEC_WRITING.has(name) && !BUILDING.has(name) && !HELPING.has(name),
+      )
     case 'define':
       return [...READ_ONLY_CODE_TOOLS, 'spec_read', 'spec_write', 'spec_propose']
     case 'build':

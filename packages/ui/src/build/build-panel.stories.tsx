@@ -143,23 +143,29 @@ const PERMISSIONS: NoticeGroup = {
 }
 
 /**
- * The chat of the Session: its head, whose details open the Session details, its thread, its
- * composer and the notices on its edge.
+ * The head of the Session, across the whole page above the chat and the panel (#77): its details
+ * open the Session details, whether the panel lies beside the chat or over it.
  */
+function Head(): ReactNode {
+  const [details, setDetails] = useState(false)
+  return (
+    <div className="shrink-0 px-6 pt-6 pb-1">
+      <SessionHeader
+        title="Build CSV export"
+        onRename={fn()}
+        onOpenDetails={() => setDetails(true)}
+      />
+      <SessionDetails open={details} onOpenChange={setDetails} plan={[]} files={[]} />
+    </div>
+  )
+}
+
+/** The chat of the Session: its thread, its composer and the notices on its edge. */
 function Chat({ thread, notices }: { thread: ScrollerEntry[]; notices: ReactNode }): ReactNode {
   const [value, setValue] = useState('')
   const [files, setFiles] = useState<string[]>([])
-  const [details, setDetails] = useState(false)
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-      <div className="mx-auto w-full max-w-3xl px-6 pt-6 pb-4">
-        <SessionHeader
-          title="Build CSV export"
-          onRename={fn()}
-          onOpenDetails={() => setDetails(true)}
-        />
-      </div>
-      <SessionDetails open={details} onOpenChange={setDetails} plan={[]} files={[]} />
       <MessageScroller className="flex-1" label="The thread of this Session" entries={thread} />
       <div className="mx-auto flex w-full max-w-3xl flex-col gap-2 px-6 pb-4">
         <Composer
@@ -245,6 +251,7 @@ function Screen({
   return (
     <TooltipProvider>
       <div className="flex h-screen min-h-0 flex-col bg-background text-foreground">
+        <Head />
         <SessionRow
           chat={
             <Chat
@@ -540,6 +547,30 @@ export const OverTheChat: Story = {
       'true',
     )
     await expect(canvas.queryByRole('log', { name: 'The thread of this Session' })).toBeNull()
+  },
+}
+
+/**
+ * The head across the whole page (#77): with the build over the chat, the head is above the panel
+ * and still in reach — its ⓘ opens the Session details, and Escape gives the keyboard back to it.
+ */
+export const HeadAboveThePanel: Story = {
+  args: { over: true },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const page = within(document.body)
+    const details = canvas.getByRole('button', { name: 'Session details' })
+    const panel = canvas
+      .getByRole('region', { name: 'Build ATL-7' })
+      .querySelector<HTMLElement>('[data-panel]')!
+    await expect(details.getBoundingClientRect().bottom).toBeLessThanOrEqual(
+      panel.getBoundingClientRect().top,
+    )
+    await userEvent.click(details)
+    await waitFor(() => expect(page.getByRole('dialog')).toBeVisible())
+    await userEvent.keyboard('{Escape}')
+    await waitFor(() => expect(page.queryByRole('dialog')).toBeNull())
+    await waitFor(() => expect(details).toHaveFocus())
   },
 }
 

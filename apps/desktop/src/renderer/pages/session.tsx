@@ -1001,77 +1001,78 @@ export function SessionPage({
 
   return (
     /*
-      One column (review of #40, defect 2): the header, the thread and the composer share one
-      width and one left edge, and nothing stands beside them but the Spec of a `define` Session —
-      the Session details are a dialog the reader opens from the head (second review of #18). The
-      screen runs under the frame all the same, and the page's own scroll is the thread's. The row
-      is the container the unfolded Spec panel's width is a share of. The chat takes what the
-      panel leaves it and no more: never wider than that for what it holds, which would push the
-      row past the window and make it scroll sideways (issue #181).
+      The head across the whole page, above the chat and the panel of the Session's mission alike,
+      so it stays in reach while the panel lies over the chat (#77). Under it the row: one column
+      (review of #40, defect 2) where the thread and the composer share one width and one left
+      edge, and beside it the panel of a `define` or a `build` Session — the Session details are a
+      dialog the reader opens from the head (second review of #18). The screen runs under the
+      frame all the same, and the page's own scroll is the thread's. The chat takes what the panel
+      leaves it and no more: never wider than that for what it holds, which would push the row
+      past the window and make it scroll sideways (issue #181).
     */
     <div className="flex h-full min-h-0 flex-col">
+      <div className="shrink-0 px-6 pt-6 pb-1">
+        {/*
+          One row (issue #241): what goes on in the Session — the runs Hemera holds, the commands
+          the agent ran in its own shell, and the Run a command is started from (issue #219) — and
+          the head's ⓘ and `…` at its end. No title: the sidebar says it. A Session nothing
+          answers has no agent to lend a command to, and offers no Run.
+        */}
+        <SessionHeader
+          title={session.title}
+          onRename={onRename}
+          onArchive={onArchive}
+          // A Session nothing was ever written in is one the user made by mistake far more often
+          // than one they are done with, and putting it away is a press they would come to
+          // regret: the archive is where threads go.
+          archiveDisabled={thread.length === 0}
+          // The one way to the Session details: nothing the agent does opens them.
+          onOpenDetails={() => setDetailsOpen(true)}
+        >
+          <GoingOnLine
+            items={lineOf(goingOn, {
+              ...marksOf(session.id, lines),
+              before: overBefore(commandRuns, shells, opened.current),
+            })}
+            onStop={(run) => onStopRun(run.id)}
+            onRunAgain={(run) => onRunAgain(run.id)}
+            onRemove={(item) => removeFromLine(session.id, item.id)}
+            onOpenUrl={onOpenUrl}
+            onAddToCatalogue={(shown) => {
+              const run = commandRuns.find((one) => one.id === shown.id)
+              if (run !== undefined) deciding(onAddToCatalogue(run))
+            }}
+            end={
+              session.provider === null ? undefined : (
+                <RunCommand
+                  catalogue={catalogue.map((command) => ({
+                    name: command.name,
+                    command: command.line,
+                    type: command.type,
+                    running: commandRuns.some(
+                      (run) => run.commandId === command.id && run.state === 'running',
+                    ),
+                  }))}
+                  workspace={workspace?.name ?? 'main'}
+                  onRunCommand={(entry) => onRunCommand(entry.name)}
+                  onRunOnce={onRunCommand}
+                  shortcut={runShortcut}
+                  asked={runAsked}
+                />
+              )
+            }
+          />
+        </SessionHeader>
+      </div>
       <SessionRow
         chat={
           <>
-            <div className="mx-auto w-full max-w-3xl px-6 pt-6 pb-4">
-              {/*
-            One row (issue #241): what goes on in the Session — the runs Hemera holds, the commands
-            the agent ran in its own shell, and the Run a command is started from (issue #219) — and
-            the head's ⓘ and `…` at its end. No title: the sidebar says it. A Session nothing
-            answers has no agent to lend a command to, and offers no Run.
-          */}
-              <SessionHeader
-                title={session.title}
-                onRename={onRename}
-                onArchive={onArchive}
-                // A Session nothing was ever written in is one the user made by mistake far more often
-                // than one they are done with, and putting it away is a press they would come to
-                // regret: the archive is where threads go.
-                archiveDisabled={thread.length === 0}
-                // The one way to the Session details: nothing the agent does opens them.
-                onOpenDetails={() => setDetailsOpen(true)}
-              >
-                <GoingOnLine
-                  items={lineOf(goingOn, {
-                    ...marksOf(session.id, lines),
-                    before: overBefore(commandRuns, shells, opened.current),
-                  })}
-                  onStop={(run) => onStopRun(run.id)}
-                  onRunAgain={(run) => onRunAgain(run.id)}
-                  onRemove={(item) => removeFromLine(session.id, item.id)}
-                  onOpenUrl={onOpenUrl}
-                  onAddToCatalogue={(shown) => {
-                    const run = commandRuns.find((one) => one.id === shown.id)
-                    if (run !== undefined) deciding(onAddToCatalogue(run))
-                  }}
-                  end={
-                    session.provider === null ? undefined : (
-                      <RunCommand
-                        catalogue={catalogue.map((command) => ({
-                          name: command.name,
-                          command: command.line,
-                          type: command.type,
-                          running: commandRuns.some(
-                            (run) => run.commandId === command.id && run.state === 'running',
-                          ),
-                        }))}
-                        workspace={workspace?.name ?? 'main'}
-                        onRunCommand={(entry) => onRunCommand(entry.name)}
-                        onRunOnce={onRunCommand}
-                        shortcut={runShortcut}
-                        asked={runAsked}
-                      />
-                    )
-                  }
-                />
-              </SessionHeader>
-            </div>
             {/*
-          The thread is given the whole width under the head, and lays its own column on the one
-          the head and the composer are laid on: a wheel anywhere beside the thread scrolls it
-          (trial of 22 September 2026, evening). An empty Session has nothing to scroll, and its
-          sentence stands in the column like everything else.
-        */}
+              The thread is given the whole width under the head, and lays its own column on the one
+              the head and the composer are laid on: a wheel anywhere beside the thread scrolls it
+              (trial of 22 September 2026, evening). An empty Session has nothing to scroll, and its
+              sentence stands in the column like everything else.
+            */}
             {thread.length === 0 ? (
               <div className="mx-auto flex min-h-0 w-full max-w-3xl flex-1 flex-col px-6">
                 {loaded ? <SessionEmpty /> : null}
@@ -1084,16 +1085,16 @@ export function SessionPage({
               />
             )}
             {/*
-          What the turn has spent stands above the box: the box has no foot (issue #241), its send
-          is an icon on its own row, and a figure read at a glance is a figure that must not be
-          what makes a row wrap. A Session no agent has accounted for yet shows no meter at all —
-          a meter drawn at zero is a figure that says nothing (D5-20).
-
-          What the turn is doing shares that row, at its other end: the two are one reading of
-          one turn — what it is doing, and what it has cost — and a row drawn for one of them is
-          a row the other would have asked for anyway. The row is drawn as soon as either has
-          something to say, and the meter keeps its end of it whether or not a turn is running.
-        */}
+              What the turn has spent stands above the box: the box has no foot (issue #241), its send
+              is an icon on its own row, and a figure read at a glance is a figure that must not be
+              what makes a row wrap. A Session no agent has accounted for yet shows no meter at all —
+              a meter drawn at zero is a figure that says nothing (D5-20).
+              
+              What the turn is doing shares that row, at its other end: the two are one reading of
+              one turn — what it is doing, and what it has cost — and a row drawn for one of them is
+              a row the other would have asked for anyway. The row is drawn as soon as either has
+              something to say, and the meter keeps its end of it whether or not a turn is running.
+            */}
             <div className="mx-auto flex w-full max-w-3xl flex-col gap-2 px-6 pb-4">
               <TurnRow
                 activity={activity}
@@ -1104,14 +1105,14 @@ export function SessionPage({
                 notched={waitsForYou}
               />
               {/*
-            What the page's last act was refused with — a rename, an archive, a thread that could
-            not be read, a Workspace changed once the agent had started (D8-08) — said here and
-            not on the send: those are refusals of the header and of the opening, and a Session
-            whose archive was refused is one that can still be written in. It stands in the same
-            stack as the meter rather than over the thread, so what it moves is itself and nothing
-            above it (D4b-02). A build that could not be asked for is said here too, as a sentence
-            (#132), until the build's actions have a place of their own to say it.
-          */}
+                What the page's last act was refused with — a rename, an archive, a thread that could
+                not be read, a Workspace changed once the agent had started (D8-08) — said here and
+                not on the send: those are refusals of the header and of the opening, and a Session
+                whose archive was refused is one that can still be written in. It stands in the same
+                stack as the meter rather than over the thread, so what it moves is itself and nothing
+                above it (D4b-02). A build that could not be asked for is said here too, as a sentence
+                (#132), until the build's actions have a place of their own to say it.
+              */}
               {(refused ?? refusal ?? stored.refusal ?? stored.buildRefused ?? built.refusal) !==
                 null && (
                 <p role="alert" className="text-sm text-muted-foreground">

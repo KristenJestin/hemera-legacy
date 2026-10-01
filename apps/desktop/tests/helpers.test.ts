@@ -402,6 +402,93 @@ describe('A helper launches its own helpers, two levels deep at most', () => {
   })
 })
 
+describe('A helper’s result reaches its launcher, whichever ends first', () => {
+  /** A helper that launches one of its own, and answers its result with what it counted. */
+  const launcher = (between: () => Promise<void>) => {
+    const handed: string[] = []
+    const agent = fakeAgent({
+      listsTools: true,
+      between,
+      answersDeliveryWith: (text) => {
+        handed.push(text)
+        if (isBrief(text)) {
+          return [launch('Count the rows of the journal.'), { does: 'says', text: 'Counting.' }]
+        }
+        return isResult(text) ? [{ does: 'says', text: 'The journal holds 42 rows.' }] : []
+      },
+    })
+    return { agent, handed }
+  }
+
+  test('its helper ends before its own turn does: the result is still handed to it', async () => {
+    const main = orchestrator([launch('Write the reader, with help.')])
+    // The launcher is held after its launch, until its own helper is done.
+    const gate = gated(1)
+    const first = launcher(gate.between)
+    const second = aHelper([{ does: 'says', text: 'There are 42 rows.' }])
+    opened = await openWindow(dataFolder, main.agent, first.agent, second.agent)
+    const seen = await opened.running(
+      Effect.gen(function* () {
+        const spec = yield* aReadySpec(dataFolder, THREE)
+        const sessionId = yield* launched(spec.specId, spec.workspaceId)
+        yield* eventually(helpersOf(sessionId), (all) =>
+          all.some((one) => one.depth === 2 && one.state === 'done'),
+        )
+        gate.carryOn()
+        const helpers = yield* eventually(
+          helpersOf(sessionId),
+          (all) => all.length === 2 && all.every((one) => one.state === 'done'),
+        )
+        yield* eventually(
+          Effect.sync(() => main.handed),
+          (all) => all.some(isResult),
+        )
+        return helpers
+      }),
+    )
+    expect(seen.map((one) => one.state)).toEqual(['done', 'done'])
+    expect(first.handed.find(isResult)).toContain('There are 42 rows.')
+    // Its own result is its answer to its helper's, not what it said before it came.
+    expect(main.handed.find(isResult)).toContain('The journal holds 42 rows.')
+  })
+
+  test('its helper ends after its own turn did: the result is handed to it then', async () => {
+    const main = orchestrator([launch('Write the reader, with help.')])
+    const first = launcher(() => Promise.resolve())
+    // The launcher's helper is held until the launcher's own turn is over.
+    const counting = held()
+    const second = aHelper([{ does: 'says', text: 'There are 42 rows.' }], {
+      between: () => counting.promise,
+    })
+    opened = await openWindow(dataFolder, main.agent, first.agent, second.agent)
+    const seen = await opened.running(
+      Effect.gen(function* () {
+        const spec = yield* aReadySpec(dataFolder, THREE)
+        const sessionId = yield* launched(spec.specId, spec.workspaceId)
+        const [parent] = yield* eventually(helpersOf(sessionId), (all) => all.length === 2)
+        yield* eventually(threadOf(parent?.id ?? ''), (thread) =>
+          thread.some((entry) => entry.kind === 'turn'),
+        )
+        const during = yield* helpersOf(sessionId)
+        counting.carryOn()
+        const helpers = yield* eventually(
+          helpersOf(sessionId),
+          (all) => all.length === 2 && all.every((one) => one.state === 'done'),
+        )
+        yield* eventually(
+          Effect.sync(() => main.handed),
+          (all) => all.some(isResult),
+        )
+        return { during, helpers }
+      }),
+    )
+    // Its turn over while its helper still ran, it waited for that helper's result.
+    expect(seen.during.map((one) => one.state)).toEqual(['running', 'running'])
+    expect(first.handed.find(isResult)).toContain('There are 42 rows.')
+    expect(main.handed.find(isResult)).toContain('The journal holds 42 rows.')
+  })
+})
+
 describe('A helper Session is read-only for the user', () => {
   test('a message written into it is refused, and no turn of the user’s is started there', async () => {
     const main = orchestrator([launch('Write the reader.')])

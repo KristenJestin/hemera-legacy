@@ -97,7 +97,8 @@ export interface HelpersService {
   readonly taken: (sessionId: string) => void
   /**
    * A delivery turn of a Session ended (issue #77): for a running helper, its answer is its result
-   * once no helper of its own still runs; a turn that failed fails it. Any other Session passes.
+   * once no helper of its own still runs and no result of one waits for it; a turn that failed
+   * fails it. Any other Session passes.
    */
   readonly turnEnded: (sessionId: string, turnId: string, stopReason: string) => Effect.Effect<void>
   /** The agent of a Session died under a turn: a running helper fails, and its launcher is told. */
@@ -622,6 +623,18 @@ export const helpersLayer = Layer.effect(
             )
             .pipe(Effect.orElseSucceed(() => []))
           if (children.length > 0) return
+          // A helper of its own ended while this turn ran: its result waits, and was never seen.
+          // It is handed over, and the turn it goes out in decides.
+          const waiting = yield* database
+            .select({ id: queuedResults.id })
+            .from(queuedResults)
+            .where(eq(queuedResults.sessionId, sessionId))
+            .limit(1)
+            .pipe(Effect.orElseSucceed(() => []))
+          if (waiting.length > 0) {
+            if (agent !== null) yield* agent.handOver(sessionId)
+            return
+          }
           const definition = row.helper === null ? null : helperNamed(row.helper)
           const result = helperResult(definition, yield* answerOf(sessionId, turnId))
           const told = result.matched

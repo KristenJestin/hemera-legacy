@@ -1,6 +1,6 @@
 import { type ReactNode, useRef, useState } from 'react'
 
-import { PHASE_TITLES, type SpecTarget, type SpecView } from './model.ts'
+import { PHASE_TITLES, type SpecTarget, type SpecView, specCalledOf } from './model.ts'
 import { PhaseGlyph } from './phase-glyph.tsx'
 import { SpecPart } from './spec-part.tsx'
 import { type PhaseGroup, isWriting, phaseProgressOf, writtenWords } from './spec-phases.ts'
@@ -92,7 +92,7 @@ export function SpecWide({ spec, groups, still }: SpecWideProps): ReactNode {
 
   return (
     <div className={COLUMNS}>
-      <nav aria-label={`Outline of ${spec.key}`} className={NAV}>
+      <nav aria-label={`Outline of ${specCalledOf(spec)}`} className={NAV}>
         {groups.map((group) => {
           const writing = isWriting(group, spec.focus)
           const title = PHASE_TITLES[group.phase]
@@ -140,7 +140,7 @@ export function SpecWide({ spec, groups, still }: SpecWideProps): ReactNode {
       <div
         ref={reader}
         role="region"
-        aria-label={`Contents of ${spec.key}`}
+        aria-label={`Contents of ${specCalledOf(spec)}`}
         tabIndex={0}
         className={READER}
         onScroll={follow}

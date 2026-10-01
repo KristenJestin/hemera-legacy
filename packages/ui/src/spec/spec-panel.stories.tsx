@@ -461,6 +461,25 @@ export const Provisional: Story = {
     await expect(canvas.getByRole('heading', { name: /text reading tool/ })).toBeVisible()
     await expect(canvas.queryByRole('button', { name: 'Mark ready' })).toBeNull()
     await expect(within(panel).getAllByText('Nothing written yet.').length).toBeGreaterThan(3)
+    // Its parts are named by the name the panel has, never by a key it does not have.
+    await expect(
+      canvas.getByRole('region', { name: 'Contents of the provisional Spec' }),
+    ).toBeVisible()
+  },
+}
+
+/** The provisional Spec over the chat: its outline and its contents named as the panel is. */
+export const ProvisionalOverTheChat: Story = {
+  args: { spec: PROVISIONAL, defaultOver: true },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await expect(
+      canvas.getByRole('navigation', { name: 'Outline of the provisional Spec' }),
+    ).toBeVisible()
+    await expect(
+      canvas.getByRole('region', { name: 'Contents of the provisional Spec' }),
+    ).toBeVisible()
+    await expect(canvas.queryByRole('navigation', { name: 'Outline of ' })).toBeNull()
   },
 }
 

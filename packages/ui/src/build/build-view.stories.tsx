@@ -14,6 +14,7 @@ import {
   BUG_REPLAYED,
   BUILDING,
   FINAL_CHECKS,
+  FINAL_CHECKS_JUST_RED,
   FINAL_CHECKS_RED,
   GETTING_READY,
   NOW,
@@ -280,9 +281,25 @@ export const FinalChecksRed: Story = {
   args: { build: FINAL_CHECKS_RED },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    await expect(canvas.getByRole('img', { name: 'Final checks on try 2 of 3' })).toBeVisible()
+    const running = canvas.getByRole('img', { name: 'Final checks on try 2 of 3' })
+    await expect(running).toBeVisible()
+    await expect(running).toHaveClass('text-warning')
     await userEvent.click(canvas.getByRole('button', { name: /^Try 1 of 3/ }))
     await expect(await canvas.findByText('exited with 1')).toBeVisible()
+  },
+}
+
+/**
+ * Final checks just red, before the next try starts: the state line wears the red cross, never the
+ * arc of something under way.
+ */
+export const FinalChecksJustRed: Story = {
+  args: { build: FINAL_CHECKS_JUST_RED },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const mark = canvas.getByRole('img', { name: 'Final checks red on try 1 of 3' })
+    await expect(mark).toBeVisible()
+    await expect(mark).toHaveClass('text-destructive')
   },
 }
 

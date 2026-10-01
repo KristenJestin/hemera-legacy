@@ -24,6 +24,7 @@ import {
   BLOCKED,
   BLOCKER,
   BUILDING,
+  FINAL_CHECKS_JUST_RED,
   FINAL_CHECKS_RED,
   GETTING_READY,
   NOW,
@@ -205,6 +206,7 @@ const SCREENS = {
   blocked: BLOCKED,
   paused: PAUSED,
   finalChecks: FINAL_CHECKS_RED,
+  finalChecksJustRed: FINAL_CHECKS_JUST_RED,
   readyToAccept: READY_TO_ACCEPT,
   accepted: ACCEPTED,
   dismissed: DISMISSED,
@@ -835,6 +837,20 @@ export const WideFinalChecks: Story = {
       'true',
     )
     await expect(canvas.getByRole('region', { name: 'Final checks' })).toBeVisible()
+  },
+}
+
+/**
+ * Over the chat, right after a red final try: the final checks' row wears the red cross, and the
+ * arc of something under way once the next try runs.
+ */
+export const WideFinalChecksRed: Story = {
+  args: { over: true, screen: 'finalChecksJustRed' },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const tasks = within(canvas.getByRole('region', { name: 'Tasks of ATL-7' }))
+    const row = tasks.getByRole('button', { name: /Final checks/ })
+    await expect(row.firstElementChild).toHaveClass('text-destructive')
   },
 }
 

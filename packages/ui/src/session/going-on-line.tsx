@@ -43,9 +43,8 @@ import { RunPlace } from './run-place.tsx'
  * holds no process it could stop, and its dot says how it stands. A helper the agent launched is a
  * live chip too (issue #77), its avatar in the slot: its glance says what it is doing and what it
  * last said, its ⓘ opens its live thread read-only (`HelperDialog`), and × stops it once the reader
- * said so. What failed comes first, then what runs, then what is over, and a chip that changes rank
- * travels to its new place; four chips, and a `+N` for the rest, which opens the whole list grouped
- * by kind.
+ * said so. What failed comes first, then what runs, then what is over; four chips, and a `+N` for
+ * the rest, which opens the whole list grouped by kind.
  *
  * A chip of the shell opens a glance: one line — icon, dot, name, where it runs, the ⓘ of its
  * Details — and what it printed under it. The Details are a dialog laid the same way for the
@@ -215,14 +214,14 @@ const SHOWN = { width: 'auto', filter: 'opacity(1)' } as const
 const HIDDEN = { width: 0, filter: 'opacity(0)' } as const
 
 /**
- * A place on the line that arrives and leaves by its width, pushing the chips after it, and travels
- * to its new rank rather than jumping there.
+ * A place on the line that arrives and leaves by its width, pushing the chips after it. It is never
+ * projected to where it stood before: a chip moves with its line, in one piece, when the page around
+ * it moves (a sidebar folds, the window is resized), and takes its new rank in place.
  */
 function Slot({ children }: { children: ReactNode }): ReactNode {
   const transition = useTransition(fold)
   return (
     <motion.span
-      layout="position"
       className={SLOT}
       initial={HIDDEN}
       animate={SHOWN}

@@ -50,6 +50,11 @@ const RIM_BODY =
 export interface BuildPanelProps extends Omit<BuildViewProps, 'specOpen' | 'onToggleSpec'> {
   /** The frozen revision the build works from, which "Spec" opens read only. */
   spec: SpecView
+  /**
+   * The Session's notices, the ones the chat's composer holds: floated over the panel while it
+   * covers the chat (#77).
+   */
+  notices?: ReactNode
   /** Whether the panel starts folded to its small frame, which it does not unless told. */
   defaultFolded?: boolean | undefined
   /** Whether the open panel starts over the chat, for the stories that show it. */
@@ -60,6 +65,7 @@ export interface BuildPanelProps extends Omit<BuildViewProps, 'specOpen' | 'onTo
 
 export function BuildPanel({
   spec,
+  notices,
   defaultFolded = false,
   defaultOver = false,
   defaultSpecOpen = false,
@@ -107,6 +113,7 @@ export function BuildPanel({
       }}
       over={over}
       onOver={setOver}
+      notices={notices}
       head={
         <h2 className={TITLE}>
           <IconHammer size="sm" aria-hidden="true" />

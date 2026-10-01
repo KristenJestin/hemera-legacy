@@ -55,6 +55,11 @@ const FOOT = 'flex items-center justify-end gap-3 px-1 pt-1.5'
 
 export interface SpecPanelProps {
   spec: SpecView
+  /**
+   * The Session's notices, the ones the chat's composer holds: floated over the panel while it
+   * covers the chat (#77).
+   */
+  notices?: ReactNode
   /** Present when this Session reads a draft another Session writes. */
   reader?: ReaderView | undefined
   /** Whether the rework dialog starts open, for the story that shows it. */
@@ -85,6 +90,7 @@ export interface SpecPanelProps {
 
 export function SpecPanel({
   spec,
+  notices,
   reader,
   defaultReworkOpen = false,
   defaultFolded = true,
@@ -188,6 +194,7 @@ export function SpecPanel({
         onFold={() => fold(true, true)}
         over={over}
         onOver={setOver}
+        notices={notices}
         arrives={arrives}
         landing={landing}
         head={

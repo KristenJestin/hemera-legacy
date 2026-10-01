@@ -933,6 +933,10 @@ export function SessionPage({
   // Which tabs have something to show, which is what the details open on.
   const tabs = detailsTabsOf(plan.length, touched.length, context)
 
+  // Everything that waits for the reader, as one pill: on the composer's edge, and floated over
+  // the panel of the Session's mission while it lies over the chat (#77).
+  const pill = <SessionNotices groups={notices} />
+
   /**
    * The panel beside the chat, chosen by the Session's mission here and nowhere else. A `define`
    * Session has its Spec. A `free` Session has no panel and nothing that offers one: a Spec begins
@@ -949,6 +953,7 @@ export function SessionPage({
         <BuildPanel
           {...buildView}
           spec={frozen}
+          notices={pill}
           selected={openBuildTask}
           onSelect={setOpenBuildTask}
         />
@@ -960,6 +965,7 @@ export function SessionPage({
       return (
         <SpecPanel
           spec={provisionalViewOf(provisional)}
+          notices={pill}
           arrives={openedFree.current}
           onMarkReady={() => undefined}
           onRework={() => undefined}
@@ -972,6 +978,7 @@ export function SessionPage({
     return (
       <SpecPanel
         spec={spec}
+        notices={pill}
         arrives={openedFree.current}
         reader={readerOf(defined, session.id, sessions, running)}
         onMarkReady={() => void markReady(session.id)}
@@ -1172,7 +1179,7 @@ export function SessionPage({
                 onStop={onStop}
                 // Everything that waits for the reader, on the box's edge (issue #237): it rises from
                 // behind the box when something starts waiting, and goes back there when nothing does.
-                notices={<SessionNotices groups={notices} />}
+                notices={pill}
                 takeFocus={composing}
                 onFocusTaken={() => setComposing(false)}
               />

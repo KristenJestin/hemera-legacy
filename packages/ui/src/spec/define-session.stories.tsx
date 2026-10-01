@@ -406,6 +406,22 @@ async function unfold(canvasElement: HTMLElement): Promise<void> {
   await canvas.findByRole('region', { name: 'Contents of ATL-7' })
 }
 
+/**
+ * The one text of the page in reach: the panel keeps both its views drawn, beside the chat and over
+ * it, the one not shown out of reach.
+ */
+function textInReach(
+  canvasElement: HTMLElement,
+  text: string | RegExp,
+  selector?: string,
+): HTMLElement {
+  const found = within(canvasElement)
+    .getAllByText(text, selector === undefined ? undefined : { selector })
+    .filter((one) => one.closest('[inert]') === null)
+  if (found.length !== 1) throw new Error(`${String(found.length)} "${String(text)}" in reach`)
+  return found[0]!
+}
+
 /** The heading of a phase in the open panel's column, named with where the phase stands. */
 function phaseHeading(canvasElement: HTMLElement, name: RegExp): HTMLElement {
   const column = within(canvasElement).getByRole('region', { name: 'Contents of ATL-7' })
@@ -452,7 +468,7 @@ export const MidPlanNotReadyYet: Story = {
     await expect(canvas.queryByRole('alert')).toBeNull()
     const column = canvas.getByRole('region', { name: 'Contents of ATL-7' })
     await expect(within(column).getByRole('heading', { name: /^Tasks · 0/ })).toBeVisible()
-    await expect(canvas.getByText(/Tasks are written in Decompose/)).toBeVisible()
+    await expect(textInReach(canvasElement, /Tasks are written in Decompose/)).toBeVisible()
   },
 }
 
@@ -574,7 +590,7 @@ export const LastQuestionAnswered: Story = {
       'Negative rows, marked by a type column.{Enter}',
     )
     await expect(
-      canvas.getByText('Negative rows, marked by a type column.', { selector: 'p' }),
+      textInReach(canvasElement, 'Negative rows, marked by a type column.', 'p'),
     ).toBeVisible()
     const mark = await canvas.findByRole('button', { name: 'Mark ready' })
     mark.focus()
@@ -641,7 +657,7 @@ export const Reader: Story = {
   args: { screen: 'reader', folded: false },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    await expect(canvas.getByText('« Spec CSV »')).toBeVisible()
+    await expect(textInReach(canvasElement, '« Spec CSV »')).toBeVisible()
     await expect(canvas.getByRole('button', { name: 'Take over' })).toBeVisible()
     await expect(phaseHeading(canvasElement, /^Decompose phase/)).toBeVisible()
   },

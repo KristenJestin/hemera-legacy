@@ -4,6 +4,7 @@ import { type ReactNode, useState } from 'react'
 import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
 
 import { atRest } from '../../.storybook/at-rest.ts'
+import { withinFrames } from '../../.storybook/reduced-motion.ts'
 
 import { HemeraToolCall } from '../activity/hemera-tool-call.tsx'
 import { PermissionRecord, PermissionRequest } from '../approval/permission-request.tsx'
@@ -335,6 +336,18 @@ export default meta
 
 type Story = StoryObj<typeof meta>
 
+/**
+ * The one text of the page in reach: the panel keeps both its views drawn, beside the chat and over
+ * it, the one not shown out of reach.
+ */
+function textInReach(canvasElement: HTMLElement, text: string): HTMLElement {
+  const found = within(canvasElement)
+    .getAllByText(text)
+    .filter((one) => one.closest('[inert]') === null)
+  if (found.length !== 1) throw new Error(`${String(found.length)} "${text}" in reach`)
+  return found[0]!
+}
+
 /** The width of a region of the page, in pixels, which only a browser decides. */
 function widthOf(canvasElement: HTMLElement, name: string): number {
   return within(canvasElement).getByLabelText(name).getBoundingClientRect().width
@@ -380,7 +393,7 @@ export const GettingReady: Story = {
 export const Building: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    await expect(canvas.getByText('Building')).toBeVisible()
+    await expect(textInReach(canvasElement, 'Building')).toBeVisible()
     await expect(canvas.queryByRole('group', { name: /^Yours:/ })).toBeNull()
   },
 }
@@ -456,7 +469,7 @@ export const Paused: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     await expect(canvas.getByRole('button', { name: 'Resume' })).toBeVisible()
-    await expect(canvas.getByText('Paused')).toBeVisible()
+    await expect(textInReach(canvasElement, 'Paused')).toBeVisible()
   },
 }
 
@@ -475,7 +488,7 @@ export const Accepted: Story = {
   args: { screen: 'accepted' },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    await expect(canvas.getByText('Accepted')).toBeVisible()
+    await expect(textInReach(canvasElement, 'Accepted')).toBeVisible()
     await expect(canvas.queryByRole('button', { name: 'Stop build' })).toBeNull()
   },
 }
@@ -639,7 +652,7 @@ export const SpecOpen: Story = {
     const canvas = within(canvasElement)
     await expect(canvas.getByRole('region', { name: 'Spec ATL-7' })).toBeVisible()
     await expect(canvas.getByRole('region', { name: 'Tasks of ATL-7' })).toBeVisible()
-    await expect(canvas.getByText('read only')).toBeVisible()
+    await expect(textInReach(canvasElement, 'read only')).toBeVisible()
     await expect(canvas.queryByRole('button', { name: 'Rework' })).toBeNull()
     await expect(canvas.queryByRole('button', { name: 'Mark ready' })).toBeNull()
     await expect(canvas.getByRole('button', { name: 'Spec' })).toHaveAttribute(
@@ -679,6 +692,56 @@ export const SpecBesideItsTasks: Story = {
       expect(canvas.getByRole('button', { name: 'Spec' })).toHaveAttribute('aria-pressed', 'false'),
     )
     await expect(widthOf(canvasElement, 'The thread of this Session')).toBe(before)
+  },
+}
+
+/** Waits for the panel's cross-fade and the swap to be over: half a second of frames, or so. */
+async function settled(): Promise<void> {
+  await withinFrames(() => false, 30)
+}
+
+/**
+ * The view beside the chat is kept while the panel lies over it: a story unfolded and the view
+ * scrolled there are still unfolded and scrolled once the Spec, which lays the panel over the chat,
+ * is closed, and once the panel is laid over the chat by hand and taken back.
+ */
+export const ViewKeptOverTheChat: Story = {
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const folded = canvas
+      .getAllByRole('button', { name: /^Tasks · / })
+      .find((one) => one.getAttribute('aria-expanded') === 'false')!
+    await userEvent.click(folded)
+    await waitFor(() => expect(folded).toHaveAttribute('aria-expanded', 'true'))
+    const body = canvas.getByRole('region', { name: 'The build of ATL-7' })
+    await waitFor(() => expect(body.scrollHeight).toBeGreaterThan(body.clientHeight + 40))
+    body.scrollTop = 40
+    const scrolled = body.scrollTop
+    await expect(scrolled).toBeGreaterThan(0)
+    await userEvent.click(canvas.getByRole('button', { name: 'Spec' }))
+    await canvas.findByRole('region', { name: 'Spec ATL-7' })
+    // The cross-fade over, so what was beside the chat has had the time to go.
+    await settled()
+    await userEvent.click(canvas.getByRole('button', { name: 'Close the Spec' }))
+    await waitFor(() =>
+      expect(canvas.getByRole('button', { name: 'Over the chat' })).toHaveAttribute(
+        'aria-pressed',
+        'false',
+      ),
+    )
+    await waitFor(() =>
+      expect(canvas.getByRole('region', { name: 'The build of ATL-7' })).toBe(body),
+    )
+    await expect(folded).toHaveAttribute('aria-expanded', 'true')
+    await expect(body.scrollTop).toBe(scrolled)
+    await userEvent.click(canvas.getByRole('button', { name: 'Over the chat' }))
+    await settled()
+    await userEvent.click(canvas.getByRole('button', { name: 'Over the chat' }))
+    await waitFor(() =>
+      expect(canvas.getByRole('region', { name: 'The build of ATL-7' })).toBe(body),
+    )
+    await expect(folded).toHaveAttribute('aria-expanded', 'true')
+    await expect(body.scrollTop).toBe(scrolled)
   },
 }
 

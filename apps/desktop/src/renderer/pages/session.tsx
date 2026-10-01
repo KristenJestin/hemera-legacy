@@ -31,6 +31,7 @@ import {
   SessionDetails,
   SessionHeader,
   SessionNotices,
+  SessionRow,
   SpecPanel,
   TurnLine,
   STUCK_AFTER_MS,
@@ -1008,79 +1009,81 @@ export function SessionPage({
       panel leaves it and no more: never wider than that for what it holds, which would push the
       row past the window and make it scroll sideways (issue #181).
     */
-    <div className="@container flex h-full min-h-0">
-      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-        <div className="mx-auto w-full max-w-3xl px-6 pt-6 pb-4">
-          {/*
+    <div className="flex h-full min-h-0 flex-col">
+      <SessionRow
+        chat={
+          <>
+            <div className="mx-auto w-full max-w-3xl px-6 pt-6 pb-4">
+              {/*
             One row (issue #241): what goes on in the Session — the runs Hemera holds, the commands
             the agent ran in its own shell, and the Run a command is started from (issue #219) — and
             the head's ⓘ and `…` at its end. No title: the sidebar says it. A Session nothing
             answers has no agent to lend a command to, and offers no Run.
           */}
-          <SessionHeader
-            title={session.title}
-            onRename={onRename}
-            onArchive={onArchive}
-            // A Session nothing was ever written in is one the user made by mistake far more often
-            // than one they are done with, and putting it away is a press they would come to
-            // regret: the archive is where threads go.
-            archiveDisabled={thread.length === 0}
-            // The one way to the Session details: nothing the agent does opens them.
-            onOpenDetails={() => setDetailsOpen(true)}
-          >
-            <GoingOnLine
-              items={lineOf(goingOn, {
-                ...marksOf(session.id, lines),
-                before: overBefore(commandRuns, shells, opened.current),
-              })}
-              onStop={(run) => onStopRun(run.id)}
-              onRunAgain={(run) => onRunAgain(run.id)}
-              onRemove={(item) => removeFromLine(session.id, item.id)}
-              onOpenUrl={onOpenUrl}
-              onAddToCatalogue={(shown) => {
-                const run = commandRuns.find((one) => one.id === shown.id)
-                if (run !== undefined) deciding(onAddToCatalogue(run))
-              }}
-              end={
-                session.provider === null ? undefined : (
-                  <RunCommand
-                    catalogue={catalogue.map((command) => ({
-                      name: command.name,
-                      command: command.line,
-                      type: command.type,
-                      running: commandRuns.some(
-                        (run) => run.commandId === command.id && run.state === 'running',
-                      ),
-                    }))}
-                    workspace={workspace?.name ?? 'main'}
-                    onRunCommand={(entry) => onRunCommand(entry.name)}
-                    onRunOnce={onRunCommand}
-                    shortcut={runShortcut}
-                    asked={runAsked}
-                  />
-                )
-              }
-            />
-          </SessionHeader>
-        </div>
-        {/*
+              <SessionHeader
+                title={session.title}
+                onRename={onRename}
+                onArchive={onArchive}
+                // A Session nothing was ever written in is one the user made by mistake far more often
+                // than one they are done with, and putting it away is a press they would come to
+                // regret: the archive is where threads go.
+                archiveDisabled={thread.length === 0}
+                // The one way to the Session details: nothing the agent does opens them.
+                onOpenDetails={() => setDetailsOpen(true)}
+              >
+                <GoingOnLine
+                  items={lineOf(goingOn, {
+                    ...marksOf(session.id, lines),
+                    before: overBefore(commandRuns, shells, opened.current),
+                  })}
+                  onStop={(run) => onStopRun(run.id)}
+                  onRunAgain={(run) => onRunAgain(run.id)}
+                  onRemove={(item) => removeFromLine(session.id, item.id)}
+                  onOpenUrl={onOpenUrl}
+                  onAddToCatalogue={(shown) => {
+                    const run = commandRuns.find((one) => one.id === shown.id)
+                    if (run !== undefined) deciding(onAddToCatalogue(run))
+                  }}
+                  end={
+                    session.provider === null ? undefined : (
+                      <RunCommand
+                        catalogue={catalogue.map((command) => ({
+                          name: command.name,
+                          command: command.line,
+                          type: command.type,
+                          running: commandRuns.some(
+                            (run) => run.commandId === command.id && run.state === 'running',
+                          ),
+                        }))}
+                        workspace={workspace?.name ?? 'main'}
+                        onRunCommand={(entry) => onRunCommand(entry.name)}
+                        onRunOnce={onRunCommand}
+                        shortcut={runShortcut}
+                        asked={runAsked}
+                      />
+                    )
+                  }
+                />
+              </SessionHeader>
+            </div>
+            {/*
           The thread is given the whole width under the head, and lays its own column on the one
           the head and the composer are laid on: a wheel anywhere beside the thread scrolls it
           (trial of 22 September 2026, evening). An empty Session has nothing to scroll, and its
           sentence stands in the column like everything else.
         */}
-        {thread.length === 0 ? (
-          <div className="mx-auto flex min-h-0 w-full max-w-3xl flex-1 flex-col px-6">
-            {loaded ? <SessionEmpty /> : null}
-          </div>
-        ) : (
-          <MessageScroller
-            className="flex-1"
-            label="The thread of this Session"
-            entries={scroller}
-          />
-        )}
-        {/*
+            {thread.length === 0 ? (
+              <div className="mx-auto flex min-h-0 w-full max-w-3xl flex-1 flex-col px-6">
+                {loaded ? <SessionEmpty /> : null}
+              </div>
+            ) : (
+              <MessageScroller
+                className="flex-1"
+                label="The thread of this Session"
+                entries={scroller}
+              />
+            )}
+            {/*
           What the turn has spent stands above the box: the box has no foot (issue #241), its send
           is an icon on its own row, and a figure read at a glance is a figure that must not be
           what makes a row wrap. A Session no agent has accounted for yet shows no meter at all —
@@ -1091,16 +1094,16 @@ export function SessionPage({
           a row the other would have asked for anyway. The row is drawn as soon as either has
           something to say, and the meter keeps its end of it whether or not a turn is running.
         */}
-        <div className="mx-auto flex w-full max-w-3xl flex-col gap-2 px-6 pb-4">
-          <TurnRow
-            activity={activity}
-            usage={usage}
-            since={agent.running ? heardSince(agent, thread) : null}
-            sessionId={session.id}
-            onStop={onStop}
-            notched={waitsForYou}
-          />
-          {/*
+            <div className="mx-auto flex w-full max-w-3xl flex-col gap-2 px-6 pb-4">
+              <TurnRow
+                activity={activity}
+                usage={usage}
+                since={agent.running ? heardSince(agent, thread) : null}
+                sessionId={session.id}
+                onStop={onStop}
+                notched={waitsForYou}
+              />
+              {/*
             What the page's last act was refused with — a rename, an archive, a thread that could
             not be read, a Workspace changed once the agent had started (D8-08) — said here and
             not on the send: those are refusals of the header and of the opening, and a Session
@@ -1109,71 +1112,83 @@ export function SessionPage({
             above it (D4b-02). A build that could not be asked for is said here too, as a sentence
             (#132), until the build's actions have a place of their own to say it.
           */}
-          {(refused ?? refusal ?? stored.refusal ?? stored.buildRefused ?? built.refusal) !==
-            null && (
-            <p role="alert" className="text-sm text-muted-foreground">
-              {refused ?? refusal ?? stored.refusal ?? stored.buildRefused ?? built.refusal}
-            </p>
-          )}
-          <Composer
-            value={value}
-            onValueChange={setValue}
-            files={files}
-            onFilesChange={setFiles}
-            onSearchFiles={onSearchFiles}
-            onPickFiles={onPickFiles}
-            variant="inline"
-            action={session.provider === null ? 'Write' : 'Send'}
-            placeholder={
-              session.provider === null
-                ? 'Write to this Session…'
-                : `Say something to ${session.provider}…`
-            }
-            onSend={write}
-            // Nothing is handed over here: a refusal of this page is not a reason not to write,
-            // and a write that is refused answers `write` itself — which is what the composer
-            // shows under the box, on the sentence that was not written (D4b-02).
-            agentMenu={
-              <AgentModelMenu
-                agents={agents}
-                agent={session.provider}
-                // The agent of a Session is the one it was made with and cannot be changed:
-                // `fixed` takes the agent stage out of the panel altogether, and the panel opens
-                // on the models of the agent that is answering (D17-11).
-                fixed
-                onAgentChange={() => undefined}
-                models={model?.choices ?? []}
-                model={model?.current ?? null}
-                onModelChange={(chosen) => {
-                  if (model !== null) onChooseOption(model.optionId, chosen)
-                }}
-                efforts={effort?.choices ?? []}
-                effort={effort?.current ?? null}
-                onEffortChange={(chosen) => {
-                  if (effort !== null) onChooseOption(effort.optionId, chosen)
-                }}
-                // The level the agent recommends, which the scale marks.
-                effortDefault={effortDefaultOf(options)}
-                // The mode is a row of that same panel since the trial of 22 September 2026: it
-                // is one of the four things the agent is set on, and a control of its own beside
-                // the menu was a second control asking about one agent.
-                modes={mode?.choices ?? []}
-                mode={mode?.current ?? null}
-                onModeChange={(chosen) => {
-                  if (mode !== null) onChooseOption(mode.optionId, chosen)
-                }}
+              {(refused ?? refusal ?? stored.refusal ?? stored.buildRefused ?? built.refusal) !==
+                null && (
+                <p role="alert" className="text-sm text-muted-foreground">
+                  {refused ?? refusal ?? stored.refusal ?? stored.buildRefused ?? built.refusal}
+                </p>
+              )}
+              <Composer
+                value={value}
+                onValueChange={setValue}
+                files={files}
+                onFilesChange={setFiles}
+                onSearchFiles={onSearchFiles}
+                onPickFiles={onPickFiles}
+                variant="inline"
+                action={session.provider === null ? 'Write' : 'Send'}
+                placeholder={
+                  session.provider === null
+                    ? 'Write to this Session…'
+                    : `Say something to ${session.provider}…`
+                }
+                onSend={write}
+                // Nothing is handed over here: a refusal of this page is not a reason not to write,
+                // and a write that is refused answers `write` itself — which is what the composer
+                // shows under the box, on the sentence that was not written (D4b-02).
+                agentMenu={
+                  <AgentModelMenu
+                    agents={agents}
+                    agent={session.provider}
+                    // The agent of a Session is the one it was made with and cannot be changed:
+                    // `fixed` takes the agent stage out of the panel altogether, and the panel opens
+                    // on the models of the agent that is answering (D17-11).
+                    fixed
+                    onAgentChange={() => undefined}
+                    models={model?.choices ?? []}
+                    model={model?.current ?? null}
+                    onModelChange={(chosen) => {
+                      if (model !== null) onChooseOption(model.optionId, chosen)
+                    }}
+                    efforts={effort?.choices ?? []}
+                    effort={effort?.current ?? null}
+                    onEffortChange={(chosen) => {
+                      if (effort !== null) onChooseOption(effort.optionId, chosen)
+                    }}
+                    // The level the agent recommends, which the scale marks.
+                    effortDefault={effortDefaultOf(options)}
+                    // The mode is a row of that same panel since the trial of 22 September 2026: it
+                    // is one of the four things the agent is set on, and a control of its own beside
+                    // the menu was a second control asking about one agent.
+                    modes={mode?.choices ?? []}
+                    mode={mode?.current ?? null}
+                    onModeChange={(chosen) => {
+                      if (mode !== null) onChooseOption(mode.optionId, chosen)
+                    }}
+                  />
+                }
+                running={agent.running}
+                onStop={onStop}
+                // Everything that waits for the reader, on the box's edge (issue #237): it rises from
+                // behind the box when something starts waiting, and goes back there when nothing does.
+                notices={<SessionNotices groups={notices} />}
+                takeFocus={composing}
+                onFocusTaken={() => setComposing(false)}
               />
-            }
-            running={agent.running}
-            onStop={onStop}
-            // Everything that waits for the reader, on the box's edge (issue #237): it rises from
-            // behind the box when something starts waiting, and goes back there when nothing does.
-            notices={<SessionNotices groups={notices} />}
-            takeFocus={composing}
-            onFocusTaken={() => setComposing(false)}
-          />
-        </div>
-      </div>
+            </div>
+          </>
+        }
+      >
+        {/*
+          The panel of the Session's mission, beside the chat: the working surface the thread gave
+          up width for, where the side column stood before the Session details took its plan and
+          its files into a dialog. It opens folded to a small frame at the window's edge, and is
+          swapped for its panel, which pushes the chat aside, when the hand or the agent asks
+          (issue #164). The chat is the row's first child whatever the mission, so a panel that
+          arrives draws nothing of the thread again (#77).
+        */}
+        {missionPanel()}
+      </SessionRow>
       {/*
         The Session details: a centred dialog the reader opens from the head, and nothing else
         opens (second review of #18). A permission, a run or a plan that arrives updates the thread
@@ -1230,13 +1245,6 @@ export function SessionPage({
         // the reader.
         defaultTab={openingTabOf(tabs)}
       />
-      {/*
-        The panel of the Session's mission, beside the chat: the working surface the thread gave
-        up width for, where the side column stood before the Session details took its plan and its
-        files into a dialog. It opens folded to a small frame at the window's edge, and is swapped
-        for its panel, which pushes the chat aside, when the hand or the agent asks (issue #164).
-      */}
-      {missionPanel()}
       {workspacePlan !== null && (
         <CreateWorkspaceDialog
           open={intent !== null}

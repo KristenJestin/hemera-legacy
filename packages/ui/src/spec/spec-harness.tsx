@@ -1,6 +1,7 @@
 import { type ReactNode, useState } from 'react'
 
 import { Button } from '../components/button/button.tsx'
+import { SessionRow } from '../session/session-row.tsx'
 import {
   SECTION_TITLES,
   type ReaderView,
@@ -194,32 +195,37 @@ export function LiveSpecPanel({
     }
   }
   return (
-    <div className="@container flex h-screen min-h-0 bg-background text-foreground">
-      <div className="flex min-w-0 flex-1 flex-col items-start gap-3 p-6 text-sm text-muted-foreground">
-        <p>
-          The chat of the Session stands here, and takes whatever width the Spec panel leaves it:
-          all of it but the small frame while the Spec is folded, and what is left beside the panel
-          once it is open.
-        </p>
-        {agentWrites !== undefined && (
-          <Button
-            onClick={() => write(agentWrites)}
-          >{`Let the agent write the ${partName(agentWrites)}`}</Button>
-        )}
-      </div>
-      <SpecPanel
-        spec={spec}
-        reader={reader}
-        defaultReworkOpen={defaultReworkOpen}
-        defaultFolded={defaultFolded}
-        onFoldChange={onFoldChange}
-        arrives={arrives}
-        onMarkReady={actions.onMarkReady}
-        onRework={onRework}
-        onPickRevision={actions.onPickRevision}
-        onTakeOver={actions.onTakeOver}
-        build={build === undefined ? undefined : { ...build, launch }}
-      />
+    <div className="flex h-screen min-h-0 flex-col bg-background text-foreground">
+      <SessionRow
+        chat={
+          <div className="flex flex-col items-start gap-3 p-6 text-sm text-muted-foreground">
+            <p>
+              The chat of the Session stands here, and takes whatever width the Spec panel leaves
+              it: all of it but the small frame while the Spec is folded, and what is left beside
+              the panel once it is open.
+            </p>
+            {agentWrites !== undefined && (
+              <Button
+                onClick={() => write(agentWrites)}
+              >{`Let the agent write the ${partName(agentWrites)}`}</Button>
+            )}
+          </div>
+        }
+      >
+        <SpecPanel
+          spec={spec}
+          reader={reader}
+          defaultReworkOpen={defaultReworkOpen}
+          defaultFolded={defaultFolded}
+          onFoldChange={onFoldChange}
+          arrives={arrives}
+          onMarkReady={actions.onMarkReady}
+          onRework={onRework}
+          onPickRevision={actions.onPickRevision}
+          onTakeOver={actions.onTakeOver}
+          build={build === undefined ? undefined : { ...build, launch }}
+        />
+      </SessionRow>
     </div>
   )
 }

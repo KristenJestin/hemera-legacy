@@ -1,5 +1,4 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
-import { AnimatePresence, motion } from 'motion/react'
 import { type ReactNode, useState } from 'react'
 import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
 
@@ -8,7 +7,7 @@ import { TooltipProvider } from '../components/tooltip/tooltip.tsx'
 import { AgentText } from '../message/agent-text.tsx'
 import { MessageGroup } from '../message/message.tsx'
 import { MessageScroller, type ScrollerEntry } from '../message/scroller/scroller.tsx'
-import { crossfade, useTransition } from '../motion.ts'
+import { SessionRow } from '../session/session-row.tsx'
 import { SessionHeader } from '../session/session.tsx'
 import { CreateSpecProposal, type ProposalState } from './create-spec-proposal.tsx'
 import { MissionBrief } from './mission-brief.tsx'
@@ -251,30 +250,29 @@ function DefineSession({
     ]
   })
   return (
-    // The row is the container the unfolded panel's width is a share of.
-    <div className="@container flex h-screen min-h-0 bg-background text-foreground">
-      <Chat title={shown.title} thread={[...shown.thread, ...asked]} />
-      <SpecPanel
-        spec={spec}
-        reader={reader}
-        defaultReworkOpen={reworkOpen}
-        defaultFolded={folded}
-        onMarkReady={actions.onMarkReady}
-        onRework={actions.onRework}
-        onPickRevision={actions.onPickRevision}
-        onTakeOver={actions.onTakeOver}
-      />
+    <div className="flex h-screen min-h-0 flex-col bg-background text-foreground">
+      <SessionRow chat={<Chat title={shown.title} thread={[...shown.thread, ...asked]} />}>
+        <SpecPanel
+          spec={spec}
+          reader={reader}
+          defaultReworkOpen={reworkOpen}
+          defaultFolded={folded}
+          onMarkReady={actions.onMarkReady}
+          onRework={actions.onRework}
+          onPickRevision={actions.onPickRevision}
+          onTakeOver={actions.onTakeOver}
+        />
+      </SessionRow>
     </div>
   )
 }
 
 /**
  * A `free` Session whose agent proposes a Spec: on `Create` the Session becomes `define`, the
- * Spec exists, and the panel arrives beside the thread — a cross-fade, nothing travelling — while
- * the thread stays exactly as it was.
+ * Spec exists, and the panel arrives beside the thread, opening from nothing (#130), while the
+ * thread stays exactly as it was: it is the row's first child either way (#77).
  */
 function FreeThenDefine(): ReactNode {
-  const transition = useTransition(crossfade)
   const [state, setState] = useState<ProposalState>('proposed')
   const [created, setCreated] = useState<SpecView | null>(null)
   const thread: ScrollerEntry[] = [
@@ -301,27 +299,19 @@ function FreeThenDefine(): ReactNode {
     },
   ]
   return (
-    <div className="@container flex h-screen min-h-0 bg-background text-foreground">
-      <Chat title="Invoices for the accountants" thread={thread} />
-      <AnimatePresence initial={false}>
+    <div className="flex h-screen min-h-0 flex-col bg-background text-foreground">
+      <SessionRow chat={<Chat title="Invoices for the accountants" thread={thread} />}>
         {created !== null && (
-          <motion.div
-            key="panel"
-            className="flex shrink-0"
-            initial={{ filter: 'opacity(0)' }}
-            animate={{ filter: 'opacity(1)' }}
-            transition={transition}
-          >
-            <SpecPanel
-              spec={created}
-              onMarkReady={fn()}
-              onRework={fn()}
-              onPickRevision={fn()}
-              onTakeOver={fn()}
-            />
-          </motion.div>
+          <SpecPanel
+            spec={created}
+            arrives
+            onMarkReady={fn()}
+            onRework={fn()}
+            onPickRevision={fn()}
+            onTakeOver={fn()}
+          />
         )}
-      </AnimatePresence>
+      </SessionRow>
     </div>
   )
 }
@@ -469,7 +459,7 @@ export const Bug: Story = {
 
 /**
  * Screen 3 · from a free Session: the agent proposes the Spec in the thread, `Create` makes the
- * Session `define`, and the Spec arrives beside the thread, folded to its small frame, while the
+ * Session `define`, and the Spec arrives beside the thread, opening from nothing, while the
  * thread stays.
  */
 export const FromAFreeSession: Story = {
@@ -477,12 +467,15 @@ export const FromAFreeSession: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     await expect(canvas.queryByRole('region', { name: 'Spec ATL-7' })).toBeNull()
+    const thread = canvas.getByRole('log', { name: 'The thread of this Session' })
     await userEvent.click(canvas.getByRole('button', { name: 'Start' }))
     await expect(await canvas.findByRole('region', { name: 'Spec ATL-7' })).toBeVisible()
-    await expect(canvas.getByRole('button', { name: 'Unfold the Spec' })).toBeVisible()
+    await waitFor(() => expect(canvas.getByRole('button', { name: 'Fold the Spec' })).toBeVisible())
+    // The thread is the one that was there: nothing of it was drawn again.
+    await expect(canvas.getByRole('log', { name: 'The thread of this Session' })).toBe(thread)
     // The head names the Project and nothing more: the mission is the panel (issue #149).
     await expect(canvas.queryByText(/DEFINE ·/)).toBeNull()
-    await expect(canvas.getByRole('status')).toHaveTextContent('Created ATL-7')
+    await expect(within(thread).getByRole('status')).toHaveTextContent('Created ATL-7')
     await expect(canvas.getByText(/Shall I write it down as a Spec/)).toBeVisible()
   },
 }
@@ -647,8 +640,8 @@ function sideways(canvasElement: HTMLElement): number {
 async function neverSideways(canvasElement: HTMLElement): Promise<void> {
   const canvas = within(canvasElement)
   const dock = canvas.getByRole('region', { name: 'Spec ATL-7' })
-  const frame = dock.querySelector<HTMLElement>('[data-spec-frame]')!
-  const panel = dock.querySelector<HTMLElement>('[data-spec-panel]')!
+  const frame = dock.querySelector<HTMLElement>('[data-panel-frame]')!
+  const panel = dock.querySelector<HTMLElement>('[data-panel]')!
   await expect(sideways(canvasElement)).toBe(0)
   await unfold(canvasElement)
   await waitFor(() => expect(getComputedStyle(frame).filter).toBe('opacity(0)'))

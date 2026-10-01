@@ -1,4 +1,5 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
+import { MotionConfig } from 'motion/react'
 import { type ReactNode, useState } from 'react'
 import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
 
@@ -11,6 +12,7 @@ import { AgentText } from '../message/agent-text.tsx'
 import { MessageScroller, type ScrollerEntry } from '../message/scroller/scroller.tsx'
 import { type NoticeGroup, SessionNotices } from '../session/session-notices.tsx'
 import { SessionDetails } from '../session/session-details.tsx'
+import { SessionRow } from '../session/session-row.tsx'
 import { SessionHeader } from '../session/session.tsx'
 import { MissionBrief } from '../spec/mission-brief.tsx'
 import { READY } from '../spec/spec-fixtures.ts'
@@ -208,7 +210,7 @@ function Screen({
   screen: keyof typeof SCREENS
   /** Whether a permission of the agent waits, among the notices and in the thread. */
   asking?: boolean
-  /** Whether the panel opens folded to its band. */
+  /** Whether the panel opens folded to its small frame. */
   folded?: boolean
   /** Whether the frozen Spec opens in the view's place. */
   specOpen?: boolean
@@ -239,23 +241,28 @@ function Screen({
   }
   return (
     <TooltipProvider>
-      <div className="@container flex h-screen min-h-0 bg-background text-foreground">
-        <Chat
-          thread={thread}
-          notices={
-            <SessionNotices
-              groups={[...(asking ? [PERMISSIONS] : []), buildNotices(view, setSelected)]}
+      <div className="flex h-screen min-h-0 flex-col bg-background text-foreground">
+        <SessionRow
+          chat={
+            <Chat
+              thread={thread}
+              notices={
+                <SessionNotices
+                  groups={[...(asking ? [PERMISSIONS] : []), buildNotices(view, setSelected)]}
+                />
+              }
             />
           }
-        />
-        <BuildPanel
-          {...view}
-          selected={selected}
-          onSelect={setSelected}
-          spec={READY}
-          defaultFolded={folded}
-          defaultSpecOpen={specOpen}
-        />
+        >
+          <BuildPanel
+            {...view}
+            selected={selected}
+            onSelect={setSelected}
+            spec={READY}
+            defaultFolded={folded}
+            defaultSpecOpen={specOpen}
+          />
+        </SessionRow>
       </div>
     </TooltipProvider>
   )
@@ -287,7 +294,10 @@ const meta = {
       description: 'Which moment of the build.',
     },
     asking: { control: 'boolean', description: 'Whether a permission of the agent waits.' },
-    folded: { control: 'boolean', description: 'Whether the panel opens folded to its band.' },
+    folded: {
+      control: 'boolean',
+      description: 'Whether the panel opens folded to its small frame.',
+    },
     specOpen: {
       control: 'boolean',
       description: "Whether the frozen Spec opens in the view's place.",
@@ -450,7 +460,10 @@ export const Accepted: Story = {
   },
 }
 
-/** Folded to its band: the hammer, and the dot that says a blocker waits for the hand. */
+/**
+ * Folded to its small frame at the window's edge, as the Spec's (#77): the hammer, and the dot
+ * that says a blocker waits for the hand.
+ */
 export const Folded: Story = {
   args: { folded: true, screen: 'blocked' },
   play: async ({ canvasElement }) => {
@@ -460,6 +473,46 @@ export const Folded: Story = {
       canvas.getByRole('img', { name: 'Something in the build waits for you' }),
     ).toBeVisible()
     await expect(canvas.queryByRole('region', { name: 'Credit notes as negative rows' })).toBeNull()
+  },
+}
+
+/** Where a control stands on the screen, to the pixel: its centre. */
+function placeOf(button: HTMLElement): string {
+  const box = button.getBoundingClientRect()
+  return [box.left + box.width / 2, box.top + box.height / 2].map(Math.round).join(' ')
+}
+
+/**
+ * The build's panel is the Spec's (#77): open, the same share of the row and the same margin at
+ * its edge; folded, the same small frame at the window's edge, its unfold chevron exactly where
+ * the head's fold chevron stood, so the same spot pressed twice folds the build and unfolds it.
+ */
+export const SameFrameAsTheSpec: Story = {
+  // Settled at once, so that each side of the swap is read where it lands.
+  decorators: [
+    (Story) => (
+      <MotionConfig reducedMotion="always">
+        <Story />
+      </MotionConfig>
+    ),
+  ],
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const dock = canvas.getByRole('region', { name: 'Build ATL-7' })
+    const row = dock.parentElement!.getBoundingClientRect().width
+    await expect(dock.getBoundingClientRect().width).toBeCloseTo(row * 0.45 + 12, 0)
+    const fold = canvas.getByRole('button', { name: 'Fold the build' })
+    const open = placeOf(fold)
+    await userEvent.click(fold)
+    const unfold = canvas.getByRole('button', { name: 'Unfold the build' })
+    await waitFor(() => expect(placeOf(unfold)).toBe(open))
+    // Folded, the slot is the small frame's width and its margin, the Spec's own.
+    await waitFor(() => expect(dock.getBoundingClientRect().width).toBeCloseTo(56 + 12, 0))
+    await expect(dock.querySelector('[data-panel]')).toHaveAttribute('data-stowed')
+    await userEvent.click(unfold)
+    await waitFor(() =>
+      expect(placeOf(canvas.getByRole('button', { name: 'Fold the build' }))).toBe(open),
+    )
   },
 }
 

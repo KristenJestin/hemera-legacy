@@ -284,17 +284,22 @@ export function LiveChip({
           <Tooltip label={name}>
             <button type="button" className={CHIP} aria-label={label} data-state={state}>
               {running && <span aria-hidden="true" className={BREATH} data-breath />}
-              {wiping && (state === 'finished' || state === 'failed') && (
-                <motion.span
-                  aria-hidden="true"
-                  className={WIPE[state]}
-                  data-wipe
-                  initial={BEFORE}
-                  animate={PAST}
-                  transition={crossing}
-                  onAnimationComplete={crossed}
-                />
-              )}
+              {/* A presence of its own: a chip on a line whose presence skips what is there at
+                  first would otherwise have its wipe start where it ends, and never cross. */}
+              <AnimatePresence>
+                {wiping && (state === 'finished' || state === 'failed') && (
+                  <motion.span
+                    key="wipe"
+                    aria-hidden="true"
+                    className={WIPE[state]}
+                    data-wipe
+                    initial={BEFORE}
+                    animate={PAST}
+                    transition={crossing}
+                    onAnimationComplete={crossed}
+                  />
+                )}
+              </AnimatePresence>
               <Mark icon={icon} end={end} />
               <span className={NAME}>{name}</span>
               <span className={TIME}>{time}</span>

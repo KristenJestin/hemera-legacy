@@ -1,4 +1,3 @@
-import { cn } from 'cn'
 import { AnimatePresence, motion } from 'motion/react'
 import { type ReactNode, useId, useState } from 'react'
 
@@ -6,7 +5,13 @@ import { Disclosure } from '../activity/disclosure.tsx'
 import { Button } from '../components/button/button.tsx'
 import { StatusDot, type StatusTone } from '../components/status-dot/status-dot.tsx'
 import { StatusMark } from '../components/status-mark/status-mark.tsx'
-import { IconCheck, IconFileDescription, IconPlayerPause, IconPlayerPlay } from '../icons.ts'
+import {
+  IconCheck,
+  IconFileDescription,
+  IconFlask,
+  IconPlayerPause,
+  IconPlayerPlay,
+} from '../icons.ts'
 import { AgentText } from '../message/agent-text.tsx'
 import { check, useTransition } from '../motion.ts'
 import type { StoryView } from '../spec/model.ts'
@@ -67,14 +72,8 @@ const PHASE = 'flex items-center gap-1.5 font-medium text-foreground'
 
 const QUIET = 'text-muted-foreground'
 
-/** The one sentence of a build that is paused, over, or stopped, under its head. */
-const BAND = 'border-b px-6 py-2 text-sm'
-
-const BANDS = {
-  paused: 'border-warning/40 bg-warning-muted text-warning-muted-foreground',
-  accepted: 'border-success/40 bg-success-muted text-success-muted-foreground',
-  stopped: 'border-border bg-muted text-muted-foreground',
-} as const
+/** Where the final checks stand, in the state line: the flask and the mark of the last try. */
+const FINALS = 'flex items-center gap-1 text-muted-foreground'
 
 const APPROACH = 'border-b border-border px-5 py-2'
 
@@ -100,9 +99,6 @@ const STORY_HEAD = 'flex min-w-0 items-center gap-2'
 const STORY_KEY = 'shrink-0 font-mono text-xs text-muted-foreground'
 
 const STORY_TITLE = 'min-w-0 text-base font-medium'
-
-/** Where the story stands, pushed to the end of its line. */
-const STORY_WORD = 'ml-auto shrink-0 text-xs text-muted-foreground'
 
 const NARRATIVE = 'text-sm text-muted-foreground'
 
@@ -164,11 +160,13 @@ const PROGRESS_TONES: Record<BuildStoryProgress, StatusTone> = {
   blocked: 'failure',
 }
 
-const HINT = 'text-sm text-muted-foreground'
+/** The head of the final checks, its mark before it while none has run. */
+const FINALS_HEAD = 'flex items-center gap-2 text-lg font-medium'
 
 const REPLAY_HEAD = 'flex items-center gap-2 text-sm font-medium'
 
-const WAITS = 'text-sm text-muted-foreground'
+/** What a task held by another's blocker waits on: the blocked mark, and the tasks it names. */
+const WAITS = 'flex items-center gap-2 font-mono text-xs text-muted-foreground'
 
 /** A state said as a word and the dot beside it. */
 interface Standing {
@@ -255,15 +253,26 @@ function StateLine({ build, now }: { build: BuildViewData; now: string }): React
         </>
       )}
       {build.phase === 'verify' && final !== undefined && (
-        <span className={QUIET}>
-          {final.result === 'green'
-            ? 'final checks green'
-            : `final checks on ${tryLabel(final.number).toLowerCase()}`}
+        <span className={FINALS}>
+          <IconFlask size="sm" aria-hidden="true" />
+          <StatusMark
+            state={final.result === 'green' ? 'done' : 'progress'}
+            label={
+              final.result === 'green'
+                ? 'Final checks green'
+                : `Final checks on ${tryLabel(final.number).toLowerCase()}`
+            }
+          />
         </span>
       )}
       {build.pausedAt !== null && !closed(build) && (
         <span className={QUIET}>{`since ${ago(build.pausedAt, now)}`}</span>
       )}
+      {build.phase === 'stopped' &&
+        build.detail !== null && (
+          // Why it stopped, in the engine's words.
+          <span className={QUIET}>{build.detail}</span>
+        )}
     </div>
   )
 }
@@ -339,46 +348,21 @@ export function BuildHead({
   )
 }
 
-/** The sentence of a build that is paused, accepted or stopped. */
-export function Band({ build }: { build: BuildViewData }): ReactNode {
-  if (build.phase === 'accepted') {
-    return (
-      <p role="status" className={cn(BAND, BANDS.accepted)}>
-        Accepted. The branch and the files stay in the Workspace; delivering them comes next.
-      </p>
-    )
-  }
-  if (build.phase === 'stopped') {
-    return (
-      <p role="status" className={cn(BAND, BANDS.stopped)}>
-        {`Stopped. ${build.detail ?? ''} The build stays readable; nothing runs in it any more.`}
-      </p>
-    )
-  }
-  if (build.pausedAt !== null) {
-    return (
-      <p role="status" className={cn(BAND, BANDS.paused)}>
-        Paused. The agent finished what it was doing; nothing new starts until you resume.
-      </p>
-    )
-  }
-  return null
-}
-
-/** The agent's approach, or the line that waits for it (D10-02). */
+/**
+ * The agent's approach, or its mark while the build waits for it (D10-02): a turning mark, its
+ * words for the tooltip and the screen reader. Nothing once the build is over without one.
+ */
 export function Approach({ build }: { build: BuildViewData }): ReactNode {
   if (build.note === null) {
+    if (closed(build)) return null
     return (
       <div className={APPROACH}>
         <p className={WAITING}>
-          {closed(build) ? (
-            'The agent wrote no approach.'
-          ) : (
-            <>
-              <StatusDot status="running" />
-              Waiting for the agent's approach: no task starts before it.
-            </>
-          )}
+          <StatusMark
+            state="progress"
+            label="Waiting for the agent's approach: no task starts before it"
+          />
+          Approach
         </p>
       </div>
     )
@@ -453,7 +437,11 @@ export function TaskAttention({
     .map((one) => one.label)
   return (
     <p className={WAITS}>
-      {`Waits on ${holding.join(', ')}, which the agent says contradicts the Spec.`}
+      <StatusMark
+        state="blocked"
+        label={`Waits on ${holding.join(', ')}, which the agent says contradicts the Spec`}
+      />
+      {holding.join(', ')}
     </p>
   )
 }
@@ -588,10 +576,9 @@ export function BuildView({
                   <span className={TASK_LABEL}>{one.label}</span>
                   <span className="sr-only">{', '}</span>
                   <TaskTitle done={one.state === 'done'}>{one.title}</TaskTitle>
-                  <span className="sr-only">{', '}</span>
-                  <span className={TASK_META}>
-                    {`${taskStateLabel(one)}, ${taskTime(one, now)}`}
-                  </span>
+                  {/* Where it stands is its mark's to show; the words are for the screen reader. */}
+                  <span className="sr-only">{`, ${taskStateLabel(one)}, `}</span>
+                  <span className={TASK_META}>{taskTime(one, now)}</span>
                 </span>
               }
             >
@@ -615,13 +602,9 @@ export function BuildView({
         onAccept={onAccept}
         onStop={onStop}
       />
-      <Band build={build} />
       {!over && build.canAccept && <ReviewCard className={REVIEW} onOpenChat={onOpenChat} />}
       <Approach build={build} />
       <div className={BODY} role="region" tabIndex={0} aria-label={`The build of ${build.specKey}`}>
-        {rows.length === 0 && outside.length === 0 && (
-          <p className={HINT}>No story of the Spec is being built yet.</p>
-        )}
         {rows.length > 0 && (
           <ol aria-label={`Stories of ${build.specKey}`} className={STORIES}>
             {rows.map((story) => {
@@ -631,12 +614,14 @@ export function BuildView({
                 <li key={story.id} className="flex">
                   <article aria-labelledby={heading} className={STORY}>
                     <div className={STORY_HEAD}>
-                      <StatusDot status={PROGRESS_TONES[story.progress]} />
+                      <StatusDot
+                        status={PROGRESS_TONES[story.progress]}
+                        label={STORY_PROGRESS_LABELS[story.progress]}
+                      />
                       <span className={STORY_KEY}>{story.key}</span>
                       <h2 id={heading} className={STORY_TITLE}>
                         {story.title}
                       </h2>
-                      <span className={STORY_WORD}>{STORY_PROGRESS_LABELS[story.progress]}</span>
                     </div>
                     {story.narrative !== '' && <p className={NARRATIVE}>{story.narrative}</p>}
                     {story.criteria.length > 0 && (
@@ -713,17 +698,14 @@ function Reproduction({ build }: { build: BuildViewData }): ReactNode {
 export function FinalChecks({ build, now }: { build: BuildViewData; now: string }): ReactNode {
   return (
     <section aria-label="Final checks" className="flex flex-col gap-6">
-      <header className="flex flex-col gap-1">
-        <h2 className="text-lg font-medium">Final checks</h2>
-        <p className="text-sm text-muted-foreground">
-          Run once every task is done, on the whole Workspace. A red one hands the agent its
-          failures; three red tries come back to you.
-        </p>
-      </header>
+      <h2 className={FINALS_HEAD}>
+        {build.endAttempts.length === 0 && (
+          <StatusMark state="todo" label="They run once every task is done" />
+        )}
+        Final checks
+      </h2>
       {build.specType === 'bug' && build.endAttempts.length > 0 && <Reproduction build={build} />}
-      {build.endAttempts.length === 0 ? (
-        <p className={HINT}>They run once every task is done.</p>
-      ) : (
+      {build.endAttempts.length === 0 ? null : (
         <BuildTries
           attempts={build.endAttempts}
           now={now}

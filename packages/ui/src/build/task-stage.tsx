@@ -4,12 +4,21 @@ import { Disclosure } from '../activity/disclosure.tsx'
 import { TerminalOutput } from '../activity/terminal-output.tsx'
 import { Badge } from '../components/badge/badge.tsx'
 import { StatusDot, type StatusTone } from '../components/status-dot/status-dot.tsx'
-import { IconFileDiff } from '../icons.ts'
+import { StatusMark } from '../components/status-mark/status-mark.tsx'
+import { Tooltip } from '../components/tooltip/tooltip.tsx'
+import {
+  IconAlertTriangle,
+  IconCircleDashed,
+  IconFileDiff,
+  IconLock,
+  IconPlayerSkipForward,
+  IconUser,
+} from '../icons.ts'
+import { TASK_MARKS } from './build-progress.tsx'
 import {
   type BuildAttemptView,
   type BuildCheckView,
   type BuildFileView,
-  type BuildTaskState,
   type BuildTaskView,
   lastAttempt,
   placeLabel,
@@ -23,8 +32,8 @@ import { taskTime, took, tryLabel } from './times.ts'
  *
  * The definition comes first because it is the contract the tries are judged against: the result
  * the task delivers, how it is verified, what it waits on and who does it. The tries follow, the
- * latest open: a try says where it stands (working, checking, green, red, not verified) and how
- * long it took, each check says where it ran and its verdict with the engine's short reason
+ * latest open: a try says where it stands by its dot (working, checking, green, red, not verified,
+ * the words for the tooltip and the screen reader) and how long it took, each check says where it ran and its verdict with the engine's short reason
  * (`64.2 < 70`, `exited with 1`) and folds its output's last lines under its line, and the files
  * it changed are listed per repository with the lines added and removed.
  *
@@ -37,7 +46,10 @@ const STAGE = 'flex flex-col gap-6'
 
 const HEAD = 'flex flex-col gap-1'
 
-const TITLE_LINE = 'flex min-w-0 items-baseline gap-2'
+const TITLE_LINE = 'flex min-w-0 items-center gap-2'
+
+/** The state's mark, and the warning's sign beside it when nothing judged a done task. */
+const MARK = 'focus-ring flex shrink-0 items-center gap-1 rounded-sm not-italic'
 
 const LABEL = 'shrink-0 font-mono text-sm text-muted-foreground'
 
@@ -58,9 +70,10 @@ const TERM = 'w-24 shrink-0 text-muted-foreground'
 
 const VALUE = 'min-w-0 flex-1'
 
-const NOTE = 'text-sm text-muted-foreground'
+/** What stands where there is nothing yet: a mark or an icon, its words for the tooltip. */
+const NOTE = 'flex text-muted-foreground'
 
-const SKIPPED = 'flex flex-col gap-1 rounded-md border border-border bg-muted px-3 py-2 text-sm'
+const SKIPPED = 'flex items-center gap-2 rounded-md border border-border bg-muted px-3 py-2 text-sm'
 
 const TRIES = 'flex flex-col gap-2'
 
@@ -108,26 +121,28 @@ interface Standing {
   tone: StatusTone
 }
 
-/** The tone a task's state wears on its badge. */
-const STATE_TONES: Record<
-  BuildTaskState,
-  'neutral' | 'info' | 'success' | 'warning' | 'destructive'
-> = {
-  waiting: 'neutral',
-  ready: 'neutral',
-  in_progress: 'info',
-  checking: 'info',
-  done: 'success',
-  yours: 'warning',
-  blocked: 'destructive',
-  skipped: 'neutral',
-}
-
-/** A task's state as a badge: "Done, not verified" wears the warning, since nothing judged it. */
-export function TaskStateBadge({ task }: { task: BuildTaskView }): ReactNode {
+/**
+ * A task's state as its mark, the words for the tooltip and the screen reader (#77): "Done, not
+ * verified" adds the warning's sign beside the done mark, since nothing judged it.
+ */
+export function TaskStateMark({ task }: { task: BuildTaskView }): ReactNode {
   const said = taskStateLabel(task)
-  const tone = said === 'Done, not verified' ? 'warning' : STATE_TONES[task.state]
-  return <Badge tone={tone}>{said}</Badge>
+  return (
+    <Tooltip label={said}>
+      <i
+        role="img"
+        // Focusable so the keyboard reaches its tooltip as the pointer does.
+        tabIndex={0}
+        aria-label={said}
+        className={MARK}
+      >
+        <StatusMark state={TASK_MARKS[task.state]} />
+        {said === 'Done, not verified' && (
+          <IconAlertTriangle size="sm" aria-hidden="true" className="text-warning" />
+        )}
+      </i>
+    </Tooltip>
+  )
 }
 
 /** Where a try stands, in a word and a dot. */
@@ -171,7 +186,9 @@ function CheckResult({ check, open }: { check: BuildCheckView; open: boolean }):
       >
         <p className={RAN}>{check.line}</p>
         {check.outputTail === '' ? (
-          <p className={NOTE}>It printed nothing.</p>
+          <p className={NOTE}>
+            <IconCircleDashed size="sm" role="img" aria-label="It printed nothing" />
+          </p>
         ) : (
           <TerminalOutput
             terminalId={`${check.name} on ${place}`}
@@ -286,18 +303,25 @@ export function BuildTries({
                 <span className={TRY_LINE}>
                   <span className={TRY_NAME}>{tryLabel(attempt.number)}</span>
                   <StatusDot status={tone} label={word} />
-                  <span className={TRY_TIME}>{`${word} · ${time}`}</span>
+                  <span className={TRY_TIME}>{time}</span>
                 </span>
               }
             >
               <div className={TRY_BODY}>
                 {attempt.checks.length === 0 ? (
                   <p className={NOTE}>
-                    {attempt.endedAt === null
-                      ? 'The checks run once the agent says it finished.'
-                      : attempt.result === 'unverified'
-                        ? unchecked
-                        : 'No check has answered yet.'}
+                    {attempt.result === 'unverified' ? (
+                      <IconCircleDashed size="sm" role="img" aria-label={unchecked} />
+                    ) : (
+                      <StatusMark
+                        state="progress"
+                        label={
+                          attempt.endedAt === null
+                            ? 'The checks run once the agent says it finished'
+                            : 'No check has answered yet'
+                        }
+                      />
+                    )}
                   </p>
                 ) : (
                   <ul
@@ -348,7 +372,7 @@ export function TaskStage({ task, now, attention }: TaskStageProps): ReactNode {
           <h2 id={heading} className={TITLE}>
             {task.title}
           </h2>
-          <TaskStateBadge task={task} />
+          <TaskStateMark task={task} />
         </div>
         <p className={SUB}>
           {task.attempts.length > 0 && task.state !== 'done'
@@ -361,12 +385,23 @@ export function TaskStage({ task, now, attention }: TaskStageProps): ReactNode {
 
       {task.state === 'skipped' && (
         <div className={SKIPPED}>
-          <p>{`Skipped: ${task.skipReason ?? 'no reason given'}`}</p>
-          <p className="text-muted-foreground">
-            {task.skipUnblocks === true
-              ? 'The tasks that depend on it go on without it.'
-              : 'The tasks that depend on it wait.'}
-          </p>
+          <StatusMark state="skipped" label="Skipped" />
+          <p className="min-w-0 flex-1">{task.skipReason ?? 'no reason given'}</p>
+          {task.skipUnblocks === true ? (
+            <IconPlayerSkipForward
+              size="sm"
+              role="img"
+              aria-label="The tasks that depend on it go on without it"
+              className="text-muted-foreground"
+            />
+          ) : (
+            <IconLock
+              size="sm"
+              role="img"
+              aria-label="The tasks that depend on it wait"
+              className="text-muted-foreground"
+            />
+          )}
         </div>
       )}
 
@@ -393,9 +428,15 @@ export function TaskStage({ task, now, attention }: TaskStageProps): ReactNode {
             <h3 className={SECTION_TITLE}>Tries</h3>
             {task.attempts.length === 0 ? (
               <p className={NOTE}>
-                {human
-                  ? 'Yours to do: the agent does not work on it and no check runs.'
-                  : 'Not started yet.'}
+                {human ? (
+                  <IconUser
+                    size="sm"
+                    role="img"
+                    aria-label="Yours to do: the agent does not work on it and no check runs"
+                  />
+                ) : (
+                  <StatusMark state="todo" label="Not started yet" />
+                )}
               </p>
             ) : (
               <BuildTries attempts={task.attempts} now={now} of={task.label} />

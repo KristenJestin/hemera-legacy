@@ -12,7 +12,6 @@ import { BuildBar, BUCKET_OF, TASK_MARKS } from './build-progress.tsx'
 import { BuildSpecPanel } from './build-spec-panel.tsx'
 import {
   Approach,
-  Band,
   BuildHead,
   type BuildViewProps,
   FinalChecks,
@@ -212,7 +211,6 @@ export function BuildWide({
         onAccept={onAccept}
         onStop={onStop}
       />
-      <Band build={build} />
       {!closed(build) && build.canAccept && (
         <ReviewCard className={REVIEW} onOpenChat={onOpenChat} />
       )}
@@ -462,7 +460,7 @@ function Returns({ task, build }: { task: BuildTaskView; build: BuildViewData })
       {dismissed.map((blocker) => (
         <div key={blocker.id} className={RETURN}>
           <span className={RETURN_ICON}>
-            <IconRobot size="sm" aria-label="The agent" />
+            <IconRobot size="sm" role="img" aria-label="The agent" />
           </span>
           <StatusDot status="cancelled" size="sm" label="Dismissed" />
           <span className="min-w-0">{blocker.reason}</span>

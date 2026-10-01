@@ -5,14 +5,15 @@ import { IconCheck, IconInfoCircle, IconPlayerStop, IconRefresh, IconX } from '.
 import {
   CROSSFADE,
   SHAKE,
+  WIPE,
   collapse,
   crossfade,
   expand,
   fold,
   instant,
-  morph,
   shake,
   useTransition,
+  wipe,
 } from '../../motion.ts'
 import { Button, IconButton } from '../button/button.tsx'
 import { Popover } from '../popover/popover.tsx'
@@ -61,14 +62,10 @@ const SHAKEN = 'inline-flex min-w-0'
 const BREATH =
   'pointer-events-none absolute inset-0 -z-10 bg-warning-muted opacity-50 motion-safe:animate-breathe'
 
-const WIPE: Record<'finished' | 'failed', string> = {
+const WIPED: Record<'finished' | 'failed', string> = {
   finished: 'pointer-events-none absolute inset-0 -z-10 bg-success-muted',
   failed: 'pointer-events-none absolute inset-0 -z-10 bg-destructive-muted',
 }
-
-/** Where the wipe starts, out of the chip on its left, and where it leaves, out on its right. */
-const BEFORE = { x: '-100%' } as const
-const PAST = { x: '100%' } as const
 
 /** The icon's room, held by the chip's own icon whether it shows or not. */
 const MARK = 'relative flex shrink-0'
@@ -238,7 +235,7 @@ export function LiveChip({
   const shown = open ?? held
   const [asking, setAsking] = useState(false)
   const [scope, animate] = useAnimate<HTMLSpanElement>()
-  const crossing = useTransition(morph)
+  const crossing = useTransition(wipe)
   const shaking = useTransition(shake)
   const folding = useTransition(fold)
   const now = useNow(endedAt === null)
@@ -291,10 +288,10 @@ export function LiveChip({
                   <motion.span
                     key="wipe"
                     aria-hidden="true"
-                    className={WIPE[state]}
+                    className={WIPED[state]}
                     data-wipe
-                    initial={BEFORE}
-                    animate={PAST}
+                    initial={WIPE.before}
+                    animate={WIPE.past}
                     transition={crossing}
                     onAnimationComplete={crossed}
                   />

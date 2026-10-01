@@ -516,6 +516,63 @@ describe('A helper’s result reaches its launcher, whichever ends first', () =>
   })
 })
 
+describe('A helper whose turn is cancelled does not run on forever', () => {
+  test('its agent answers its turn cancelled: it is stopped, and its launcher told', async () => {
+    const main = orchestrator([launch('Write the reader.', { task: 'T2' })])
+    const helper = aHelper([{ does: 'says', text: 'Half way.' }], { stopReason: 'cancelled' })
+    opened = await openWindow(dataFolder, main.agent, helper.agent)
+    const seen = await opened.running(
+      Effect.gen(function* () {
+        const spec = yield* aReadySpec(dataFolder, THREE)
+        const sessionId = yield* launched(spec.specId, spec.workspaceId)
+        const helpers = yield* eventually(helpersOf(sessionId), (all) =>
+          all.some((one) => one.state !== 'running'),
+        )
+        yield* eventually(
+          Effect.sync(() => main.handed),
+          (all) => all.some(isResult),
+        )
+        return helpers
+      }),
+    )
+    expect(seen).toMatchObject([{ state: 'stopped', task: 'T2' }])
+    const told = main.handed.find(isResult) ?? ''
+    expect(told).toContain('its turn was cancelled')
+    expect(told).toContain('Its task T2 stays in progress')
+  })
+
+  test('the page cannot stop, set, resume, rename or archive a helper’s Session', async () => {
+    const main = orchestrator([launch('Write the reader.')])
+    const gate = gated(0)
+    const helper = aHelper([{ does: 'says', text: 'Working.' }], { between: gate.between })
+    opened = await openWindow(dataFolder, main.agent, helper.agent)
+    const window = opened
+    const { sessionId, id, version } = await window.running(
+      Effect.gen(function* () {
+        const spec = yield* aReadySpec(dataFolder, THREE)
+        const build = yield* launched(spec.specId, spec.workspaceId)
+        const [running] = yield* eventually(helpersOf(build), (all) => all.length === 1)
+        const { session } = yield* (yield* Sessions).one(running?.id ?? '')
+        return { sessionId: build, id: session.id, version: session.version }
+      }),
+    )
+    const refusals = await Promise.all([
+      window.bridge.invoke('agents.stop', { sessionId: id }).then(String, String),
+      window.bridge
+        .invoke('agents.setOption', { sessionId: id, optionId: 'model', value: 'opus' })
+        .then(String, String),
+      window.bridge.invoke('agents.resume', { sessionId: id }).then(String, String),
+      window.bridge.invoke('sessions.rename', { id, version, title: 'Mine' }).then(String, String),
+      window.bridge.invoke('sessions.archive', { id, version }).then(String, String),
+    ])
+    const helpers = await window.running(helpersOf(sessionId))
+    gate.carryOn()
+    for (const refusal of refusals) expect(refusal).toContain('A helper is read-only')
+    expect(helpers).toMatchObject([{ state: 'running' }])
+    expect(helper.agent.answers.cancels).toBe(0)
+  })
+})
+
 describe('A helper Session is read-only for the user', () => {
   test('a message written into it is refused, and no turn of the user’s is started there', async () => {
     const main = orchestrator([launch('Write the reader.')])

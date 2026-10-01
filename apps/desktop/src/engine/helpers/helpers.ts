@@ -624,8 +624,19 @@ export const helpersLayer = Layer.effect(
         Effect.gen(function* () {
           const row = yield* rowOf(sessionId)
           if (row === null || row.helperState !== 'running') return
-          // A Stop: whoever stopped it has settled it already.
-          if (stopReason === 'cancelled') return
+          // A turn cancelled by anything but its settling — its agent, a Stop of its own — would
+          // leave it running with nothing to end it: it is stopped, and its launcher told. Whoever
+          // stopped it through Hemera has settled it already, and it is not running any more.
+          if (stopReason === 'cancelled') {
+            yield* settle(
+              row,
+              'stopped',
+              'Its turn was cancelled.',
+              `${row.title} (helper ${row.id}) stopped: its turn was cancelled.${taskWords(row)}`,
+              'hemera',
+            )
+            return
+          }
           if (stopReason !== 'end_turn') {
             return yield* fail(sessionId, `its turn ended: ${stopReason}`)
           }

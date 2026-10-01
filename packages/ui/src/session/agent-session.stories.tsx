@@ -4,6 +4,7 @@ import { expect, userEvent, fn, waitFor, within } from 'storybook/test'
 
 import { onOneLine } from '../../.storybook/one-line.ts'
 import { DiffBlock } from '../activity/diff-block.tsx'
+import { loaded, subscribeToHighlight } from '../activity/highlight.ts'
 import { TerminalOutput } from '../activity/terminal-output.tsx'
 import { ThoughtBlock } from '../activity/thought-block.tsx'
 import { ToolCallCard } from '../activity/tool-call-card.tsx'
@@ -522,6 +523,21 @@ export default meta
 
 type Story = StoryObj<typeof meta>
 
+/** Answers once the grammar of a language has arrived, however long its import takes. */
+function grammarOf(language: string): Promise<void> {
+  return new Promise((arrived) => {
+    if (loaded(language)) {
+      arrived()
+      return
+    }
+    const stop = subscribeToHighlight(() => {
+      if (!loaded(language)) return
+      stop()
+      arrived()
+    })
+  })
+}
+
 /**
  * Everything the lot draws, in one page: the reader's turn, the agent's answer, what it thought,
  * what it read and ran with what came back of it, the change it made, the console it opened, the
@@ -549,15 +565,14 @@ export const Complete: Story = {
     expect(canvas.queryByText('2 of 4')).toBeNull()
     // The change is read in the language of its file, which is what the extension bought. The
     // grammar of that language is a module loaded on demand, so the first diff of a session is
-    // drawn plain and coloured once the grammar has arrived. On a machine busy with the rest of
-    // the run that import outlasts the default patience of a wait, so it is given ten seconds;
-    // a draw kept plain would never be coloured, and would fail the wait however long it is.
-    await waitFor(
-      () => {
-        expect(canvasElement.querySelectorAll('.tok-keyword').length).toBeGreaterThan(0)
-      },
-      { timeout: 10_000 },
-    )
+    // drawn plain and coloured once the grammar has arrived. That import is the dev server's to
+    // answer, and a server busy with the rest of the run was seen to take longer than any
+    // patience given to a wait: the play waits for the grammar itself, and then for the colour.
+    // A draw kept plain once it is there would never be coloured, and fails the wait.
+    await grammarOf('typescript')
+    await waitFor(() => {
+      expect(canvasElement.querySelectorAll('.tok-keyword').length).toBeGreaterThan(0)
+    })
     // A call to one of Hemera's own tools wears the mark of its kind, as a native call does, and
     // is announced as Hemera's, so it is not read as a native call.
     await expect(canvas.getByRole('button', { name: /^Hemera Read file/ })).toBeVisible()

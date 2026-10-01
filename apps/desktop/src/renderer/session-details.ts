@@ -165,6 +165,24 @@ export function lineOf(items: readonly GoingOnItem[], marks: LineMarks): GoingOn
   })
 }
 
+/** How long an agent's one-off stays on the line once it ended, success or failure (#321). */
+export const ONE_OFF_LINGERS_MS = 30_000
+
+/**
+ * The one-offs the agent started that ended, and when (issue #321): what leaves the line on its
+ * own, 30 s after its end. A command of the catalogue stays as the shortcut it is, and a one-off
+ * the user started keeps the rule of #237.
+ */
+export function endedAgentOneOffs(
+  runs: readonly CommandRun[],
+): { readonly id: string; readonly endedAt: number }[] {
+  return runs.flatMap((run) =>
+    run.commandId === null && run.startedBy === 'agent' && run.endedAt !== null
+      ? [{ id: run.id, endedAt: Date.parse(run.endedAt) }]
+      : [],
+  )
+}
+
 /** What was over when the Session was opened: its runs ended, and its shell commands done. */
 export function overBefore(
   runs: readonly CommandRun[],

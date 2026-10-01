@@ -131,15 +131,20 @@ export const GettingReady: Story = {
 }
 
 /**
- * Building: everything the panel holds at once — the phase, the stories with the words they were
- * written with and the criteria they are judged on, the task being worked on unfolded into its
- * stage, and the approach folded now that tasks started.
+ * Building: everything the panel holds at once — the phase and how far the build is, the stories
+ * with the words they were written with and the criteria they are judged on, the task being worked
+ * on unfolded into its stage, and the approach folded now that tasks started.
  */
 export const Building: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     await expect(canvas.getByText('Building')).toBeVisible()
-    await expect(canvas.getByText('0 of 2 stories done')).toBeVisible()
+    // How far the build is: a mark and a count a state, and the bar of every task (#77).
+    await expect(canvas.getByRole('img', { name: '1 done' })).toBeVisible()
+    await expect(canvas.getByRole('img', { name: '2 in progress' })).toBeVisible()
+    await expect(canvas.getByRole('img', { name: '1 to do' })).toBeVisible()
+    await expect(canvas.queryByRole('img', { name: /waiting for you/ })).toBeNull()
+    await expect(canvas.getByRole('img', { name: 'Where each task stands' })).toBeVisible()
     await expect(canvas.getByRole('heading', { name: 'CSV invoice export' })).toBeVisible()
     const one = storyOf(canvasElement, 'Export a month')
     await expect(one).toHaveTextContent('in progress')
@@ -163,14 +168,14 @@ export const Building: Story = {
 
 /**
  * A `bug` Spec with no story (issue #203): its tasks stand in a group of their own, each opening
- * its stage, and the head counts the tasks done since there is no story to count.
+ * its stage, and the head counts its tasks as it always does.
  */
 export const NoStories: Story = {
   args: { build: NO_STORIES, stories: [] },
   play: async ({ canvasElement, args }) => {
     const canvas = within(canvasElement)
     await expect(canvas.queryByText(/No story of the Spec/)).toBeNull()
-    await expect(canvas.getByText('1 of 3 tasks done')).toBeVisible()
+    await expect(canvas.getByRole('img', { name: '1 done' })).toBeVisible()
     const tasks = within(canvas.getByRole('region', { name: 'Tasks of ATL-9' }))
     // The user's task is on the stage from the start, with its Done and its Skip.
     await expect(

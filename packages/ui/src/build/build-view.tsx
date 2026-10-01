@@ -5,18 +5,17 @@ import { type ReactNode, useId, useState } from 'react'
 import { Disclosure } from '../activity/disclosure.tsx'
 import { Button } from '../components/button/button.tsx'
 import { StatusDot, type StatusTone } from '../components/status-dot/status-dot.tsx'
-import { type MarkState, StatusMark } from '../components/status-mark/status-mark.tsx'
+import { StatusMark } from '../components/status-mark/status-mark.tsx'
 import { IconCheck, IconFileDescription, IconPlayerPause, IconPlayerPlay } from '../icons.ts'
 import { AgentText } from '../message/agent-text.tsx'
 import { check, useTransition } from '../motion.ts'
 import type { StoryView } from '../spec/model.ts'
 import { BlockerBlock } from './blocker-block.tsx'
+import { BuildBar, BuildCounts, TASK_MARKS } from './build-progress.tsx'
 import {
   type BuildBlockerView,
   type BuildReproductionView,
   type BuildStoryProgress,
-  type BuildStoryRow,
-  type BuildTaskState,
   type BuildTaskView,
   type BuildViewData,
   PHASE_LABELS,
@@ -26,7 +25,6 @@ import {
   outsideOf,
   storyRowsOf,
   taskStateLabel,
-  tasksProgressOf,
 } from './model.ts'
 import { ReviewCard } from './review-card.tsx'
 import { StopBuild } from './stop-build.tsx'
@@ -127,23 +125,11 @@ const STRIKE = 'absolute inset-0 flex origin-left items-center'
 
 const TASK_META = 'shrink-0 text-xs text-muted-foreground'
 
-/** Where a task stands, as the mark that leads its line and changes in place with it (#77). */
-const TASK_MARKS: Record<BuildTaskState, MarkState> = {
-  waiting: 'todo',
-  ready: 'todo',
-  in_progress: 'progress',
-  checking: 'progress',
-  done: 'done',
-  yours: 'yours',
-  blocked: 'blocked',
-  skipped: 'skipped',
-}
-
 /**
  * A task's title, struck through once it is done: the stroke draws itself across it on the beat
  * the mark's check draws on.
  */
-function TaskTitle({ done, children }: { done: boolean; children: ReactNode }): ReactNode {
+export function TaskTitle({ done, children }: { done: boolean; children: ReactNode }): ReactNode {
   const drawing = useTransition(check.draw)
   return (
     <span className={done ? TASK_TITLE_DONE : TASK_TITLE}>
@@ -209,7 +195,7 @@ function phaseOf(build: BuildViewData): Standing {
 }
 
 /** Whether the build is over: accepted or stopped, readable, and nothing runs in it any more. */
-function closed(build: BuildViewData): boolean {
+export function closed(build: BuildViewData): boolean {
   return build.phase === 'accepted' || build.phase === 'stopped'
 }
 
@@ -233,7 +219,7 @@ export function dependantsOf(label: string, tasks: readonly BuildTaskView[]): st
  * on, then the first task of the build. Nothing once the build is in its final checks — the
  * checks of the whole Spec are drawn under the stories, and they are the news then.
  */
-function firstShown(build: BuildViewData): string | null {
+export function firstShown(build: BuildViewData): string | null {
   if (closed(build)) return null
   const needs = build.tasks.find(
     (task) =>
@@ -250,21 +236,11 @@ function firstShown(build: BuildViewData): string | null {
 }
 
 /**
- * The one line under the title: the phase in words, the stories done — the tasks done when the
- * Spec has no story (issue #203) — and the final checks.
+ * The one line under the title: the phase in words, how many tasks stand where and the bar of
+ * them all (#77), and the final checks.
  */
-function StateLine({
-  build,
-  stories,
-  now,
-}: {
-  build: BuildViewData
-  stories: readonly BuildStoryRow[]
-  now: string
-}): ReactNode {
+function StateLine({ build, now }: { build: BuildViewData; now: string }): ReactNode {
   const { word, tone } = phaseOf(build)
-  const done = stories.filter((story) => story.progress === 'done').length
-  const tasks = tasksProgressOf(build.tasks)
   const final = lastAttempt(build.endAttempts)
   return (
     <div className={STATE_LINE}>
@@ -272,11 +248,11 @@ function StateLine({
         <StatusDot status={tone} />
         {word}
       </span>
-      {stories.length > 0 && (
-        <span className={QUIET}>{`${String(done)} of ${String(stories.length)} stories done`}</span>
-      )}
-      {stories.length === 0 && tasks.of > 0 && (
-        <span className={QUIET}>{`${String(tasks.done)} of ${String(tasks.of)} tasks done`}</span>
+      {build.tasks.length > 0 && (
+        <>
+          <BuildCounts tasks={build.tasks} />
+          <BuildBar tasks={build.tasks} label="Where each task stands" />
+        </>
       )}
       {build.phase === 'verify' && final !== undefined && (
         <span className={QUIET}>
@@ -292,8 +268,79 @@ function StateLine({
   )
 }
 
+export interface BuildHeadProps {
+  build: BuildViewData
+  now: string
+  /** Whether the frozen Spec is open, which its button says. */
+  specOpen: boolean
+  onToggleSpec: () => void
+  onPause: () => void
+  onResume: () => void
+  onAccept: () => void
+  onStop: () => void
+}
+
+/**
+ * The head of the build, beside the chat and over it alike: the Spec, its actions — the frozen
+ * Spec, Accept, Pause or Resume, and the one Stop build there is — and where the build stands.
+ */
+export function BuildHead({
+  build,
+  now,
+  specOpen,
+  onToggleSpec,
+  onPause,
+  onResume,
+  onAccept,
+  onStop,
+}: BuildHeadProps): ReactNode {
+  const over = closed(build)
+  const paused = build.pausedAt !== null
+  return (
+    <header className={HEAD}>
+      <div className={HEAD_LINE}>
+        <span className={KEY}>{build.specKey}</span>
+        <h1 className={TITLE}>{build.specTitle}</h1>
+        <div className={ACTIONS}>
+          <Button
+            variant="ghost"
+            size="sm"
+            aria-pressed={specOpen}
+            // What the page gives the keyboard back to once the Spec it opened is closed.
+            data-spec-toggle
+            onClick={onToggleSpec}
+          >
+            <IconFileDescription size="sm" />
+            Spec
+          </Button>
+          {!over && build.canAccept && (
+            <Button variant="primary" size="sm" onClick={onAccept}>
+              <IconCheck size="sm" />
+              Accept
+            </Button>
+          )}
+          {!over && !build.canAccept && paused && (
+            <Button variant="primary" size="sm" onClick={onResume}>
+              <IconPlayerPlay size="sm" />
+              Resume
+            </Button>
+          )}
+          {!over && !build.canAccept && !paused && (
+            <Button variant="secondary" size="sm" onClick={onPause}>
+              <IconPlayerPause size="sm" />
+              Pause
+            </Button>
+          )}
+          {!over && <StopBuild specKey={build.specKey} onStop={onStop} />}
+        </div>
+      </div>
+      <StateLine build={build} now={now} />
+    </header>
+  )
+}
+
 /** The sentence of a build that is paused, accepted or stopped. */
-function Band({ build }: { build: BuildViewData }): ReactNode {
+export function Band({ build }: { build: BuildViewData }): ReactNode {
   if (build.phase === 'accepted') {
     return (
       <p role="status" className={cn(BAND, BANDS.accepted)}>
@@ -319,7 +366,7 @@ function Band({ build }: { build: BuildViewData }): ReactNode {
 }
 
 /** The agent's approach, or the line that waits for it (D10-02). */
-function Approach({ build }: { build: BuildViewData }): ReactNode {
+export function Approach({ build }: { build: BuildViewData }): ReactNode {
   if (build.note === null) {
     return (
       <div className={APPROACH}>
@@ -345,6 +392,69 @@ function Approach({ build }: { build: BuildViewData }): ReactNode {
         </div>
       </Disclosure>
     </div>
+  )
+}
+
+export interface TaskAttentionProps {
+  task: BuildTaskView
+  build: BuildViewData
+  now: string
+  /**
+   * Whether a blocker raised on the task itself is drawn here: beside the chat it stands on the
+   * task's story, above its tasks; over it, on the task's own detail.
+   */
+  ownBlocker: boolean
+  onTaskDone: (taskId: string) => void
+  onTaskSkip: (taskId: string, reason: string, unblock: boolean) => void
+  onDismissBlocker: (blockerId: string, note: string | null) => void
+}
+
+/**
+ * What stands on top of a task's stage when it needs the user: the user's own task to do or skip,
+ * the blocker the agent raised on it, or why it waits on a blocked one. Nothing once the build is
+ * over.
+ */
+export function TaskAttention({
+  task,
+  build,
+  now,
+  ownBlocker,
+  onTaskDone,
+  onTaskSkip,
+  onDismissBlocker,
+}: TaskAttentionProps): ReactNode {
+  if (closed(build)) return null
+  if (task.state === 'yours') {
+    return (
+      <YoursBlock
+        task={task}
+        dependants={dependantsOf(task.label, build.tasks)}
+        onDone={() => onTaskDone(task.id)}
+        onSkip={(reason, unblock) => onTaskSkip(task.id, reason, unblock)}
+      />
+    )
+  }
+  if (task.state !== 'blocked') return null
+  const own = openBlockerOf(task, build.blockers)
+  if (own !== undefined) {
+    if (!ownBlocker) return null
+    return (
+      <BlockerBlock
+        blocker={own}
+        now={now}
+        suspended={dependantsOf(task.label, build.tasks)}
+        onDismiss={(note) => onDismissBlocker(own.id, note)}
+      />
+    )
+  }
+  const holding = build.blockers
+    .filter((one) => one.dismissedAt === null)
+    .filter((one) => dependantsOf(one.label, build.tasks).includes(task.label))
+    .map((one) => one.label)
+  return (
+    <p className={WAITS}>
+      {`Waits on ${holding.join(', ')}, which the agent says contradicts the Spec.`}
+    </p>
   )
 }
 
@@ -402,7 +512,6 @@ export function BuildView({
   const [unfolded, setUnfolded] = useState<readonly string[]>([])
   const shown = selected ?? chosen
   const over = closed(build)
-  const paused = build.pausedAt !== null
   const storyIds = useId()
   const rows = storyRowsOf(build, stories)
   const outside = outsideOf(build, rows)
@@ -426,28 +535,16 @@ export function BuildView({
 
   /** What stands on top of a task's stage when it needs the user. */
   function attentionOf(on: BuildTaskView): ReactNode {
-    if (over) return null
-    if (on.state === 'yours') {
-      return (
-        <YoursBlock
-          task={on}
-          dependants={dependantsOf(on.label, build.tasks)}
-          onDone={() => onTaskDone(on.id)}
-          onSkip={(reason, unblock) => onTaskSkip(on.id, reason, unblock)}
-        />
-      )
-    }
-    if (on.state !== 'blocked') return null
-    // A blocker of its own stands on the story, above the tasks: it says what it holds.
-    if (openBlockerOf(on, build.blockers) !== undefined) return null
-    const holding = build.blockers
-      .filter((one) => one.dismissedAt === null)
-      .filter((one) => dependantsOf(one.label, build.tasks).includes(on.label))
-      .map((one) => one.label)
     return (
-      <p className={WAITS}>
-        {`Waits on ${holding.join(', ')}, which the agent says contradicts the Spec.`}
-      </p>
+      <TaskAttention
+        task={on}
+        build={build}
+        now={now}
+        ownBlocker={false}
+        onTaskDone={onTaskDone}
+        onTaskSkip={onTaskSkip}
+        onDismissBlocker={onDismissBlocker}
+      />
     )
   }
 
@@ -508,45 +605,16 @@ export function BuildView({
 
   return (
     <div className={VIEW}>
-      <header className={HEAD}>
-        <div className={HEAD_LINE}>
-          <span className={KEY}>{build.specKey}</span>
-          <h1 className={TITLE}>{build.specTitle}</h1>
-          <div className={ACTIONS}>
-            <Button
-              variant="ghost"
-              size="sm"
-              aria-pressed={specOpen}
-              // What the page gives the keyboard back to once the Spec it opened is closed.
-              data-spec-toggle
-              onClick={onToggleSpec}
-            >
-              <IconFileDescription size="sm" />
-              Spec
-            </Button>
-            {!over && build.canAccept && (
-              <Button variant="primary" size="sm" onClick={onAccept}>
-                <IconCheck size="sm" />
-                Accept
-              </Button>
-            )}
-            {!over && !build.canAccept && paused && (
-              <Button variant="primary" size="sm" onClick={onResume}>
-                <IconPlayerPlay size="sm" />
-                Resume
-              </Button>
-            )}
-            {!over && !build.canAccept && !paused && (
-              <Button variant="secondary" size="sm" onClick={onPause}>
-                <IconPlayerPause size="sm" />
-                Pause
-              </Button>
-            )}
-            {!over && <StopBuild specKey={build.specKey} onStop={onStop} />}
-          </div>
-        </div>
-        <StateLine build={build} stories={rows} now={now} />
-      </header>
+      <BuildHead
+        build={build}
+        now={now}
+        specOpen={specOpen}
+        onToggleSpec={onToggleSpec}
+        onPause={onPause}
+        onResume={onResume}
+        onAccept={onAccept}
+        onStop={onStop}
+      />
       <Band build={build} />
       {!over && build.canAccept && <ReviewCard className={REVIEW} onOpenChat={onOpenChat} />}
       <Approach build={build} />
@@ -642,7 +710,7 @@ function Reproduction({ build }: { build: BuildViewData }): ReactNode {
 }
 
 /** The final checks of the whole Spec (D10-07): their tries, as a task's are drawn. */
-function FinalChecks({ build, now }: { build: BuildViewData; now: string }): ReactNode {
+export function FinalChecks({ build, now }: { build: BuildViewData; now: string }): ReactNode {
   return (
     <section aria-label="Final checks" className="flex flex-col gap-6">
       <header className="flex flex-col gap-1">

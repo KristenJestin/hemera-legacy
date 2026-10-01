@@ -38,6 +38,12 @@ export {
   type StatusDotProps,
   type StatusTone,
 } from './components/status-dot/status-dot.tsx'
+/** Where a task stands, as one mark that changes in place. */
+export {
+  StatusMark,
+  type MarkState,
+  type StatusMarkProps,
+} from './components/status-mark/status-mark.tsx'
 /** What goes on in a Session — a run, a helper — as one chip, its seconds and its glance. */
 export { LiveChip, type LiveChipProps, type LiveState } from './components/live-chip/live-chip.tsx'
 export {

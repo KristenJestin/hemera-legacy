@@ -96,6 +96,8 @@ const CATALOGUE: Catalogued[] = [
   { name: 'Face', folder: 'face', keyboard: false },
   // Issue #77: what goes on in a Session — a run, a helper — as one chip with its glance.
   { name: 'LiveChip', folder: 'live-chip', keyboard: true },
+  // Issue #77: where a task stands, as one mark that changes in place. A thing to read.
+  { name: 'StatusMark', folder: 'status-mark', keyboard: false },
 ]
 
 /** The pieces of the shell, which are components with a story each and no catalogue entry. */

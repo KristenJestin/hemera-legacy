@@ -2,7 +2,7 @@ import { type ReactNode, type RefObject, memo } from 'react'
 
 import { Menu } from '../components/menu/menu.tsx'
 import { IconChevronDown } from '../icons.ts'
-import { PHASE_TITLES, type PhaseName, type SpecView } from './model.ts'
+import { PHASE_TITLES, type PhaseName, type SpecView, specCalledOf } from './model.ts'
 import { PhaseGlyph } from './phase-glyph.tsx'
 import { SpecPart } from './spec-part.tsx'
 import {
@@ -83,7 +83,7 @@ export const SpecColumn = memo(function SpecColumn({
     <div
       ref={column}
       role="region"
-      aria-label={`Contents of ${spec.key}`}
+      aria-label={`Contents of ${specCalledOf(spec)}`}
       tabIndex={0}
       className={COLUMN}
     >

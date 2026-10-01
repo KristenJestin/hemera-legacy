@@ -3,11 +3,13 @@ import { MotionConfig } from 'motion/react'
 import { type ReactNode, useState } from 'react'
 import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
 
-import { journeyOf } from '../../.storybook/journey.ts'
+import { atRest } from '../../.storybook/at-rest.ts'
+import { journeyOf, readEveryFrame } from '../../.storybook/journey.ts'
 
 import { Button } from '../components/button/button.tsx'
 import { TooltipProvider } from '../components/tooltip/tooltip.tsx'
 import { swap } from '../motion.ts'
+import { SessionRow } from '../session/session-row.tsx'
 import { LiveSpecPanel } from './spec-harness.tsx'
 import {
   BUG,
@@ -46,7 +48,7 @@ function dockOf(canvasElement: HTMLElement): HTMLElement {
 
 /** The panel, which stays mounted folded as well as open. */
 function panelOf(canvasElement: HTMLElement): HTMLElement {
-  return dockOf(canvasElement).querySelector<HTMLElement>('[data-spec-panel]')!
+  return dockOf(canvasElement).querySelector<HTMLElement>('[data-panel]')!
 }
 
 /**
@@ -66,7 +68,7 @@ function isStowed(canvasElement: HTMLElement): boolean {
 
 /** What the small frame is laid in, which slides and fades as a whole. */
 function frameOf(canvasElement: HTMLElement): HTMLElement {
-  return dockOf(canvasElement).querySelector<HTMLElement>('[data-spec-frame]')!
+  return dockOf(canvasElement).querySelector<HTMLElement>('[data-panel-frame]')!
 }
 
 /** The panel's footer holding the build's actions, or `Mark ready`; null while it holds neither. */
@@ -182,6 +184,10 @@ const meta = {
     defaultFolded: {
       control: 'boolean',
       description: 'Whether it starts folded to its small frame.',
+    },
+    defaultOver: {
+      control: 'boolean',
+      description: 'Whether the open Spec starts over the chat, the whole width of the row.',
     },
     arrives: {
       control: 'boolean',
@@ -445,7 +451,7 @@ export const Provisional: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     const dock = canvas.getByRole('region', { name: 'Provisional Spec' })
-    const panel = dock.querySelector<HTMLElement>('[data-spec-panel]')!
+    const panel = dock.querySelector<HTMLElement>('[data-panel]')!
     await waitFor(() => expect(panel).not.toHaveAttribute('data-stowed'))
     await expect(canvas.getByText('No key yet')).toBeVisible()
     // The key placeholder and the badge say it is not created; no sentence explains it (#209).
@@ -455,6 +461,25 @@ export const Provisional: Story = {
     await expect(canvas.getByRole('heading', { name: /text reading tool/ })).toBeVisible()
     await expect(canvas.queryByRole('button', { name: 'Mark ready' })).toBeNull()
     await expect(within(panel).getAllByText('Nothing written yet.').length).toBeGreaterThan(3)
+    // Its parts are named by the name the panel has, never by a key it does not have.
+    await expect(
+      canvas.getByRole('region', { name: 'Contents of the provisional Spec' }),
+    ).toBeVisible()
+  },
+}
+
+/** The provisional Spec over the chat: its outline and its contents named as the panel is. */
+export const ProvisionalOverTheChat: Story = {
+  args: { spec: PROVISIONAL, defaultOver: true },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await expect(
+      canvas.getByRole('navigation', { name: 'Outline of the provisional Spec' }),
+    ).toBeVisible()
+    await expect(
+      canvas.getByRole('region', { name: 'Contents of the provisional Spec' }),
+    ).toBeVisible()
+    await expect(canvas.queryByRole('navigation', { name: 'Outline of ' })).toBeNull()
   },
 }
 
@@ -465,19 +490,24 @@ export const Provisional: Story = {
 function ProvisionalThenCreated(): ReactNode {
   const [created, setCreated] = useState(false)
   return (
-    <div className="@container flex h-screen min-h-0 bg-background text-foreground">
-      <div className="flex min-w-0 flex-1 flex-col items-start gap-3 p-6 text-sm text-muted-foreground">
-        <p>The chat of the Session, where the agent proposed the Spec.</p>
-        <Button onClick={() => setCreated(true)}>Create</Button>
-      </div>
-      <SpecPanel
-        spec={created ? { ...JUST_CREATED, focus: undefined } : PROVISIONAL}
-        arrives
-        onMarkReady={fn()}
-        onRework={fn()}
-        onPickRevision={fn()}
-        onTakeOver={fn()}
-      />
+    <div className="flex h-screen min-h-0 flex-col bg-background text-foreground">
+      <SessionRow
+        chat={
+          <div className="flex flex-col items-start gap-3 p-6 text-sm text-muted-foreground">
+            <p>The chat of the Session, where the agent proposed the Spec.</p>
+            <Button onClick={() => setCreated(true)}>Create</Button>
+          </div>
+        }
+      >
+        <SpecPanel
+          spec={created ? { ...JUST_CREATED, focus: undefined } : PROVISIONAL}
+          arrives
+          onMarkReady={fn()}
+          onRework={fn()}
+          onPickRevision={fn()}
+          onTakeOver={fn()}
+        />
+      </SessionRow>
     </div>
   )
 }
@@ -494,7 +524,7 @@ export const ProvisionalBecomesReal: Story = {
     const dock = canvas.getByRole('region', { name: 'Provisional Spec' })
     const row = dock.parentElement!.getBoundingClientRect().width
     await waitFor(() => expect(dock.getBoundingClientRect().width).toBeCloseTo(row * 0.45 + 12, 0))
-    const panel = dock.querySelector<HTMLElement>('[data-spec-panel]')!
+    const panel = dock.querySelector<HTMLElement>('[data-panel]')!
     const before = panel.getBoundingClientRect()
     await userEvent.click(canvas.getByRole('button', { name: 'Create' }))
     await expect(canvas.getByRole('region', { name: 'Spec ATL-7' })).toBe(dock)
@@ -1030,6 +1060,271 @@ export const ReducedMotion: Story = {
     await expect(dockWidth(canvasElement)).toBe(FOLDED)
     await expect(measure(canvasElement).frame).toBe(1)
     await expect(isStowed(canvasElement)).toBe(true)
+  },
+}
+
+/** The chat beside the panel: the row's first child, which the panel lies over or beside. */
+function chatOf(canvasElement: HTMLElement): HTMLElement {
+  const chat = dockOf(canvasElement).parentElement!.firstElementChild
+  if (!(chat instanceof HTMLElement)) throw new Error('the row holds no chat')
+  return chat
+}
+
+/** Where the panel stands over the chat: the row's left edge, in by its margin. */
+function overEdge(canvasElement: HTMLElement): number {
+  return dockOf(canvasElement).parentElement!.getBoundingClientRect().left + 12
+}
+
+/**
+ * Over the chat (#77): the open Spec lies over the chat, the whole width of the row less its two
+ * margins, and the chat under it is out of reach. The button beside the fold says it is pressed,
+ * its arrows turned inwards.
+ */
+export const OverTheChat: Story = {
+  args: { defaultOver: true },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const panel = panelOf(canvasElement)
+    await expect(canvas.getByRole('button', { name: 'Over the chat' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    )
+    await expect(panel).toHaveAttribute('data-over')
+    await expect(panel.getBoundingClientRect().left).toBeCloseTo(overEdge(canvasElement), 0)
+    await expect(chatOf(canvasElement).inert).toBe(true)
+    await expect(chatOf(canvasElement)).toHaveAttribute('aria-hidden', 'true')
+    await expect(canvas.getByRole('region', { name: 'Contents of ATL-7' })).toBeVisible()
+  },
+}
+
+/**
+ * Over the chat and back (#77): only the panel's left edge moves, on the swap's spring, frame
+ * after frame. The chat keeps its width under the panel the whole way, so nothing in it reflows,
+ * and the panel's right edge stays where it is.
+ */
+export const OverAndBack: Story = {
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const panel = panelOf(canvasElement)
+    const chat = chatOf(canvasElement)
+    const beside = panel.getBoundingClientRect()
+    const width = chat.getBoundingClientRect().width
+    const toggle = canvas.getByRole('button', { name: 'Over the chat' })
+
+    const edge = readEveryFrame(() => panel.getBoundingClientRect().left)
+    const chats = readEveryFrame(() => chat.getBoundingClientRect().width)
+    const rights = readEveryFrame(() => panel.getBoundingClientRect().right)
+    await userEvent.click(toggle)
+    await waitFor(() =>
+      expect(panel.getBoundingClientRect().left).toBeCloseTo(overEdge(canvasElement), 0),
+    )
+    await atRest(panel)
+    const out = edge.stop()
+    await expect(journeyOf(out, beside.left, overEdge(canvasElement))).not.toBe('jumped')
+    await expect(toggle).toHaveAttribute('aria-pressed', 'true')
+    await expect(toggle).toHaveFocus()
+    await expect(chat.inert).toBe(true)
+
+    const back = readEveryFrame(() => panel.getBoundingClientRect().left)
+    await userEvent.click(toggle)
+    await waitFor(() => expect(panel.getBoundingClientRect().left).toBeCloseTo(beside.left, 0))
+    await atRest(panel)
+    await expect(journeyOf(back.stop(), overEdge(canvasElement), beside.left)).not.toBe('jumped')
+    await expect(toggle).toHaveAttribute('aria-pressed', 'false')
+    await expect(chat.inert).toBe(false)
+
+    const reflowed = chats.stop().filter((reading) => Math.abs(reading.value - width) > 0.5)
+    await expect(reflowed, 'the chat changed width under the panel').toEqual([])
+    const shifted = rights.stop().filter((reading) => Math.abs(reading.value - beside.right) > 0.5)
+    await expect(shifted, "the panel's right edge moved").toEqual([])
+  },
+}
+
+/**
+ * The Spec over the chat (#77): a sidebar of its phases on the left — each its glyph, its name and
+ * how much of it is written, its sections on a line under it, the one being read marked — in place
+ * of the phase headings' menu, and the Spec's text at a reading measure beside it.
+ */
+export const WideSpec: Story = {
+  args: { defaultOver: true },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const outline = within(canvas.getByRole('navigation', { name: 'Outline of ATL-7' }))
+    await expect(outline.getByRole('button', { name: /^Shape, \d+ of \d+ written$/ })).toBeVisible()
+    await expect(outline.getByRole('button', { name: /^Plan, / })).toBeVisible()
+    await expect(outline.getByRole('button', { name: /^Decompose, / })).toBeVisible()
+    await expect(outline.getByRole('button', { name: 'Tasks' })).toBeVisible()
+    const contents = canvas.getByRole('region', { name: 'Contents of ATL-7' })
+    // No menu of the phases: the sidebar is the way through.
+    await expect(within(contents).queryByRole('button', { name: /go to another phase/ })).toBeNull()
+    // The text at a reading measure, however wide the row.
+    const page = contents.querySelector('[data-phase="shape"]')!.getBoundingClientRect()
+    await expect(page.width).toBeLessThanOrEqual(768)
+    await expect(contents.getBoundingClientRect().width).toBeGreaterThan(page.width)
+  },
+}
+
+/**
+ * A section pressed in the sidebar: the reader goes there, and the mark goes with it; read back up
+ * by hand, the mark follows.
+ */
+export const OutlineGoesThere: Story = {
+  args: { defaultOver: true },
+  decorators: [
+    (Story) => (
+      <MotionConfig reducedMotion="always">
+        <Story />
+      </MotionConfig>
+    ),
+  ],
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const outline = within(canvas.getByRole('navigation', { name: 'Outline of ATL-7' }))
+    const contents = canvas.getByRole('region', { name: 'Contents of ATL-7' })
+    const tasks = outline.getByRole('button', { name: 'Tasks' })
+    await expect(tasks).not.toHaveAttribute('aria-current')
+    await userEvent.click(tasks)
+    await expect(tasks).toHaveAttribute('aria-current', 'location')
+    const part = contents.querySelector<HTMLElement>('[data-part="tasks"]')!
+    await waitFor(() =>
+      expect(
+        Math.abs(part.getBoundingClientRect().top - contents.getBoundingClientRect().top),
+      ).toBeLessThan(40),
+    )
+    await expect(outline.getAllByRole('button', { current: 'location' })).toHaveLength(1)
+    // Read back up by hand, the mark follows the reading to the first part.
+    contents.scrollTo({ top: 0, behavior: 'instant' })
+    const first = outline.getAllByRole('button').find((one) => !one.hasAttribute('aria-label'))!
+    await waitFor(() => expect(first).toHaveAttribute('aria-current', 'location'))
+    await expect(tasks).not.toHaveAttribute('aria-current')
+  },
+}
+
+/** The four channels of a colour the browser computed, alpha last. */
+function channelsOf(css: string): [number, number, number, number] {
+  const [red = 0, green = 0, blue = 0, alpha = 1] = (css.match(/[\d.]+/g) ?? []).map(Number)
+  return [red, green, blue, alpha]
+}
+
+/** What a colour that lets some of what is under it through is drawn as. */
+function laid(
+  colour: [number, number, number, number],
+  under: [number, number, number, number],
+): [number, number, number, number] {
+  const [red, green, blue, alpha] = colour
+  return [
+    red * alpha + under[0] * (1 - alpha),
+    green * alpha + under[1] * (1 - alpha),
+    blue * alpha + under[2] * (1 - alpha),
+    1,
+  ]
+}
+
+/** What an element is drawn on: its own fill over the first one up the page that hides the rest. */
+function fillUnder(element: Element): [number, number, number, number] {
+  const fills: [number, number, number, number][] = []
+  for (let at: Element | null = element; at !== null; at = at.parentElement) {
+    const colour = channelsOf(getComputedStyle(at).backgroundColor)
+    if (colour[3] > 0) fills.push(colour)
+    if (colour[3] === 1) break
+  }
+  return fills.reduceRight<[number, number, number, number]>(
+    (under, fill) => laid(fill, under),
+    [255, 255, 255, 1],
+  )
+}
+
+function luminanceOf([red, green, blue]: [number, number, number, number]): number {
+  const linear = (channel: number) => {
+    const share = channel / 255
+    return share <= 0.03928 ? share / 12.92 : ((share + 0.055) / 1.055) ** 2.4
+  }
+  return 0.2126 * linear(red) + 0.7152 * linear(green) + 0.0722 * linear(blue)
+}
+
+/** The contrast of an element's text on what it is drawn on. */
+function contrastOf(element: Element): number {
+  const fill = fillUnder(element)
+  const ink = laid(channelsOf(getComputedStyle(element).color), fill)
+  const [light, dark] = [luminanceOf(fill), luminanceOf(ink)].toSorted((one, other) => other - one)
+  return (light! + 0.05) / (dark! + 0.05)
+}
+
+/**
+ * The sidebar reads in this theme (#77): the section being read, the others, a phase's name and
+ * how much of it is written all stand at AA or better on what they are drawn on — no grey on grey.
+ */
+export const OutlineContrast: Story = {
+  args: { defaultOver: true },
+  play: async ({ canvasElement }) => {
+    const outline = within(canvasElement).getByRole('navigation', { name: 'Outline of ATL-7' })
+    const current = outline.querySelector('[aria-current="location"]')!
+    const other = [...outline.querySelectorAll('button:not([aria-label])')].find(
+      (one) => !one.hasAttribute('aria-current'),
+    )!
+    const words = [...outline.querySelectorAll('span')].filter((one) =>
+      /written/.test(one.textContent ?? ''),
+    )
+    const read = [current, other, ...words].map((one) => ({
+      text: one.textContent,
+      contrast: contrastOf(one),
+    }))
+    await expect(read.filter((one) => one.contrast < 4.5)).toEqual([])
+  },
+}
+
+/**
+ * Folding the Spec over the chat takes it back beside the chat: unfolded again, it stands where
+ * it always does, and the chat is in reach.
+ */
+export const FoldComesBackBeside: Story = {
+  args: { defaultOver: true },
+  decorators: [
+    (Story) => (
+      <MotionConfig reducedMotion="always">
+        <Story />
+      </MotionConfig>
+    ),
+  ],
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await userEvent.click(canvas.getByRole('button', { name: 'Fold the Spec' }))
+    await waitFor(() => expect(isStowed(canvasElement)).toBe(true))
+    await expect(chatOf(canvasElement).inert).toBe(false)
+    await userEvent.click(canvas.getByRole('button', { name: 'Unfold the Spec' }))
+    await nextFrame()
+    const row = dockOf(canvasElement).parentElement!.getBoundingClientRect().width
+    await expect(dockWidth(canvasElement)).toBeCloseTo(row * 0.45 + 12, 0)
+    await expect(panelOf(canvasElement)).not.toHaveAttribute('data-over')
+    await expect(canvas.getByRole('button', { name: 'Over the chat' })).toHaveAttribute(
+      'aria-pressed',
+      'false',
+    )
+  },
+}
+
+/**
+ * Told to move less, the panel lies over the chat on the next frame, and comes back beside it on
+ * the next frame too.
+ */
+export const OverAtOnce: Story = {
+  decorators: [
+    (Story) => (
+      <MotionConfig reducedMotion="always">
+        <Story />
+      </MotionConfig>
+    ),
+  ],
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const panel = panelOf(canvasElement)
+    const beside = panel.getBoundingClientRect().left
+    await userEvent.click(canvas.getByRole('button', { name: 'Over the chat' }))
+    await nextFrame()
+    await expect(panel.getBoundingClientRect().left).toBeCloseTo(overEdge(canvasElement), 0)
+    await userEvent.click(canvas.getByRole('button', { name: 'Over the chat' }))
+    await nextFrame()
+    await expect(panel.getBoundingClientRect().left).toBeCloseTo(beside, 0)
   },
 }
 

@@ -40,13 +40,16 @@ export interface Watch {
   readonly stop: () => Reading[]
 }
 
-/** Reads a length on every frame, from now until `stop` is called. */
-export function readEveryFrame(read: () => number): Watch {
+/**
+ * Reads a length on every frame, from now until `stop` is called, each reading timed by `now`: the
+ * page's clock, or the one the animations run on (`steadyClock`).
+ */
+export function readEveryFrame(read: () => number, now = (): number => performance.now()): Watch {
   const readings: Reading[] = []
   let reading = true
   const look = (): void => {
     if (!reading) return
-    readings.push({ at: performance.now(), value: read() })
+    readings.push({ at: now(), value: read() })
     requestAnimationFrame(look)
   }
   look()

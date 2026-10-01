@@ -245,6 +245,31 @@ async function awaitsIn(selector: string, text: string, within = 20_000): Promis
     })
 }
 
+/**
+ * Waits until a chip of the line is named with this — a run's live chip says its address in its
+ * name and its glance, not beside it (issue #77) — and says what the chips were named instead.
+ */
+async function awaitsChip(text: string, within = 20_000): Promise<void> {
+  let named: string[] = []
+  await browser
+    .waitUntil(
+      async () => {
+        named = await browser.execute(
+          (css: string) =>
+            [...document.querySelectorAll(`${css} button[aria-label]`)].map(
+              (one) => one.getAttribute('aria-label') ?? '',
+            ),
+          LINE,
+        )
+        return named.some((one) => one.includes(text))
+      },
+      { timeout: within, interval: 200 },
+    )
+    .catch(() => {
+      throw new Error(`no chip of the line was named "${text}"; they were ${named.join(' | ')}`)
+    })
+}
+
 /** The row of a Workspace in the settings' list, found by the button that opens it. */
 function rowOf(name: string): string {
   return `ul[aria-label="Workspaces"] > li:has(button[aria-label="Details of ${name}"])`
@@ -509,7 +534,7 @@ describe('A URL is ready only after it answers', () => {
     await startSession('main', 'Serve the app in main.')
     await runLine('dev')
     // The catalogue's `dev`, with the address it printed: not a line `dev` run once.
-    await awaitsIn(LINE, `localhost:${String(port)}`)
+    await awaitsChip(`localhost:${String(port)}`)
 
     // A Workspace's services are shown with it in the settings (D8-08).
     await settings('Workspaces')
@@ -548,7 +573,7 @@ describe('Two Workspaces run the same command as two instances', () => {
     await browser.keys('Escape')
     await browser.pause(400)
     await runLine('dev')
-    await awaitsIn(LINE, `localhost:${String(port)}`)
+    await awaitsChip(`localhost:${String(port)}`)
     await runLine('dev')
 
     // One instance per Workspace, each in its own folder.

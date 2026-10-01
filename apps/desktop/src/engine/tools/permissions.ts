@@ -20,7 +20,13 @@ import { AgentNotices } from '../agents/notices.ts'
 export interface OutsideRequest {
   /** The identifier this question is asked under, which is what the answer comes back with. */
   readonly id: string
+  /**
+   * The Session the question is answered in: the Session whose call asks, or — for a helper — its
+   * build Session, whose notices hold it (issue #77).
+   */
   readonly sessionId: string
+  /** The Session whose call waits on the answer: what withdraws it when its turn or agent goes. */
+  readonly askedBy: string
   readonly tool: string
   /** Where the tool would act, resolved: the place the human decides on, not the agent's text. */
   readonly named: string
@@ -46,7 +52,10 @@ export interface ToolPermissionsService {
    * decided about.
    */
   readonly answer: (sessionId: string, id: string, answer: OutsideAnswer) => Effect.Effect<boolean>
-  /** Cancels every question this Session is waiting on: its turn stopped, or its agent went. */
+  /**
+   * Cancels every question this Session's calls are waiting on, wherever they are answered: its
+   * turn stopped, or its agent went.
+   */
   readonly withdrawn: (sessionId: string) => Effect.Effect<void>
 }
 
@@ -57,6 +66,7 @@ export class ToolPermissions extends Context.Service<ToolPermissions, ToolPermis
 /** One question the human has not answered yet. */
 interface Question {
   readonly sessionId: string
+  readonly askedBy: string
   readonly answer: Deferred.Deferred<OutsideAnswer>
 }
 
@@ -80,7 +90,7 @@ export const toolPermissionsLayer: Layer.Layer<ToolPermissions, never, AgentNoti
       askOutside: (asked) =>
         Effect.gen(function* () {
           const answer = yield* Deferred.make<OutsideAnswer>()
-          questions.set(asked.id, { sessionId: asked.sessionId, answer })
+          questions.set(asked.id, { sessionId: asked.sessionId, askedBy: asked.askedBy, answer })
           // The window is told the way it is told about the agent's own questions: the block is
           // already in the thread, and this is what makes it appear without asking again.
           notices.changed(asked.sessionId, 'permission_requested')
@@ -104,7 +114,7 @@ export const toolPermissionsLayer: Layer.Layer<ToolPermissions, never, AgentNoti
 
       withdrawn: (sessionId) =>
         Effect.forEach(
-          [...questions].filter(([, held]) => held.sessionId === sessionId),
+          [...questions].filter(([, held]) => held.askedBy === sessionId),
           ([id, held]) =>
             Effect.gen(function* () {
               questions.delete(id)

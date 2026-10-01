@@ -1,9 +1,17 @@
 import { animate, motion, useMotionValue } from 'motion/react'
-import { type ReactNode, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import {
+  type ReactNode,
+  createContext,
+  useContext,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from 'react'
 
 import { IconButton } from '../components/button/button.tsx'
 import { Tooltip } from '../components/tooltip/tooltip.tsx'
-import { IconChevronRight } from '../icons.ts'
+import { IconArrowsDiagonal, IconArrowsDiagonalMinimize2, IconChevronRight } from '../icons.ts'
 import { CROSSFADE, instant, onTheBeat, slide, swap, useTransition } from '../motion.ts'
 
 /**
@@ -27,9 +35,15 @@ import { CROSSFADE, instant, onTheBeat, slide, swap, useTransition } from '../mo
  * at its open width from the first frame and clipped at the window's edge: nothing in it reflows
  * on the way.
  *
+ * Beside the fold, one button lays the open panel over the chat, the whole width of the row, and
+ * takes it back: arrows out while it is beside the chat, arrows in while it is over it. Over the
+ * chat and not pushing it: the chat keeps its width under the panel and nothing in it reflows, so
+ * what moves is the panel's own left edge, on the swap's spring. The chat is out of reach while it
+ * is covered. Folding the panel takes it back beside the chat.
+ *
  * The caller hands the panel its head, its body, its foot and its small frame, and decides whether
- * it is folded: the dock holds nothing of what it shows, only how it moves and where the keyboard
- * lands once it has.
+ * it is folded and whether it is over the chat: the dock holds nothing of what it shows, only how
+ * it moves and where the keyboard lands once it has.
  */
 
 /**
@@ -48,11 +62,17 @@ export interface SessionRowProps {
   children?: ReactNode
 }
 
+/** How the panel of a row tells it that it covers the chat, which is then out of reach. */
+const Covering = createContext<(covers: boolean) => void>(() => undefined)
+
 export function SessionRow({ chat, children }: SessionRowProps): ReactNode {
+  const [covered, setCovered] = useState(false)
   return (
     <div className={ROW}>
-      <div className={CHAT}>{chat}</div>
-      {children}
+      <div inert={covered} aria-hidden={covered ? true : undefined} className={CHAT}>
+        {chat}
+      </div>
+      <Covering value={setCovered}>{children}</Covering>
     </div>
   )
 }
@@ -114,6 +134,10 @@ export interface PanelDockProps {
   folded: boolean
   /** Asked by the fold at the end of the head; the small frame unfolds by its own button. */
   onFold: () => void
+  /** Whether the open panel lies over the chat, the whole width of the row. */
+  over: boolean
+  /** Asked by the button beside the fold, to lay the panel over the chat or take it back. */
+  onOver: (over: boolean) => void
   /**
    * Whether the panel arrives, opening from nothing on the swap's own spring, rather than standing
    * there: a Spec just created from the agent's proposal (#130).
@@ -135,9 +159,13 @@ export function PanelDock({
   frame,
   folded,
   onFold,
+  over,
+  onOver,
   arrives = false,
   landing,
 }: PanelDockProps): ReactNode {
+  const cover = useContext(Covering)
+  const covers = over && !folded
   const dock = useRef<HTMLElement>(null)
   // Whether the swap is on its way. Folded and at rest, the panel is stowed: laid out, hidden.
   const [moving, setMoving] = useState(false)
@@ -158,6 +186,8 @@ export function PanelDock({
   const open = useMotionValue(folded ? 0 : 1)
   // How far in the panel has arrived, from nothing (0) to its place in the row (1).
   const present = useMotionValue(arrives ? 0 : 1)
+  // How far over the chat the panel lies, from beside it (0) to the whole row (1).
+  const covering = useMotionValue(over ? 1 : 0)
 
   /**
    * Writes how far open the panel is onto the row, which its slot's width and its panel's place
@@ -176,11 +206,37 @@ export function PanelDock({
     dock.current?.style.setProperty('--panel-in', String(share))
   }
 
+  /** Writes how far over the chat the panel lies, which its clip's width is drawn from. */
+  function lay(share: number): void {
+    dock.current?.style.setProperty('--panel-over', String(share))
+  }
+
   // The first frame has no animation to report a share: the resting one is written before it.
   useLayoutEffect(() => {
     pose(open.get())
     place(present.get())
+    lay(covering.get())
   }, [])
+
+  // Over the chat and back: only the panel's left edge moves, on the swap's spring, from wherever
+  // it stands. Told to move less, it lands at once.
+  useLayoutEffect(() => {
+    const target = over ? 1 : 0
+    if (covering.get() === target) return
+    if (still) {
+      covering.jump(target)
+      lay(target)
+      return
+    }
+    const travel = animate(covering, target, { ...move, onUpdate: lay })
+    return () => travel.stop()
+  }, [over])
+
+  // The chat under the panel is out of reach for as long as the panel covers it.
+  useEffect(() => {
+    cover(covers)
+    return () => cover(false)
+  }, [covers])
 
   // Arriving, the panel opens from nothing on the swap's spring; told to move less, it is there.
   useLayoutEffect(() => {
@@ -250,12 +306,30 @@ export function PanelDock({
           inert={folded}
           aria-hidden={folded ? true : undefined}
           data-panel
+          data-over={covers ? '' : undefined}
           data-stowed={stowed ? '' : undefined}
           className={stowed ? STOWED : PANEL}
         >
           <header className={HEAD}>
             <div className="flex min-w-0 flex-1 flex-col gap-1">{head}</div>
             <span className={END}>
+              <Tooltip label={over ? 'Back beside the chat' : 'Over the chat'}>
+                <IconButton
+                  variant="ghost"
+                  size="sm"
+                  icon={
+                    over ? (
+                      <IconArrowsDiagonalMinimize2 size="sm" />
+                    ) : (
+                      <IconArrowsDiagonal size="sm" />
+                    )
+                  }
+                  aria-label="Over the chat"
+                  aria-pressed={over}
+                  data-over-toggle
+                  onClick={() => onOver(!over)}
+                />
+              </Tooltip>
               <Tooltip label={`Fold the ${name}`}>
                 <IconButton
                   variant="ghost"

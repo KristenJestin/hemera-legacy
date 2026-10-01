@@ -197,6 +197,7 @@ function Screen({
   screen,
   asking = false,
   folded = false,
+  over = false,
   specOpen = false,
   onPause,
   onResume,
@@ -212,6 +213,8 @@ function Screen({
   asking?: boolean
   /** Whether the panel opens folded to its small frame. */
   folded?: boolean
+  /** Whether the open panel lies over the chat. */
+  over?: boolean
   /** Whether the frozen Spec opens in the view's place. */
   specOpen?: boolean
   onPause: () => void
@@ -260,6 +263,7 @@ function Screen({
             onSelect={setSelected}
             spec={READY}
             defaultFolded={folded}
+            defaultOver={over}
             defaultSpecOpen={specOpen}
           />
         </SessionRow>
@@ -277,6 +281,7 @@ const meta = {
     screen: 'building',
     asking: false,
     folded: false,
+    over: false,
     specOpen: false,
     onPause: fn(),
     onResume: fn(),
@@ -298,6 +303,7 @@ const meta = {
       control: 'boolean',
       description: 'Whether the panel opens folded to its small frame.',
     },
+    over: { control: 'boolean', description: 'Whether the open panel lies over the chat.' },
     specOpen: {
       control: 'boolean',
       description: "Whether the frozen Spec opens in the view's place.",
@@ -513,6 +519,27 @@ export const SameFrameAsTheSpec: Story = {
     await waitFor(() =>
       expect(placeOf(canvas.getByRole('button', { name: 'Fold the build' }))).toBe(open),
     )
+  },
+}
+
+/**
+ * Over the chat (#77): the build lies over the chat, the whole width of the row, the button beside
+ * the fold pressed; the chat keeps its width under it and is out of reach, and the pill of what
+ * waits for the user is still there to be pressed.
+ */
+export const OverTheChat: Story = {
+  args: { over: true, screen: 'blocked' },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const dock = canvas.getByRole('region', { name: 'Build ATL-7' })
+    const row = dock.parentElement!.getBoundingClientRect()
+    const panel = dock.querySelector<HTMLElement>('[data-panel]')!
+    await expect(panel.getBoundingClientRect().left).toBeCloseTo(row.left + 12, 0)
+    await expect(canvas.getByRole('button', { name: 'Over the chat' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    )
+    await expect(canvas.queryByRole('log', { name: 'The thread of this Session' })).toBeNull()
   },
 }
 

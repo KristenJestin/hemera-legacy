@@ -3,7 +3,8 @@ import { MotionConfig } from 'motion/react'
 import { type ReactNode, useState } from 'react'
 import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
 
-import { journeyOf } from '../../.storybook/journey.ts'
+import { atRest } from '../../.storybook/at-rest.ts'
+import { journeyOf, readEveryFrame } from '../../.storybook/journey.ts'
 
 import { Button } from '../components/button/button.tsx'
 import { TooltipProvider } from '../components/tooltip/tooltip.tsx'
@@ -183,6 +184,10 @@ const meta = {
     defaultFolded: {
       control: 'boolean',
       description: 'Whether it starts folded to its small frame.',
+    },
+    defaultOver: {
+      control: 'boolean',
+      description: 'Whether the open Spec starts over the chat, the whole width of the row.',
     },
     arrives: {
       control: 'boolean',
@@ -1036,6 +1041,138 @@ export const ReducedMotion: Story = {
     await expect(dockWidth(canvasElement)).toBe(FOLDED)
     await expect(measure(canvasElement).frame).toBe(1)
     await expect(isStowed(canvasElement)).toBe(true)
+  },
+}
+
+/** The chat beside the panel: the row's first child, which the panel lies over or beside. */
+function chatOf(canvasElement: HTMLElement): HTMLElement {
+  const chat = dockOf(canvasElement).parentElement!.firstElementChild
+  if (!(chat instanceof HTMLElement)) throw new Error('the row holds no chat')
+  return chat
+}
+
+/** Where the panel stands over the chat: the row's left edge, in by its margin. */
+function overEdge(canvasElement: HTMLElement): number {
+  return dockOf(canvasElement).parentElement!.getBoundingClientRect().left + 12
+}
+
+/**
+ * Over the chat (#77): the open Spec lies over the chat, the whole width of the row less its two
+ * margins, and the chat under it is out of reach. The button beside the fold says it is pressed,
+ * its arrows turned inwards.
+ */
+export const OverTheChat: Story = {
+  args: { defaultOver: true },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const panel = panelOf(canvasElement)
+    await expect(canvas.getByRole('button', { name: 'Over the chat' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    )
+    await expect(panel).toHaveAttribute('data-over')
+    await expect(panel.getBoundingClientRect().left).toBeCloseTo(overEdge(canvasElement), 0)
+    await expect(chatOf(canvasElement).inert).toBe(true)
+    await expect(chatOf(canvasElement)).toHaveAttribute('aria-hidden', 'true')
+    await expect(canvas.getByRole('region', { name: 'Contents of ATL-7' })).toBeVisible()
+  },
+}
+
+/**
+ * Over the chat and back (#77): only the panel's left edge moves, on the swap's spring, frame
+ * after frame. The chat keeps its width under the panel the whole way, so nothing in it reflows,
+ * and the panel's right edge stays where it is.
+ */
+export const OverAndBack: Story = {
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const panel = panelOf(canvasElement)
+    const chat = chatOf(canvasElement)
+    const beside = panel.getBoundingClientRect()
+    const width = chat.getBoundingClientRect().width
+    const toggle = canvas.getByRole('button', { name: 'Over the chat' })
+
+    const edge = readEveryFrame(() => panel.getBoundingClientRect().left)
+    const chats = readEveryFrame(() => chat.getBoundingClientRect().width)
+    const rights = readEveryFrame(() => panel.getBoundingClientRect().right)
+    await userEvent.click(toggle)
+    await waitFor(() =>
+      expect(panel.getBoundingClientRect().left).toBeCloseTo(overEdge(canvasElement), 0),
+    )
+    await atRest(panel)
+    const out = edge.stop()
+    await expect(journeyOf(out, beside.left, overEdge(canvasElement))).not.toBe('jumped')
+    await expect(toggle).toHaveAttribute('aria-pressed', 'true')
+    await expect(toggle).toHaveFocus()
+    await expect(chat.inert).toBe(true)
+
+    const back = readEveryFrame(() => panel.getBoundingClientRect().left)
+    await userEvent.click(toggle)
+    await waitFor(() => expect(panel.getBoundingClientRect().left).toBeCloseTo(beside.left, 0))
+    await atRest(panel)
+    await expect(journeyOf(back.stop(), overEdge(canvasElement), beside.left)).not.toBe('jumped')
+    await expect(toggle).toHaveAttribute('aria-pressed', 'false')
+    await expect(chat.inert).toBe(false)
+
+    const reflowed = chats.stop().filter((reading) => Math.abs(reading.value - width) > 0.5)
+    await expect(reflowed, 'the chat changed width under the panel').toEqual([])
+    const shifted = rights.stop().filter((reading) => Math.abs(reading.value - beside.right) > 0.5)
+    await expect(shifted, "the panel's right edge moved").toEqual([])
+  },
+}
+
+/**
+ * Folding the Spec over the chat takes it back beside the chat: unfolded again, it stands where
+ * it always does, and the chat is in reach.
+ */
+export const FoldComesBackBeside: Story = {
+  args: { defaultOver: true },
+  decorators: [
+    (Story) => (
+      <MotionConfig reducedMotion="always">
+        <Story />
+      </MotionConfig>
+    ),
+  ],
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await userEvent.click(canvas.getByRole('button', { name: 'Fold the Spec' }))
+    await waitFor(() => expect(isStowed(canvasElement)).toBe(true))
+    await expect(chatOf(canvasElement).inert).toBe(false)
+    await userEvent.click(canvas.getByRole('button', { name: 'Unfold the Spec' }))
+    await nextFrame()
+    const row = dockOf(canvasElement).parentElement!.getBoundingClientRect().width
+    await expect(dockWidth(canvasElement)).toBeCloseTo(row * 0.45 + 12, 0)
+    await expect(panelOf(canvasElement)).not.toHaveAttribute('data-over')
+    await expect(canvas.getByRole('button', { name: 'Over the chat' })).toHaveAttribute(
+      'aria-pressed',
+      'false',
+    )
+  },
+}
+
+/**
+ * Told to move less, the panel lies over the chat on the next frame, and comes back beside it on
+ * the next frame too.
+ */
+export const OverAtOnce: Story = {
+  decorators: [
+    (Story) => (
+      <MotionConfig reducedMotion="always">
+        <Story />
+      </MotionConfig>
+    ),
+  ],
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const panel = panelOf(canvasElement)
+    const beside = panel.getBoundingClientRect().left
+    await userEvent.click(canvas.getByRole('button', { name: 'Over the chat' }))
+    await nextFrame()
+    await expect(panel.getBoundingClientRect().left).toBeCloseTo(overEdge(canvasElement), 0)
+    await userEvent.click(canvas.getByRole('button', { name: 'Over the chat' }))
+    await nextFrame()
+    await expect(panel.getBoundingClientRect().left).toBeCloseTo(beside, 0)
   },
 }
 

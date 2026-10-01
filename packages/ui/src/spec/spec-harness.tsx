@@ -161,6 +161,7 @@ export interface LiveSpecPanelProps extends SpecActions {
   reader?: ReaderView | undefined
   defaultReworkOpen?: boolean | undefined
   defaultFolded?: boolean | undefined
+  defaultOver?: boolean | undefined
   onFoldChange?: ((folded: boolean) => void) | undefined
   /** Whether the Spec was just created here, and the panel arrives. */
   arrives?: boolean | undefined
@@ -179,6 +180,7 @@ export function LiveSpecPanel({
   reader: initialReader,
   defaultReworkOpen,
   defaultFolded,
+  defaultOver,
   onFoldChange,
   arrives,
   agentWrites,
@@ -217,6 +219,7 @@ export function LiveSpecPanel({
           reader={reader}
           defaultReworkOpen={defaultReworkOpen}
           defaultFolded={defaultFolded}
+          defaultOver={defaultOver}
           onFoldChange={onFoldChange}
           arrives={arrives}
           onMarkReady={actions.onMarkReady}

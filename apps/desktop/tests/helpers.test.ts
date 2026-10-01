@@ -342,7 +342,7 @@ describe('The main agent reads a helper and stops it', () => {
 })
 
 describe('The Project caps how many helpers run at once', () => {
-  test('a launch above the cap is refused with the reason, never queued', async () => {
+  test('a launch after the cap is reached is refused with the reason, never queued', async () => {
     const main = orchestrator([launch('Write the exporter.'), launch('Write the reader.')])
     const gate = gated(0)
     const helper = aHelper([{ does: 'says', text: 'Done.' }], { between: gate.between })
@@ -368,6 +368,40 @@ describe('The Project caps how many helpers run at once', () => {
       '1 helpers are running, the most this Project lets run at once',
     )
     expect(seen).toHaveLength(1)
+  })
+
+  test('two launches at once are never both let past the cap', async () => {
+    const main = orchestrator([])
+    const gate = gated(0)
+    const helper = aHelper([{ does: 'says', text: 'Done.' }], { between: gate.between })
+    opened = await openWindow(dataFolder, main.agent, helper.agent)
+    const seen = await opened.running(
+      Effect.gen(function* () {
+        const spec = yield* aReadySpec(dataFolder, THREE)
+        const projects = yield* Projects
+        const project = (yield* projects.list()).find((one) => one.id === spec.projectId)
+        yield* projects.setHelpersAtOnce(spec.projectId, project?.version ?? 0, 1)
+        const sessionId = yield* launched(spec.specId, spec.workspaceId)
+        const helpers = yield* Helpers
+        const asked = (brief: string) =>
+          helpers.tool(sessionId, { tool: 'helper_launch', arguments: { brief } })
+        // Both in flight together, each in a fiber of its own.
+        const answers = yield* Effect.all(
+          [asked('Write the exporter.'), asked('Write the reader.')],
+          {
+            concurrency: 'unbounded',
+          },
+        )
+        const listed = yield* helpersOf(sessionId)
+        gate.carryOn()
+        return { answers, listed }
+      }),
+    )
+    expect(seen.answers.map((one) => one.ok).toSorted()).toEqual([false, true])
+    expect(seen.answers.find((one) => !one.ok)?.text).toContain(
+      '1 helpers are running, the most this Project lets run at once',
+    )
+    expect(seen.listed).toHaveLength(1)
   })
 
   test('three by default, and the setting takes one to six', async () => {

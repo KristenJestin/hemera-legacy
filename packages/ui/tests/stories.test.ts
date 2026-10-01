@@ -94,6 +94,8 @@ const CATALOGUE: Catalogued[] = [
   // Issue #140: what an agent is doing, said by Hemera's face. A thing to read and not a thing to
   // operate, like the dot it will stand beside.
   { name: 'Face', folder: 'face', keyboard: false },
+  // Issue #77: what goes on in a Session — a run, a helper — as one chip with its glance.
+  { name: 'LiveChip', folder: 'live-chip', keyboard: true },
 ]
 
 /** The pieces of the shell, which are components with a story each and no catalogue entry. */

@@ -38,6 +38,8 @@ export {
   type StatusDotProps,
   type StatusTone,
 } from './components/status-dot/status-dot.tsx'
+/** What goes on in a Session — a run, a helper — as one chip, its seconds and its glance. */
+export { LiveChip, type LiveChipProps, type LiveState } from './components/live-chip/live-chip.tsx'
 export {
   Tooltip,
   TooltipProvider,

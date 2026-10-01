@@ -60,6 +60,8 @@ function runOf(
     startedBy: run.startedBy,
     environment: facts.environment,
     at: clockOf(Date.parse(run.startedAt)),
+    startedAt: Date.parse(run.startedAt),
+    endedAt: run.endedAt === null ? null : Date.parse(run.endedAt),
   }
 }
 

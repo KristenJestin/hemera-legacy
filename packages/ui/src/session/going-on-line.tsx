@@ -3,25 +3,20 @@ import { type ReactNode, useRef, useState } from 'react'
 
 import { COMMAND_TYPE_ICONS } from '../activity/command-type.ts'
 import { IconButton } from '../components/button/button.tsx'
+import { LiveChip } from '../components/live-chip/live-chip.tsx'
 import { Popover } from '../components/popover/popover.tsx'
 import { StatusDot } from '../components/status-dot/status-dot.tsx'
 import { Tooltip } from '../components/tooltip/tooltip.tsx'
-import {
-  IconBookmarkPlus,
-  IconInfoCircle,
-  IconPlayerStop,
-  IconRefresh,
-  IconRobot,
-  IconTerminal2,
-  IconX,
-} from '../icons.ts'
+import { IconBookmarkPlus, IconInfoCircle, IconRobot, IconTerminal2, IconX } from '../icons.ts'
 import { AgentText } from '../message/agent-text.tsx'
 import { fold, useTransition } from '../motion.ts'
 import { ServiceUrl } from '../workspace/service-list.tsx'
 import {
   GOING_ON_SHOWN,
+  type GoingOnAgent,
   type GoingOnItem,
   type GoingOnRun,
+  type GoingOnShell,
   goingOnStateOf,
   rankedGoingOn,
 } from './going-on.ts'
@@ -38,14 +33,16 @@ import { RunPlace } from './run-place.tsx'
  * runs, the ones the agent runs in its own shell, and its sub-agents, one chip each, where the eye
  * already is when it looks for what the Session is doing.
  *
- * The kinds are told apart by their chip: a command Hemera runs has its type's icon and a solid
- * edge; a command of the agent's own shell a terminal and a dashed edge, since Hemera holds no
- * process it could stop; a sub-agent a robot. How each stands is its dot alone, and beside its name
- * only an address once a server answers on one. What failed comes first, then what runs, then what
- * is over; four chips, and a `+N` for the rest, which opens the whole list grouped by kind.
+ * The kinds are told apart by their chip. A command Hemera runs is a `LiveChip` (issue #77): its
+ * type's icon, its name and its seconds, no dot — a faint breath while it runs, the plain mark it
+ * ended on after — and its glance says where it runs, its address once a server answers, and what
+ * it printed. A command of the agent's own shell has a terminal and a dashed edge, since Hemera
+ * holds no process it could stop; a sub-agent a robot; how each of those stands is its dot. What
+ * failed comes first, then what runs, then what is over, and a chip that changes rank travels to
+ * its new place; four chips, and a `+N` for the rest, which opens the whole list grouped by kind.
  *
- * A chip opens a glance: one line — icon, dot, name, where it runs, Stop when Hemera holds the
- * process, and the ⓘ of its Details — and what it printed under it. The Details are a dialog laid
+ * A chip of the shell or of a sub-agent opens a glance: one line — icon, dot, name, where it runs,
+ * the ⓘ of its Details — and what it printed or last said under it. The Details are a dialog laid
  * the same way for every kind (`GoingOnDetails`). The line ends on `end`, where the page puts the
  * way to start a command.
  *
@@ -171,12 +168,8 @@ function ItemLine({ item }: { item: GoingOnItem }): ReactNode {
   )
 }
 
-/**
- * Where the item runs, or how far a sub-agent got: the quiet words after its name. A run in one of
- * the Project's repositories is said as it, with its mark (issue #239).
- */
-function whereOf(item: GoingOnItem): ReactNode {
-  if (item.kind === 'run') return <RunPlace repository={item.repository} folder={item.folder} />
+/** Where the agent's shell ran it, or how far a sub-agent got: the quiet words after its name. */
+function whereOf(item: GoingOnShell | GoingOnAgent): string {
   if (item.kind === 'shell') return `${item.folder} · the agent’s shell`
   return `${String(item.steps.length)} steps`
 }
@@ -200,18 +193,25 @@ function Act({
   )
 }
 
-/** The room a chip takes on the line, which is what grows and folds: its right edge is the gap. */
-const SLOT = 'flex shrink-0 overflow-hidden pr-1.5'
+/**
+ * The room a chip takes on the line, which is what grows and folds: its right edge is the gap. A
+ * little room on its left too, given back by its margin, so a live chip's shake is not cut.
+ */
+const SLOT = 'flex shrink-0 overflow-hidden -ml-1 pl-1 pr-1.5'
 
 const SHOWN = { width: 'auto', filter: 'opacity(1)' } as const
 
 const HIDDEN = { width: 0, filter: 'opacity(0)' } as const
 
-/** A place on the line that arrives and leaves by its width, pushing the chips after it. */
+/**
+ * A place on the line that arrives and leaves by its width, pushing the chips after it, and travels
+ * to its new rank rather than jumping there.
+ */
 function Slot({ children }: { children: ReactNode }): ReactNode {
   const transition = useTransition(fold)
   return (
     <motion.span
+      layout="position"
       className={SLOT}
       initial={HIDDEN}
       animate={SHOWN}
@@ -223,23 +223,18 @@ function Slot({ children }: { children: ReactNode }): ReactNode {
   )
 }
 
-/** A glance at one item: one line with its tools, and what it printed or last said under it. */
+/**
+ * A glance at a command of the agent's shell or a sub-agent: one line with its tools, and what it
+ * printed or last said under it.
+ */
 function Glance({
   item,
-  onStop,
-  onOpenUrl,
   onDetails,
-  onRunAgain,
-  onAddToCatalogue,
   onRemove,
 }: {
-  item: GoingOnItem
-  onStop: (run: GoingOnRun) => void
-  onOpenUrl: (url: string) => void
+  item: GoingOnShell | GoingOnAgent
   onDetails: () => void
-  onRunAgain?: ((run: GoingOnRun) => void) | undefined
-  onAddToCatalogue: (run: GoingOnRun) => void
-  onRemove?: ((item: GoingOnItem) => void) | undefined
+  onRemove?: (() => void) | undefined
 }): ReactNode {
   const face = faceOf(item)
   const state = goingOnStateOf(item)
@@ -251,25 +246,6 @@ function Glance({
         <span className={face.mono ? MONO_LABEL : LABEL}>{face.label}</span>
         <span className={WHERE}>{whereOf(item)}</span>
         <span className={TOOLS}>
-          {item.kind === 'run' && item.state === 'running' && (
-            <Act label={`Stop ${item.name}`} tip="Stop" onPress={() => onStop(item)}>
-              <IconPlayerStop size="sm" />
-            </Act>
-          )}
-          {item.kind === 'run' && item.state !== 'running' && onRunAgain !== undefined && (
-            <Act label={`Run ${item.name} again`} tip="Run again" onPress={() => onRunAgain(item)}>
-              <IconRefresh size="sm" />
-            </Act>
-          )}
-          {item.kind === 'run' && item.oneOff === true && (
-            <Act
-              label={`Add ${item.name} to the catalogue`}
-              tip="Add to catalogue"
-              onPress={() => onAddToCatalogue(item)}
-            >
-              <IconBookmarkPlus size="sm" />
-            </Act>
-          )}
           <Act label={`Details of ${face.label}`} tip="Details" onPress={onDetails}>
             <IconInfoCircle size="sm" />
           </Act>
@@ -277,18 +253,13 @@ function Glance({
             <Act
               label={`Remove ${face.label} from the line`}
               tip="Remove from the line"
-              onPress={() => onRemove(item)}
+              onPress={onRemove}
             >
               <IconX size="sm" />
             </Act>
           )}
         </span>
       </div>
-      {item.kind === 'run' && item.url !== undefined && item.state === 'running' && (
-        <p className="text-xs">
-          <ServiceUrl url={item.url} readiness={item.readiness} onOpenUrl={onOpenUrl} />
-        </p>
-      )}
       {item.kind === 'agent' ? (
         <div className="flex flex-col gap-1 text-sm">
           <p>{item.task}</p>
@@ -298,6 +269,73 @@ function Glance({
         <GoingOnOutput item={item} />
       )}
     </div>
+  )
+}
+
+/**
+ * A command Hemera runs, as a live chip (issue #77): its type's icon in the slot; in its glance,
+ * where it runs, its address once a server answers on one, and what it printed. Stop, Run again,
+ * the one-off's `Add to catalogue`, the ⓘ and, once it has ended, the ✕ that takes it off the line.
+ */
+function RunChip({
+  run,
+  open,
+  onOpenChange,
+  onClosed,
+  onDetails,
+  onStop,
+  onOpenUrl,
+  onRunAgain,
+  onAddToCatalogue,
+  onRemove,
+}: {
+  run: GoingOnRun
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  onClosed: () => void
+  onDetails: () => void
+  onStop: (run: GoingOnRun) => void
+  onOpenUrl: (url: string) => void
+  onRunAgain?: ((run: GoingOnRun) => void) | undefined
+  onAddToCatalogue: (run: GoingOnRun) => void
+  onRemove?: (() => void) | undefined
+}): ReactNode {
+  const TypeIcon = COMMAND_TYPE_ICONS[run.type]
+  return (
+    <LiveChip
+      name={run.name}
+      icon={<TypeIcon size="sm" aria-hidden="true" />}
+      state={run.state}
+      startedAt={run.startedAt}
+      endedAt={run.endedAt}
+      label={nameOf(run)}
+      step={<RunPlace repository={run.repository} folder={run.folder} />}
+      open={open}
+      onOpenChange={onOpenChange}
+      onClosed={onClosed}
+      onDetails={onDetails}
+      onStop={() => onStop(run)}
+      onRunAgain={onRunAgain === undefined ? undefined : () => onRunAgain(run)}
+      onRemove={onRemove}
+      tools={
+        run.oneOff === true && (
+          <Act
+            label={`Add ${run.name} to the catalogue`}
+            tip="Add to catalogue"
+            onPress={() => onAddToCatalogue(run)}
+          >
+            <IconBookmarkPlus size="sm" />
+          </Act>
+        )
+      }
+    >
+      {run.url !== undefined && run.state === 'running' && (
+        <p className="text-xs">
+          <ServiceUrl url={run.url} readiness={run.readiness} onOpenUrl={onOpenUrl} />
+        </p>
+      )}
+      <GoingOnOutput item={run} />
+    </LiveChip>
   )
 }
 
@@ -337,55 +375,60 @@ export function GoingOnLine({
   return (
     <div role="group" aria-label="What goes on in this Session" className={LINE}>
       <AnimatePresence initial={false}>
-        {chips.map((item) => (
-          <Slot key={item.id}>
-            <Popover
-              side="bottom"
-              align="start"
-              label={nameOf(item)}
-              open={open === item.id}
-              onOpenChange={(next) => setOpen(next ? item.id : null)}
-              onClosed={() => {
-                if (leaving?.id !== item.id) return
-                setLeaving(null)
-                onRemove?.(item)
-              }}
-              trigger={
-                <button
-                  type="button"
-                  className={item.kind === 'shell' ? SHELL_CHIP : CHIP}
-                  aria-label={nameOf(item)}
+        {chips.map((item) => {
+          const glanced = (next: boolean) => setOpen(next ? item.id : null)
+          // The glance closes first, with its own motion, and the chip leaves once it is gone.
+          const closed = () => {
+            if (leaving?.id !== item.id) return
+            setLeaving(null)
+            onRemove?.(item)
+          }
+          const remove =
+            onRemove === undefined
+              ? undefined
+              : () => {
+                  setLeaving(item)
+                  setOpen(null)
+                }
+          return (
+            <Slot key={item.id}>
+              {item.kind === 'run' ? (
+                <RunChip
+                  run={item}
+                  open={open === item.id}
+                  onOpenChange={glanced}
+                  onClosed={closed}
+                  onDetails={() => details(item.id)}
+                  onStop={onStop}
+                  onOpenUrl={onOpenUrl}
+                  onRunAgain={onRunAgain}
+                  onAddToCatalogue={onAddToCatalogue}
+                  onRemove={remove}
+                />
+              ) : (
+                <Popover
+                  side="bottom"
+                  align="start"
+                  label={nameOf(item)}
+                  open={open === item.id}
+                  onOpenChange={glanced}
+                  onClosed={closed}
+                  trigger={
+                    <button
+                      type="button"
+                      className={item.kind === 'shell' ? SHELL_CHIP : CHIP}
+                      aria-label={nameOf(item)}
+                    >
+                      <ItemLine item={item} />
+                    </button>
+                  }
                 >
-                  <ItemLine item={item} />
-                </button>
-              }
-            >
-              <Glance
-                item={item}
-                onStop={onStop}
-                onOpenUrl={onOpenUrl}
-                onDetails={() => details(item.id)}
-                onRunAgain={
-                  onRunAgain === undefined
-                    ? undefined
-                    : (run) => {
-                        setOpen(null)
-                        onRunAgain(run)
-                      }
-                }
-                onAddToCatalogue={onAddToCatalogue}
-                onRemove={
-                  onRemove === undefined
-                    ? undefined
-                    : (gone) => {
-                        setLeaving(gone)
-                        setOpen(null)
-                      }
-                }
-              />
-            </Popover>
-          </Slot>
-        ))}
+                  <Glance item={item} onDetails={() => details(item.id)} onRemove={remove} />
+                </Popover>
+              )}
+            </Slot>
+          )
+        })}
       </AnimatePresence>
       {rest > 0 && (
         <span className={SLOT}>

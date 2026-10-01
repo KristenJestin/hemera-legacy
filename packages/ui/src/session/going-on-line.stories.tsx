@@ -2,6 +2,9 @@ import type { Meta, StoryObj } from '@storybook/react-vite'
 import { type ReactNode, useState } from 'react'
 import { expect, fn, screen, userEvent, waitFor, within } from 'storybook/test'
 
+import { atRest } from '../../.storybook/at-rest.ts'
+import { journeyOf, readEveryFrame } from '../../.storybook/journey.ts'
+import { movesLess } from '../../.storybook/reduced-motion.ts'
 import { TooltipProvider } from '../components/tooltip/tooltip.tsx'
 import { GOING_ON, ONE_OFF_DONE } from './going-on-fixtures.ts'
 import { GoingOnLine, type GoingOnLineProps } from './going-on-line.tsx'
@@ -145,7 +148,13 @@ export const RoundTrip: Story = {
     await userEvent.click(canvas.getByRole('button', { name: 'test, running' }))
     const glanced = await screen.findByRole('dialog', { name: 'test, running' })
     await waitFor(() => expect(within(glanced).getByText(/csv\.stream\.test\.ts/)).toBeVisible())
+    // What runs is stopped from here, once the reader said so, and neither run again nor taken out.
+    await expect(within(glanced).queryByRole('button', { name: /again$/ })).toBeNull()
+    await expect(within(glanced).queryByRole('button', { name: /from the line$/ })).toBeNull()
     await userEvent.click(within(glanced).getByRole('button', { name: 'Stop test' }))
+    await expect(args.onStop).not.toHaveBeenCalled()
+    const asked = await within(glanced).findByRole('group', { name: 'Stop test?' })
+    await userEvent.click(within(asked).getByRole('button', { name: 'Stop' }))
     await expect(args.onStop).toHaveBeenCalledWith(expect.objectContaining({ id: 'run-test' }))
     await userEvent.click(within(glanced).getByRole('button', { name: 'Details of test' }))
     const details = await screen.findByRole('dialog', { name: 'test' })
@@ -211,25 +220,52 @@ export const GlanceActs: Story = {
   },
 }
 
-/** The ✕ of a glance takes the chip out of the line; the page decides what the line holds. */
+/**
+ * The ✕ of an ended run's glance takes the chip out of the line; the page decides what the line
+ * holds.
+ */
 export const RemovedByHand: Story = {
+  args: { items: [ONE_OFF_DONE] },
   play: async ({ canvasElement, args }) => {
     const canvas = within(canvasElement)
-    await userEvent.click(canvas.getByRole('button', { name: 'test, running' }))
-    const glanced = await screen.findByRole('dialog', { name: 'test, running' })
-    // What runs is stopped from here, not run again.
-    await expect(within(glanced).queryByRole('button', { name: /again$/ })).toBeNull()
-    await userEvent.click(
-      within(glanced).getByRole('button', { name: 'Remove test from the line' }),
-    )
+    await userEvent.click(canvas.getByRole('button', { name: /done$/ }))
+    const glanced = await screen.findByRole('dialog', { name: /done$/ })
+    await userEvent.click(within(glanced).getByRole('button', { name: /from the line$/ }))
     // The glance closes first; the chip is taken out once it is gone.
     await waitFor(() => {
-      expect(screen.queryByRole('dialog', { name: 'test, running' })).toBeNull()
+      expect(screen.queryByRole('dialog', { name: /done$/ })).toBeNull()
     })
     await waitFor(() => {
-      expect(args.onRemove).toHaveBeenCalledWith(expect.objectContaining({ id: 'run-test' }))
+      expect(args.onRemove).toHaveBeenCalledWith(
+        expect.objectContaining({ id: 'run-one-off-done' }),
+      )
     })
   },
+}
+
+/** The line, whose test can be ended in failure by a press beside it. */
+function Ending(props: GoingOnLineProps): ReactNode {
+  const [items, setItems] = useState(props.items)
+  return (
+    <>
+      <Line {...props} items={items} />
+      <button
+        type="button"
+        className="mx-6 mt-3 text-xs underline"
+        onClick={() =>
+          setItems((before) =>
+            before.map((one) =>
+              one.kind === 'run' && one.id === 'run-test'
+                ? { ...one, state: 'failed', exitCode: 1, endedAt: Date.now() }
+                : one,
+            ),
+          )
+        }
+      >
+        End the test
+      </button>
+    </>
+  )
 }
 
 /** A line that takes out what its glance's ✕ asks it to, as the page does. */
@@ -250,21 +286,73 @@ function Removing(props: GoingOnLineProps): ReactNode {
  * a chip that is going away.
  */
 export const RemovedFromItsGlance: Story = {
+  args: { items: [...GOING_ON.few, ONE_OFF_DONE] },
   render: (args) => <Removing {...args} />,
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    await userEvent.click(canvas.getByRole('button', { name: 'test, running' }))
-    const glanced = await screen.findByRole('dialog', { name: 'test, running' })
-    await userEvent.click(
-      within(glanced).getByRole('button', { name: 'Remove test from the line' }),
-    )
+    await userEvent.click(canvas.getByRole('button', { name: /done$/ }))
+    const glanced = await screen.findByRole('dialog', { name: /done$/ })
+    await userEvent.click(within(glanced).getByRole('button', { name: /from the line$/ }))
     // While the glance is still there, the chip it hangs from is too.
-    await expect(canvas.getByRole('button', { name: 'test, running' })).toBeInTheDocument()
+    await expect(canvas.getByRole('button', { name: /done$/ })).toBeInTheDocument()
     await waitFor(() => {
-      expect(screen.queryByRole('dialog', { name: 'test, running' })).toBeNull()
+      expect(screen.queryByRole('dialog', { name: /done$/ })).toBeNull()
     })
     await waitFor(() => {
-      expect(canvas.queryByRole('button', { name: 'test, running' })).toBeNull()
+      expect(canvas.queryByRole('button', { name: /done$/ })).toBeNull()
     })
+  },
+}
+
+/**
+ * The runs Hemera holds are live chips (issue #77): their type's icon, no dot, their seconds, a
+ * faint breath while they run, and the plain mark they ended on. The agent's own shell commands
+ * and the sub-agents keep their dot.
+ */
+export const LiveRuns: Story = {
+  args: { items: GOING_ON.many },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const dev = canvas.getByRole('button', { name: 'dev, running on localhost:5173/' })
+    await expect(dev).toHaveTextContent(/^dev\d+s$/)
+    await expect(dev.querySelector('[data-breath]')).not.toBeNull()
+    await expect(dev.querySelector('.rounded-full')).toBeNull()
+    const shell = canvas.getByRole('button', { name: /run by the agent, running$/ })
+    await expect(shell.querySelector('.rounded-full')).not.toBeNull()
+  },
+}
+
+/** A run of the line ends where it is watched: its wipe, then the mark it ended on. */
+export const RunEnds: Story = {
+  render: (args) => <Ending {...args} />,
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const chip = canvas.getByRole('button', { name: 'test, running' })
+    await userEvent.click(canvas.getByRole('button', { name: 'End the test' }))
+    await waitFor(() => expect(chip).toHaveAccessibleName('test, failed'))
+    await expect(chip.querySelector('[data-wipe]')).toHaveClass('bg-destructive-muted')
+    await waitFor(() => expect(chip.querySelector('[data-end="failed"]')).not.toBeNull())
+    await waitFor(() => expect(chip.querySelector('[data-wipe]')).toBeNull())
+  },
+}
+
+/**
+ * What failed comes first: a run that fails while watched travels to the head of the line, frame
+ * after frame, rather than jumping there; the chips it passes make room for it.
+ */
+export const FailedRunTakesTheLead: Story = {
+  render: (args) => <Ending {...args} />,
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const chip = canvas.getByRole('button', { name: 'test, running' })
+    const from = chip.getBoundingClientRect().left
+    const watch = readEveryFrame(() => chip.getBoundingClientRect().left)
+    await userEvent.click(canvas.getByRole('button', { name: 'End the test' }))
+    await waitFor(() => expect(canvas.getAllByRole('button')[0]).toBe(chip))
+    await atRest(chip)
+    const to = chip.getBoundingClientRect().left
+    await expect(to).toBeLessThan(from)
+    if (movesLess()) return
+    await expect(journeyOf(watch.stop(), from, to)).not.toBe('jumped')
   },
 }

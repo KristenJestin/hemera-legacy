@@ -465,6 +465,25 @@ describe('The Context tab lists what Hemera said to the agent of its own', () =>
   })
 })
 
+describe('The Context tab shows the app tester brief (#300)', () => {
+  test('its own line, with the time it went with the first prompt', () => {
+    const view = aViewOf([
+      aSource('base', 'system_prompt'),
+      {
+        ...aHanding('notice', 'app-tester', '2026-09-30T13:40:00.000Z'),
+        reached: 'embedded_resource',
+      },
+    ])
+
+    expect(contextListsOf(view, ROOT).handed).toEqual([
+      {
+        label: 'The app tester brief went to the agent',
+        at: atOf('2026-09-30T13:40:00.000Z'),
+      },
+    ])
+  })
+})
+
 describe('A one-off command shows and is not promoted', () => {
   withQualifiedOpenCode()
 

@@ -55,6 +55,7 @@ import { type Preparation, hostLinks, preparationLayer } from '#engine/workspace
 import { type Launches, launchesLayer } from '#engine/workspaces/launches.ts'
 import { type Recipe, recipeLayer } from '#engine/workspaces/recipe.ts'
 import { type Variables, variablesLayer } from '#engine/workspaces/variables.ts'
+import { type TesterFindings, testerFindingsLayer } from '#engine/tester/findings.ts'
 import { type Workspaces, WorkspacesRoot, workspacesLayer } from '#engine/workspaces/workspaces.ts'
 
 import { threadOf, until } from './application.ts'
@@ -112,6 +113,7 @@ function running<A, E>(
     | Proposals
     | ProjectChecks
     | Builds
+    | TesterFindings
     | SetupProposals
     | Launches
   >,
@@ -239,9 +241,11 @@ function running<A, E>(
     | Launches
     | ProjectChecks
     | Builds
+    | TesterFindings
     | Database
     | SqliteClient
   > = Layer.mergeAll(
+    testerFindingsLayer({ directory: dataFolder, version: '0.3.0', channel: 'dev' }),
     preferencesLayer,
     classifierSettingsLayer,
     engineStatusLayer({ directory: dataFolder, channel: 'dev', version: '0.3.0' }),
@@ -371,7 +375,27 @@ describe('Un message conforme est traité', () => {
       activeSessions: {},
       composers: {},
       acpTrace: false,
+      appTester: false,
     })
+  })
+})
+
+describe('The app tester mode is a preference', () => {
+  test('off until it is turned on, and read back as it was written (#300)', async () => {
+    const before = await send('preferences.read', {})
+    expect(before).toMatchObject({ appTester: false })
+    const written = decideRequest('preferences.write', { appTester: true })
+    expect(written.accepted).toBe(true)
+    await running(
+      Effect.gen(function* () {
+        if (written.accepted) yield* answer(written)
+      }),
+    )
+    expect(await send('preferences.read', {})).toMatchObject({ appTester: true, acpTrace: false })
+  })
+
+  test('its findings are asked for by name, and none is an empty list', async () => {
+    expect(await send('tester.findings', {})).toEqual([])
   })
 })
 

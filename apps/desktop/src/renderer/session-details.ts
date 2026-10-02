@@ -1,4 +1,4 @@
-import { MAIN_WORKSPACE, PHASE_IDS } from '@hemera/core'
+import { APP_TESTER_PATH, MAIN_WORKSPACE, PHASE_IDS } from '@hemera/core'
 import type { CommandRun, ContextView, Provided } from '@hemera/ipc'
 import type {
   ContextCommand,
@@ -335,9 +335,17 @@ function handedOf(provided: ContextView['provided']): ContextEntry[] {
         ]
       case 'internal':
         return [{ label: 'The result of a sub-agent went to the agent', at }]
-      // Hemera's own words: the only notice it sends is that the user declined a proposal.
+      // Hemera's own words: the app tester's brief (#300), or that the user declined a proposal.
       case 'notice':
-        return [{ label: 'Hemera told the agent you declined its proposal', at }]
+        return [
+          {
+            label:
+              one.path === APP_TESTER_PATH
+                ? 'The app tester brief went to the agent'
+                : 'Hemera told the agent you declined its proposal',
+            at,
+          },
+        ]
       case 'request':
         return [{ label: 'The New Spec request went to the agent', at }]
       default:

@@ -38,6 +38,8 @@ import type { McpServer } from '@agentclientprotocol/sdk'
 
 import {
   AGENTS_FILE,
+  APP_TESTER_BRIEF,
+  APP_TESTER_PATH,
   type AgentProvider,
   type BaseReach,
   contextUri,
@@ -473,6 +475,8 @@ interface Live {
   readonly meta: SessionMeta | undefined
   /** How the base reaches this agent, as its adapter declares (D6-07). */
   readonly base: BaseReach
+  /** Whether the app tester mode was on as this agent started: its brief and tools (#300). */
+  readonly tester: boolean
   /** The handle the agent gave this Session, which a resume asks it to take back. */
   nativeSessionId: string
   /** What the supervisor observed when the process died, or null while it is alive. */
@@ -891,6 +895,18 @@ export const runtimeLayer = Layer.effect(
       if (mode === undefined) return null
       const name = mode.values.find((value) => value.id === mode.value)?.name ?? mode.value
       return { agent: held.provider, mode: mode.value, name }
+    })
+
+    // What the agent is and stands on, which a finding of the app tester records (#300).
+    sessionModes.agentHeldBy((sessionId) => {
+      const held = live.get(sessionId)
+      if (held === undefined) return null
+      return {
+        version: held.connection.handshake.version ?? null,
+        options: held.connection
+          .options()
+          .map((option) => ({ category: option.category, value: option.value })),
+      }
     })
 
     /** One line, written as a `note`: what Hemera did that the agent did not say. */
@@ -1870,10 +1886,18 @@ export const runtimeLayer = Layer.effect(
         // says whose call a tool call is (D6-01). It travels as a bearer header, which the three
         // agents take, and not in the address, which is what a log or a proxy would keep. What it
         // may ask for is the set of the Session's mission (D7-14).
+        // The app tester mode as it stands now: an agent started while it is on is briefed and
+        // lent its two tools for as long as its process lives (#300).
+        const tester = yield* preferences.read.pipe(
+          Effect.map((read) => read.appTester),
+          Effect.orElseSucceed(() => false),
+        )
         const granted = yield* access.granted(
           sessionId,
           String(process.pid ?? 'unknown'),
           session.mission,
+          false,
+          tester,
         )
         const mcp: readonly McpServer[] = [
           {
@@ -1928,6 +1952,7 @@ export const runtimeLayer = Layer.effect(
           mission: session.mission,
           meta: bare.meta,
           base: mode.base,
+          tester,
           nativeSessionId: '',
           death: null,
           context: null,
@@ -1965,6 +1990,8 @@ export const runtimeLayer = Layer.effect(
           yield* attempt('stopping the agent', process.stop).pipe(Effect.ignore)
           return yield* Effect.fail(resumed)
         }
+
+        yield* briefedToTest(sessionId, started, fresh)
 
         // The Workspace's instructions are watched for as long as this agent holds the Session:
         // a change is handed over at the next safe point rather than at the next prompt (D6-08).
@@ -2143,6 +2170,28 @@ export const runtimeLayer = Layer.effect(
         held.provisions = provisions
         held.unbriefed = true
         return null
+      })
+
+    /**
+     * The app tester's brief (#300), for an agent started while the mode is on: a resource in
+     * front of its first prompt, as the base goes to an agent without a system prompt, and a row
+     * of what the Session was provided. A session opened afresh is always given it; one the agent
+     * took back is given it only if it never was.
+     */
+    const briefedToTest = (sessionId: string, held: Live, fresh: boolean) =>
+      Effect.gen(function* () {
+        if (!held.tester) return
+        if (!fresh) {
+          const provided = yield* context.provided(sessionId).pipe(Effect.orElseSucceed(() => []))
+          if (provided.some((one) => one.kind === 'notice' && one.path === APP_TESTER_PATH)) return
+        }
+        held.provisions = [
+          ...held.provisions,
+          { uri: contextUri(APP_TESTER_PATH), text: APP_TESTER_BRIEF, mimeType: 'text/plain' },
+        ]
+        yield* context
+          .handed(sessionId, 'notice', APP_TESTER_BRIEF, APP_TESTER_PATH)
+          .pipe(Effect.ignore)
       })
 
     /**

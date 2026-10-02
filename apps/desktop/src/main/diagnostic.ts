@@ -95,3 +95,20 @@ export function traceFileOf(directory: string, sessionId: string): string | null
   if (!FILE_SAFE.test(sessionId)) return null
   return join(directory, TRACES_FOLDER, `${sessionId}.log`)
 }
+
+/**
+ * Where the app tester keeps its findings (#300): a folder of the data folder, one file a finding
+ * under `findings/`, and the index beside them. One place spells it, as for the traces: the engine
+ * writes it, and the main process opens it for the reader.
+ */
+export const TESTER_FOLDER = 'tester'
+
+/** The index of the findings, written again after every change. */
+export const TESTER_INDEX = 'README.md'
+
+/** The folder of the findings themselves, inside the tester's. */
+export const FINDINGS_FOLDER = 'findings'
+
+export function testerFolderOf(directory: string): string {
+  return join(directory, TESTER_FOLDER)
+}

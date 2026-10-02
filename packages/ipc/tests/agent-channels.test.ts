@@ -342,7 +342,7 @@ describe('No tool is replayed on resume', () => {
 })
 
 describe('Text arrives as a stream', () => {
-  test('the twelve things the engine pushes are the ones declared', () => {
+  test('the thirteen things the engine pushes are the ones declared', () => {
     expect(Object.keys(ENGINE_EVENTS).toSorted()).toEqual([
       'agent',
       'agents_changed',
@@ -353,6 +353,7 @@ describe('Text arrives as a stream', () => {
       'permission',
       'run',
       'spec_changed',
+      'tester_changed',
       'turn',
       'turn_start',
       'workspace',

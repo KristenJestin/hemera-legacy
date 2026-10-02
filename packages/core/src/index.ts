@@ -2,10 +2,21 @@
 
 export {
   CLASSIFIER_POLICY_VERSION,
+  CLASSIFIER_STRICTNESS_LEVELS,
+  DEFAULT_CLASSIFIER_STRICTNESS,
   classifierVerdictFromScores,
   judgedByClassifier,
   localClassifierVerdict,
 } from './domain/classifier.ts'
+export {
+  SENSITIVE_PLACES,
+  concernSaid,
+  placesNamed,
+  sensitivePlace,
+  shownFromHome,
+  verdictAtPlaces,
+} from './domain/classifier-places.ts'
+export type { NamedPlaces, PlaceConcern, PlaceContext } from './domain/classifier-places.ts'
 export {
   HEMERA_AUTO_MODE,
   autoGoverns,
@@ -29,7 +40,9 @@ export type {
   HumanContextItem,
 } from './domain/classifier-context.ts'
 export type {
+  ClassifierStrictness,
   ClassifierVerdict,
+  JudgeVerdict,
   LocalAction,
   LocalVerdict,
   ResolvedCommand,
@@ -168,6 +181,32 @@ export {
   internalText,
 } from './domain/context.ts'
 export type { BaseReach, ContextReach, ContextSource } from './domain/context.ts'
+export {
+  APP_TESTER_BRIEF,
+  APP_TESTER_PATH,
+  FINDING_KINDS,
+  FINDING_KIND_TITLES,
+  FINDING_SEVERITIES,
+  FINDING_SEVERITY_TITLES,
+  SIMILAR_TITLE,
+  TESTER_TOOLS,
+  findingFileName,
+  findingsIndex,
+  matchingFinding,
+  newFinding,
+  recordOccurrence,
+  titleSimilarity,
+  writeFindingFile,
+} from './domain/tester.ts'
+export type {
+  Finding,
+  FindingCall,
+  FindingContext,
+  FindingHead,
+  FindingKind,
+  FindingSeverity,
+  ReportedFinding,
+} from './domain/tester.ts'
 export {
   InvalidVariableKeyError,
   InvalidWorkspaceNameError,

@@ -81,6 +81,7 @@ describe('The build protocol', () => {
     expect(BUILD_MISSION_BRIEF).toContain('You never set a task')
     expect(BUILD_MISSION_BRIEF).toContain('Do not commit, push')
     expect(BUILD_MISSION_BRIEF).toContain('reproduction scenario before you fix')
+    expect(BUILD_MISSION_BRIEF).toContain('reproduction_replayed({ gone: true, observed })')
   })
 })
 

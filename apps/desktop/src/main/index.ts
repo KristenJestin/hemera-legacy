@@ -161,6 +161,22 @@ if (!app.requestSingleInstanceLock()) {
     // channel with nobody on it would answer that with an error in the application's own console.
     const window = createWindow(main)
     registerChannels(window, identity, engine, data)
+    // Whether the window is looked at: a call that needs the user's answer waits a short grace for
+    // it only then, and otherwise tells the agent at once that it waits (#304).
+    const focused = (value: boolean) => {
+      void Effect.runPromise(
+        engine
+          .ask('window.focus.write', { focused: value })
+          .pipe(
+            Effect.catch((failed) =>
+              Effect.sync(() => log(`the engine was not told the focus: ${reported(failed)}`)),
+            ),
+          ),
+      )
+    }
+    window.on('focus', () => focused(true))
+    window.on('blur', () => focused(false))
+    focused(window.isFocused())
     await loadWindow(window)
 
     // What the Projects run each time Hemera opens, asked once the window is shown and never

@@ -17,6 +17,7 @@ import {
   linkSync,
   mkdirSync,
   readFileSync,
+  readdirSync,
   realpathSync,
   rmSync,
   symlinkSync,
@@ -50,6 +51,8 @@ import {
   typeSafeTransport,
 } from '#engine/classifier/jev.ts'
 import { Journal, journalLayer } from '#engine/journal.ts'
+import { Preferences, preferencesLayer } from '#engine/preferences.ts'
+import { type TesterFindings, testerFindingsLayer } from '#engine/tester/findings.ts'
 import { openProfile } from '#engine/migrate.ts'
 import { Projects, projectsLayer } from '#engine/projects.ts'
 import { Sessions, sessionsLayer } from '#engine/sessions.ts'
@@ -63,6 +66,7 @@ import { ToolCatalogue, toolCatalogueLayer } from '#engine/tools/catalogue.ts'
 import type { ToolArguments } from '#engine/tools/arguments.ts'
 import type { ToolOutcome } from '#engine/tools/catalogue.ts'
 import { ToolAccess, toolAccessLayer } from '#engine/tools/access.ts'
+import { approvalsLayer } from '#engine/tools/approvals.ts'
 import { ToolPermissions } from '#engine/tools/permissions.ts'
 import type { OutsideAnswer, OutsideRequest } from '#engine/tools/permissions.ts'
 import { Variables, variablesLayer } from '#engine/workspaces/variables.ts'
@@ -145,6 +149,8 @@ type Engine =
   | ToolAccess
   | ToolPermissions
   | SessionModes
+  | Preferences
+  | TesterFindings
   | Database
   | SqliteClient
   | Variables
@@ -174,13 +180,19 @@ function engine(
     Layer.provideMerge(journalLayer),
     Layer.provideMerge(toolAccessLayer),
     Layer.provideMerge(Layer.succeed(ToolPermissions, human.service)),
+    Layer.provide(approvalsLayer),
     Layer.provideMerge(commandsLayer),
     Layer.provideMerge(variablesLayer),
     Layer.provide(setupPlaces(folder)),
+    // The app tester's findings, files of the suite's data folder (#300).
+    Layer.provideMerge(
+      testerFindingsLayer({ directory: folder, version: VERSION, channel: 'dev' }),
+    ),
     Layer.provideMerge(
       Layer.mergeAll(
         projectsLayer,
         sessionsLayer,
+        preferencesLayer,
         specsLayer.pipe(Layer.provide(NoSpecNotices)),
       ).pipe(
         Layer.provideMerge(
@@ -236,6 +248,8 @@ const calling = (asked: {
   readonly arguments: ToolArguments
   readonly key?: string | undefined
   readonly offered?: readonly ToolName[] | undefined
+  /** The agent's own identifier of the call, when the suite plays an agent that sends one. */
+  readonly callId?: string | undefined
 }) =>
   Effect.gen(function* () {
     const catalogue = yield* ToolCatalogue
@@ -248,6 +262,7 @@ const calling = (asked: {
       key: asked.key ?? keySent(asked.arguments),
       offered: asked.offered ?? TOOL_NAMES,
       caller: 'a1b2c3d4e5f6',
+      callId: asked.callId ?? null,
     })
     return outcome
   })
@@ -276,7 +291,7 @@ const fileInRoot = (name: string, content: string) => {
   return path
 }
 
-function jevResponse(risk: number): Response {
+function jevResponse(risk: number, approval = 0.2, userRequested = 0.9): Response {
   return Response.json({
     model: JEV_MODEL,
     answers: {
@@ -287,8 +302,8 @@ function jevResponse(risk: number): Response {
         legend: { '0': 'read', '1': 'limited', '2': 'significant', '3': 'destructive' },
         probabilities: { '0': 0.1, '1': 0.9, '2': 0, '3': 0 },
       },
-      approval: { type: 'noul', noul: 0.2 },
-      user_requested: { type: 'noul', noul: 0.9 },
+      approval: { type: 'noul', noul: approval },
+      user_requested: { type: 'noul', noul: userRequested },
     },
   })
 }
@@ -394,6 +409,16 @@ describe('Hemera Auto classifies one admitted tool call before execution', () =>
         .filter((entry) => entry.kind === 'permission_decision')
         .map((entry) => entry.state),
     ).toEqual(['completed'])
+    // The human's answer is one of Hemera Auto's decisions too: it says who decided, what the
+    // classifier had settled before asking, and the decision it answers (#294).
+    const answered = result.entries.find((entry) => entry.kind === 'permission_decision')
+    expect(JSON.parse(answered?.payload ?? '{}')).toMatchObject({
+      tool: 'fs_write',
+      answer: 'allowed',
+      by: 'human',
+      judged: 'nobody',
+      classifier: userDecisions[0]?.payload.classifier,
+    })
   })
 
   it('refuses a destructive one-off before asking or starting it', async () => {
@@ -474,13 +499,16 @@ describe('Hemera Auto classifies one admitted tool call before execution', () =>
     })
   })
 
-  it('does not dispatch a valid Jev deny or treat an invalid reply as approval', async () => {
-    const human = humanSaying('allowed')
+  it('asks the human for a risky Jev score, and never treats an invalid reply as approval', async () => {
+    // The first call is scored as the `rm -rf` judged live was: Jev refuses nothing on its own.
+    const human = humanSaying('refused', 'allowed')
     let calls = 0
     const transport: JevTransport = {
       send: async () => {
         calls += 1
-        return calls === 1 ? jevResponse(2.5) : Response.json({ model: JEV_MODEL, answers: {} })
+        return calls === 1
+          ? jevResponse(2.96, 0.88, 0.18)
+          : Response.json({ model: JEV_MODEL, answers: {} })
       },
     }
     const result = await engine(
@@ -509,7 +537,7 @@ describe('Hemera Auto classifies one admitted tool call before execution', () =>
     expect(result.denied.state).toBe('refused')
     expect(existsSync(join(root, 'denied.md'))).toBe(false)
     expect(result.invalid.state).toBe('completed')
-    expect(human.asked).toHaveLength(1)
+    expect(human.asked).toHaveLength(2)
     expect(calls).toBe(2)
   })
 
@@ -713,9 +741,10 @@ describe('Local rules settle only understood calls', () => {
       expect(result.listing.state).toBe('completed')
       expect(result.deletion.state).toBe('refused')
       expect(result.outside.state).toBe('completed')
-      // Only the listing that leaves the Workspace went to the judge; no question was asked.
+      // Only the listing that leaves the Workspace went to the judge, and it asked whatever the
+      // judge said: a path outside always asks (#306).
       expect(evaluated).toBe(1)
-      expect(human.asked).toHaveLength(0)
+      expect(human.asked).toHaveLength(1)
     },
   )
 })
@@ -918,13 +947,14 @@ describe('Concurrent calls keep independent decisions', () => {
           ],
           { concurrency: 'unbounded' },
         ).pipe(Effect.timeout('5 seconds'))
-        return { allowed, refused }
+        return { allowed, refused, otherId: other.id }
       }),
     )
     expect(seen.allowed.state).toBe('completed')
     expect(seen.refused.state).toBe('refused')
     expect(existsSync(join(root, 'refused.md'))).toBe(false)
-    expect(human.asked).toHaveLength(0)
+    // The risky one asked its own Session's human, who refused it: Jev refuses nothing (#298).
+    expect(human.asked.map((question) => question.sessionId)).toEqual([seen.otherId])
     // Context from another Session is never included.
     const other = bodies.find((body) => body.includes('refused.md'))
     expect(other).not.toContain('first Session only')
@@ -1141,7 +1171,7 @@ describe('Audit distinguishes a verdict from execution', () => {
     expect(seen.lines.find((line) => line.type === 'classifier.decision')?.payload).toMatchObject({
       verdict: 'allow',
       source: 'jev',
-      policy: '1',
+      policy: '3',
       model: JEV_MODEL,
     })
     expect(types).toContain('tool.failed')
@@ -1211,7 +1241,7 @@ describe("Hemera Auto's decisions are quiet records, and what it cannot decide w
       send: async (body) =>
         body.includes('asked.md')
           ? Response.json({ model: JEV_MODEL, answers: {} })
-          : jevResponse(body.includes('refused.md') ? 2.5 : 1),
+          : jevResponse(1),
     }
     const seen = await engine(
       human,
@@ -1230,7 +1260,12 @@ describe("Hemera Auto's decisions are quiet records, and what it cannot decide w
             arguments: { path, content: 'x', key: path },
           })
         const allowed = yield* write('allowed.md')
-        const refused = yield* write('refused.md')
+        // Only the local rules refuse (#298).
+        const refused = yield* calling({
+          sessionId: session.sessionId,
+          tool: 'commands_run',
+          arguments: { line: 'rm -rf .git', key: 'refused' },
+        })
         yield* Effect.forkScoped(write('asked.md'))
         yield* Effect.promise(async () => {
           for (let tries = 0; tries < 100 && human.asked.length === 0; tries += 1) {
@@ -1307,7 +1342,7 @@ describe('Every Hemera Auto decision leaves one line in the diagnostic log', () 
     // The judged write: its path, the judge, its verdict, policy, model, scores and time.
     expect(lines[0]).toMatch(/fs_write .*judged\.md/)
     expect(lines[0]).toContain('by=judge verdict=allow')
-    expect(lines[0]).toContain('policy=1')
+    expect(lines[0]).toContain('policy=3')
     expect(lines[0]).toContain(`model=${JEV_MODEL}`)
     expect(lines[0]).toContain('risk=1 approval=0.2 userRequested=0.9')
     expect(lines[0]).toMatch(/jev=\d+ms/)
@@ -1321,6 +1356,66 @@ describe('Every Hemera Auto decision leaves one line in the diagnostic log', () 
     expect(lines[3]).toContain('commands_run rm -rf .git')
     expect(lines[3]).toContain('by=rules verdict=deny')
     expect(lines).toHaveLength(4)
+  })
+})
+
+describe('Changing the strictness applies to the next call, in every Session', () => {
+  it('asks for a significant change at normal, and lets it through once permissive', async () => {
+    // A significant change nobody asked for, as Jev scores it every time.
+    const transport: JevTransport = { send: async () => jevResponse(2, 0.2, 0.18) }
+    const human = humanSaying('refused')
+    const seen = await engine(
+      human,
+      transport,
+    )(
+      Effect.gen(function* () {
+        const first = yield* opened
+        const sessions = yield* Sessions
+        const other = yield* sessions.create(first.projectId, 'codex')
+        yield* (yield* ToolAccess).granted(other.id, 'agent-2', 'free')
+        const settings = yield* ClassifierSettings
+        yield* settings.replaceKey('ciphertext', 'private-key')
+        yield* settings.setConsent(true)
+        yield* settings.select('hemera-auto')
+        const write = (sessionId: string, path: string) =>
+          calling({ sessionId, tool: 'fs_write', arguments: { path, content: 'x', key: path } })
+        const asked = yield* write(first.sessionId, 'normal.md')
+        yield* settings.selectStrictness('permissive')
+        const elsewhere = yield* write(other.id, 'elsewhere.md')
+        const again = yield* write(first.sessionId, 'again.md')
+        return {
+          states: [asked, elsewhere, again].map((one) => one.state),
+          lines: yield* journalLines(first.projectId),
+          entries: yield* threadEntries(first.sessionId),
+        }
+      }),
+    )
+    expect(seen.states).toEqual(['refused', 'completed', 'completed'])
+    expect(human.asked).toHaveLength(1)
+    // Each decision says the level it was taken at, as the policy it belongs to.
+    const decisions = seen.lines
+      .filter((line) => line.type === 'classifier.decision')
+      .map((line) => line.payload)
+      .reverse()
+    expect(decisions).toMatchObject([
+      { verdict: 'ask', policy: '3', strictness: 'normal' },
+      { verdict: 'allow', policy: '3', strictness: 'permissive' },
+      { verdict: 'allow', policy: '3', strictness: 'permissive' },
+    ])
+    const record = seen.entries.find(
+      (entry) => entry.kind === 'permission_decision' && entry.state === 'completed',
+    )
+    expect(JSON.parse(record?.payload ?? '{}')).toMatchObject({
+      policyVersion: '3',
+      strictness: 'permissive',
+    })
+    const lines = diagnostics.filter(
+      (line) => line.startsWith('hemera-auto: fs_write') && line.includes('by=judge'),
+    )
+    expect(lines).toHaveLength(3)
+    expect(lines[0]).toContain('policy=3 strictness=normal')
+    expect(lines[1]).toContain('policy=3 strictness=permissive')
+    expect(lines[2]).toContain('policy=3 strictness=permissive')
   })
 })
 
@@ -2369,5 +2464,367 @@ describe('Changing the mode during a Session applies to the next call', () => {
     expect(seen.second.ok).toBe(true)
     expect(seen.third.ok).toBe(false)
     expect(human.asked).toHaveLength(2)
+  })
+})
+
+describe('Hemera Auto: paths outside the Workspace and sensitive places always ask', () => {
+  /** Jev as it scored the live case: a harmless read the user asked for, whatever it is sent. */
+  const harmless = (sent: string[]): JevTransport => ({
+    send: async (body) => {
+      sent.push(body)
+      return jevResponse(0.11, 0.05, 0.97)
+    },
+  })
+
+  /** Hemera Auto on, with a key and consent, at a strictness. */
+  const autoAt = (strictness: 'careful' | 'normal' | 'permissive') =>
+    Effect.gen(function* () {
+      const settings = yield* ClassifierSettings
+      yield* settings.replaceKey('ciphertext', 'private-key')
+      yield* settings.setConsent(true)
+      yield* settings.select('hemera-auto')
+      yield* settings.selectStrictness(strictness)
+    })
+
+  it.each(['careful', 'normal', 'permissive'] as const)(
+    'at %s, the two commands of the live case ask, and say why',
+    async (strictness) => {
+      const sent: string[] = []
+      const human = humanSaying('refused', 'refused')
+      const seen = await engine(
+        human,
+        harmless(sent),
+      )(
+        Effect.gen(function* () {
+          const session = yield* opened
+          yield* autoAt(strictness)
+          const run = (line: string, key: string) =>
+            calling({
+              sessionId: session.sessionId,
+              tool: 'commands_run',
+              arguments: { line, key },
+            })
+          const tilde = yield* run('cat ~/.ssh/config', 'live-1')
+          const shell = yield* run(`sh -c 'cat "$HOME/.ssh/config"'`, 'live-2')
+          return {
+            answers: [tilde, shell],
+            recent: yield* (yield* Commands).recent(session.sessionId),
+            lines: yield* journalLines(session.projectId),
+            entries: yield* threadEntries(session.sessionId),
+          }
+        }),
+      )
+      expect(human.asked).toHaveLength(2)
+      expect(seen.answers.map((answer) => answer.ok)).toEqual([false, false])
+      expect(seen.recent).toHaveLength(0)
+      // Jev judged with where the calls point, and its allow did not stand.
+      expect(sent).toHaveLength(2)
+      for (const body of sent) {
+        expect(body).toContain('"outside":true')
+        expect(body).toContain('"sensitive":"~/.ssh"')
+      }
+      const decisions = seen.lines
+        .filter((line) => line.type === 'classifier.decision')
+        .map((line) => line.payload)
+      expect(decisions).toHaveLength(2)
+      for (const decision of decisions) {
+        expect(decision).toMatchObject({ verdict: 'ask', source: 'jev', strictness })
+        expect(decision.why).toBe('outside the Workspace: ~/.ssh/config; sensitive place: ~/.ssh')
+      }
+      const questions = seen.entries.filter((entry) => entry.kind === 'permission_request')
+      expect(questions).toHaveLength(2)
+      for (const question of questions) {
+        expect(question.body).toContain('sensitive place: ~/.ssh')
+        expect(JSON.parse(question.payload ?? '{}')).toMatchObject({
+          inside: false,
+          why: ['outside the Workspace: ~/.ssh/config', 'sensitive place: ~/.ssh'],
+        })
+      }
+      const lines = diagnostics.filter((line) => line.startsWith('hemera-auto: commands_run'))
+      expect(lines[0]).toContain(
+        'why="outside the Workspace: ~/.ssh/config; sensitive place: ~/.ssh"',
+      )
+    },
+  )
+
+  it('asks for a path that climbs out, an absolute one, and a link that leads out', async () => {
+    mkdirSync(join(folder, 'elsewhere'))
+    writeFileSync(join(folder, 'elsewhere', 'notes'), 'outside')
+    symlinkSync(join(folder, 'elsewhere'), join(root, 'linked'))
+    const human = humanSaying()
+    const seen = await engine(
+      human,
+      harmless([]),
+    )(
+      Effect.gen(function* () {
+        const session = yield* opened
+        yield* autoAt('permissive')
+        const run = (line: string, key: string) =>
+          calling({ sessionId: session.sessionId, tool: 'commands_run', arguments: { line, key } })
+        yield* run('cat ../elsewhere/notes', 'out-1')
+        yield* run(`cat ${join(folder, 'elsewhere', 'notes')}`, 'out-2')
+        yield* run('cat linked/notes', 'out-3')
+        yield* run('sh -c "cat $(printf notes)"', 'out-4')
+        return yield* (yield* Commands).recent(session.sessionId)
+      }),
+    )
+    expect(human.asked).toHaveLength(4)
+    expect(seen).toHaveLength(0)
+  })
+
+  it('asks before a file tool reads or writes a .env inside the Workspace', async () => {
+    fileInRoot('.env', 'SECRET=1')
+    const human = humanSaying()
+    const seen = await engine(
+      human,
+      harmless([]),
+    )(
+      Effect.gen(function* () {
+        const session = yield* opened
+        yield* autoAt('permissive')
+        const read = yield* calling({
+          sessionId: session.sessionId,
+          tool: 'fs_read',
+          arguments: { path: '.env' },
+        })
+        const write = yield* calling({
+          sessionId: session.sessionId,
+          tool: 'fs_write',
+          arguments: { path: 'config/.env.local', content: 'SECRET=2', key: 'env-w' },
+        })
+        return { read, write, entries: yield* threadEntries(session.sessionId) }
+      }),
+    )
+    expect(human.asked).toHaveLength(2)
+    expect(seen.read.ok).toBe(false)
+    expect(seen.read.text).not.toContain('SECRET=1')
+    expect(seen.write.ok).toBe(false)
+    expect(existsSync(join(root, 'config', '.env.local'))).toBe(false)
+    const questions = seen.entries.filter((entry) => entry.kind === 'permission_request')
+    expect(questions[0]?.body).toMatch(/sensitive place: .*\.env$/)
+  })
+
+  it('does not take a Workspace Hemera assembled in its own data folder for a sensitive place', async () => {
+    // Hemera assembles Workspaces under its data folder, `~/.hemera/workspaces`: what is inside
+    // one is the Workspace's, and only what sits below the root is looked at.
+    root = join(folder, '.hemera', 'workspaces', 'atlas')
+    mkdirSync(join(root, 'src'), { recursive: true })
+    const human = humanSaying()
+    const seen = await engine(
+      human,
+      harmless([]),
+    )(
+      Effect.gen(function* () {
+        const session = yield* opened
+        yield* autoAt('careful')
+        const listing = yield* calling({
+          sessionId: session.sessionId,
+          tool: 'commands_run',
+          arguments: { line: 'ls src', key: 'assembled-ls' },
+        })
+        const listed = yield* calling({
+          sessionId: session.sessionId,
+          tool: 'fs_list',
+          arguments: { path: 'src' },
+        })
+        return { listing, listed }
+      }),
+    )
+    expect(seen.listing.ok).toBe(true)
+    expect(seen.listed.ok).toBe(true)
+    expect(human.asked).toHaveLength(0)
+  })
+
+  it("reads a catalogue line's variables as the user's, and the same one-off as unreadable", async () => {
+    const human = humanSaying()
+    const seen = await engine(
+      human,
+      harmless([]),
+    )(
+      Effect.gen(function* () {
+        const session = yield* opened
+        yield* autoAt('normal')
+        yield* (yield* Commands).save(
+          {
+            projectId: session.projectId,
+            name: 'port',
+            line: `sh -c 'echo $PORT'`,
+            type: 'script',
+            lineWindows: null,
+            lineLinux: null,
+            scope: 'workspace',
+            portless: false,
+            portlessName: null,
+            folderBase: null,
+            folder: null,
+            runAtOpen: false,
+          },
+          false,
+        )
+        const saved = yield* calling({
+          sessionId: session.sessionId,
+          tool: 'commands_run',
+          arguments: { name: 'port', key: 'catalogue-port' },
+        })
+        const oneOff = yield* calling({
+          sessionId: session.sessionId,
+          tool: 'commands_run',
+          arguments: { line: `sh -c 'echo $PORT'`, key: 'one-off-port' },
+        })
+        return { saved, oneOff }
+      }),
+    )
+    expect(seen.saved.ok).toBe(true)
+    expect(seen.oneOff.ok).toBe(false)
+    expect(human.asked).toHaveLength(1)
+  })
+
+  it('still lets ls src run inside the Workspace, without a question or a call to Jev', async () => {
+    mkdirSync(join(root, 'src'))
+    const sent: string[] = []
+    const human = humanSaying()
+    const seen = await engine(
+      human,
+      harmless(sent),
+    )(
+      Effect.gen(function* () {
+        const session = yield* opened
+        yield* autoAt('careful')
+        return yield* calling({
+          sessionId: session.sessionId,
+          tool: 'commands_run',
+          arguments: { line: 'ls src', key: 'ls-src' },
+        })
+      }),
+    )
+    expect(seen.ok).toBe(true)
+    expect(human.asked).toHaveLength(0)
+    expect(sent).toHaveLength(0)
+  })
+})
+
+describe("The app tester reports Hemera's own problems (#300)", () => {
+  /** What the agent says of the problem: the human part, and nothing Hemera knows itself. */
+  const REPORTED = {
+    title: 'fs_read cuts the last line of a file',
+    kind: 'tool_error',
+    where: 'fs_read',
+    severity: 'hurts',
+    trying: 'Read notes.md to the end.',
+    happened: 'The last line was missing; the call carried Authorization: Bearer abc.def.',
+    expected: 'Every line of the file.',
+    steps: '1. Write a file of three lines.\n2. Read it with fs_read.',
+    files: 'notes.md, docs/other.md',
+  }
+
+  const testing = Effect.gen(function* () {
+    yield* (yield* Preferences).write({ appTester: true })
+  })
+
+  const findingsIn = () => join(folder, 'tester', 'findings')
+
+  it('a first report answers "new #1" and writes what Hemera knows beside it', async () => {
+    const seen = await engine(humanSaying())(
+      Effect.gen(function* () {
+        yield* testing
+        const session = yield* opened
+        fileInRoot('notes.md', 'one\ntwo\nthree\n')
+        yield* calling({
+          sessionId: session.sessionId,
+          tool: 'fs_read',
+          arguments: { path: 'notes.md' },
+          callId: 'toolu_read_1',
+        })
+        const outcome = yield* calling({
+          sessionId: session.sessionId,
+          tool: 'hemera_report',
+          arguments: { ...REPORTED, call_id: 'toolu_read_1', code: '0' },
+        })
+        return { outcome, session }
+      }),
+    )
+    expect(seen.outcome.ok).toBe(true)
+    expect(seen.outcome.text).toMatch(/^new #1\b/)
+    const [file] = readdirSync(findingsIn())
+    const written = readFileSync(join(findingsIn(), file ?? ''), 'utf8')
+    for (const part of [
+      'kind: "tool_error"',
+      `project_id: "${seen.session.projectId}"`,
+      'project: "Atlas"',
+      `workspace_path: "${root}"`,
+      'version: "0.4.0"',
+      'channel: "dev"',
+      `(\`${seen.session.sessionId}\`) · free`,
+      '`notes.md`, `docs/other.md`',
+      '`fs_read` `toolu_read_1` · completed',
+      '`{"path":"notes.md"}`',
+      'Code: 0',
+      'Thread entries:',
+      '1. Write a file of three lines.',
+    ]) {
+      expect(written).toContain(part)
+    }
+    expect(written).not.toContain('abc.def')
+    expect(existsSync(join(folder, 'tester', 'README.md'))).toBe(true)
+  })
+
+  it('the same problem again answers "added to #1", and hemera_reports lists it', async () => {
+    const seen = await engine(humanSaying())(
+      Effect.gen(function* () {
+        yield* testing
+        const session = yield* opened
+        yield* calling({ sessionId: session.sessionId, tool: 'hemera_report', arguments: REPORTED })
+        const again = yield* calling({
+          sessionId: session.sessionId,
+          tool: 'hemera_report',
+          arguments: { ...REPORTED, title: 'fs_read cuts the last line' },
+        })
+        const listed = yield* calling({
+          sessionId: session.sessionId,
+          tool: 'hemera_reports',
+          arguments: {},
+        })
+        return { again, listed }
+      }),
+    )
+    expect(seen.again.text).toMatch(/^added to #1\b/)
+    expect(seen.again.text).toContain('2 occurrences')
+    expect(readdirSync(findingsIn())).toHaveLength(1)
+    expect(seen.listed.ok).toBe(true)
+    expect(seen.listed.text).toContain(
+      '#1 tool_error · hurts · fs_read: fs_read cuts the last line of a file',
+    )
+  })
+
+  it('while the mode is off, a report is refused and nothing is written', async () => {
+    const outcome = await engine(humanSaying())(
+      Effect.gen(function* () {
+        const session = yield* opened
+        return yield* calling({
+          sessionId: session.sessionId,
+          tool: 'hemera_report',
+          arguments: REPORTED,
+        })
+      }),
+    )
+    expect(outcome.ok).toBe(false)
+    expect(outcome.text).toContain('app tester mode is off')
+    expect(existsSync(findingsIn())).toBe(false)
+  })
+
+  it('a report without what happened is refused, naming the field', async () => {
+    const outcome = await engine(humanSaying())(
+      Effect.gen(function* () {
+        yield* testing
+        const session = yield* opened
+        return yield* calling({
+          sessionId: session.sessionId,
+          tool: 'hemera_report',
+          arguments: { ...REPORTED, happened: '' },
+        })
+      }),
+    )
+    expect(outcome.ok).toBe(false)
+    expect(outcome.text).toContain('happened')
   })
 })

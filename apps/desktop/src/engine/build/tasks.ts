@@ -359,6 +359,11 @@ export function openAttempt(
 ) {
   return Effect.gen(function* () {
     const id = crypto.randomUUID()
+    // The end checks take the replay of a bug's reproduction the agent reported in the turn before
+    // them, and the Session holds it no more: the next end checks wait for a replay of their own
+    // (issue #203).
+    const replay =
+      attempt.scope === 'build' ? yield* takeReproduction(transaction, attempt.sessionId) : null
     yield* transaction
       .insert(buildAttempts)
       .values({
@@ -369,6 +374,8 @@ export function openAttempt(
         storyId: attempt.storyId,
         number: attempt.number,
         startedAt: attempt.at,
+        reproduction: replay?.observed ?? null,
+        reproductionGone: replay?.gone ?? null,
       })
       .pipe(Effect.mapError(failed('writing the attempt')))
     if (attempt.trees.length > 0) {
@@ -384,6 +391,28 @@ export function openAttempt(
         .pipe(Effect.mapError(failed('writing the snapshots of the attempt')))
     }
     return id
+  })
+}
+
+/**
+ * The replay of a bug's reproduction the Session holds, taken off it: what the agent observed and
+ * whether the incorrect behaviour is gone, or null when it reported none (issue #203).
+ */
+function takeReproduction(transaction: EngineTransaction, sessionId: string) {
+  return Effect.gen(function* () {
+    const held = yield* transaction
+      .select({ observed: sessions.buildReproduction, gone: sessions.buildReproductionGone })
+      .from(sessions)
+      .where(eq(sessions.id, sessionId))
+      .pipe(Effect.mapError(failed('reading the replay of the reproduction')))
+    const replay = held[0]
+    if (replay === undefined || replay.observed === null || replay.gone === null) return null
+    yield* transaction
+      .update(sessions)
+      .set({ buildReproduction: null, buildReproductionGone: null })
+      .where(eq(sessions.id, sessionId))
+      .pipe(Effect.mapError(failed('taking the replay of the reproduction')))
+    return { observed: replay.observed, gone: replay.gone }
   })
 }
 

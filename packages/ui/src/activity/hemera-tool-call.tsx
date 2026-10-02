@@ -4,6 +4,7 @@ import { StatusDot, type StatusTone } from '../components/status-dot/status-dot.
 import {
   IconAdjustments,
   IconBookmarkPlus,
+  IconBug,
   IconCircleCheck,
   IconClipboardList,
   IconFileDescription,
@@ -15,10 +16,12 @@ import {
   IconHandStop,
   IconListCheck,
   IconListDetails,
+  IconMessageReport,
   IconMessages,
   IconPencil,
   IconPlayerPlay,
   IconPlayerStop,
+  IconReportSearch,
   IconSearch,
   IconTerminal2,
   IconWriting,
@@ -110,6 +113,9 @@ export type HemeraToolMark =
   | 'read-build'
   | 'finish-task'
   | 'block-task'
+  | 'replay-reproduction'
+  | 'report-finding'
+  | 'read-findings'
 
 const HEMERA_MARKS: Record<HemeraToolMark, ReactNode> = {
   'read-file': <IconFileText size="sm" aria-hidden="true" />,
@@ -134,6 +140,11 @@ const HEMERA_MARKS: Record<HemeraToolMark, ReactNode> = {
   'read-build': <IconClipboardList size="sm" aria-hidden="true" />,
   'finish-task': <IconCircleCheck size="sm" aria-hidden="true" />,
   'block-task': <IconHandStop size="sm" aria-hidden="true" />,
+  // The replay of a bug's reproduction, which the final checks of a `bug` wait for (issue #203).
+  'replay-reproduction': <IconBug size="sm" aria-hidden="true" />,
+  // The app tester's two (#300): a problem with Hemera reported, and the reports read.
+  'report-finding': <IconMessageReport size="sm" aria-hidden="true" />,
+  'read-findings': <IconReportSearch size="sm" aria-hidden="true" />,
 }
 
 /** Where the mark sits on the line, in the tone a native call's mark is drawn in. */

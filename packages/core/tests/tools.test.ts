@@ -8,7 +8,10 @@ import { describe, expect, test } from 'vite-plus/test'
 import { TOOL_LABELS, TOOL_NAMES, offeredTools } from '#index.ts'
 
 /** The build's own tools (D10-13). */
-const BUILD_TOOLS = ['build_read', 'task_finished', 'task_blocked']
+const BUILD_TOOLS = ['build_read', 'task_finished', 'task_blocked', 'reproduction_replayed']
+
+/** The app tester's own, offered only while the mode is on (#300). */
+const TESTER_TOOLS = ['hemera_report', 'hemera_reports']
 
 describe('Every tool has a label and a mark', () => {
   test('one of each per tool, and no two tools share either', () => {
@@ -42,13 +45,17 @@ describe('Every tool has a label and a mark', () => {
 describe('A mission is offered its own tools', () => {
   test('a free Session is offered the code tools and spec_propose alone', () => {
     expect(offeredTools('free')).toEqual(
-      TOOL_NAMES.filter((tool) => !['spec_read', 'spec_write', ...BUILD_TOOLS].includes(tool)),
+      TOOL_NAMES.filter(
+        (tool) => !['spec_read', 'spec_write', ...BUILD_TOOLS, ...TESTER_TOOLS].includes(tool),
+      ),
     )
   })
 
   test('a build Session is offered the code tools and the build tools, and no Spec tool', () => {
     expect(offeredTools('build')).toEqual(
-      TOOL_NAMES.filter((tool) => !['spec_read', 'spec_write', 'spec_propose'].includes(tool)),
+      TOOL_NAMES.filter(
+        (tool) => !['spec_read', 'spec_write', 'spec_propose', ...TESTER_TOOLS].includes(tool),
+      ),
     )
   })
 

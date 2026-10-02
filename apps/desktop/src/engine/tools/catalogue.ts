@@ -30,18 +30,28 @@ import {
   admitTool,
   CLASSIFIER_POLICY_VERSION,
   classifierHumanContext,
+  classifierVerdictFromScores,
+  type ClassifierStrictness,
   commandPlace,
+  concernSaid,
   judgedByClassifier,
   localClassifierVerdict,
   offeredTools,
+  placesNamed,
   runsInMain,
+  sensitivePlace,
+  shownFromHome,
+  TESTER_TOOLS,
+  verdictAtPlaces,
   type LocalAction,
   type Mission,
+  type PlaceConcern,
 } from '@hemera/core'
 import { and, desc, eq } from 'drizzle-orm'
-import { Context, Deferred, Effect, Layer } from 'effect'
-import { mkdir, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises'
-import { basename, dirname, join, relative } from 'node:path'
+import { Context, Deferred, Duration, Effect, Fiber, Layer } from 'effect'
+import { mkdir, readFile, readdir, realpath, rename, rm, stat, writeFile } from 'node:fs/promises'
+import { homedir, userInfo } from 'node:os'
+import { basename, dirname, join, relative, resolve } from 'node:path'
 
 import { HeldWords } from '../agents/held.ts'
 import { HEMERA_AUTO, SessionModes, modeAsks } from '../agents/modes.ts'
@@ -53,7 +63,9 @@ import { evaluateJev, type JevResult, JevTransportPort } from '../classifier/jev
 import { knownSecretValues, redactText } from '../classifier/redaction.ts'
 import { type Invocation, wordsOf } from '../commands/line.ts'
 import { Commands, Platform, type RunRequest } from '../commands/service.ts'
+import { Preferences } from '../preferences.ts'
 import { Projects } from '../projects.ts'
+import { TesterFindings } from '../tester/findings.ts'
 import { Sessions, type ThreadWrite } from '../sessions.ts'
 import { Specs } from '../specs/specs.ts'
 import type { DescribedWorkspace } from '../workspaces/described.ts'
@@ -63,6 +75,7 @@ import { Variables } from '../workspaces/variables.ts'
 import { SetupDesk } from '../setup/desk.ts'
 import { mutate } from '../transaction.ts'
 import { ToolAccess } from './access.ts'
+import { Approvals, waitingText } from './approvals.ts'
 import {
   OUTPUT_PAGE_LINES,
   RUN_WAIT_MS,
@@ -71,16 +84,20 @@ import {
   type ParsedCall,
   parseCall,
 } from './arguments.ts'
-import { type RefusedPathError, resolveInside } from './paths.ts'
+import { type RefusedPathError, containedIn, resolveInside } from './paths.ts'
 import { type OutsideAnswer, ToolPermissions } from './permissions.ts'
 import { type Page, type ReadRange, numbered, readPage } from './read.ts'
 import { searchIn } from './search.ts'
 import { argumentsShown } from '../setup/hidden.ts'
 import { setupTools } from './setup.ts'
 import { specTools } from './spec.ts'
+import { testerTools } from './tester.ts'
 
 /** How much of an argument list is kept in the Journal, so a payload stays a payload. */
 const ARGUMENTS_KEPT = 400
+
+/** The app tester's tools (#300). */
+const TESTING: ReadonlySet<string> = new Set(TESTER_TOOLS)
 
 /** How many answered keys a Session keeps against a retry, the least recently asked let go of first. */
 const KEYS_KEPT = 256
@@ -161,6 +178,23 @@ interface Made {
   readonly milliseconds: number
 }
 
+/**
+ * What a call that may outlast its request carries (#304): the question it asked, once it asked
+ * one, and the entry of the thread it is written under from its "waiting" to its end.
+ */
+interface Late {
+  /** What the human answered the question it asked, once they did. */
+  answer?: OutsideAnswer
+  /** Whether the agent was answered "waiting" and the call went on without it. */
+  detached?: boolean
+  readonly asking: Deferred.Deferred<{
+    readonly id: string
+    /** Rewrites the question as one that no longer holds the turn: the notices keep it. */
+    readonly detach: Effect.Effect<void>
+  }>
+  readonly entry: string
+}
+
 /** An answer kept against its key, with the arguments it was given for. */
 interface Kept {
   readonly sent: string
@@ -177,11 +211,15 @@ interface Classified {
   readonly correlationId?: string
   /** Who settled it: the rules, the judge, nobody (unavailable), or its expiry (cancelled). */
   readonly source?: 'local' | 'jev' | 'unavailable' | 'cancelled'
+  /** The level the policy stood at when the call was judged (#298). */
+  readonly strictness?: ClassifierStrictness
   readonly model?: string
   /** The call as the diagnostic log says it: its line or its path, masked, never its content. */
   readonly said?: string
   /** How long Jev took to answer this call, when it was asked. */
   readonly roundTripMs?: number | undefined
+  /** Why it asks whatever the judge said: where the call points (#306). */
+  readonly concerns?: readonly PlaceConcern[]
   readonly scores?:
     | {
         readonly risk: number
@@ -204,6 +242,26 @@ interface ClassifierDetail {
   readonly invocation?: Invocation
   readonly portless?: boolean
   readonly environmentNames?: readonly string[]
+  /** Where the call points, as the judge is told it: each place, outside or sensitive (#306). */
+  readonly places?: readonly PointedPlace[]
+}
+
+/** One place a call points at, from the home, and why it is a concern if it is one. */
+interface PointedPlace {
+  readonly path: string
+  readonly outside: boolean
+  readonly sensitive: string | null
+}
+
+/** Each concern once, in the order it was found. */
+function distinctConcerns(concerns: readonly PlaceConcern[]): PlaceConcern[] {
+  const said = new Set<string>()
+  return concerns.filter((concern) => {
+    const one = concernSaid(concern)
+    if (said.has(one)) return false
+    said.add(one)
+    return true
+  })
 }
 
 /**
@@ -361,6 +419,9 @@ export const toolCatalogueLayer: Layer.Layer<
   | ClassifierSettings
   | SetupDesk
   | StderrSink
+  | Approvals
+  | TesterFindings
+  | Preferences
 > = Layer.effect(
   ToolCatalogue,
   Effect.gen(function* () {
@@ -379,9 +440,66 @@ export const toolCatalogueLayer: Layer.Layer<
     const classifier = yield* ClassifierSettings
     const jevTransport = yield* JevTransportPort
     const platform = yield* Platform
+    /** Whose home `~` is, as the words of a command are read (#306). */
+    const placeContext = {
+      home: homedir(),
+      user: (() => {
+        try {
+          return userInfo().username
+        } catch {
+          return ''
+        }
+      })(),
+      platform,
+    }
+    /**
+     * The sensitive place a path is in. Below the root, only what sits below it counts: Hemera
+     * assembles Workspaces in its own data folder, and a Workspace is not sensitive for being
+     * there — a `.env` in it is.
+     */
+    const sensitiveUnder = (roots: readonly string[], path: string) => {
+      const root = roots.find((one) => containedIn(one, path))
+      if (root === undefined) return sensitivePlace(path, placeContext)
+      const below = sensitivePlace(relative(root, path), placeContext)
+      return below === null ? null : shownFromHome(join(root, below), placeContext)
+    }
+    /** A root as it is spelled and as the disk has it, so a linked home is still the root. */
+    const rootsOf = (root: string) =>
+      Effect.promise(() =>
+        realpath(root).then(
+          (real) => [root, real],
+          () => [root],
+        ),
+      )
+    /**
+     * What a place a call points at is: outside the root, sensitive, or neither. `written` is the
+     * path as named, made absolute; `place` is where it leads once `..` and links are followed.
+     */
+    const pointed = (
+      roots: readonly string[],
+      written: string,
+      place: { readonly inside: boolean | null; readonly path?: string },
+    ) => {
+      const outside = place.inside !== true
+      const where = place.path ?? written
+      const sensitive = sensitiveUnder(roots, written) ?? sensitiveUnder(roots, where)
+      const shown = shownFromHome(where, placeContext)
+      const concerns: PlaceConcern[] = []
+      if (outside) concerns.push({ kind: 'outside', place: shown })
+      if (sensitive !== null) concerns.push({ kind: 'sensitive', place: sensitive })
+      return { place: { path: shown, outside, sensitive } satisfies PointedPlace, concerns }
+    }
     const desk = yield* SetupDesk
     /** The engine's diagnostic log, where each Hemera Auto decision is told in one line. */
     const diagnostic = yield* StderrSink
+    const approvals = yield* Approvals
+    /** The engine's own scope: a call that answered "waiting" goes on in it, not in its request. */
+    const scope = yield* Effect.scope
+
+    /** The calls that may outlast their request, by the call as the catalogue was handed it. */
+    const lateOf = new WeakMap<ToolCall, Late>()
+    const findings = yield* TesterFindings
+    const preferences = yield* Preferences
 
     /**
      * One entry of a call written into its Session's thread, below what the agent said before it.
@@ -411,6 +529,23 @@ export const toolCatalogueLayer: Layer.Layer<
         )
 
     const spec = specTools({ specs, sessions, held, inThread, askedForSpec })
+
+    // What goes wrong on Hemera's side, reported by the agent while the app tester mode is on (#300).
+    const tester = testerTools({
+      findings,
+      sessions,
+      variables,
+      builds,
+      modes,
+      on: preferences.read.pipe(
+        Effect.map((read) => read.appTester),
+        Effect.orElseSucceed(() => false),
+      ),
+      auto: classifier.current.pipe(
+        Effect.map((settings) => settings.mode),
+        Effect.orElseSucceed(() => 'unknown'),
+      ),
+    })
 
     // The Project's setup, read freely and changed only by the human's acceptance (#218).
     const setup = setupTools({
@@ -501,7 +636,7 @@ export const toolCatalogueLayer: Layer.Layer<
       ).pipe(Effect.catch(() => Effect.void))
 
     /** The line and the event of one call, written together, in the thread and in the Journal. */
-    const note = (asked: ToolCall, state: ToolState, answer: Answer, made: Made) =>
+    const note = (asked: ToolCall, state: ToolState | 'pending', answer: Answer, made: Made) =>
       Effect.gen(function* () {
         const payload = JSON.stringify({
           tool: asked.tool,
@@ -533,13 +668,16 @@ export const toolCatalogueLayer: Layer.Layer<
           kind: 'hemera_tool_call',
           body: answer.summary,
           payload,
-          correlationId: `tool:${crypto.randomUUID()}`,
+          // A call that answered "waiting" is one entry from then to its end (#304).
+          correlationId: lateOf.get(asked)?.entry ?? `tool:${crypto.randomUUID()}`,
           state,
         }).pipe(
           // A thread that cannot be written is a Session that went away while the call was
           // running: the answer is still the answer, and losing the line is not losing it.
           Effect.catch(() => Effect.void),
         )
+        // Waiting is not an end: the Journal has its line once the call has one.
+        if (state === 'pending') return
         yield* journalled(asked, made, `tool.${state}`, {
           state,
           paths: answer.paths.length,
@@ -548,8 +686,12 @@ export const toolCatalogueLayer: Layer.Layer<
       })
 
     /** Writes the answer down and hands it to the caller. */
-    const settle = (asked: ToolCall, made: Made, answer: Answer, state: ToolState) =>
+    const settle = (asked: ToolCall, made: Made, answer: Answer, given: ToolState) =>
       Effect.gen(function* () {
+        // A request the human refused after the agent went on ends as refused, on the entry that
+        // showed it waiting (#304).
+        const late = lateOf.get(asked)
+        const state = late?.detached === true && late.answer === 'refused' ? 'refused' : given
         yield* note(asked, state, answer, made)
         const outcome: ToolOutcome = {
           ok: answer.ok,
@@ -644,15 +786,21 @@ export const toolCatalogueLayer: Layer.Layer<
     ) =>
       Effect.gen(function* () {
         const id = crypto.randomUUID()
+        // Why Hemera Auto asked whatever its judge said, where it did (#306): the question says it,
+        // and a call that points outside is not said to be inside because it runs from there.
+        const concerns = classified?.concerns ?? []
+        const why = concerns.map(concernSaid)
+        const said = why.length === 0 ? body : `${body} — ${why.join('; ')}`
+        const within = inside && !concerns.some((concern) => concern.kind === 'outside')
         // The block the window already draws for an agent's own permission is the one this is
         // read by: the same two options every time, because the question is always the same one
         // and nothing about it is remembered (D6-05). The request and the decision are two rows
         // under two correlations, so neither is written over the other.
-        const request = (state: string) =>
+        const request = (state: string, late = false) =>
           inThread(asked.sessionId, {
             role: 'hemera',
             kind: 'permission_request',
-            body,
+            body: said,
             payload: JSON.stringify({
               toolCallId: id,
               options: OUTSIDE_OPTIONS,
@@ -660,14 +808,22 @@ export const toolCatalogueLayer: Layer.Layer<
               named,
               resolved: where,
               root,
-              inside,
+              inside: within,
               line,
+              why: why.length === 0 ? undefined : why,
+              // No longer the turn's (#304): it waits among the notices after the turn ended.
+              late: late ? true : undefined,
             }),
             correlationId: `perm:${id}`,
             state,
           }).pipe(Effect.catch(() => Effect.void))
 
         yield* request('pending')
+        // The call is told its question is asked: the grace starts now (#304).
+        const late = lateOf.get(asked)
+        if (late !== undefined) {
+          yield* Deferred.succeed(late.asking, { id, detach: request('pending', true) })
+        }
         const answer = yield* permissions
           .askOutside({
             id,
@@ -700,6 +856,7 @@ export const toolCatalogueLayer: Layer.Layer<
               }),
             ),
           )
+        if (late !== undefined) late.answer = answer
         // A question nobody will answer — the turn was stopped, the Session ended — is closed as
         // the block of D5-09 closes one: cancelled, with no option chosen (D6-05).
         const closed: Record<OutsideAnswer, { state: string; said: string }> = {
@@ -719,6 +876,15 @@ export const toolCatalogueLayer: Layer.Layer<
             named,
             resolved: where,
             answer,
+            // Asked by Hemera Auto, the answer is one of its decisions (#294): who decided, what
+            // the classifier had settled before asking, and on what. Left out otherwise.
+            by: classified === undefined ? undefined : 'human',
+            judged: classified === undefined ? undefined : BY[classified.source ?? 'cancelled'],
+            line: classified === undefined ? undefined : (line ?? undefined),
+            policyVersion: classified === undefined ? undefined : CLASSIFIER_POLICY_VERSION,
+            model: classified?.model === '' ? undefined : classified?.model,
+            scores: classified?.scores,
+            classifier: classified?.correlationId,
           }),
           correlationId: `decision:${id}`,
           state: answer === 'allowed' ? 'completed' : answer,
@@ -859,6 +1025,12 @@ export const toolCatalogueLayer: Layer.Layer<
         let scores:
           | { readonly risk: number; readonly approval: number; readonly userRequested: number }
           | undefined
+        // The judge never refuses: what its scores find risky asks the human (#298).
+        const verdictOf = (judgedScores: NonNullable<typeof scores>) =>
+          classifierVerdictFromScores(
+            { ...judgedScores, hasHumanContext: context.items.length > 0 },
+            snapshot.strictness,
+          )
         const correlationId = `classifier:${crypto.randomUUID()}`
         const local = localClassifierVerdict(action)
         if (local !== 'defer') {
@@ -885,7 +1057,7 @@ export const toolCatalogueLayer: Layer.Layer<
           const judged = `${snapshot.generation}\u0000${context.latestHumanSeq}\u0000${actionText}`
           const reused = verdicts.get(judged)
           if (reused !== undefined) {
-            verdict = reused.verdict
+            verdict = verdictOf(reused.scores)
             source = 'jev'
             model = reused.model
             scores = reused.scores
@@ -907,7 +1079,7 @@ export const toolCatalogueLayer: Layer.Layer<
             }).pipe(Effect.catch(() => Effect.succeed({ kind: 'unavailable' as const })))
             jevMs = 'ms' in evaluated ? evaluated.ms : undefined
             if (evaluated.kind === 'evaluated') {
-              verdict = evaluated.verdict
+              verdict = verdictOf(evaluated.scores)
               source = 'jev'
               model = evaluated.model
               scores = evaluated.scores
@@ -919,6 +1091,11 @@ export const toolCatalogueLayer: Layer.Layer<
             }
           }
         }
+        // What points outside the Workspace or at a sensitive place asks, whatever the judge said
+        // and at every strictness: only a refusal of the rules stands above it (#306).
+        const concerns = action.concerns ?? []
+        verdict = verdictAtPlaces(verdict, concerns)
+        const why = concerns.map(concernSaid)
         const [currentSettings, currentMessages] = yield* Effect.all([
           answered(classifier.current),
           answered(sessions.humanMessages(asked.sessionId)),
@@ -939,12 +1116,15 @@ export const toolCatalogueLayer: Layer.Layer<
           source,
           model,
           policy: CLASSIFIER_POLICY_VERSION,
+          strictness: snapshot.strictness,
           generation: snapshot.generation,
           correlationId,
         }
         if (scores !== undefined) {
           Object.assign(decisionPayload, scores)
         }
+        // A Journal payload is flat: the reasons are one line, as the diagnostic log says them.
+        if (why.length > 0) Object.assign(decisionPayload, { why: why.join('; ') })
         yield* journalled(asked, made, 'classifier.decision', decisionPayload)
         // One line in the diagnostic log per decision, with what can be said safely: the call's
         // line or path masked as it would be for Jev, never a file's content or a secret.
@@ -956,13 +1136,22 @@ export const toolCatalogueLayer: Layer.Layer<
           [
             `hemera-auto: ${action.tool} ${said}`,
             `by=${BY[source]} verdict=${verdict}`,
-            `policy=${CLASSIFIER_POLICY_VERSION} model=${model === '' ? '-' : model}`,
+            `policy=${CLASSIFIER_POLICY_VERSION} strictness=${snapshot.strictness}`,
+            `model=${model === '' ? '-' : model}`,
             ...(scores === undefined
               ? []
               : [
                   `risk=${String(scores.risk)} approval=${String(scores.approval)} userRequested=${String(scores.userRequested)}`,
                 ]),
             ...(jevMs === undefined ? [] : [`jev=${String(jevMs)}ms`]),
+            ...(why.length === 0
+              ? []
+              : [
+                  `why="${redactText(why.join('; '), [
+                    ...knownSecrets,
+                    ...(snapshot.key === null ? [] : [snapshot.key]),
+                  ]).slice(0, 300)}"`,
+                ]),
             ...(source === 'local' || failure === undefined ? [] : [`failure=${failure}`]),
             ...(verdict === 'ask' ? ['fallback=ask'] : []),
           ].join(' '),
@@ -975,8 +1164,10 @@ export const toolCatalogueLayer: Layer.Layer<
           latestHumanSeq: context.latestHumanSeq,
           correlationId,
           source,
+          strictness: snapshot.strictness,
           model,
           scores,
+          concerns,
         }
       })
 
@@ -1020,6 +1211,7 @@ export const toolCatalogueLayer: Layer.Layer<
           answer: ran ? 'allowed' : 'refused',
           by: BY[decision.source ?? 'cancelled'],
           policyVersion: CLASSIFIER_POLICY_VERSION,
+          strictness: decision.strictness,
           model: decision.model === '' ? undefined : decision.model,
           scores: decision.scores,
           roundTripMs: decision.roundTripMs,
@@ -1422,15 +1614,37 @@ export const toolCatalogueLayer: Layer.Layer<
                 : null
             const commandLine = prepared?.line ?? runRequest.line
             // What the local rules read: the words of the line as the runner splits them, the file
-            // the runner starts, and whether the folder and every path the line names stay inside.
+            // the runner starts, and whether the folder and every path the line names stay inside
+            // the root — the paths inside the strings it hands to a shell included, the home in
+            // every spelling, and words that do not read taken for outside (#306).
             const [program = '', ...words] = wordsOf(commandLine)
+            const base = entry === undefined ? root : home.path
+            const bases = yield* rootsOf(base)
+            const namedPlaces =
+              judged === null ? null : placesNamed([program, ...words], placeContext)
+            const points =
+              namedPlaces === null
+                ? []
+                : [
+                    pointed(bases, resolvedPlace.path, resolvedPlace),
+                    ...(yield* Effect.forEach(namedPlaces.paths, (path) => {
+                      const written = resolve(resolvedPlace.path, path)
+                      return placeOf(base, written).pipe(
+                        Effect.map((place) => pointed(bases, written, place)),
+                      )
+                    })),
+                  ]
+            // Words that do not read with confidence could name anything: outside by default —
+            // in a line the agent wrote. A catalogue line is the user's own, its variables theirs.
+            const unread: PlaceConcern[] =
+              namedPlaces?.unreadable == null || entry !== undefined
+                ? []
+                : [{ kind: 'outside', place: `words that do not read (${namedPlaces.unreadable})` }]
+            const concerns = distinctConcerns([...points.flatMap((one) => one.concerns), ...unread])
             const contained =
               judged !== null &&
               resolvedPlace.inside &&
-              (yield* Effect.forEach(
-                words.filter((word) => !word.startsWith('-')),
-                (word) => placeOf(resolvedPlace.path, word),
-              )).every((place) => place.inside === true)
+              !concerns.some((concern) => concern.kind === 'outside')
             // A program the Workspace itself holds is the Workspace's code, whatever it is named.
             const programPlace =
               judged?.prepared.resolved == null
@@ -1445,6 +1659,7 @@ export const toolCatalogueLayer: Layer.Layer<
                     {
                       tool: 'commands_run',
                       target: contained ? 'inside' : 'outside',
+                      concerns,
                       command: {
                         program,
                         args: words,
@@ -1459,6 +1674,7 @@ export const toolCatalogueLayer: Layer.Layer<
                       invocation: judged.invocation,
                       portless: entry?.portless ?? false,
                       environmentNames: Object.keys(environment),
+                      places: points.slice(1).map((one) => one.place),
                     },
                     knownSecretValues(environment),
                   )
@@ -1846,13 +2062,115 @@ export const toolCatalogueLayer: Layer.Layer<
           case 'build_read':
           case 'task_finished':
           case 'task_blocked':
+          case 'reproduction_replayed':
             return yield* builds.tool(asked.sessionId, call)
+
+          case 'hemera_report':
+            return yield* tester.report(
+              asked.sessionId,
+              { projectId, projectName, workspace },
+              call.arguments,
+            )
+
+          case 'hemera_reports':
+            return yield* tester.reports(call.arguments)
         }
+      })
+
+    /**
+     * A call that may wait for the human beyond its request (#304).
+     *
+     * The call runs in the engine's scope rather than in its request's. Until it asks the human,
+     * and for a grace after that while the window is focused, the request waits for it as it
+     * always did: an answer in time is the call's own answer, and an agent that gives up on its
+     * request stops the call as before. Past the grace — at once when the window is not
+     * focused — the agent is answered "waiting, request #n" and the call goes on without it: its
+     * entry says it is pending, its question stays among the notices, a Stop leaves it, and what
+     * it ends with is handed to the agent at its next safe point. A Session that ends withdraws
+     * the question, and then nothing is handed to anyone.
+     */
+    const detachable = (
+      asked: ToolCall,
+      made: Made,
+      run: Effect.Effect<ToolOutcome>,
+      ended: (outcome: ToolOutcome) => void,
+    ) =>
+      Effect.gen(function* () {
+        const late = lateOf.get(asked)
+        if (late === undefined) return yield* run
+        const began = performance.now()
+        const fiber = yield* Effect.forkIn(run, scope)
+        const graced = Deferred.await(late.asking).pipe(
+          Effect.tap(() =>
+            Effect.gen(function* () {
+              if (!approvals.focused()) return
+              const settings = yield* answered(classifier.current)
+              const grace = settings?.grace ?? 0
+              if (grace > 0) yield* Effect.sleep(Duration.seconds(grace))
+            }),
+          ),
+        )
+        const first = yield* Effect.raceFirst(
+          Fiber.join(fiber).pipe(Effect.map((outcome) => ({ done: true as const, outcome }))),
+          graced.pipe(Effect.map((asking) => ({ done: false as const, asking }))),
+        ).pipe(Effect.onInterrupt(() => Fiber.interrupt(fiber)))
+        if (first.done) return first.outcome
+
+        late.detached = true
+        const request = approvals.number(asked.sessionId)
+        const released = yield* approvals.detached(asked.sessionId, first.asking.id)
+        yield* first.asking.detach
+        const text = waitingText(request)
+        const summary = `waiting for the user's approval, request #${request}`
+        yield* note(
+          asked,
+          'pending',
+          { ok: true, summary, text, paths: [] },
+          { ...made, milliseconds: Math.round((performance.now() - began) * 1000) / 1000 },
+        )
+        // What the call ends with, whenever it does, goes to the agent: unless its Session ended,
+        // which withdrew the question and left nobody to hand it to.
+        yield* Effect.forkIn(
+          Fiber.join(fiber).pipe(
+            Effect.tap((outcome) =>
+              Effect.gen(function* () {
+                ended(outcome)
+                const answer = late.answer
+                if (answer === undefined || answer === 'cancelled') return
+                if (!(yield* access.live(asked.sessionId))) return
+                yield* approvals.answered(asked.sessionId, {
+                  request,
+                  tool: asked.tool,
+                  answer,
+                  state: outcome.state,
+                  text: outcome.text,
+                })
+              }),
+            ),
+            Effect.ensuring(Effect.sync(released)),
+          ),
+          scope,
+        )
+        return {
+          ok: true,
+          state: 'completed',
+          summary,
+          text,
+          paths: [],
+          repeated: false,
+          range: null,
+        } satisfies ToolOutcome
       })
 
     /** One call from the guard to the answer, or one already refused by the server, recorded. */
     const handled = (asked: ToolCall, rejected: string | null) =>
       Effect.gen(function* () {
+        if (rejected === null) {
+          lateOf.set(asked, {
+            asking: Deferred.makeUnsafe(),
+            entry: `tool:${crypto.randomUUID()}`,
+          })
+        }
         const named = TOOL_NAMES.find((one) => one === asked.tool)
         const read = yield* answered(sessions.one(asked.sessionId))
         if (read === undefined) {
@@ -1909,7 +2227,8 @@ export const toolCatalogueLayer: Layer.Layer<
         // What the token was minted with, and no more than the Session's mission offers now: a
         // `free` Session that turned `define` while its agent ran keeps none of the write tools it
         // was lent, from its very next call (D7-14).
-        const mission = offeredTools(session.mission)
+        // The app tester's tools belong to no mission: the grant alone says whether they were lent.
+        const mission = offeredTools(session.mission, true)
         const decision = admitTool(
           asked.offered.filter((name) => mission.includes(name)),
           named,
@@ -1959,12 +2278,23 @@ export const toolCatalogueLayer: Layer.Layer<
               // command line: a `.env` value written by `fs_write` is the same secret (D59-06).
               const environment =
                 (yield* answered(variables.givenFor(project.id, workspace.id))) ?? {}
+              // Where the call points: outside the root, or at a sensitive place even inside it,
+              // asks whatever the judge says (#306).
+              const points = pointed(yield* rootsOf(root), resolve(root, namedTarget ?? '.'), place)
               const classified = yield* classify(
                 asked,
                 made,
                 session.mission,
-                { tool: named, target: place.inside ? 'inside' : 'outside' },
-                { arguments: parsed.call.arguments, resolvedTarget: place.path },
+                {
+                  tool: named,
+                  target: place.inside ? 'inside' : 'outside',
+                  concerns: points.concerns,
+                },
+                {
+                  arguments: parsed.call.arguments,
+                  resolvedTarget: place.path,
+                  places: [points.place],
+                },
                 knownSecretValues(environment),
               )
               if (classified.generation < 0) {
@@ -2062,14 +2392,26 @@ export const toolCatalogueLayer: Layer.Layer<
             ),
           ),
         )
-        const run = builds.admitted(asked.sessionId, named, measured, (reason) =>
-          refused(asked, made, reason),
-        )
-        if (asked.key === null) return yield* run
-
         const key = asked.key
-        const slot = `${named}|${key}`
+        const slot = `${named}|${key ?? ''}`
         const sent = argumentsSent(asked.arguments)
+        const run = detachable(
+          asked,
+          made,
+          // A report about Hemera is neither new work nor the start of a task: a paused build
+          // takes it, and it starts nothing (#300).
+          TESTING.has(named)
+            ? measured
+            : builds.admitted(asked.sessionId, named, measured, (reason) =>
+                refused(asked, made, reason),
+              ),
+          // A retry after the human answered is answered what the call ended with, not "waiting".
+          (outcome) => {
+            if (key !== null) remember(asked.sessionId, slot, { sent, outcome })
+          },
+        )
+        if (key === null) return yield* run
+
         /**
          * The answer an earlier call under this key was given, as this call's own: no second
          * entry in the thread, one Journal line that says the call was a repeat — unless the

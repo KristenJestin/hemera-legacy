@@ -133,7 +133,23 @@ export {
   type ProfileFacts,
   type ProfileSectionProps,
   type SettingsProps,
+  type SettingsSection,
 } from './settings/settings.tsx'
+export {
+  DecisionsPanel,
+  DeveloperSection,
+  DiagnosticsPanel,
+  type FindingKind,
+  type FindingLine,
+  type FindingSeverity,
+  type TesterPanelProps,
+  type DecisionBy,
+  type DecisionLine,
+  type DecisionVerdict,
+  type DecisionsPanelProps,
+  type DeveloperSectionProps,
+  type DiagnosticsPanelProps,
+} from './settings/developer-section.tsx'
 export {
   ClassifierSection,
   CLASSIFIER_OPTIONS,
@@ -145,6 +161,7 @@ export {
   type EvaluationEngineOption,
   type EvaluatorStatus,
 } from './settings/classifier-section.tsx'
+export type { StrictnessLevel } from './settings/auto-strictness.tsx'
 export {
   NotificationBell,
   NotificationList,
@@ -594,6 +611,7 @@ export type {
   BuildAttemptResult,
   BuildAttemptScope,
   BuildAttemptView,
+  BuildReproductionView,
   BuildBlockerView,
   BuildCheckVerdict,
   BuildCheckView,

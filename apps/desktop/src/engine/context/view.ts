@@ -8,7 +8,7 @@
  * what was kept.
  */
 
-import { offeredTools } from '@hemera/core'
+import { APP_TESTER_PATH, offeredTools } from '@hemera/core'
 import type { ContextView } from '@hemera/ipc'
 import { Effect } from 'effect'
 
@@ -28,7 +28,12 @@ export const contextOf = (sessionId: string) =>
     const catalogue = yield* commands.list(session.projectId)
     // The set of the Session's mission (D6-03, D7-14), read through the same function the grant
     // of its agent is, so the view shows what the guard admits.
-    const tools = offeredTools(session.mission).map((name) => ({ name, bound: TOOL_BOUNDS[name] }))
+    // The app tester's tools are listed once the Session's agent was briefed to test (#300).
+    const tester = provided.some((one) => one.kind === 'notice' && one.path === APP_TESTER_PATH)
+    const tools = offeredTools(session.mission, tester).map((name) => ({
+      name,
+      bound: TOOL_BOUNDS[name],
+    }))
     const view: ContextView = {
       provided: provided.map((one) => ({
         kind: one.kind,

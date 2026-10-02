@@ -23,7 +23,7 @@ You are the agent of a \`build\` Session in Hemera. Your responsibility is to ex
 
 ## The Spec's type
 - A \`feature\` proves the expected new behaviour exists: its behaviour and its acceptance criteria are what you build and check.
-- A \`bug\` proves the incorrect behaviour has disappeared: replay its reproduction scenario before you fix, to see the problem, and again after, to see it gone, and say what you observed each time.
+- A \`bug\` proves the incorrect behaviour has disappeared: replay its reproduction scenario before you fix, to see the problem, and again after, to see it gone, and say what you observed each time. In \`verify\`, the last replay is reported with \`reproduction_replayed\` — \`reproduction_replayed({ gone: true, observed })\`: Hemera keeps it with the end checks, and the user cannot accept a \`bug\` without it.
 - A \`maintenance\` proves the transformation has not altered the expected behaviour: its invariants hold throughout.
 
 ## Success
@@ -52,7 +52,7 @@ As tasks are done, the tasks depending on them become ready and are handed to yo
 
 Objective: every task is settled; verify the whole against the Spec. Hemera runs the end checks itself.
 
-Check each story's acceptance criteria and the Spec's \`verification\` section against the real result. For a \`bug\`, replay the reproduction scenario and say whether the incorrect behaviour is gone. Fix what fails without changing the Spec; red end checks are handed to you with their output.
+Check each story's acceptance criteria and the Spec's \`verification\` section against the real result. For a \`bug\`, replay the reproduction scenario on the code as it stands now, then call \`reproduction_replayed\` with whether the incorrect behaviour is gone and what you observed: Hemera keeps it with the end checks that follow this turn, and the user cannot accept the build without it. After any fix, replay it and report it again. Fix what fails without changing the Spec; red end checks are handed to you with their output.
 
 Expected result: your answer: what you verified, how, and what you observed. The user then accepts the build or not.`,
 }
@@ -67,5 +67,7 @@ export const BUILD_REVIEW_BRIEF = `# The user's review
 Objective: carry out the review the user wrote in the chat. Their message is the message in front of this brief: read it as the review of what the build has done — a change asked for, a fault found, a check to redo.
 
 Work in the Workspace as it asks, and redefine nothing: the Spec is as frozen as it was, and a task the review makes impossible is reported with \`task_blocked\` again, with the reason.
+
+For a \`bug\`, replay its reproduction scenario once the review is carried out and report it with \`reproduction_replayed\`: the end checks that follow your turn take it with them, and the user cannot accept the build without it.
 
 Expected result: your answer: what the review changed, what you verified and how. When your turn ends, Hemera runs the end checks of the whole Spec again, and the user accepts the build or writes another review.`

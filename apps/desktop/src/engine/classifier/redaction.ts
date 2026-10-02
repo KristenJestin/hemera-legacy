@@ -89,3 +89,34 @@ export function redactAction(action: string, secrets: readonly string[]): string
     return null
   }
 }
+
+/**
+ * A stored record shown again (#294): every string in it masked by its shape, and a credential
+ * field masked whole. Unlike an action, nothing is refused: a destination masked is still shown.
+ * What does not read as JSON is masked as text.
+ */
+export function redactRecord(record: string): string {
+  const visit = (
+    value: z.infer<ReturnType<typeof z.json>>,
+    key = '',
+  ): z.infer<ReturnType<typeof z.json>> => {
+    if (credentialField.test(key)) return MASK
+    const string = z.string().safeParse(value)
+    if (string.success) return maskShapes(string.data)
+    if (Array.isArray(value)) return value.map((item) => visit(item))
+    const fields = z.record(z.string(), z.json()).safeParse(value)
+    if (fields.success) {
+      return Object.fromEntries(
+        Object.entries(fields.data).map(([name, item]) => [name, visit(item, name)]),
+      )
+    }
+    return value
+  }
+  try {
+    // SAFETY: JSON.parse is validated by z.json before the tree is traversed.
+    const read = z.json().safeParse(JSON.parse(record))
+    return read.success ? JSON.stringify(visit(read.data)) : maskShapes(record)
+  } catch {
+    return maskShapes(record)
+  }
+}

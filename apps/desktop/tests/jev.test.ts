@@ -36,19 +36,18 @@ function transport<T>(value: T, status = 200): JevTransport {
 }
 
 describe('Every invalid or unavailable evaluation asks', () => {
-  test('valid answers use the pinned score policy', async () => {
+  test('valid answers are scores, which the policy judges and Jev never refuses on', async () => {
     expect(
       await evaluateJev(state, 'test-key', new AbortController().signal, transport(answer())),
     ).toEqual({
       kind: 'evaluated',
-      verdict: 'allow',
       model: JEV_MODEL,
       scores: { risk: 1, approval: 0.2, userRequested: 0.9 },
       ms: expect.any(Number),
     })
     expect(
-      await evaluateJev(state, 'test-key', new AbortController().signal, transport(answer(2.5))),
-    ).toMatchObject({ verdict: 'deny' })
+      await evaluateJev(state, 'test-key', new AbortController().signal, transport(answer(2.96))),
+    ).not.toHaveProperty('verdict')
   })
 
   test('a model mismatch, absent score or invalid number is unavailable', async () => {

@@ -1,7 +1,21 @@
-/** The version recorded beside every Hemera Auto decision (D59-03). */
-export const CLASSIFIER_POLICY_VERSION = '1'
+import type { PlaceConcern } from './classifier-places.ts'
+
+/**
+ * The version recorded beside every Hemera Auto decision (D59-03). Version 2 (#298): the judge
+ * never refuses, and its thresholds follow the strictness the user chose. Version 3 (#306): the
+ * paths a call names decide inside or outside, and what points outside the Workspace or at a
+ * sensitive place always asks.
+ */
+export const CLASSIFIER_POLICY_VERSION = '3'
 
 export type ClassifierVerdict = 'allow' | 'ask' | 'deny'
+/** What the judge may answer: only the local rules refuse (#298). */
+export type JudgeVerdict = Exclude<ClassifierVerdict, 'deny'>
+
+/** How often Hemera Auto asks when Jev judged a call, from most to least often (#298). */
+export const CLASSIFIER_STRICTNESS_LEVELS = ['careful', 'normal', 'permissive'] as const
+export type ClassifierStrictness = (typeof CLASSIFIER_STRICTNESS_LEVELS)[number]
+export const DEFAULT_CLASSIFIER_STRICTNESS: ClassifierStrictness = 'normal'
 export type LocalVerdict = 'allow' | 'deny' | 'defer'
 
 /** A command after the runner has selected its platform line and resolved its invocation. */
@@ -23,6 +37,8 @@ export interface LocalAction {
   /** For a command: its folder and every path it names, resolved by the caller. */
   readonly target: 'inside' | 'outside' | 'unknown'
   readonly command?: ResolvedCommand
+  /** Why the call always asks, whatever the judge says: where it points (#306). */
+  readonly concerns?: readonly PlaceConcern[]
 }
 
 /** The tools that only read inside the Workspace, settled without the evaluator. */
@@ -101,6 +117,7 @@ export function localClassifierVerdict(action: LocalAction): LocalVerdict {
       (word, at) => DELETERS.has(programName(word)) && words.slice(at + 1).some(namesGit),
     )
     if (deletes) return 'deny'
+    if ((action.concerns?.length ?? 0) > 0) return 'defer'
     if (action.target !== 'inside' || command.shell || command.resolved === null) return 'defer'
     const name = programName(command.program)
     const written = command.program.replaceAll('\\', '/')
@@ -125,17 +142,47 @@ export function localClassifierVerdict(action: LocalAction): LocalVerdict {
     return 'defer'
   }
 
-  if (action.target !== 'inside') return 'defer'
+  if (action.target !== 'inside' || (action.concerns?.length ?? 0) > 0) return 'defer'
   return READ_ONLY_TOOLS.has(action.tool) ? 'allow' : 'defer'
 }
 
-/** The pinned Jev thresholds; all structural validation happens before calling this (D59-03). */
-export function classifierVerdictFromScores(scores: {
-  readonly risk: number
-  readonly approval: number
-  readonly userRequested: number
-  readonly hasHumanContext: boolean
-}): ClassifierVerdict {
+/**
+ * The Jev thresholds of each level (#298). Risk is Jev's 0–3 scale (read-only, limited
+ * reversible change, significant change, destructive); approval and user-requested are 0–1.
+ *
+ * - `alwaysAsks`: from this risk, the call asks even when the user asked for it;
+ * - `risk` and `approval`: from either, the call asks unless the user clearly asked for it.
+ */
+const STRICTNESS: Record<
+  ClassifierStrictness,
+  { readonly alwaysAsks: number; readonly risk: number; readonly approval: number }
+> = {
+  careful: { alwaysAsks: 1.5, risk: 0.75, approval: 0.5 },
+  normal: { alwaysAsks: 2.5, risk: 1.5, approval: 0.75 },
+  permissive: {
+    alwaysAsks: Number.POSITIVE_INFINITY,
+    risk: 2.5,
+    approval: Number.POSITIVE_INFINITY,
+  },
+}
+
+/** How sure Jev must be that the user asked for this exact call before it lifts a question. */
+const USER_REQUESTED = 0.85
+
+/**
+ * The verdict from Jev's scores at a strictness level; all structural validation happens
+ * before calling this (D59-03). It never refuses: a call Jev finds risky asks the human, and only
+ * the local rules refuse (#298).
+ */
+export function classifierVerdictFromScores(
+  scores: {
+    readonly risk: number
+    readonly approval: number
+    readonly userRequested: number
+    readonly hasHumanContext: boolean
+  },
+  strictness: ClassifierStrictness,
+): JudgeVerdict {
   const { risk, approval, userRequested, hasHumanContext } = scores
   if (
     !Number.isFinite(risk) ||
@@ -150,9 +197,10 @@ export function classifierVerdictFromScores(scores: {
   ) {
     return 'ask'
   }
-  if (risk >= 2.5) return 'deny'
-  if (risk >= 1.5 || approval >= 0.75) {
-    return hasHumanContext && userRequested >= 0.85 ? 'allow' : 'ask'
+  const level = STRICTNESS[strictness]
+  if (risk >= level.alwaysAsks) return 'ask'
+  if (risk >= level.risk || approval >= level.approval) {
+    return hasHumanContext && userRequested >= USER_REQUESTED ? 'allow' : 'ask'
   }
   return 'allow'
 }

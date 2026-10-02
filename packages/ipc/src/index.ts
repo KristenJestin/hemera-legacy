@@ -29,6 +29,7 @@ export {
   ENGINE_REQUESTS,
   channelSchema,
   classifierModeSchema,
+  classifierStrictnessSchema,
   composerChoiceSchema,
   composersSchema,
   displayPreferencesChangeSchema,
@@ -52,6 +53,7 @@ export {
 } from './engine.ts'
 export type {
   ClassifierMode,
+  ClassifierStrictness,
   Channel,
   RepositoryIcon,
   ComposerChoice,

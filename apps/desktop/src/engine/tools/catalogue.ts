@@ -30,6 +30,8 @@ import {
   admitTool,
   CLASSIFIER_POLICY_VERSION,
   classifierHumanContext,
+  classifierVerdictFromScores,
+  type ClassifierStrictness,
   commandPlace,
   judgedByClassifier,
   localClassifierVerdict,
@@ -177,6 +179,8 @@ interface Classified {
   readonly correlationId?: string
   /** Who settled it: the rules, the judge, nobody (unavailable), or its expiry (cancelled). */
   readonly source?: 'local' | 'jev' | 'unavailable' | 'cancelled'
+  /** The level the policy stood at when the call was judged (#298). */
+  readonly strictness?: ClassifierStrictness
   readonly model?: string
   /** The call as the diagnostic log says it: its line or its path, masked, never its content. */
   readonly said?: string
@@ -859,6 +863,12 @@ export const toolCatalogueLayer: Layer.Layer<
         let scores:
           | { readonly risk: number; readonly approval: number; readonly userRequested: number }
           | undefined
+        // The judge never refuses: what its scores find risky asks the human (#298).
+        const verdictOf = (judgedScores: NonNullable<typeof scores>) =>
+          classifierVerdictFromScores(
+            { ...judgedScores, hasHumanContext: context.items.length > 0 },
+            snapshot.strictness,
+          )
         const correlationId = `classifier:${crypto.randomUUID()}`
         const local = localClassifierVerdict(action)
         if (local !== 'defer') {
@@ -885,7 +895,7 @@ export const toolCatalogueLayer: Layer.Layer<
           const judged = `${snapshot.generation}\u0000${context.latestHumanSeq}\u0000${actionText}`
           const reused = verdicts.get(judged)
           if (reused !== undefined) {
-            verdict = reused.verdict
+            verdict = verdictOf(reused.scores)
             source = 'jev'
             model = reused.model
             scores = reused.scores
@@ -907,7 +917,7 @@ export const toolCatalogueLayer: Layer.Layer<
             }).pipe(Effect.catch(() => Effect.succeed({ kind: 'unavailable' as const })))
             jevMs = 'ms' in evaluated ? evaluated.ms : undefined
             if (evaluated.kind === 'evaluated') {
-              verdict = evaluated.verdict
+              verdict = verdictOf(evaluated.scores)
               source = 'jev'
               model = evaluated.model
               scores = evaluated.scores
@@ -939,6 +949,7 @@ export const toolCatalogueLayer: Layer.Layer<
           source,
           model,
           policy: CLASSIFIER_POLICY_VERSION,
+          strictness: snapshot.strictness,
           generation: snapshot.generation,
           correlationId,
         }
@@ -956,7 +967,8 @@ export const toolCatalogueLayer: Layer.Layer<
           [
             `hemera-auto: ${action.tool} ${said}`,
             `by=${BY[source]} verdict=${verdict}`,
-            `policy=${CLASSIFIER_POLICY_VERSION} model=${model === '' ? '-' : model}`,
+            `policy=${CLASSIFIER_POLICY_VERSION} strictness=${snapshot.strictness}`,
+            `model=${model === '' ? '-' : model}`,
             ...(scores === undefined
               ? []
               : [
@@ -975,6 +987,7 @@ export const toolCatalogueLayer: Layer.Layer<
           latestHumanSeq: context.latestHumanSeq,
           correlationId,
           source,
+          strictness: snapshot.strictness,
           model,
           scores,
         }
@@ -1020,6 +1033,7 @@ export const toolCatalogueLayer: Layer.Layer<
           answer: ran ? 'allowed' : 'refused',
           by: BY[decision.source ?? 'cancelled'],
           policyVersion: CLASSIFIER_POLICY_VERSION,
+          strictness: decision.strictness,
           model: decision.model === '' ? undefined : decision.model,
           scores: decision.scores,
           roundTripMs: decision.roundTripMs,

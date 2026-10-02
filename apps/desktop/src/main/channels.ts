@@ -47,6 +47,7 @@ export function registerChannels(
         ready && !state.hasKey ? yield* engine.ask('classifier.ciphertext.read', {}) : null
       return {
         mode: state.mode,
+        strictness: state.strictness,
         credential: credentialStatus({ ready, hasKey: state.hasKey, ciphertext }),
         consent: state.consent,
         generation: state.generation,
@@ -56,6 +57,9 @@ export function registerChannels(
   handle('classifier.mode.write', ({ mode }) => engine.ask('classifier.mode.write', { mode }))
   handle('classifier.consent.write', ({ consent }) =>
     engine.ask('classifier.consent.write', { consent }),
+  )
+  handle('classifier.strictness.write', ({ strictness }) =>
+    engine.ask('classifier.strictness.write', { strictness }),
   )
   handle('classifier.key.save', ({ key }) => {
     const ciphertext = encryptClassifierKey(key)

@@ -210,6 +210,7 @@ export function answer(
       const current = yield* (yield* ClassifierSettings).current
       return {
         mode: current.mode,
+        strictness: current.strictness,
         hasKey: current.key !== null,
         consent: current.consent,
         generation: current.generation,
@@ -221,6 +222,10 @@ export function answer(
       yield* settings.select(decision.argument.mode)
       if (previous.mode !== decision.argument.mode) yield* (yield* AgentRuntime).classifierChanged
       return
+    }
+    if (decision.name === 'classifier.strictness.write') {
+      // Read at every call: the next one, in every Session, is judged at the new level (#298).
+      return yield* (yield* ClassifierSettings).selectStrictness(decision.argument.strictness)
     }
     if (decision.name === 'classifier.consent.write') {
       const settings = yield* ClassifierSettings

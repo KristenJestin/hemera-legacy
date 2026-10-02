@@ -10,6 +10,7 @@ import {
   type ClassifierMode,
   type CredentialStatus,
 } from './classifier-section.tsx'
+import type { StrictnessLevel } from './auto-strictness.tsx'
 import {
   Settings,
   type ArchivedProject,
@@ -54,6 +55,7 @@ function Controlled({
     classifier?.credential ?? 'missing',
   )
   const [consent, setConsent] = useState(classifier?.consent ?? false)
+  const [strictness, setStrictness] = useState<StrictnessLevel>(classifier?.strictness ?? 'normal')
   const [tracing, setTracing] = useState(acpTrace ?? false)
   return (
     <Settings
@@ -72,6 +74,7 @@ function Controlled({
               engine,
               credential,
               consent,
+              strictness,
               credentialMessage:
                 credential === 'invalid'
                   ? 'The key was rejected. Replace it to retry.'
@@ -87,6 +90,10 @@ function Controlled({
               onConsentChange: (next) => {
                 setConsent(next)
                 classifier.onConsentChange(next)
+              },
+              onStrictnessChange: (next) => {
+                setStrictness(next)
+                classifier.onStrictnessChange(next)
               },
               onSaveKey: (key) => {
                 setCredential(key === 'invalid' ? 'invalid' : 'saved')
@@ -179,6 +186,8 @@ const CLASSIFIER: ClassifierSectionProps = {
   evaluator: 'ready',
   consent: false,
   onConsentChange: fn(),
+  strictness: 'normal',
+  onStrictnessChange: fn(),
   onSaveKey: fn(),
   onRemoveKey: fn(),
 }
@@ -487,6 +496,72 @@ export const ClassifierKeyboard: Story = {
     await waitFor(() => expect(canvas.getByRole('radio', { name: /Hemera Auto/ })).toBeChecked())
     expect(canvas.getByRole('radio', { name: /Hemera Auto/ })).toHaveFocus()
     expect(canvas.getByRole('radiogroup', { name: 'Evaluation engine' })).toBeVisible()
+  },
+}
+
+/**
+ * How often Hemera Auto asks when Jev judged a call: three levels, each with its icon, Normal
+ * until the reader chooses another. The level is part of Hemera Auto and shows with it.
+ */
+export const Strictness: Story = {
+  args: { classifier: { ...CLASSIFIER, mode: 'hemera-auto', consent: true, credential: 'saved' } },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement)
+    const group = canvas.getByRole('radiogroup', { name: 'Strictness' })
+    const levels = within(group).getAllByRole('radio')
+    expect(levels.map((level) => level.textContent)).toEqual(['Careful', 'Normal', 'Permissive'])
+    for (const level of levels) expect(level.querySelector('svg')).not.toBeNull()
+    expect(within(group).getByRole('radio', { name: 'Normal' })).toBeChecked()
+    await userEvent.click(within(group).getByRole('radio', { name: 'Permissive' }))
+    await waitFor(() =>
+      expect(within(group).getByRole('radio', { name: 'Permissive' })).toBeChecked(),
+    )
+    expect(args.classifier?.onStrictnessChange).toHaveBeenCalledWith('permissive')
+    await userEvent.click(within(group).getByRole('radio', { name: 'Careful' }))
+    await waitFor(() => expect(within(group).getByRole('radio', { name: 'Careful' })).toBeChecked())
+    expect(args.classifier?.onStrictnessChange).toHaveBeenCalledWith('careful')
+  },
+}
+
+/** Under Agent default there is no level to choose: it belongs to Hemera Auto. */
+export const StrictnessHidden: Story = {
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    expect(canvas.queryByRole('radiogroup', { name: 'Strictness' })).toBeNull()
+  },
+}
+
+/** The arrows move the level, as they move the theme. */
+export const StrictnessKeyboard: Story = {
+  args: { classifier: { ...CLASSIFIER, mode: 'hemera-auto' } },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement)
+    const group = canvas.getByRole('radiogroup', { name: 'Strictness' })
+    within(group).getByRole('radio', { name: 'Normal' }).focus()
+    await userEvent.keyboard('{ArrowRight}')
+    const permissive = within(group).getByRole('radio', { name: 'Permissive' })
+    await waitFor(() => expect(permissive).toBeChecked())
+    expect(permissive).toHaveFocus()
+    expect(args.classifier?.onStrictnessChange).toHaveBeenCalledWith('permissive')
+  },
+}
+
+/**
+ * The fill of the strictness segment crossing it, from one end to the other and back: on every
+ * frame of the way it is drawn over the middle level and never under it (issue #127).
+ */
+export const StrictnessMarkCrossing: Story = {
+  args: { classifier: { ...CLASSIFIER, mode: 'hemera-auto' } },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const segment = canvas.getByRole('radiogroup', { name: 'Strictness' })
+    const watched = await watchThereAndBack(
+      segment,
+      () => userEvent.click(within(segment).getByRole('radio', { name: 'Careful' })),
+      () => userEvent.click(within(segment).getByRole('radio', { name: 'Permissive' })),
+    )
+    expect(within(segment).getByRole('radio', { name: 'Permissive' })).toBeChecked()
+    expectNeverBuried(watched)
   },
 }
 

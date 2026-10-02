@@ -18,6 +18,10 @@ import { z } from 'zod'
 export const classifierModeSchema = z.enum(['agent-default', 'hemera-auto'])
 export type ClassifierMode = z.infer<typeof classifierModeSchema>
 
+/** How often Hemera Auto asks when Jev judged a call, from most to least often (#298). */
+export const classifierStrictnessSchema = z.enum(['careful', 'normal', 'permissive'])
+export type ClassifierStrictness = z.infer<typeof classifierStrictnessSchema>
+
 import {
   agentAvailabilitySchema,
   agentOfferSchema,
@@ -425,6 +429,7 @@ export const ENGINE_REQUESTS = {
     arguments: nothingSchema,
     response: z.object({
       mode: classifierModeSchema,
+      strictness: classifierStrictnessSchema,
       hasKey: z.boolean(),
       consent: z.boolean(),
       generation: z.number().int(),
@@ -435,6 +440,10 @@ export const ENGINE_REQUESTS = {
     response: z.void(),
   },
   'classifier.consent.write': { arguments: z.object({ consent: z.boolean() }), response: z.void() },
+  'classifier.strictness.write': {
+    arguments: z.object({ strictness: classifierStrictnessSchema }),
+    response: z.void(),
+  },
   'classifier.ciphertext.read': { arguments: nothingSchema, response: z.string().nullable() },
   'classifier.key.replace': {
     arguments: z.object({ ciphertext: z.string().min(1), plaintext: z.string().min(1) }),

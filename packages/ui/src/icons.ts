@@ -145,6 +145,8 @@ import {
   IconSettings as TablerSettings,
   IconSettingsFilled as TablerSettingsFilled,
   IconShield as TablerShield,
+  IconShieldCheck as TablerShieldCheck,
+  IconShieldHalf as TablerShieldHalf,
   IconSun as TablerSun,
   IconSunFilled as TablerSunFilled,
   IconTarget as TablerTarget,
@@ -344,6 +346,9 @@ export const IconSparkles = catalogued(TablerSparkles, TablerSparkles, 'IconSpar
 export const IconSearch = catalogued(TablerSearchFilled, TablerSearch, 'IconSearch')
 export const IconSettings = catalogued(TablerSettingsFilled, TablerSettings, 'IconSettings')
 export const IconShield = catalogued(TablerShield, TablerShield, 'IconShield')
+/* How closely Hemera Auto guards (#298), outlined at either weight as the shield is. */
+export const IconShieldCheck = catalogued(TablerShieldCheck, TablerShieldCheck, 'IconShieldCheck')
+export const IconShieldHalf = catalogued(TablerShieldHalf, TablerShieldHalf, 'IconShieldHalf')
 export const IconSun = catalogued(TablerSunFilled, TablerSun, 'IconSun')
 export const IconTarget = catalogued(TablerTarget, TablerTarget, 'IconTarget')
 /* Tabler draws no solid prompt: the outline stands for both weights, which is what a prompt is

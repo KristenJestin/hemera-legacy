@@ -28,6 +28,7 @@ import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import {
   AGENTS_FILE,
+  APP_TESTER_PATH,
   type BaseReach,
   CONTEXT_BASE,
   type ContextReach,
@@ -133,12 +134,14 @@ export interface ContextService {
   ) => Effect.Effect<void, Refusal>
   /**
    * Records Hemera's own words as given, once the agent took them: a notice, or the New Spec
-   * request, each a row of its own for the Context view to list.
+   * request, each a row of its own for the Context view to list. The app tester's brief is a
+   * notice under its own path (#300).
    */
   readonly handed: (
     sessionId: string,
     kind: 'notice' | 'request',
     text: string,
+    path?: string,
   ) => Effect.Effect<void, Refusal>
   /** Everything a Session was provided, oldest first. */
   readonly provided: (sessionId: string) => Effect.Effect<Delivery[], Refusal>
@@ -519,7 +522,7 @@ export const contextLayer = Layer.effect(
       Effect.gen(function* () {
         const base = yield* baseReachOf(sessionId)
         const rows = yield* rowsOf(sessionId)
-        const reachOf = (kind: DeliveryKind): ContextReach => {
+        const reachOf = (kind: DeliveryKind, path: string): ContextReach => {
           switch (kind) {
             case 'base':
               return base
@@ -532,8 +535,11 @@ export const contextLayer = Layer.effect(
             case 'answer':
             case 'edit':
             case 'internal':
-            case 'notice':
               return 'delivery_prompt'
+            // The app tester's brief rides the first prompt, as the base does without a system
+            // prompt (#300); every other notice is a delivery of its own.
+            case 'notice':
+              return path === APP_TESTER_PATH ? 'embedded_resource' : 'delivery_prompt'
             // It rides the first turn's prompt, in front of the user's message.
             case 'request':
               return 'embedded_resource'
@@ -544,7 +550,7 @@ export const contextLayer = Layer.effect(
           path: row.path,
           fingerprint: row.fingerprint,
           deliveredAt: row.deliveredAt,
-          reached: reachOf(row.kind),
+          reached: reachOf(row.kind, row.path),
         }))
       })
 
@@ -556,8 +562,8 @@ export const contextLayer = Layer.effect(
       queueInternal,
       queuedInternal,
       handedInternal,
-      handed: (sessionId, kind, text) =>
-        record(sessionId, kind, '', fingerprintOf(text)).pipe(Effect.asVoid),
+      handed: (sessionId, kind, text, path = '') =>
+        record(sessionId, kind, path, fingerprintOf(text)).pipe(Effect.asVoid),
       provided,
     }
   }),

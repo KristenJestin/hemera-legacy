@@ -56,6 +56,8 @@ import type { Database, SqliteClient } from '#engine/storage/database.ts'
 import { toolAccessLayer } from '#engine/tools/access.ts'
 import type { ToolAccess } from '#engine/tools/access.ts'
 import { toolCatalogueLayer } from '#engine/tools/catalogue.ts'
+import { type Approvals, approvalsLayer } from '#engine/tools/approvals.ts'
+import { testerFindingsLayer } from '#engine/tester/findings.ts'
 import { type ToolPermissions, toolPermissionsLayer } from '#engine/tools/permissions.ts'
 import { ToolServer, toolServerLayer } from '#engine/tools/server.ts'
 import { type Git, gitLayer } from '#engine/git.ts'
@@ -237,7 +239,14 @@ export function application(
       // No build runs here: a Session that is none passes through the builds untouched.
       Layer.provide(idleBuilds),
       Layer.provide(
-        Layer.mergeAll(server, commandsLayer, toolPermissionsLayer, gitLayer(), variablesLayer),
+        Layer.mergeAll(
+          server,
+          commandsLayer,
+          toolPermissionsLayer,
+          approvalsLayer,
+          gitLayer(),
+          variablesLayer,
+        ),
       ),
       Layer.provideMerge(
         Layer.mergeAll(
@@ -424,6 +433,8 @@ export type ToolEngine =
   | ToolAccess
   | ToolServer
   | ToolPermissions
+  | Approvals
+  | ClassifierSettings
   | Commands
   | AgentContext
   | Journal
@@ -514,11 +525,15 @@ export function toolApplication(
     const places = setupPlaces(dataFolder)
     const tools = toolServerLayer.pipe(
       Layer.provideMerge(toolCatalogueLayer),
+      Layer.provide(
+        testerFindingsLayer({ directory: dataFolder, version: VERSION, channel: 'dev' }),
+      ),
       Layer.provideMerge(classifierSettingsLayer),
       // One build service, the catalogue's and the runtime's: the runtime drives what it holds.
       Layer.provideMerge(idleBuilds),
       Layer.provideMerge(toolAccessLayer),
       Layer.provideMerge(toolPermissionsLayer),
+      Layer.provideMerge(approvalsLayer),
       Layer.provideMerge(commandsLayer),
       Layer.provide(variablesLayer),
       Layer.provideMerge(places),

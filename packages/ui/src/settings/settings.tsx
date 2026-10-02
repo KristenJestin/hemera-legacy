@@ -1,22 +1,28 @@
 import { Radio } from '@base-ui/react/radio'
 import { RadioGroup } from '@base-ui/react/radio-group'
+import { Tabs as BaseTabs } from '@base-ui/react/tabs'
 import { cn } from 'cn'
-import type { ReactNode } from 'react'
+import { type FunctionComponent, type ReactNode, useState } from 'react'
 
 import { AgentsSection, type AgentsSectionProps } from './agents-section.tsx'
 import { ClassifierSection, type ClassifierSectionProps } from './classifier-section.tsx'
+import { type DecisionLine, DeveloperSection, type TesterPanelProps } from './developer-section.tsx'
 import { Button } from '../components/button/button.tsx'
 import { Card } from '../components/card/card.tsx'
-import { Checkbox } from '../components/checkbox/checkbox.tsx'
 import { List, ListItem } from '../components/list/list.tsx'
 import { OVER_MARK, SlidingMark } from '../components/sliding-mark/sliding-mark.tsx'
 import {
   IconArchive,
+  IconBrandHemeraAuto,
+  IconBug,
+  IconCircleHalf2,
+  IconDatabase,
   IconDeviceDesktop,
-  IconFileText,
   IconFolderOpen,
   IconMoon,
+  type IconProps,
   IconRestore,
+  IconRobot,
   IconSun,
 } from '../icons.ts'
 import type { ThemeChoice } from '../window.ts'
@@ -25,9 +31,15 @@ import type { ThemeChoice } from '../window.ts'
  * The settings of the application: what the window wears, where its data lives, and what was
  * archived out of the bar (design D4-07).
  *
+ * Laid out as Project settings are (#294): a navigation on the left and one section on screen at
+ * a time — Appearance, Agents, Hemera Auto, Archive, Profile and Developer — with the same tabs,
+ * the same travelling fill and the same keys. A page that held them one under the other was a
+ * page read by scrolling past the agents to reach the classifier. The section shown can be kept
+ * by the caller, which is how a link to a setting opens its section.
+ *
  * Nothing here is computed. The Profile block says what the engine reported, word for word —
  * a page that worked out how big a database is would be a page reading a file it must not
- * open — and the two buttons hand a closed choice back to the main process, never a path.
+ * open — and its button hands a closed choice back to the main process, never a path.
  */
 const NOTE = 'text-sm text-muted-foreground'
 
@@ -65,6 +77,46 @@ const PAIR = 'flex flex-wrap items-baseline gap-x-6 gap-y-1'
 const KEY = 'w-sidebar-collapse shrink-0 text-sm text-muted-foreground'
 
 const VALUE = 'min-w-0 truncate font-mono text-sm'
+
+/** Project settings' layout, read the same way: the navigation beside the one section shown. */
+const LAYOUT = 'flex items-start gap-8'
+
+/** The navigation, which the mark is placed against and whose layers stay inside it. */
+const NAV = 'relative isolate flex w-menu-side shrink-0 flex-col gap-1'
+
+/** The section chosen is drawn over the fill; the others are crossed by it. */
+const NAV_ITEM =
+  'relative flex h-control-md w-full items-center gap-2 rounded-md px-3 text-sm text-muted-foreground outline-none select-none focus-ring data-active:z-1 data-active:text-foreground'
+
+/** What an entry says, drawn over the fill whichever entry the fill is crossing. */
+const NAV_CONTENT = 'flex items-center gap-2'
+
+/** The one fill of the navigation, which travels to the section chosen (#127). */
+const NAV_MARK = 'absolute inset-0 rounded-md bg-accent'
+
+const PANEL = 'flex min-w-0 flex-1 flex-col gap-4 outline-none'
+
+/** The sections of the page, in the order the navigation lists them. */
+export type SettingsSection =
+  | 'appearance'
+  | 'agents'
+  | 'hemera-auto'
+  | 'archive'
+  | 'profile'
+  | 'developer'
+
+const SECTIONS: {
+  value: SettingsSection
+  label: string
+  icon: FunctionComponent<IconProps>
+}[] = [
+  { value: 'appearance', label: 'Appearance', icon: IconCircleHalf2 },
+  { value: 'agents', label: 'Agents', icon: IconRobot },
+  { value: 'hemera-auto', label: 'Hemera Auto', icon: IconBrandHemeraAuto },
+  { value: 'archive', label: 'Archive', icon: IconArchive },
+  { value: 'profile', label: 'Profile', icon: IconDatabase },
+  { value: 'developer', label: 'Developer', icon: IconBug },
+]
 
 const THEMES: { value: ThemeChoice; label: string; icon: ReactNode }[] = [
   { value: 'system', label: 'System', icon: <IconDeviceDesktop size="sm" /> },
@@ -132,14 +184,9 @@ export interface ProfileFacts {
 export interface ProfileSectionProps {
   facts: ProfileFacts
   onOpenFolder: () => void
-  onOpenDiagnostic: () => void
 }
 
-export function ProfileSection({
-  facts,
-  onOpenFolder,
-  onOpenDiagnostic,
-}: ProfileSectionProps): ReactNode {
+export function ProfileSection({ facts, onOpenFolder }: ProfileSectionProps): ReactNode {
   return (
     <Card title="Profile">
       <dl className={ROW}>
@@ -163,37 +210,7 @@ export function ProfileSection({
           <IconFolderOpen size="sm" />
           Open the folder
         </Button>
-        <Button variant="secondary" size="sm" onClick={onOpenDiagnostic}>
-          <IconFileText size="sm" />
-          Open diagnostic.log
-        </Button>
       </div>
-    </Card>
-  )
-}
-
-/**
- * What Hemera writes down to find out why an agent went quiet (issue #131).
- *
- * One switch, off unless turned on: the ACP trace of each Session, beside the diagnostic. A
- * conversation written to a file is not something a reader should find out about afterwards, so
- * the sentence under it says what is kept and what is not.
- */
-function DiagnosticsSection({
-  acpTrace,
-  onAcpTraceChange,
-}: {
-  acpTrace: boolean
-  onAcpTraceChange: (on: boolean) => void
-}): ReactNode {
-  return (
-    <Card title="Diagnostics">
-      <Checkbox
-        checked={acpTrace}
-        onCheckedChange={onAcpTraceChange}
-        label="Write an ACP trace of each Session"
-        description="Every message between Hemera and the agent, with its time, beside diagnostic.log. Prompts, files and secrets are written as their size only. Takes effect from the next message."
-      />
     </Card>
   )
 }
@@ -254,8 +271,19 @@ export interface SettingsProps {
   onRestore: (id: string) => void
   /** Whether the ACP trace of each Session is written (issue #131). Off unless turned on. */
   acpTrace?: boolean | undefined
-  /** Turns it on or off; absent, the Diagnostics card is not drawn. */
+  /** Turns it on or off; absent, the switch is not drawn. */
   onAcpTraceChange?: ((on: boolean) => void) | undefined
+  /** Hemera Auto's latest decisions, newest first; null or absent while not read yet. */
+  decisions?: readonly DecisionLine[] | null | undefined
+  /** Opens the Session a decision was taken in. */
+  onOpenSession?: ((sessionId: string) => void) | undefined
+  /** The app tester of the Developer section (#300); absent, its card is not drawn. */
+  tester?: TesterPanelProps | undefined
+  /** The section shown first; Appearance unless said otherwise. */
+  defaultSection?: SettingsSection | undefined
+  /** The section shown, for a caller that keeps it: a link to a setting opens its section. */
+  section?: SettingsSection | undefined
+  onSectionChange?: ((section: SettingsSection) => void) | undefined
 }
 
 export function Settings({
@@ -271,25 +299,79 @@ export function Settings({
   onRestore,
   acpTrace = false,
   onAcpTraceChange,
+  decisions = null,
+  onOpenSession = () => undefined,
+  tester,
+  defaultSection = 'appearance',
+  section,
+  onSectionChange,
 }: SettingsProps): ReactNode {
+  const [chosen, setChosen] = useState<SettingsSection>(defaultSection)
+  const current = section ?? chosen
+
+  const panels: Record<SettingsSection, ReactNode> = {
+    appearance: <AppearanceSection theme={theme} onThemeChange={onThemeChange} />,
+    agents: <AgentsSection {...agents} />,
+    'hemera-auto':
+      classifier === undefined ? (
+        <p className={NOTE}>Hemera Auto cannot be read yet.</p>
+      ) : (
+        <ClassifierSection {...classifier} />
+      ),
+    archive: <ArchivedProjects projects={archived} onRestore={onRestore} />,
+    profile: <ProfileSection facts={facts} onOpenFolder={onOpenFolder} />,
+    developer: (
+      <DeveloperSection
+        decisions={decisions}
+        onOpenSession={onOpenSession}
+        acpTrace={acpTrace}
+        onAcpTraceChange={onAcpTraceChange}
+        onOpenDiagnostic={onOpenDiagnostic}
+        tester={tester}
+      />
+    ),
+  }
+
   return (
-    <div className="mx-auto flex max-w-3xl flex-col gap-4 px-6 py-10">
+    <div className="mx-auto flex w-full max-w-5xl flex-col gap-6 px-6 py-10">
       <div className="flex flex-col gap-1">
         <h1 className="text-2xl font-medium">Settings</h1>
         <p className={NOTE}>{subtitle}</p>
       </div>
-      <AppearanceSection theme={theme} onThemeChange={onThemeChange} />
-      <ProfileSection
-        facts={facts}
-        onOpenFolder={onOpenFolder}
-        onOpenDiagnostic={onOpenDiagnostic}
-      />
-      {onAcpTraceChange === undefined ? null : (
-        <DiagnosticsSection acpTrace={acpTrace} onAcpTraceChange={onAcpTraceChange} />
-      )}
-      <AgentsSection {...agents} />
-      {classifier !== undefined && <ClassifierSection {...classifier} />}
-      <ArchivedProjects projects={archived} onRestore={onRestore} />
+      <BaseTabs.Root
+        orientation="vertical"
+        value={current}
+        onValueChange={(next: SettingsSection) => {
+          setChosen(next)
+          onSectionChange?.(next)
+        }}
+        className={LAYOUT}
+      >
+        <BaseTabs.List activateOnFocus aria-label="Settings" className={NAV}>
+          {SECTIONS.map((one) => (
+            <BaseTabs.Tab
+              key={one.value}
+              value={one.value}
+              data-mark={one.value}
+              className={NAV_ITEM}
+            >
+              <span className={cn(OVER_MARK, NAV_CONTENT)}>
+                <one.icon size="sm" aria-hidden="true" />
+                {one.label}
+              </span>
+            </BaseTabs.Tab>
+          ))}
+          {/* Last, so that it is drawn after every entry it can cross. */}
+          <SlidingMark target={current} shape={NAV_MARK} />
+        </BaseTabs.List>
+        {SECTIONS.map((one) => (
+          // Not a stop of the tab order of its own: the Tab key goes from the navigation to the
+          // first control of the section.
+          <BaseTabs.Panel key={one.value} value={one.value} tabIndex={-1} className={PANEL}>
+            {panels[one.value]}
+          </BaseTabs.Panel>
+        ))}
+      </BaseTabs.Root>
     </div>
   )
 }

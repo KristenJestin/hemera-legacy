@@ -15,7 +15,6 @@ import { useTransition } from './motion.ts'
  */
 const meta = {
   title: 'Foundations',
-  tags: ['updated'],
   parameters: { layout: 'padded' },
 } satisfies Meta
 

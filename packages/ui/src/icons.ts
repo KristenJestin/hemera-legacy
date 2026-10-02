@@ -145,6 +145,8 @@ import {
   IconSettings as TablerSettings,
   IconSettingsFilled as TablerSettingsFilled,
   IconShield as TablerShield,
+  IconShieldCheck as TablerShieldCheck,
+  IconShieldHalf as TablerShieldHalf,
   IconSun as TablerSun,
   IconSunFilled as TablerSunFilled,
   IconTarget as TablerTarget,
@@ -153,6 +155,11 @@ import {
   IconTimelineEvent as TablerTimelineEvent,
   IconTimelineEventFilled as TablerTimelineEventFilled,
   IconTool as TablerTool,
+  IconMessageReport as TablerMessageReport,
+  IconMessageReportFilled as TablerMessageReportFilled,
+  IconPuzzle as TablerPuzzle,
+  IconPuzzleFilled as TablerPuzzleFilled,
+  IconReportSearch as TablerReportSearch,
   IconTrash as TablerTrash,
   IconTrashFilled as TablerTrashFilled,
   IconUser as TablerUser,
@@ -344,6 +351,9 @@ export const IconSparkles = catalogued(TablerSparkles, TablerSparkles, 'IconSpar
 export const IconSearch = catalogued(TablerSearchFilled, TablerSearch, 'IconSearch')
 export const IconSettings = catalogued(TablerSettingsFilled, TablerSettings, 'IconSettings')
 export const IconShield = catalogued(TablerShield, TablerShield, 'IconShield')
+/* How closely Hemera Auto guards (#298), outlined at either weight as the shield is. */
+export const IconShieldCheck = catalogued(TablerShieldCheck, TablerShieldCheck, 'IconShieldCheck')
+export const IconShieldHalf = catalogued(TablerShieldHalf, TablerShieldHalf, 'IconShieldHalf')
 export const IconSun = catalogued(TablerSunFilled, TablerSun, 'IconSun')
 export const IconTarget = catalogued(TablerTarget, TablerTarget, 'IconTarget')
 /* Tabler draws no solid prompt: the outline stands for both weights, which is what a prompt is
@@ -441,6 +451,23 @@ export const IconPlayerPause = catalogued(
  * bug of a `bug` (issue #130). Tabler draws no solid wrench: the outline stands for both weights.
  */
 export const IconTool = catalogued(TablerTool, TablerTool, 'IconTool')
+
+/**
+ * The app tester's (#300): a problem with Hemera reported, the reports read — Tabler draws no
+ * solid twin of that one, the outline stands for both — and a capability the agent lacked, the
+ * missing piece.
+ */
+export const IconMessageReport = catalogued(
+  TablerMessageReportFilled,
+  TablerMessageReport,
+  'IconMessageReport',
+)
+export const IconReportSearch = catalogued(
+  TablerReportSearch,
+  TablerReportSearch,
+  'IconReportSearch',
+)
+export const IconPuzzle = catalogued(TablerPuzzleFilled, TablerPuzzle, 'IconPuzzle')
 
 /**
  * A mark Tabler does not draw, vendored as the one path it is (design D17-11).

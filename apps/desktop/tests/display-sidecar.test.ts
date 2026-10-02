@@ -21,6 +21,7 @@ const DARK: DisplayPreferences = {
   activeSessions: {},
   composers: {},
   acpTrace: false,
+  appTester: false,
 }
 
 let dataFolder: string
@@ -64,6 +65,7 @@ describe('Indication divergente', () => {
       activeSessions: {},
       composers: {},
       acpTrace: false,
+      appTester: false,
     })
 
     expect(readSidecar(dataFolder)).toEqual({
@@ -73,6 +75,7 @@ describe('Indication divergente', () => {
       activeSessions: {},
       composers: {},
       acpTrace: false,
+      appTester: false,
     })
   })
 

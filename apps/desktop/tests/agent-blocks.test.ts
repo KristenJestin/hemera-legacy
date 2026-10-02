@@ -98,6 +98,25 @@ describe('A read inside the Workspace goes through on its own', () => {
     ])
   })
 
+  test('a call that waits for the human is drawn pending, with no error (#304)', () => {
+    const entry = entryOf(
+      'hemera_tool_call',
+      'agent',
+      "waiting for the user's approval, request #1",
+      JSON.stringify({
+        tool: 'fs_write',
+        state: 'pending',
+        caller: 'a1b2c3d4e5f6',
+        paths: [],
+        arguments: JSON.stringify({ path: '../notes.md' }),
+      }),
+    )
+    const drawn = hemeraToolCallOf(entry)
+    expect(drawn?.status).toBe('pending')
+    expect(drawn?.error).toBeUndefined()
+    expect(drawn?.defaultOpen).toBe(false)
+  })
+
   test('a hemera_tool_call entry whose payload does not parse is left out', () => {
     const entry = entryOf('hemera_tool_call', 'agent', 'Read a file', '{"tool":"fs_read"}')
     expect(hemeraToolCallOf(entry)).toBeNull()

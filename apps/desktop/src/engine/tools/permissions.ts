@@ -46,8 +46,11 @@ export interface ToolPermissionsService {
    * decided about.
    */
   readonly answer: (sessionId: string, id: string, answer: OutsideAnswer) => Effect.Effect<boolean>
-  /** Cancels every question this Session is waiting on: its turn stopped, or its agent went. */
-  readonly withdrawn: (sessionId: string) => Effect.Effect<void>
+  /**
+   * Cancels every question this Session is waiting on: its turn stopped, or its agent went. A
+   * Stop keeps the questions that no longer hold its turn (#304), which it names in `kept`.
+   */
+  readonly withdrawn: (sessionId: string, kept?: ReadonlySet<string>) => Effect.Effect<void>
 }
 
 export class ToolPermissions extends Context.Service<ToolPermissions, ToolPermissionsService>()(
@@ -102,9 +105,11 @@ export const toolPermissionsLayer: Layer.Layer<ToolPermissions, never, AgentNoti
           return true
         }),
 
-      withdrawn: (sessionId) =>
+      withdrawn: (sessionId, kept) =>
         Effect.forEach(
-          [...questions].filter(([, held]) => held.sessionId === sessionId),
+          [...questions].filter(
+            ([id, held]) => held.sessionId === sessionId && kept?.has(id) !== true,
+          ),
           ([id, held]) =>
             Effect.gen(function* () {
               questions.delete(id)

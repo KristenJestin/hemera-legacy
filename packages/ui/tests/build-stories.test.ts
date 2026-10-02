@@ -4,8 +4,10 @@ import {
   type BuildStoryView,
   type BuildTaskView,
   type BuildViewData,
+  outsideOf,
   storyProgressOf,
   storyRowsOf,
+  tasksProgressOf,
 } from '../src/build/model.ts'
 import { BUILDING, T1_DONE } from '../src/build/build-fixtures.ts'
 
@@ -77,5 +79,34 @@ describe('Where a story of the build stands', () => {
     expect(rows[0]!.criteria).toEqual(['one'])
     expect(rows[1]!.narrative).toBe('')
     expect(rows[1]!.criteria).toEqual([])
+  })
+})
+
+describe('A build shows the tasks that cover no story', () => {
+  test('a Spec with no story draws every task in a group of its own', () => {
+    const tasks = [task('a', 'done', []), task('b', 'in_progress', []), task('c', 'yours', [])]
+    const shown = build([], tasks)
+    const rows = storyRowsOf(shown, [])
+
+    expect(rows).toEqual([])
+    expect(outsideOf(shown, rows).map((one) => one.id)).toEqual(['a', 'b', 'c'])
+  })
+
+  test('beside stories, only the tasks no story holds are outside', () => {
+    const shown = build(
+      [story('s1', 'S1')],
+      [task('a', 'done', ['s1']), task('b', 'waiting', []), task('c', 'ready', ['gone'])],
+    )
+    const rows = storyRowsOf(shown, [])
+
+    expect(rows.map((row) => row.tasks.map((one) => one.id))).toEqual([['a']])
+    expect(outsideOf(shown, rows).map((one) => one.id)).toEqual(['b', 'c'])
+  })
+
+  test('with no story, the progress is counted in tasks, a skipped one over', () => {
+    const tasks = [task('a', 'done', []), task('b', 'skipped', []), task('c', 'in_progress', [])]
+
+    expect(tasksProgressOf(tasks)).toEqual({ done: 2, of: 3 })
+    expect(tasksProgressOf([])).toEqual({ done: 0, of: 0 })
   })
 })

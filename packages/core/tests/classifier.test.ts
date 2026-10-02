@@ -1,6 +1,14 @@
 import { describe, expect, test } from 'vite-plus/test'
 
-import { classifierVerdictFromScores, judgedByClassifier, localClassifierVerdict } from '#index.ts'
+import {
+  CLASSIFIER_POLICY_VERSION,
+  CLASSIFIER_STRICTNESS_LEVELS,
+  classifierVerdictFromScores,
+  DEFAULT_CLASSIFIER_STRICTNESS,
+  judgedByClassifier,
+  localClassifierVerdict,
+  type ClassifierStrictness,
+} from '#index.ts'
 
 describe('Local rules settle only understood calls', () => {
   const run = (
@@ -91,30 +99,102 @@ describe('Local rules settle only understood calls', () => {
   })
 })
 
-describe('Risk and authorization thresholds are applied in order', () => {
-  const decide = (risk: number, approval: number, userRequested: number, hasHumanContext = true) =>
-    classifierVerdictFromScores({ risk, approval, userRequested, hasHumanContext })
+describe('Jev asks instead of refusing, at the strictness the user chose', () => {
+  const decide = (
+    strictness: ClassifierStrictness,
+    risk: number,
+    approval: number,
+    userRequested: number,
+    hasHumanContext = true,
+  ) => classifierVerdictFromScores({ risk, approval, userRequested, hasHumanContext }, strictness)
 
-  test('the destructive threshold wins even when the user asked', () => {
-    expect(decide(2.499, 0, 1)).toBe('allow')
-    expect(decide(2.5, 0, 1)).toBe('deny')
-    expect(decide(3, 1, 1)).toBe('deny')
+  test('the policy that records the strictness is a new version', () => {
+    expect(CLASSIFIER_POLICY_VERSION).toBe('2')
+    expect(CLASSIFIER_STRICTNESS_LEVELS).toEqual(['careful', 'normal', 'permissive'])
+    expect(DEFAULT_CLASSIFIER_STRICTNESS).toBe('normal')
   })
 
-  test('medium risk or high approval needs supported human intent', () => {
-    expect(decide(1.499, 0.749, 0)).toBe('allow')
-    expect(decide(1.5, 0, 0.849)).toBe('ask')
-    expect(decide(1.5, 0, 0.85)).toBe('allow')
-    expect(decide(0, 0.75, 0.849)).toBe('ask')
-    expect(decide(0, 0.75, 0.85)).toBe('allow')
-    expect(decide(1.5, 1, 1, false)).toBe('ask')
+  test.each(CLASSIFIER_STRICTNESS_LEVELS)(
+    'at %s, the rm -rf judged live (risk 2.96, approval 0.88, asked 0.18) asks',
+    (strictness) => {
+      expect(decide(strictness, 2.96, 0.88, 0.18)).toBe('ask')
+    },
+  )
+
+  test.each(CLASSIFIER_STRICTNESS_LEVELS)('at %s, the judge never refuses', (strictness) => {
+    for (const risk of [0, 0.75, 1.5, 2.5, 3]) {
+      for (const approval of [0, 0.5, 0.75, 1]) {
+        for (const userRequested of [0, 0.85, 1]) {
+          expect(decide(strictness, risk, approval, userRequested)).not.toBe('deny')
+          expect(decide(strictness, risk, approval, userRequested, false)).not.toBe('deny')
+        }
+      }
+    }
   })
 
-  test('invalid scores can never allow', () => {
-    expect(decide(Number.NaN, 0, 0)).toBe('ask')
-    expect(decide(0, Number.POSITIVE_INFINITY, 0)).toBe('ask')
-    expect(decide(0, 0, -0.1)).toBe('ask')
-    expect(decide(3.1, 0, 0)).toBe('ask')
+  // strictness, risk, approval, userRequested, verdict
+  test.each([
+    // Careful: a read passes; a change beyond the smallest asks unless the user asked for it; a
+    // significant change asks even then.
+    ['careful', 0.749, 0.499, 0, 'allow'],
+    ['careful', 0.75, 0, 0.849, 'ask'],
+    ['careful', 0.75, 0, 0.85, 'allow'],
+    ['careful', 0, 0.5, 0.849, 'ask'],
+    ['careful', 0, 0.5, 0.85, 'allow'],
+    ['careful', 1.499, 0.9, 0.85, 'allow'],
+    ['careful', 1.5, 0, 1, 'ask'],
+    ['careful', 3, 1, 1, 'ask'],
+    // Normal: the thresholds of policy 1, with the destructive band asking where it refused.
+    ['normal', 1.499, 0.749, 0, 'allow'],
+    ['normal', 1.5, 0, 0.849, 'ask'],
+    ['normal', 1.5, 0, 0.85, 'allow'],
+    ['normal', 0, 0.75, 0.849, 'ask'],
+    ['normal', 0, 0.75, 0.85, 'allow'],
+    ['normal', 2.499, 1, 0.85, 'allow'],
+    ['normal', 2.5, 0, 1, 'ask'],
+    ['normal', 3, 1, 1, 'ask'],
+    // Permissive: only a destructive call asks, and not when the user clearly asked for it.
+    ['permissive', 2.499, 1, 0, 'allow'],
+    ['permissive', 2.5, 0, 0.849, 'ask'],
+    ['permissive', 2.5, 0, 0.85, 'allow'],
+    ['permissive', 3, 1, 1, 'allow'],
+  ] as const)(
+    'at %s, risk %d, approval %d, asked %d: %s',
+    (strictness, risk, approval, asked, verdict) => {
+      expect(decide(strictness, risk, approval, asked)).toBe(verdict)
+    },
+  )
+
+  test.each(CLASSIFIER_STRICTNESS_LEVELS)(
+    'at %s, what the user asked for lifts nothing without their words',
+    (strictness) => {
+      expect(decide(strictness, 2.5, 0, 1, false)).toBe('ask')
+      expect(decide(strictness, 0, 0.75, 1, false)).toBe(
+        strictness === 'permissive' ? 'allow' : 'ask',
+      )
+    },
+  )
+
+  test.each(CLASSIFIER_STRICTNESS_LEVELS)('at %s, invalid scores can never allow', (strictness) => {
+    expect(decide(strictness, Number.NaN, 0, 0)).toBe('ask')
+    expect(decide(strictness, 0, Number.POSITIVE_INFINITY, 0)).toBe('ask')
+    expect(decide(strictness, 0, 0, -0.1)).toBe('ask')
+    expect(decide(strictness, 3.1, 0, 0)).toBe('ask')
+  })
+
+  test('a stricter level asks for everything a looser one asks for', () => {
+    const scores = [0, 0.5, 0.75, 1, 1.5, 2, 2.5, 3]
+    const shares = [0, 0.5, 0.75, 0.85, 1]
+    for (const risk of scores) {
+      for (const approval of shares) {
+        for (const userRequested of shares) {
+          const asks = (level: ClassifierStrictness) =>
+            decide(level, risk, approval, userRequested) === 'ask'
+          if (asks('permissive')) expect(asks('normal')).toBe(true)
+          if (asks('normal')) expect(asks('careful')).toBe(true)
+        }
+      }
+    }
   })
 })
 

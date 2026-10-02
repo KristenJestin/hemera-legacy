@@ -63,6 +63,7 @@ import { type InvalidCursorError, Journal } from './journal.ts'
 import { type PathOutsideBaseError, entriesUnder } from './paths.ts'
 import { Preferences } from './preferences.ts'
 import { ClassifierSettings } from './classifier/settings.ts'
+import { Approvals } from './tools/approvals.ts'
 import {
   type InvalidBranchPrefixError,
   type InvalidWorkspacesRootError,
@@ -77,6 +78,7 @@ import {
 } from './sessions.ts'
 import { Specs, type SpecRefusal, declinedNotice } from './specs/specs.ts'
 import { EngineStatus } from './status.ts'
+import { TesterFindings, type TesterFilesError } from './tester/findings.ts'
 import type { DatabaseError } from './storage/database.ts'
 import type { StaleVersionError } from './transaction.ts'
 import type { UnknownWorkspaceError } from './workspaces/described.ts'
@@ -185,6 +187,7 @@ export function answer(
   Refusal,
   | Preferences
   | ClassifierSettings
+  | Approvals
   | EngineStatus
   | Projects
   | Journal
@@ -204,12 +207,15 @@ export function answer(
   | Specs
   | ProjectChecks
   | Builds
+  | TesterFindings
 > {
   return Effect.gen(function* () {
     if (decision.name === 'classifier.state') {
       const current = yield* (yield* ClassifierSettings).current
       return {
         mode: current.mode,
+        strictness: current.strictness,
+        grace: current.grace,
         hasKey: current.key !== null,
         consent: current.consent,
         generation: current.generation,
@@ -221,6 +227,17 @@ export function answer(
       yield* settings.select(decision.argument.mode)
       if (previous.mode !== decision.argument.mode) yield* (yield* AgentRuntime).classifierChanged
       return
+    }
+    if (decision.name === 'classifier.strictness.write') {
+      // Read at every call: the next one, in every Session, is judged at the new level (#298).
+      return yield* (yield* ClassifierSettings).selectStrictness(decision.argument.strictness)
+    }
+    if (decision.name === 'classifier.grace.write') {
+      // Read at every question: the next one, in every Session, waits the new grace (#304).
+      return yield* (yield* ClassifierSettings).selectGrace(decision.argument.grace)
+    }
+    if (decision.name === 'window.focus.write') {
+      return yield* (yield* Approvals).focus(decision.argument.focused)
     }
     if (decision.name === 'classifier.consent.write') {
       const settings = yield* ClassifierSettings
@@ -249,6 +266,27 @@ export function answer(
       if ((yield* settings.current).mode === 'hemera-auto')
         yield* (yield* AgentRuntime).classifierChanged
       return
+    }
+    if (decision.name === 'classifier.decisions') {
+      return yield* (yield* Sessions).decisions(decision.argument.limit)
+    }
+    if (decision.name === 'tester.findings') {
+      const findings = yield* (yield* TesterFindings).list
+      return findings.map(({ file, head, body }) => ({
+        file,
+        number: head.number,
+        title: head.title,
+        kind: head.kind,
+        place: head.place,
+        severity: head.severity,
+        occurrences: head.occurrences,
+        firstSeen: head.firstSeen,
+        lastSeen: head.lastSeen,
+        sessions: [...head.sessions],
+        agent: head.agent,
+        version: head.version,
+        body,
+      }))
     }
     if (decision.name === 'engine.status') return yield* (yield* EngineStatus).read
 
@@ -735,6 +773,7 @@ export function answer(
  * something that happens by writing a service.
  */
 export type Refusal =
+  | TesterFilesError
   | SpecRefusal
   | LaunchRefusal
   | AgentRuntimeError

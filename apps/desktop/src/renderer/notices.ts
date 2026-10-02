@@ -38,9 +38,11 @@ export function waitingAs(
 ): NoticeKind | null {
   if (entry.kind === 'permission_request') {
     // Open, undecided, and in a turn that still runs: a request a turn left behind when it ended
-    // — the agent gave up on the call, the engine never rewrote it — waits for nobody.
+    // — the agent gave up on the call, the engine never rewrote it — waits for nobody. Unless the
+    // agent went on without it (#304): that one waits for the human after the turn.
     const open = questionOpen(entry) && decisionOf(entry, thread) === null
-    return open && !endedAfter(entry, thread) ? 'permission' : null
+    const late = read(requestSchema, entry.payload)?.late === true
+    return open && (late || !endedAfter(entry, thread)) ? 'permission' : null
   }
   if (entry.kind === 'command_proposal') {
     return commandProposalOf(entry)?.state === 'pending' ? 'proposal' : null
@@ -81,6 +83,8 @@ const requestSchema = z.object({
   toolCallId: z.string(),
   tool: z.string().optional(),
   options: z.array(z.object({ optionId: z.string(), kind: z.string() })),
+  /** A request of Hemera's tool the agent went on without (#304). */
+  late: z.boolean().optional(),
 })
 
 const decisionSchema = z.object({ toolCallId: z.string(), optionId: z.string().nullable() })

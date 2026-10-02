@@ -1,0 +1,112 @@
+/* What the two libraries of the review are drawn with (exploration of issue #271).
+
+   Both draw inside a shadow root, which no class of the design system reaches: what they read
+   from outside are CSS variables, which cross the shadow boundary by inheritance. So this is the
+   one place the roles of the design system meet the libraries' own variables, the way the
+   `.code-diff` block of `theme.css` is the one place a token role meets a colour. Were the design
+   kept, these blocks move into `theme.css` beside it; nothing here is a colour of its own. */
+
+/* The diff: the code font, the colours of a change, the selection and the gutter. The tokens of
+   the code itself come from `.code-diff` in `theme.css`, which the stage wears as well: the diff
+   is highlighted with a css-variables theme, so a keyword is the same magenta here as in a
+   diff of the thread. */
+[data-review-diff] {
+  --diffs-font-family: var(--font-mono);
+  --diffs-header-font-family: var(--font-sans);
+  --diffs-font-size: var(--text-sm);
+  --diffs-line-height: 1.6;
+  --diffs-tab-size: 2;
+  --diffs-light-bg: var(--card);
+  --diffs-dark-bg: var(--card);
+  --diffs-addition-color-override: var(--success-muted-foreground);
+  --diffs-deletion-color-override: var(--destructive-muted-foreground);
+  --diffs-modified-color-override: var(--warning-muted-foreground);
+  --diffs-bg-addition-override: var(--success-muted);
+  --diffs-bg-addition-number-override: var(--success-muted);
+  --diffs-bg-deletion-override: var(--destructive-muted);
+  --diffs-bg-deletion-number-override: var(--destructive-muted);
+  /* The words that changed inside a line: a shade of the line's own fill, light enough that a
+     comment in the muted colour still reads on it. */
+  --diffs-bg-addition-emphasis-override: color-mix(
+    in oklab,
+    var(--success-muted-foreground) 8%,
+    var(--success-muted)
+  );
+  --diffs-bg-deletion-emphasis-override: color-mix(
+    in oklab,
+    var(--destructive-muted-foreground) 8%,
+    var(--destructive-muted)
+  );
+  --diffs-selection-color-override: var(--primary);
+  --diffs-bg-selection-override: var(--primary);
+  --diffs-bg-selection-number-override: var(--primary);
+  --diffs-bg-context-override: var(--card);
+  --diffs-bg-separator-override: var(--muted);
+  --diffs-bg-hover-override: var(--accent);
+  --diffs-fg-number-override: var(--muted-foreground);
+  --diffs-gap-inline: 0.5rem;
+  --diffs-gap-block: 0.5rem;
+}
+
+/* In the dark the line's own fill is already a tint over the card, and a shade of it drawn from
+   the bright green read darker than the keywords on it: the changed words take the fill alone. */
+.dark [data-review-diff] {
+  --diffs-bg-addition-emphasis-override: var(--success-muted);
+  --diffs-bg-deletion-emphasis-override: var(--destructive-muted);
+}
+
+/* The dark keyword, `primary-strong`, is made for the card: on a changed word's tint it fell under
+   the contrast a line of code needs (4.05:1). The review's diff draws it one step lighter. */
+.dark [data-review-diff].code-diff {
+  --shiki-token-keyword: var(--primary-muted-foreground);
+}
+
+/* The library draws its surface in the theme's background, which the css-variables theme leaves
+   transparent (a diff of the thread sits on its card): a header stuck at the top of the scroll
+   let the code show through it. The review's diff sits on the card. */
+[data-review-diff].code-diff {
+  --shiki-background: var(--card);
+}
+
+/* The tree: the surface it sits on, the hand over a row, the row chosen, the search, and the
+   letter of each Git status. */
+[data-review-tree] {
+  --trees-bg-override: transparent;
+  --trees-fg-override: var(--foreground);
+  --trees-fg-muted-override: var(--muted-foreground);
+  --trees-bg-muted-override: var(--accent);
+  --trees-border-color-override: var(--border);
+  --trees-accent-override: var(--primary);
+  --trees-selected-bg-override: var(--primary-muted);
+  --trees-selected-fg-override: var(--foreground);
+  --trees-selected-focused-border-color-override: var(--ring);
+  --trees-focus-ring-color-override: var(--ring);
+  --trees-input-bg-override: var(--card);
+  --trees-search-bg-override: var(--card);
+  --trees-search-fg-override: var(--foreground);
+  --trees-indent-guide-bg-override: var(--border);
+  --trees-scrollbar-thumb-override: var(--border);
+  --trees-font-family-override: var(--font-sans);
+  --trees-font-size-override: var(--text-sm);
+  --trees-git-added-color-override: var(--success-muted-foreground);
+  --trees-git-modified-color-override: var(--warning-muted-foreground);
+  --trees-git-deleted-color-override: var(--destructive-muted-foreground);
+  --trees-git-renamed-color-override: var(--info-muted-foreground);
+  --trees-git-untracked-color-override: var(--muted-foreground);
+  --trees-git-ignored-color-override: var(--muted-foreground);
+  --trees-status-added-override: var(--success-muted-foreground);
+  --trees-status-modified-override: var(--warning-muted-foreground);
+  --trees-status-deleted-override: var(--destructive-muted-foreground);
+  --trees-status-renamed-override: var(--info-muted-foreground);
+  --trees-status-untracked-override: var(--muted-foreground);
+  --trees-status-ignored-override: var(--muted-foreground);
+}
+
+/* The review widened over the chat: its slot's width, from its share of the row beside the chat
+   (0) to the whole row (1), which the page writes as `--review-wide` on every frame, as the
+   build panel writes `--build-open`. */
+[data-review-slot] {
+  width: calc(
+    var(--spacing-build-panel) + (100cqw - var(--spacing-build-panel)) * var(--review-wide, 0)
+  );
+}

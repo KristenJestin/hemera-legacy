@@ -208,6 +208,7 @@ const RELAYED = [
   'repositories.update',
   'projects.setWorkspacesRoot',
   'projects.setBranchPrefix',
+  'projects.setHelpersAtOnce',
   'projects.setRepositoryIncluded',
   'journal.read',
   'journal.unseen',
@@ -302,6 +303,23 @@ const RELAYED = [
   'launches.request',
   'launches.start',
   'launches.retry',
+  // The build of a `build` Session and the checks it is judged by, the engine's like the rest
+  // (D10-04, D10-06).
+  'build.read',
+  'build.pause',
+  'build.resume',
+  'build.accept',
+  'build.stop',
+  'build.taskDone',
+  'build.taskSkip',
+  'build.dismissBlocker',
+  'checks.list',
+  'checks.save',
+  'checks.remove',
+  'checks.acceptProposed',
+  // The helpers of a build, read and stopped by the user (issue #77).
+  'helpers.list',
+  'helpers.stop',
 ] as const
 
 type Relayed = (typeof RELAYED)[number]

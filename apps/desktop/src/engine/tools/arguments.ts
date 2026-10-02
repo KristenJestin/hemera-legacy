@@ -13,6 +13,7 @@
 import {
   COMMAND_SCOPES,
   COMMAND_TYPES,
+  HELPER_DEPTH,
   PHASE_IDS,
   RECIPE_KINDS,
   QUESTION_RULE,
@@ -24,6 +25,7 @@ import {
   SPEC_TYPES,
   TASK_EXECUTORS,
   type ToolName,
+  helpersFor,
 } from '@hemera/core'
 import { z } from 'zod'
 
@@ -86,6 +88,34 @@ export type ParsedCall =
   | {
       readonly tool: 'spec_propose'
       readonly arguments: z.infer<(typeof TOOL_ARGUMENTS)['spec_propose']>
+    }
+  | {
+      readonly tool: 'build_read'
+      readonly arguments: z.infer<(typeof TOOL_ARGUMENTS)['build_read']>
+    }
+  | {
+      readonly tool: 'task_finished'
+      readonly arguments: z.infer<(typeof TOOL_ARGUMENTS)['task_finished']>
+    }
+  | {
+      readonly tool: 'task_blocked'
+      readonly arguments: z.infer<(typeof TOOL_ARGUMENTS)['task_blocked']>
+    }
+  | {
+      readonly tool: 'reproduction_replayed'
+      readonly arguments: z.infer<(typeof TOOL_ARGUMENTS)['reproduction_replayed']>
+    }
+  | {
+      readonly tool: 'helper_launch'
+      readonly arguments: z.infer<(typeof TOOL_ARGUMENTS)['helper_launch']>
+    }
+  | {
+      readonly tool: 'helper_stop'
+      readonly arguments: z.infer<(typeof TOOL_ARGUMENTS)['helper_stop']>
+    }
+  | {
+      readonly tool: 'helper_read'
+      readonly arguments: z.infer<(typeof TOOL_ARGUMENTS)['helper_read']>
     }
 
 /**
@@ -547,6 +577,71 @@ export const TOOL_ARGUMENTS = {
         })
       }
     }),
+  // The build's three (D10-13): a task is named by its label, `T2`, as the briefs list it.
+  build_read: z.object({
+    task: z
+      .string()
+      .min(1)
+      .optional()
+      .describe(
+        'a task by its label, T2, to read it with its attempts; the whole build without it',
+      ),
+    offset: z.number().int().min(0).optional().describe('the character to start at; 0 without it'),
+  }),
+  task_finished: z.object({
+    task: z.string().min(1).describe('the task you finished, by its label: T2'),
+    summary: z
+      .string()
+      .max(SPEC_PAGE_CHARACTERS)
+      .optional()
+      .describe("what you did, in a few lines, written in the Journal beside the task's line"),
+  }),
+  task_blocked: z.object({
+    task: z.string().min(1).describe('the task that contradicts the Spec, by its label: T3'),
+    reason: z
+      .string()
+      .trim()
+      .min(1)
+      .max(SPEC_PAGE_CHARACTERS)
+      .describe('what in the Spec it contradicts, for the user who decides'),
+  }),
+  // What the replay of a bug's reproduction showed (issue #203), which its final checks wait for.
+  reproduction_replayed: z.object({
+    gone: z
+      .boolean()
+      .describe('whether the incorrect behaviour is gone once the scenario is replayed'),
+    observed: z
+      .string()
+      .trim()
+      .min(1)
+      .max(SPEC_PAGE_CHARACTERS)
+      .describe('what you did to replay it and what you observed, for the user who accepts'),
+  }),
+  // An orchestrator's three (issue #77): a helper is named by the id its launch answered.
+  helper_launch: z.object({
+    helper: z
+      .string()
+      .min(1)
+      .optional()
+      .describe('a defined helper by its id, review-tests; a free helper without it'),
+    brief: z
+      .string()
+      .trim()
+      .min(1)
+      .max(SPEC_PAGE_CHARACTERS)
+      .describe('the one piece of work it does, written for an agent that knows nothing else'),
+    task: z
+      .string()
+      .min(1)
+      .optional()
+      .describe('the task it carries to task_finished, by its label: T2; none without it'),
+  }),
+  helper_stop: z.object({
+    id: z.string().min(1).describe('the helper, by the id its launch answered'),
+  }),
+  helper_read: z.object({
+    id: z.string().min(1).describe('the helper, by the id its launch answered'),
+  }),
 } as const
 
 /** What each tool is, in the words the agent reads before it asks. */
@@ -576,6 +671,18 @@ export const TOOL_DESCRIPTIONS: Record<ToolName, string> = {
   spec_write: `Write the current draft of the Spec this Session defines, and only while this Session holds its write right. Exactly one of: a section, with its whole body and the version you read it at; every story; every task; a question for the user; the title; or the type. A section that changed since the version you send, a Spec that is not a draft, an older revision, and a Session that does not hold the write right are refused, and nothing is written. Send a key so that a retry after a lost answer does not write twice. ${QUESTION_RULE}`,
   spec_propose:
     "Hand the Spec this Session defines over to Hemera's checks. phase_done declares a phase finished with a summary, the elements of the Spec that support it and the assumptions still open: Hemera runs the phase's exit checks, and either finishes it and opens the phases that wait on it, or answers what fails and changes nothing. ready attests the contract is complete and executable: the user's Mark ready is what freezes it, never this call. Both only while this Session holds the write right. spec is for a free Session, which defines no Spec yet: it proposes one, a title and a type, and the user creates it or not; in a Session started by New Spec the user asked for it already, and Hemera creates it at once. existing is for a free Session too: when the Project already has the Spec the user asks for, it points to that one by its key, as project_get lists it, and the user continues it or not. Send a key so that a retry after a lost answer is answered once.",
+  build_read: `Read the frozen Spec this build executes, with the label of each task, and where the build stands: each task's state, its attempts, their files changed and their checks' verdicts. Name a task, T2, to read it alone. One call returns at most ${SPEC_PAGE_CHARACTERS} characters and ends with the range read as JSON: offset, end, size, truncated and next.`,
+  task_finished:
+    "Say you finished a task, by its label. This is not a verdict: Hemera runs the Project's checks on it and decides whether it is done; a red check comes back to you with its failures.",
+  task_blocked:
+    'Say a task contradicts the frozen Spec, by its label, with the reason. The task and the tasks that depend on it are suspended until the user decides; the others go on. Never for a task that is merely hard.',
+  reproduction_replayed:
+    "Report the replay of a bug's reproduction scenario, in the final checks of a bug Spec: whether the incorrect behaviour is gone, and what you did and observed. Hemera keeps the last one with the end checks that run once your turn is over, and the user cannot accept the build without it. Replay it and report it again after any fix.",
+  helper_launch: `Launch a helper agent to do one piece of work in this Workspace, with a fresh context: a defined helper by its id, or a free one when you name none, with the brief you write. Name a task by its label to have the helper carry it to task_finished itself. It answers at once with the helper's id and never waits for it: the helper's result comes back to you when it is done. A launch above the number of helpers the Project lets run at once is refused with the reason, never queued; helpers go ${HELPER_DEPTH} levels deep at most. The defined helpers of a build:\n${helpersFor('build')}`,
+  helper_stop:
+    'Stop a helper you launched, at once. A task it was on stays in progress, with its attempt and the files it holds, for you to hand again.',
+  helper_read:
+    'Where a helper you launched stands: running, done, stopped or failed, its last line, how long it has said nothing, and its result once it has one.',
 }
 
 /**
@@ -603,6 +710,13 @@ export const TOOL_BOUNDS: Record<ToolName, string> = {
   spec_write: "one write of this Session's draft, on its current version",
   spec_propose:
     'a phase declared finished, the contract attested, or a Spec proposed or pointed to; never marked ready',
+  build_read: `this Session's build, ${SPEC_PAGE_CHARACTERS / 1024} K characters a page`,
+  task_finished: "a signal Hemera answers with the Project's checks; never a task's state",
+  task_blocked: 'a blocker the user decides; never a change to the Spec',
+  reproduction_replayed: "a bug's final checks only; kept with the end checks that follow",
+  helper_launch: `the Project's helpers at once, ${HELPER_DEPTH} levels deep at most; refused above, never queued`,
+  helper_stop: 'a helper this Session launched',
+  helper_read: 'a helper this Session launched',
 }
 
 /** What one reading of the arguments answered. */
@@ -681,6 +795,20 @@ export function parseCall(tool: ToolName, raw: ToolArguments): ArgumentsDecision
       return decide(tool, read(TOOL_ARGUMENTS['spec_write'], raw))
     case 'spec_propose':
       return decide(tool, read(TOOL_ARGUMENTS['spec_propose'], raw))
+    case 'build_read':
+      return decide(tool, read(TOOL_ARGUMENTS['build_read'], raw))
+    case 'task_finished':
+      return decide(tool, read(TOOL_ARGUMENTS['task_finished'], raw))
+    case 'task_blocked':
+      return decide(tool, read(TOOL_ARGUMENTS['task_blocked'], raw))
+    case 'reproduction_replayed':
+      return decide(tool, read(TOOL_ARGUMENTS['reproduction_replayed'], raw))
+    case 'helper_launch':
+      return decide(tool, read(TOOL_ARGUMENTS['helper_launch'], raw))
+    case 'helper_stop':
+      return decide(tool, read(TOOL_ARGUMENTS['helper_stop'], raw))
+    case 'helper_read':
+      return decide(tool, read(TOOL_ARGUMENTS['helper_read'], raw))
   }
 }
 

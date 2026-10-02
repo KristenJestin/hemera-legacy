@@ -63,6 +63,150 @@ describe('The Journal shows each step', () => {
   })
 })
 
+/** A line of a build, about its Session or one of its tasks (D10-14). */
+function built(
+  type: string,
+  payload: JournalEntry['payload'],
+  entityKind: JournalEntry['entityKind'] = 'task',
+): JournalEntry {
+  return {
+    ...step(type, payload),
+    entityKind,
+    entityId: entityKind === 'task' ? 'build-task-2' : 'build',
+    author: 'hemera',
+    sessionId: 'build',
+  }
+}
+
+describe('The Journal names a build’s helpers (#77)', () => {
+  test('a helper launched, done, failed and stopped each read as what happened', () => {
+    const labels = [
+      built('helper.launched', { name: 'Write the reader', task: 'T2', depth: 1 }, 'session'),
+      built('helper.launched', { name: 'Test review', task: null, depth: 2 }, 'session'),
+      built('helper.done', { name: 'Write the reader', result: 'Done.' }, 'session'),
+      built(
+        'helper.failed',
+        { name: 'Test review', result: 'Hemera quit while it ran.' },
+        'session',
+      ),
+      built('helper.stopped', { name: 'Documenter', result: 'Stopped by the user.' }, 'session'),
+    ].map((entry) => lineOf(entry).label)
+    expect(labels).toEqual([
+      'Helper Write the reader launched on T2',
+      'Helper Test review launched',
+      'Helper Write the reader done',
+      'Helper Test review failed: Hemera quit while it ran.',
+      'Helper Documenter stopped: Stopped by the user.',
+    ])
+  })
+})
+
+describe('The Journal shows each step of a build in plain words', () => {
+  test('a phase, a task moving, a check run and the user’s acts each read as what happened', () => {
+    const labels = [
+      built('build.phase_started', { phase: 'prepare' }, 'session'),
+      built('build.phase_started', { phase: 'execute' }, 'session'),
+      built('build.phase_started', { phase: 'verify' }, 'session'),
+      built('spec.in_progress', {}, 'session'),
+      built('task.ready', { label: 'T2' }),
+      built('task.started', { label: 'T2', attempt: 1 }),
+      built('task.finished', { label: 'T2', attempt: 1, summary: 'Exporter written', files: 2 }),
+      built('task.checked', { label: 'T2', result: 'red', attempt: 1 }),
+      built('task.started', { label: 'T2', attempt: 2 }),
+      built('task.checked', { label: 'T2', result: 'green', attempt: 2 }),
+      built('task.done', { label: 'T2', result: 'green' }),
+      built('task.done', { label: 'T2', result: 'unverified' }),
+      built('task.done', { label: 'T3' }),
+      built('task.yours', { label: 'T3', reason: 'human' }),
+      built('task.yours', { label: 'T4', reason: '3 red attempts' }),
+      built('task.blocked', { label: 'T2', reason: 'The Spec asks for two formats.' }),
+      built('task.blocked', { label: 'T3', because: 'T2' }),
+      built('task.skipped', { label: 'T2', reason: 'Done by hand.', unblocks: true }),
+      built('build.paused', {}, 'session'),
+      built('build.resumed', {}, 'session'),
+      built('build.reproduction_replayed', { gone: true }, 'session'),
+      built('build.reproduction_replayed', { gone: false }, 'session'),
+      built('build.accepted', {}, 'session'),
+      built('build.stopped', { reason: 'Stopped by the user.' }, 'session'),
+    ].map((entry) => lineOf(entry).label)
+    expect(labels).toEqual([
+      'Build getting ready',
+      'Building',
+      'Final checks',
+      'Spec in progress: its first task started',
+      'T2 ready',
+      'T2 started',
+      'T2 finished by the agent',
+      'T2 checked: red, try 1 of 3',
+      'T2 started again, try 2 of 3',
+      'T2 checked',
+      'T2 done',
+      'T2 done, not verified',
+      'T3 done',
+      'T3 is yours',
+      'T4 is yours after three red tries',
+      'T2 blocked: The Spec asks for two formats.',
+      'T3 blocked with T2',
+      'T2 skipped: Done by hand.',
+      'Build paused',
+      'Build resumed',
+      'Reproduction replayed: the bug is gone',
+      'Reproduction replayed: the bug is still there',
+      'Build accepted',
+      'Build stopped: Stopped by the user.',
+    ])
+  })
+
+  test('a check says what it said and where it ran, and a change of the Project’s checks is named', () => {
+    const labels = [
+      built(
+        'check.ran',
+        { name: 'lint', place: 'api', verdict: 'green', detail: null, scope: 'task', label: 'T2' },
+        'session',
+      ),
+      built(
+        'check.ran',
+        {
+          name: 'Coverage',
+          place: '',
+          verdict: 'red',
+          detail: '64.2 < 70',
+          scope: 'build',
+          label: null,
+        },
+        'session',
+      ),
+      built(
+        'check.ran',
+        {
+          name: 'e2e',
+          place: 'web',
+          verdict: 'skipped',
+          detail: 'no file matched',
+          scope: 'story',
+          label: null,
+        },
+        'session',
+      ),
+      built('check.created', { name: 'lint', when: 'task' }, 'project'),
+      built('check.updated', { name: 'lint', when: 'story' }, 'project'),
+      built('check.removed', { name: 'lint', when: 'story' }, 'project'),
+    ].map((entry) => lineOf(entry).label)
+    expect(labels).toEqual([
+      'T2 · Check “lint” green in api',
+      'Final checks · Check “Coverage” red at the Workspace root: 64.2 < 70',
+      'Story · Check “e2e” skipped in web',
+      'Check “lint” added',
+      'Check “lint” changed',
+      'Check “lint” removed',
+    ])
+  })
+
+  test('a build task’s line is drawn under the Session it is built in', () => {
+    expect(lineOf(built('task.done', { label: 'T1' })).kind).toBe('session')
+  })
+})
+
 describe("The Journal says what the engine recorded of a Session's agent in plain words", () => {
   const recorded = (type: string, payload: JournalEntry['payload']): JournalEntry => ({
     ...step(type, payload),

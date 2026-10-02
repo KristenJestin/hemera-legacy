@@ -2,12 +2,11 @@ import { cn } from 'cn'
 import type { FunctionComponent, ReactNode } from 'react'
 
 import { Badge } from '../components/badge/badge.tsx'
-import { Button, IconButton } from '../components/button/button.tsx'
+import { Button } from '../components/button/button.tsx'
 import { Menu } from '../components/menu/menu.tsx'
 import { Tooltip } from '../components/tooltip/tooltip.tsx'
 import {
   type IconProps,
-  IconChevronRight,
   IconCircleCheck,
   IconCircleDashed,
   IconCircleX,
@@ -34,7 +33,7 @@ import { SPEC_TYPE_ICONS } from './spec-icons.ts'
 
 /**
  * As tall as its tallest control, the picker of the revisions or `Rework`, whether they are there
- * or not: the fold chevron at its end stays at one height, the unfold chevron's (issue #181).
+ * or not: the panel's fold chevron after it stays at one height, the unfold chevron's (#181).
  */
 const HEAD = 'flex min-h-control-md items-center gap-2.5'
 
@@ -85,8 +84,6 @@ export interface SpecHeadProps {
   onPickRevision: (revision: number) => void
   /** Opens the rework of a `ready` Spec. */
   onRework: () => void
-  /** Folds the panel to its band; the button is drawn only when this is given. */
-  onFold?: (() => void) | undefined
   /**
    * Whether the Spec is only provisional (issue #198): no key yet, a title that is the request's
    * until the agent proposes one, and no type until then.
@@ -104,7 +101,6 @@ export function SpecHead({
   superseded = false,
   onPickRevision,
   onRework,
-  onFold,
   provisional = false,
 }: SpecHeadProps): ReactNode {
   const ready = status === 'ready'
@@ -135,7 +131,7 @@ export function SpecHead({
       ) : (
         <Badge icon={<TypeIcon size="sm" aria-hidden="true" />}>{type}</Badge>
       )}
-      {(revisions.length > 1 || reworkable || onFold !== undefined) && (
+      {(revisions.length > 1 || reworkable) && (
         <span className={END}>
           {revisions.length > 1 && (
             <Menu
@@ -156,17 +152,6 @@ export function SpecHead({
               <IconRefresh size="sm" />
               Rework
             </Button>
-          )}
-          {onFold !== undefined && (
-            <Tooltip label="Fold the Spec">
-              <IconButton
-                variant="ghost"
-                size="sm"
-                icon={<IconChevronRight size="sm" />}
-                aria-label="Fold the Spec"
-                onClick={onFold}
-              />
-            </Tooltip>
           )}
         </span>
       )}

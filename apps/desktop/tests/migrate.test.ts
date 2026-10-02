@@ -86,6 +86,16 @@ const WORKSPACES_MIGRATION = '20260924223401_workspaces'
 const CHOICES_MIGRATION = '20260926132904_session_choices'
 
 /**
+ * The migration lot 22 adds, after the choices': the one a profile of lot 20 has never heard
+ * of — the build's phase and approach note on its Session, its tasks, attempts, snapshots, changed
+ * files, check results and blockers, the Project's checks, and the `task` lines of the Journal
+ * (D10-01, D10-05, D10-06, D10-14).
+ */
+const BUILD_MIGRATION = '20260926170340_build'
+/** Lot 5e (issue #117): the stamp a build waits under while the user reviews it. */
+const REVIEW_MIGRATION = '20260926170412_review'
+
+/**
  * The migration that keeps a sub-agent's result queued for its Session's next safe point across
  * a quit: the one a profile that ran the choices' has never heard of (issue #72).
  */
@@ -115,6 +125,19 @@ const RUN_TOLD_MIGRATION = '20260928202306_run_told'
  * (#218): the one a profile that ran the run told's has never heard of.
  */
 const SETUP_MIGRATION = '20260929153321_setup_proposals'
+
+/**
+ * The migration that keeps the replay of a bug's reproduction with the end checks it came before
+ * (issue #203): the one a profile that ran the setup proposals' has never heard of.
+ */
+const REPRODUCTION_MIGRATION = '20260930124109_bug_reproduction'
+
+/**
+ * The migration of the helper agents (issue #77): child Sessions, how many may run at once per
+ * Project, and the files a build task holds — the one a profile that ran the replay's has never
+ * heard of.
+ */
+const HELPERS_MIGRATION = '20261001084701_helpers'
 
 /** A folder carrying the shipped migrations up to one of them, as an older version did. */
 function shippedUpTo(last: string): string {
@@ -540,16 +563,20 @@ describe('A profile of lot 6 is migrated to lot 19 (specs)', () => {
 
     const standing = await on(dataFolder, openProfile(dataFolder, SHIPPED, '0.6.0'))
 
-    // Behind by this migration and the Workspaces' after it, and the copy is named after the first.
+    // Behind by this migration and every one after it, and the copy is named after the first.
     expect(standing.behind).toEqual([
       SPECS_MIGRATION,
       WORKSPACES_MIGRATION,
       CHOICES_MIGRATION,
+      BUILD_MIGRATION,
+      REVIEW_MIGRATION,
       QUEUED_MIGRATION,
       RUN_AT_OPEN_MIGRATION,
       CONTEXT_WORDS_MIGRATION,
       RUN_TOLD_MIGRATION,
       SETUP_MIGRATION,
+      REPRODUCTION_MIGRATION,
+      HELPERS_MIGRATION,
     ])
     expect(readdirSync(join(dataFolder, BACKUPS_FOLDER))).toEqual([`${SPECS_MIGRATION}.sqlite`])
 
@@ -914,18 +941,22 @@ describe('Un profil du lot 5 est migré vers le lot 6', () => {
 
     const standing = await on(dataFolder, openProfile(dataFolder, SHIPPED, '0.6.0'))
 
-    // Behind by this lot's migration and the ones after it — the Specs', then the Workspaces' —
-    // and the copy taken before them is named after the first.
+    // Behind by this lot's migration and the ones after it — the Specs', the Workspaces', the
+    // choices', the build's, the review's — and the copy taken before them is named after the first.
     expect(standing.behind).toEqual([
       TOOLS_MIGRATION,
       SPECS_MIGRATION,
       WORKSPACES_MIGRATION,
       CHOICES_MIGRATION,
+      BUILD_MIGRATION,
+      REVIEW_MIGRATION,
       QUEUED_MIGRATION,
       RUN_AT_OPEN_MIGRATION,
       CONTEXT_WORDS_MIGRATION,
       RUN_TOLD_MIGRATION,
       SETUP_MIGRATION,
+      REPRODUCTION_MIGRATION,
+      HELPERS_MIGRATION,
     ])
     expect(readdirSync(join(dataFolder, BACKUPS_FOLDER))).toEqual([`${TOOLS_MIGRATION}.sqlite`])
 
@@ -1067,11 +1098,15 @@ describe('A profile of lot 19 is migrated to lot 20', () => {
     expect(standing.behind).toEqual([
       WORKSPACES_MIGRATION,
       CHOICES_MIGRATION,
+      BUILD_MIGRATION,
+      REVIEW_MIGRATION,
       QUEUED_MIGRATION,
       RUN_AT_OPEN_MIGRATION,
       CONTEXT_WORDS_MIGRATION,
       RUN_TOLD_MIGRATION,
       SETUP_MIGRATION,
+      REPRODUCTION_MIGRATION,
+      HELPERS_MIGRATION,
     ])
     expect(readdirSync(join(dataFolder, BACKUPS_FOLDER))).toEqual([
       `${WORKSPACES_MIGRATION}.sqlite`,
@@ -1193,7 +1228,7 @@ describe('A profile of lot 19 is migrated to lot 20', () => {
       'profile.backed_up',
       'profile.migrated',
     ])
-    expect(JSON.parse(kept.events.at(-1)!.payload)).toEqual({ migration: SETUP_MIGRATION })
+    expect(JSON.parse(kept.events.at(-1)!.payload)).toEqual({ migration: HELPERS_MIGRATION })
   })
 
   test('a command of a word of lot 18, or a step of an unknown state, is refused', async () => {
@@ -1396,11 +1431,15 @@ describe('A profile that ran the Workspaces gains the choices of its Sessions', 
     const standing = await on(dataFolder, openProfile(dataFolder, SHIPPED, '0.4.0'))
     expect(standing.behind).toEqual([
       CHOICES_MIGRATION,
+      BUILD_MIGRATION,
+      REVIEW_MIGRATION,
       QUEUED_MIGRATION,
       RUN_AT_OPEN_MIGRATION,
       CONTEXT_WORDS_MIGRATION,
       RUN_TOLD_MIGRATION,
       SETUP_MIGRATION,
+      REPRODUCTION_MIGRATION,
+      HELPERS_MIGRATION,
     ])
     expect(readdirSync(join(dataFolder, BACKUPS_FOLDER))).toEqual([`${CHOICES_MIGRATION}.sqlite`])
 
@@ -1432,6 +1471,431 @@ describe('A profile that ran the Workspaces gains the choices of its Sessions', 
   })
 })
 
+/**
+ * What 0.4 shipped: every migration of the folder but the build's, the two that were written before
+ * the ones 0.4 carries and reached `dev` after them, and the one written after them all.
+ */
+function shippedWithoutTheBuild(): string {
+  const folder = join(workspace, 'shipped-0.4')
+  const build = [BUILD_MIGRATION, REVIEW_MIGRATION, REPRODUCTION_MIGRATION, HELPERS_MIGRATION]
+  for (const migration of readdirSync(SHIPPED)) {
+    if (build.includes(migration)) continue
+    cpSync(join(SHIPPED, migration), join(folder, migration), { recursive: true })
+  }
+  return folder
+}
+
+describe('A profile of 0.4 is migrated to the build lot', () => {
+  test('the build migrations run after the ones 0.4 ran, and keep what they wrote', async () => {
+    const dataFolder = join(workspace, 'from-0.4')
+    await on(dataFolder, openProfile(dataFolder, shippedWithoutTheBuild(), '0.4.0'))
+    await on(
+      dataFolder,
+      Effect.gen(function* () {
+        const sql = yield* SqliteClient
+        const at = '2026-09-29T10:00:00.000Z'
+        yield* sql`INSERT INTO projects (id, name, tone, created_at, updated_at, version)
+          VALUES ('atlas', 'Atlas', 'primary', ${at}, ${at}, 1)`
+        yield* sql`INSERT INTO project_commands (id, project_id, name, line, type, created_at, updated_at, run_at_open)
+          VALUES ('command-1', 'atlas', 'up', 'docker compose up -d', 'script', ${at}, ${at}, 1)`
+        yield* sql`INSERT INTO sessions (id, project_id, title, title_source, provider, native_session_id, native_state, cwd, created_at, last_written_at, version)
+          VALUES ('session-1', 'atlas', 'Set it up', 'derived', 'claude', 'native-1', 'attached', '/work/atlas', ${at}, ${at}, 3)`
+        yield* sql`INSERT INTO session_entries (id, session_id, seq, role, kind, body, payload, correlation_id, state, created_at)
+          VALUES ('entry-1', 'session-1', 1, 'hemera', 'setup_proposal', 'Declare ./api', '{}', 'setup:s1', 'pending', ${at})`
+        yield* sql`INSERT INTO command_runs (id, session_id, name, line, type, cwd, state, started_by, started_at, told)
+          VALUES ('run-1', 'session-1', 'up', 'docker compose up -d', 'script', '/work/atlas', 'running', 'user', ${at}, 'none')`
+        yield* sql`INSERT INTO queued_results (id, session_id, text, queued_at)
+          VALUES ('result-1', 'session-1', 'Two call sites.', ${at})`
+      }),
+    )
+
+    const standing = await on(dataFolder, openProfile(dataFolder, SHIPPED, '0.5.0'))
+    expect(standing.behind).toEqual([
+      BUILD_MIGRATION,
+      REVIEW_MIGRATION,
+      REPRODUCTION_MIGRATION,
+      HELPERS_MIGRATION,
+    ])
+    expect(readdirSync(join(dataFolder, BACKUPS_FOLDER))).toEqual([`${BUILD_MIGRATION}.sqlite`])
+
+    const schema = (await on(dataFolder, schemaOf)).join('\n')
+    for (const table of ['build_tasks', 'build_attempts', 'build_blockers', 'project_checks']) {
+      expect(schema).toContain(`${table}: CREATE TABLE`)
+    }
+
+    const kept = await on(
+      dataFolder,
+      Effect.gen(function* () {
+        const sql = yield* SqliteClient
+        return {
+          sessions: yield* sql<{
+            title: string
+            build_phase: string | null
+            build_review_at: string | null
+          }>`SELECT title, build_phase, build_review_at FROM sessions`,
+          entries: yield* sql<{ kind: string }>`SELECT kind FROM session_entries`,
+          runs: yield* sql<{ told: string }>`SELECT told FROM command_runs`,
+          commands: yield* sql<{ run_at_open: number }>`SELECT run_at_open FROM project_commands`,
+          queued: yield* sql<{ text: string }>`SELECT text FROM queued_results`,
+        }
+      }),
+    )
+    expect(kept).toEqual({
+      sessions: [{ title: 'Set it up', build_phase: null, build_review_at: null }],
+      entries: [{ kind: 'setup_proposal' }],
+      runs: [{ told: 'none' }],
+      commands: [{ run_at_open: 1 }],
+      queued: [{ text: 'Two call sites.' }],
+    })
+  })
+})
+
+describe('A profile of lot 20 is migrated to lot 22', () => {
+  test('the build migration keeps the Sessions, their threads, runs and Journal', async () => {
+    const dataFolder = join(workspace, 'from-lot-twenty')
+    await on(dataFolder, openProfile(dataFolder, shippedUpTo(CHOICES_MIGRATION), '0.4.0'))
+
+    // A build Session launched on a Spec, with a message, a run and the launch that started it,
+    // and two Journal lines: the two tables this migration rebuilds and every row pointing at them.
+    await on(
+      dataFolder,
+      Effect.gen(function* () {
+        const sql = yield* SqliteClient
+        const at = '2026-09-24T22:00:00.000Z'
+        yield* sql`INSERT INTO projects (id, name, tone, created_at, updated_at, version)
+          VALUES ('atlas', 'Atlas', 'primary', ${at}, ${at}, 1)`
+        yield* sql`INSERT INTO workspaces (id, project_id, name, path, created_at, state)
+          VALUES ('main-1', 'atlas', 'main', '/work/atlas', ${at}, 'ready')`
+        yield* sql`INSERT INTO specs (id, project_id, key, slug, status, current_revision_id, created_at, updated_at)
+          VALUES ('spec-1', 'atlas', 'HEM-7', 'the-login-form', 'ready', 'revision-1', ${at}, ${at})`
+        yield* sql`INSERT INTO spec_revisions (id, spec_id, number, title, type, created_by, created_at)
+          VALUES ('revision-1', 'spec-1', 1, 'The login form', 'feature', 'human', ${at})`
+        yield* sql`INSERT INTO sessions (id, project_id, title, title_source, provider, native_session_id, native_state, mission, spec_id, revision_id, workspace_id, created_at, last_written_at, version)
+          VALUES ('session-build', 'atlas', 'Build HEM-7', 'derived', 'claude', 'native-7', 'attached', 'build', 'spec-1', 'revision-1', 'main-1', ${at}, ${at}, 3)`
+        yield* sql`UPDATE specs SET writer_session_id = 'session-build' WHERE id = 'spec-1'`
+        yield* sql`INSERT INTO session_entries (id, session_id, seq, role, kind, body, payload, created_at)
+          VALUES ('entry-1', 'session-build', 1, 'hemera', 'mission_brief', 'Build HEM-7', '{}', ${at})`
+        yield* sql`INSERT INTO command_runs (id, session_id, name, line, type, cwd, state, started_by, started_at, workspace_id)
+          VALUES ('run-1', 'session-build', 'test', 'pnpm test', 'test', '/work/atlas', 'exited', 'agent', ${at}, 'main-1')`
+        yield* sql`INSERT INTO build_launches (id, spec_id, revision_id, workspace_id, state, session_id, created_at, updated_at)
+          VALUES ('launch-1', 'spec-1', 'revision-1', 'main-1', 'started', 'session-build', ${at}, ${at})`
+        yield* sql`INSERT INTO domain_events (type, entity_kind, entity_id, source, author, occurred_at, project_id, session_id, spec_id, payload)
+          VALUES ('launch.started', 'launch', 'launch-1', 'ui', 'human', ${at}, 'atlas', 'session-build', 'spec-1', '{}')`
+      }),
+    )
+
+    const standing = await on(dataFolder, openProfile(dataFolder, SHIPPED, '0.5.0'))
+    expect(standing.behind).toEqual([
+      BUILD_MIGRATION,
+      REVIEW_MIGRATION,
+      QUEUED_MIGRATION,
+      RUN_AT_OPEN_MIGRATION,
+      CONTEXT_WORDS_MIGRATION,
+      RUN_TOLD_MIGRATION,
+      SETUP_MIGRATION,
+      REPRODUCTION_MIGRATION,
+      HELPERS_MIGRATION,
+    ])
+    expect(readdirSync(join(dataFolder, BACKUPS_FOLDER))).toEqual([`${BUILD_MIGRATION}.sqlite`])
+
+    const schema = (await on(dataFolder, schemaOf)).join('\n')
+    for (const table of [
+      'build_tasks',
+      'build_attempts',
+      'build_attempt_trees',
+      'build_attempt_files',
+      'build_check_results',
+      'build_blockers',
+      'project_checks',
+    ]) {
+      expect(schema).toContain(`${table}: CREATE TABLE`)
+    }
+
+    const kept = await on(
+      dataFolder,
+      Effect.gen(function* () {
+        const sql = yield* SqliteClient
+        const sessions = yield* sql<{
+          title: string
+          native_session_id: string | null
+          mission: string
+          revision_id: string | null
+          workspace_id: string | null
+          version: number
+          build_phase: string | null
+          build_paused_at: string | null
+          build_detail: string | null
+          approach_note: string | null
+        }>`SELECT title, native_session_id, mission, revision_id, workspace_id, version,
+              build_phase, build_paused_at, build_detail, approach_note
+            FROM sessions WHERE id = 'session-build'`
+        const entries = yield* sql<{ id: string }>`
+          SELECT id FROM session_entries WHERE session_id = 'session-build'`
+        const runs = yield* sql<{ id: string }>`
+          SELECT id FROM command_runs WHERE session_id = 'session-build'`
+        const launches = yield* sql<{ session_id: string | null }>`
+          SELECT session_id FROM build_launches WHERE id = 'launch-1'`
+        const writers = yield* sql<{ writer_session_id: string | null }>`
+          SELECT writer_session_id FROM specs WHERE id = 'spec-1'`
+        const events = yield* sql<{ sequence: number; type: string }>`
+          SELECT sequence, type FROM domain_events ORDER BY sequence`
+        // The Journal keeps counting after the lines it had: its key is still `AUTOINCREMENT`.
+        yield* sql`INSERT INTO domain_events (type, entity_kind, entity_id, source, author, occurred_at, session_id, payload)
+          VALUES ('task.ready', 'task', 'task-1', 'system', 'hemera', '2026-09-25T08:00:00.000Z', 'session-build', '{}')`
+        const next = yield* sql<{ sequence: number }>`
+          SELECT sequence FROM domain_events WHERE type = 'task.ready'`
+        // A Session's thread still goes with it: the rebuilt `sessions` is the parent it was.
+        const parents = yield* sql<{ table: string }>`
+          SELECT "table" FROM pragma_foreign_key_list('session_entries')`
+        return { session: sessions[0], entries, runs, launches, writers, events, next, parents }
+      }),
+    )
+
+    expect(kept.session).toEqual({
+      title: 'Build HEM-7',
+      native_session_id: 'native-7',
+      mission: 'build',
+      revision_id: 'revision-1',
+      workspace_id: 'main-1',
+      version: 3,
+      build_phase: null,
+      build_paused_at: null,
+      build_detail: null,
+      approach_note: null,
+    })
+    expect(kept.entries).toEqual([{ id: 'entry-1' }])
+    expect(kept.runs).toEqual([{ id: 'run-1' }])
+    expect(kept.launches).toEqual([{ session_id: 'session-build' }])
+    expect(kept.writers).toEqual([{ writer_session_id: 'session-build' }])
+    expect(kept.events.map((event) => event.type)).toEqual([
+      'profile.opened',
+      'profile.migrated',
+      'launch.started',
+      'profile.opened',
+      'profile.backed_up',
+      'profile.migrated',
+    ])
+    expect(kept.next[0]!.sequence).toBeGreaterThan(kept.events.at(-1)!.sequence)
+    expect(kept.parents).toEqual([{ table: 'sessions' }])
+  })
+
+  test('a build’s rows are written, and what no build writes is refused', async () => {
+    const dataFolder = join(workspace, 'build-checks')
+    await on(dataFolder, openProfile(dataFolder, SHIPPED, '0.5.0'))
+
+    const seen = await on(
+      dataFolder,
+      Effect.gen(function* () {
+        const sql = yield* SqliteClient
+        const at = '2026-09-25T08:00:00.000Z'
+        yield* sql`INSERT INTO projects (id, name, tone, created_at, updated_at, version)
+          VALUES ('atlas', 'Atlas', 'primary', ${at}, ${at}, 1)`
+        yield* sql`INSERT INTO project_commands (id, project_id, name, line, type, created_at, updated_at)
+          VALUES ('c-test', 'atlas', 'test', 'pnpm test', 'test', ${at}, ${at})`
+        yield* sql`INSERT INTO sessions (id, project_id, title, title_source, mission, created_at, last_written_at, version, build_phase)
+          VALUES ('session-build', 'atlas', 'Build HEM-7', 'derived', 'build', ${at}, ${at}, 1, 'prepare')`
+        const tried = (insert: Effect.Effect<unknown, unknown>) =>
+          Effect.map(Effect.exit(insert), (exit) => Exit.isSuccess(exit))
+        const check = (
+          id: string,
+          command: string | null,
+          line: string | null,
+          where: string,
+          repository: string | null,
+          when: string,
+          pattern: string | null,
+          minimum: number | null,
+        ) =>
+          tried(sql`INSERT INTO project_checks (id, project_id, name, command_id, line, "where", repository, "when", expect_pattern, expect_minimum, rank, created_at, updated_at)
+            VALUES (${id}, 'atlas', ${id}, ${command}, ${line}, ${where}, ${repository}, ${when}, ${pattern}, ${minimum}, 'a', ${at}, ${at})`)
+        const task = (id: string, taskId: string, label: string, state: string) =>
+          tried(sql`INSERT INTO build_tasks (id, session_id, task_id, label, rank, state, updated_at)
+            VALUES (${id}, 'session-build', ${taskId}, ${label}, 'a', ${state}, ${at})`)
+        const attempt = (
+          id: string,
+          scope: string,
+          buildTask: string | null,
+          story: string | null,
+          number: number,
+        ) =>
+          tried(sql`INSERT INTO build_attempts (id, session_id, scope, build_task_id, story_id, number, started_at)
+            VALUES (${id}, 'session-build', ${scope}, ${buildTask}, ${story}, ${number}, ${at})`)
+
+        const checks = {
+          command: yield* check('unit', 'c-test', null, 'changed', null, 'task', null, null),
+          line: yield* check(
+            'cover',
+            null,
+            'pnpm cover',
+            'repository',
+            'api',
+            'end',
+            'All (\\d+)%',
+            70,
+          ),
+          both: yield* check('both', 'c-test', 'pnpm test', 'root', null, 'task', null, null),
+          neither: yield* check('neither', null, null, 'root', null, 'task', null, null),
+          repositoryMissing: yield* check('r1', null, 'x', 'repository', null, 'task', null, null),
+          repositoryAtRoot: yield* check('r2', null, 'x', 'root', 'api', 'task', null, null),
+          halfExpect: yield* check('e1', null, 'x', 'root', null, 'task', 'All (\\d+)%', null),
+          unknownWhere: yield* check('w1', null, 'x', 'anywhere', null, 'task', null, null),
+          unknownWhen: yield* check('w2', null, 'x', 'root', null, 'nightly', null, null),
+          sameName: yield* check('unit', null, 'x', 'root', null, 'task', null, null),
+        }
+        const tasks = {
+          ready: yield* task('bt-1', 'task-1', 'T1', 'ready'),
+          waiting: yield* task('bt-2', 'task-2', 'T2', 'waiting'),
+          unknownState: yield* task('bt-3', 'task-3', 'T3', 'started'),
+          sameTask: yield* task('bt-4', 'task-1', 'T4', 'ready'),
+          sameLabel: yield* task('bt-5', 'task-5', 'T1', 'ready'),
+        }
+        const attempts = {
+          onTask: yield* attempt('a-1', 'task', 'bt-1', null, 1),
+          onStory: yield* attempt('a-2', 'story', null, 'story-1', 1),
+          onBuild: yield* attempt('a-3', 'build', null, null, 1),
+          taskWithoutTask: yield* attempt('a-4', 'task', null, null, 2),
+          storyWithTask: yield* attempt('a-5', 'story', 'bt-1', 'story-1', 2),
+          buildWithStory: yield* attempt('a-6', 'build', null, 'story-1', 2),
+          unknownScope: yield* attempt('a-7', 'phase', null, null, 2),
+          sameTaskNumber: yield* attempt('a-8', 'task', 'bt-1', null, 1),
+          sameStoryNumber: yield* attempt('a-9', 'story', null, 'story-1', 1),
+          sameBuildNumber: yield* attempt('a-10', 'build', null, null, 1),
+          unknownResult:
+            yield* tried(sql`INSERT INTO build_attempts (id, session_id, scope, build_task_id, number, started_at, result)
+            VALUES ('a-11', 'session-build', 'task', 'bt-1', 2, ${at}, 'amber')`),
+        }
+        // The evidence of the first attempt: its snapshots, a text and a binary file, a check.
+        yield* sql`INSERT INTO build_attempt_trees (attempt_id, repository, start_tree, end_tree)
+          VALUES ('a-1', '', '4b825dc642cb6eb9a060e54bf8d69288fbee4904', NULL)`
+        yield* sql`INSERT INTO build_attempt_files (attempt_id, repository, path, status, added, removed)
+          VALUES ('a-1', '', 'src/login.ts', 'M', 12, 3), ('a-1', '', 'logo.png', 'A', NULL, NULL)`
+        const verdicts = {
+          green:
+            yield* tried(sql`INSERT INTO build_check_results (id, attempt_id, check_id, name, place, line, verdict, exit_code, ran_at)
+            VALUES ('r-1', 'a-1', 'unit', 'unit', '', 'pnpm test', 'green', 0, ${at})`),
+          unknown:
+            yield* tried(sql`INSERT INTO build_check_results (id, attempt_id, name, place, line, verdict, ran_at)
+            VALUES ('r-2', 'a-1', 'unit', '', 'pnpm test', 'amber', ${at})`),
+        }
+        const blocker =
+          yield* tried(sql`INSERT INTO build_blockers (id, session_id, build_task_id, reason, raised_at)
+          VALUES ('b-1', 'session-build', 'bt-1', 'The Spec asks for two forms', ${at})`)
+        const phases = {
+          unknown: yield* tried(
+            sql`UPDATE sessions SET build_phase = 'deliver' WHERE id = 'session-build'`,
+          ),
+          execute: yield* tried(
+            sql`UPDATE sessions SET build_phase = 'execute' WHERE id = 'session-build'`,
+          ),
+        }
+        const taskEvent =
+          yield* tried(sql`INSERT INTO domain_events (type, entity_kind, entity_id, source, author, occurred_at, session_id, payload)
+          VALUES ('task.ready', 'task', 'bt-1', 'system', 'hemera', ${at}, 'session-build', '{}')`)
+        // A check removed leaves its result where it was, no longer pointing at it.
+        yield* sql`DELETE FROM project_checks WHERE id = 'unit'`
+        const results = yield* sql<{ check_id: string | null; name: string; output_tail: string }>`
+          SELECT check_id, name, output_tail FROM build_check_results`
+        const files = yield* sql<{ path: string; added: number | null }>`
+          SELECT path, added FROM build_attempt_files ORDER BY path`
+        const skip = yield* sql<{ skip_unblocks: number }>`
+          SELECT skip_unblocks FROM build_tasks WHERE id = 'bt-1'`
+        return {
+          checks,
+          tasks,
+          attempts,
+          verdicts,
+          blocker,
+          phases,
+          taskEvent,
+          results,
+          files,
+          skip,
+        }
+      }),
+    )
+
+    expect(seen.checks).toEqual({
+      command: true,
+      line: true,
+      both: false,
+      neither: false,
+      repositoryMissing: false,
+      repositoryAtRoot: false,
+      halfExpect: false,
+      unknownWhere: false,
+      unknownWhen: false,
+      sameName: false,
+    })
+    expect(seen.tasks).toEqual({
+      ready: true,
+      waiting: true,
+      unknownState: false,
+      sameTask: false,
+      sameLabel: false,
+    })
+    expect(seen.attempts).toEqual({
+      onTask: true,
+      onStory: true,
+      onBuild: true,
+      taskWithoutTask: false,
+      storyWithTask: false,
+      buildWithStory: false,
+      unknownScope: false,
+      sameTaskNumber: false,
+      sameStoryNumber: false,
+      sameBuildNumber: false,
+      unknownResult: false,
+    })
+    expect(seen.verdicts).toEqual({ green: true, unknown: false })
+    expect(seen.blocker).toBe(true)
+    expect(seen.phases).toEqual({ unknown: false, execute: true })
+    expect(seen.taskEvent).toBe(true)
+    expect(seen.results).toEqual([{ check_id: null, name: 'unit', output_tail: '' }])
+    expect(seen.files).toEqual([
+      { path: 'logo.png', added: null },
+      { path: 'src/login.ts', added: 12 },
+    ])
+    expect(seen.skip).toEqual([{ skip_unblocks: 0 }])
+  })
+
+  test('a build view is read through its indexes', async () => {
+    const dataFolder = join(workspace, 'build-index')
+    await on(dataFolder, openProfile(dataFolder, SHIPPED, '0.5.0'))
+
+    const plans = await on(
+      dataFolder,
+      Effect.gen(function* () {
+        const sql = yield* SqliteClient
+        const detail = (rows: readonly { detail: string }[]) =>
+          rows.map((row) => row.detail).join('\n')
+        return {
+          tasks: detail(
+            yield* sql<{ detail: string }>`EXPLAIN QUERY PLAN
+              SELECT id FROM build_tasks WHERE session_id = 's' AND state = 'ready'`,
+          ),
+          attempts: detail(
+            yield* sql<{ detail: string }>`EXPLAIN QUERY PLAN
+              SELECT id FROM build_attempts WHERE session_id = 's'`,
+          ),
+          results: detail(
+            yield* sql<{ detail: string }>`EXPLAIN QUERY PLAN
+              SELECT id FROM build_check_results WHERE attempt_id = 'a' ORDER BY ran_at`,
+          ),
+          blockers: detail(
+            yield* sql<{ detail: string }>`EXPLAIN QUERY PLAN
+              SELECT id FROM build_blockers WHERE session_id = 's'`,
+          ),
+        }
+      }),
+    )
+
+    expect(plans.tasks).toContain('INDEX build_task_by_state (session_id=? AND state=?)')
+    expect(plans.attempts).toContain('INDEX attempt_by_session (session_id=?)')
+    expect(plans.results).toContain('INDEX check_result_by_attempt (attempt_id=?)')
+    expect(plans.blockers).toContain('INDEX blocker_by_session (session_id=?)')
+  })
+})
+
 describe('A profile that ran the choices keeps a queued result across a quit', () => {
   test('a Session is kept whole, and a result queued for it goes with it when it is deleted', async () => {
     const dataFolder = join(workspace, 'from-choices')
@@ -1450,13 +1914,17 @@ describe('A profile that ran the choices keeps a queued result across a quit', (
 
     const standing = await on(dataFolder, openProfile(dataFolder, SHIPPED, '0.4.0'))
     expect(standing.behind).toEqual([
+      BUILD_MIGRATION,
+      REVIEW_MIGRATION,
       QUEUED_MIGRATION,
       RUN_AT_OPEN_MIGRATION,
       CONTEXT_WORDS_MIGRATION,
       RUN_TOLD_MIGRATION,
       SETUP_MIGRATION,
+      REPRODUCTION_MIGRATION,
+      HELPERS_MIGRATION,
     ])
-    expect(readdirSync(join(dataFolder, BACKUPS_FOLDER))).toEqual([`${QUEUED_MIGRATION}.sqlite`])
+    expect(readdirSync(join(dataFolder, BACKUPS_FOLDER))).toEqual([`${BUILD_MIGRATION}.sqlite`])
 
     const read = await on(
       dataFolder,
@@ -1504,6 +1972,8 @@ describe('A profile that ran the queued results keeps its commands, none run at 
       CONTEXT_WORDS_MIGRATION,
       RUN_TOLD_MIGRATION,
       SETUP_MIGRATION,
+      REPRODUCTION_MIGRATION,
+      HELPERS_MIGRATION,
     ])
     expect(readdirSync(join(dataFolder, BACKUPS_FOLDER))).toEqual([
       `${RUN_AT_OPEN_MIGRATION}.sqlite`,
@@ -1543,7 +2013,13 @@ describe('A profile that ran the commands at open keeps what its Sessions were p
     )
 
     const standing = await on(dataFolder, openProfile(dataFolder, SHIPPED, '0.4.0'))
-    expect(standing.behind).toEqual([CONTEXT_WORDS_MIGRATION, RUN_TOLD_MIGRATION, SETUP_MIGRATION])
+    expect(standing.behind).toEqual([
+      CONTEXT_WORDS_MIGRATION,
+      RUN_TOLD_MIGRATION,
+      SETUP_MIGRATION,
+      REPRODUCTION_MIGRATION,
+      HELPERS_MIGRATION,
+    ])
     expect(readdirSync(join(dataFolder, BACKUPS_FOLDER))).toEqual([
       `${CONTEXT_WORDS_MIGRATION}.sqlite`,
     ])
@@ -1589,7 +2065,12 @@ describe('A profile that ran the context notices keeps its runs, none owed to an
     )
 
     const standing = await on(dataFolder, openProfile(dataFolder, SHIPPED, '0.4.0'))
-    expect(standing.behind).toEqual([RUN_TOLD_MIGRATION, SETUP_MIGRATION])
+    expect(standing.behind).toEqual([
+      RUN_TOLD_MIGRATION,
+      SETUP_MIGRATION,
+      REPRODUCTION_MIGRATION,
+      HELPERS_MIGRATION,
+    ])
     expect(readdirSync(join(dataFolder, BACKUPS_FOLDER))).toEqual([`${RUN_TOLD_MIGRATION}.sqlite`])
 
     const runs = await on(
@@ -1632,7 +2113,7 @@ describe('A profile that ran the run told keeps its threads, and holds a setup p
     )
 
     const standing = await on(dataFolder, openProfile(dataFolder, SHIPPED, '0.4.0'))
-    expect(standing.behind).toEqual([SETUP_MIGRATION])
+    expect(standing.behind).toEqual([SETUP_MIGRATION, REPRODUCTION_MIGRATION, HELPERS_MIGRATION])
     expect(readdirSync(join(dataFolder, BACKUPS_FOLDER))).toEqual([`${SETUP_MIGRATION}.sqlite`])
 
     const entries = await on(
@@ -1652,5 +2133,142 @@ describe('A profile that ran the run told keeps its threads, and holds a setup p
       { id: 'entry-1', kind: 'command_proposal', correlation_id: 'proposal:p1' },
       { id: 'entry-2', kind: 'setup_proposal', correlation_id: 'setup:s1' },
     ])
+  })
+})
+
+describe('A profile that ran the setup proposals keeps its builds, and holds a replay', () => {
+  test('a build and its end checks are kept whole, and a replay of a reproduction can be kept', async () => {
+    const dataFolder = join(workspace, 'from-setup-proposals')
+    await on(dataFolder, openProfile(dataFolder, shippedUpTo(SETUP_MIGRATION), '0.4.0'))
+    await on(
+      dataFolder,
+      Effect.gen(function* () {
+        const sql = yield* SqliteClient
+        const at = '2026-09-29T10:00:00.000Z'
+        yield* sql`INSERT INTO projects (id, name, tone, created_at, updated_at, version)
+          VALUES ('atlas', 'Atlas', 'primary', ${at}, ${at}, 1)`
+        yield* sql`INSERT INTO sessions (id, project_id, title, title_source, provider, mission, build_phase, created_at, last_written_at, version)
+          VALUES ('build-1', 'atlas', 'Build ATL-9', 'derived', 'claude', 'build', 'verify', ${at}, ${at}, 1)`
+        yield* sql`INSERT INTO build_attempts (id, session_id, scope, number, started_at, ended_at, result)
+          VALUES ('end-1', 'build-1', 'build', 1, ${at}, ${at}, 'green')`
+      }),
+    )
+
+    const standing = await on(dataFolder, openProfile(dataFolder, SHIPPED, '0.5.0'))
+    expect(standing.behind).toEqual([REPRODUCTION_MIGRATION, HELPERS_MIGRATION])
+    expect(readdirSync(join(dataFolder, BACKUPS_FOLDER))).toEqual([
+      `${REPRODUCTION_MIGRATION}.sqlite`,
+    ])
+
+    const kept = await on(
+      dataFolder,
+      Effect.gen(function* () {
+        const sql = yield* SqliteClient
+        const before = yield* sql<{
+          id: string
+          result: string
+          reproduction: string | null
+          reproduction_gone: number | null
+        }>`SELECT id, result, reproduction, reproduction_gone FROM build_attempts`
+        const held = yield* sql<{
+          build_reproduction: string | null
+        }>`SELECT build_reproduction FROM sessions`
+        yield* sql`INSERT INTO build_attempts (id, session_id, scope, number, started_at, reproduction, reproduction_gone)
+          VALUES ('end-2', 'build-1', 'build', 2, '2026-09-30T10:00:00.000Z', 'The total matches.', 1)`
+        const after = yield* sql<{
+          reproduction: string | null
+          reproduction_gone: number | null
+        }>`SELECT reproduction, reproduction_gone FROM build_attempts WHERE id = 'end-2'`
+        return { before, held, after }
+      }),
+    )
+    expect(kept).toEqual({
+      before: [{ id: 'end-1', result: 'green', reproduction: null, reproduction_gone: null }],
+      held: [{ build_reproduction: null }],
+      after: [{ reproduction: 'The total matches.', reproduction_gone: 1 }],
+    })
+  })
+})
+
+describe('A profile that ran the replay gains helpers, kept whole', () => {
+  test('its Projects and Sessions are kept, three helpers at once by default, and a helper can be written', async () => {
+    const dataFolder = join(workspace, 'from-reproduction')
+    await on(dataFolder, openProfile(dataFolder, shippedUpTo(REPRODUCTION_MIGRATION), '0.5.0'))
+    await on(
+      dataFolder,
+      Effect.gen(function* () {
+        const sql = yield* SqliteClient
+        const at = '2026-09-30T10:00:00.000Z'
+        yield* sql`INSERT INTO projects (id, name, tone, created_at, updated_at, version)
+          VALUES ('atlas', 'Atlas', 'primary', ${at}, ${at}, 1)`
+        yield* sql`INSERT INTO sessions (id, project_id, title, title_source, provider, mission, build_phase, created_at, last_written_at, version)
+          VALUES ('build-1', 'atlas', 'Build ATL-9', 'derived', 'claude', 'build', 'execute', ${at}, ${at}, 1)`
+        yield* sql`INSERT INTO session_entries (id, session_id, seq, role, kind, body, payload, created_at)
+          VALUES ('entry-1', 'build-1', 1, 'hemera', 'mission_brief', 'Build it.', '{}', ${at})`
+      }),
+    )
+
+    const standing = await on(dataFolder, openProfile(dataFolder, SHIPPED, '0.5.0'))
+    expect(standing.behind).toEqual([HELPERS_MIGRATION])
+    expect(readdirSync(join(dataFolder, BACKUPS_FOLDER))).toEqual([`${HELPERS_MIGRATION}.sqlite`])
+
+    const kept = await on(
+      dataFolder,
+      Effect.gen(function* () {
+        const sql = yield* SqliteClient
+        const at = '2026-10-01T10:00:00.000Z'
+        yield* sql`INSERT INTO sessions (id, project_id, title, title_source, provider, mission, created_at, last_written_at, version, parent_session_id, helper, helper_depth, helper_task, helper_state)
+          VALUES ('helper-1', 'atlas', 'Test review', 'derived', 'claude', 'build', ${at}, ${at}, 1, 'build-1', 'review-tests', 1, 'T2', 'running')`
+        yield* sql`INSERT INTO build_claims (id, session_id, task, path, claimed_at)
+          VALUES ('claim-1', 'build-1', 'T2', 'src/reader.ts', ${at})`
+        const projects = yield* sql<{
+          helpers_at_once: number
+        }>`SELECT helpers_at_once FROM projects`
+        const sessions = yield* sql<{
+          id: string
+          parent_session_id: string | null
+          helper_state: string | null
+        }>`SELECT id, parent_session_id, helper_state FROM sessions ORDER BY id`
+        const entries = yield* sql<{ id: string }>`SELECT id FROM session_entries`
+        return { projects, sessions, entries }
+      }),
+    )
+    expect(kept).toEqual({
+      projects: [{ helpers_at_once: 3 }],
+      sessions: [
+        { id: 'build-1', parent_session_id: null, helper_state: null },
+        { id: 'helper-1', parent_session_id: 'build-1', helper_state: 'running' },
+      ],
+      entries: [{ id: 'entry-1' }],
+    })
+  })
+
+  test('a helper without a state, a state without a parent, or seven at once is refused', async () => {
+    const dataFolder = join(workspace, 'helpers-refused')
+    await on(dataFolder, openProfile(dataFolder, SHIPPED, '0.5.0'))
+    const refused = await on(
+      dataFolder,
+      Effect.gen(function* () {
+        const sql = yield* SqliteClient
+        const at = '2026-10-01T10:00:00.000Z'
+        yield* sql`INSERT INTO projects (id, name, tone, created_at, updated_at, version)
+          VALUES ('atlas', 'Atlas', 'primary', ${at}, ${at}, 1)`
+        yield* sql`INSERT INTO sessions (id, project_id, title, title_source, created_at, last_written_at, version)
+          VALUES ('build-1', 'atlas', 'Build', 'derived', ${at}, ${at}, 1)`
+        const attempts = [
+          sql`INSERT INTO sessions (id, project_id, title, title_source, created_at, last_written_at, version, parent_session_id, helper_depth)
+            VALUES ('h-1', 'atlas', 'Helper', 'derived', ${at}, ${at}, 1, 'build-1', 1)`,
+          sql`INSERT INTO sessions (id, project_id, title, title_source, created_at, last_written_at, version, helper_state)
+            VALUES ('h-2', 'atlas', 'Helper', 'derived', ${at}, ${at}, 1, 'running')`,
+          sql`INSERT INTO sessions (id, project_id, title, title_source, created_at, last_written_at, version, parent_session_id, helper_depth, helper_state)
+            VALUES ('h-3', 'atlas', 'Helper', 'derived', ${at}, ${at}, 1, 'build-1', 3, 'running')`,
+          sql`UPDATE projects SET helpers_at_once = 7`,
+        ]
+        return yield* Effect.forEach(attempts, (attempt) =>
+          attempt.pipe(Effect.match({ onFailure: () => 'refused', onSuccess: () => 'written' })),
+        )
+      }),
+    )
+    expect(refused).toEqual(['refused', 'refused', 'refused', 'refused'])
   })
 })

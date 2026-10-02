@@ -25,6 +25,7 @@ import type {
   EmptyMessageError,
   EmptyTitleError,
   InvalidCommandFolderError,
+  InvalidHelpersAtOnceError,
   InvalidPortlessNameError,
   InvalidProjectNameError,
   InvalidRepositoryPathError,
@@ -32,12 +33,15 @@ import type {
   InvalidVariableKeyError,
   NoAgentError,
 } from '@hemera/core'
+import { HelperReadOnlyError } from '@hemera/core'
 
 import { type AgentOption } from './agents/client.ts'
 import { AgentRuntime, type AgentRuntimeError } from './agents/runtime.ts'
 import { Agents, availabilityOf, type AgentUpdateRefusedError } from './agents/service.ts'
 import { type BareModeNotQualifiedError, refusedUnlessBare } from './agents/bare.ts'
 import { ADAPTERS, Discovery } from './agents/discovery.ts'
+import { type BuildRefusedError, Builds, type UnknownBuildError } from './build/build.ts'
+import { type CheckRefusedError, ProjectChecks, type UnknownCheckError } from './build/checks.ts'
 import { runAtOpen } from './commands/at-open.ts'
 import {
   type NothingToRunError,
@@ -57,6 +61,7 @@ import { Commands, type UnknownCommandError, type UnknownRunError } from './comm
 import { SetupProposals, type SetupRefusedError } from './setup/proposals.ts'
 import { type Context, type UnreadableInstructionsError } from './context/service.ts'
 import { contextOf } from './context/view.ts'
+import { Helpers } from './helpers/helpers.ts'
 import { type InvalidCursorError, Journal } from './journal.ts'
 import { type PathOutsideBaseError, entriesUnder } from './paths.ts'
 import { Preferences } from './preferences.ts'
@@ -68,6 +73,7 @@ import {
 } from './projects.ts'
 import {
   Sessions,
+  type SessionsService,
   type UnknownSessionError,
   type WorkspaceFixedError,
   type WorkspaceNotReadyError,
@@ -169,6 +175,18 @@ export function decideRequest(
 }
 
 /**
+ * Refuses a request of the page that would change a helper's Session (issue #77): its launcher
+ * and Hemera drive it — stopped by its ×, never by the Session's own Stop, which would cancel its
+ * turn with nobody to settle it — and the user reads it, nothing more.
+ */
+function notAHelper(sessions: SessionsService, id: string) {
+  return Effect.gen(function* () {
+    const { session } = yield* sessions.one(id)
+    if (session.helper !== null) return yield* Effect.fail(new HelperReadOnlyError())
+  })
+}
+
+/**
  * The use case itself, once the message has been read and accepted.
  *
  * Each one is a function of a service, so what this does is choose which and hand it what it
@@ -198,6 +216,9 @@ export function answer(
   | Proposals
   | SetupProposals
   | Specs
+  | ProjectChecks
+  | Builds
+  | Helpers
 > {
   return Effect.gen(function* () {
     if (decision.name === 'engine.status') return yield* (yield* EngineStatus).read
@@ -234,6 +255,7 @@ export function answer(
     }
     if (decision.name === 'sessions.rename') {
       const { id, version, title } = decision.argument
+      yield* notAHelper(sessions, id)
       return yield* sessions.rename(id, version, title)
     }
     if (decision.name === 'sessions.chooseWorkspace') {
@@ -241,6 +263,7 @@ export function answer(
       return yield* sessions.chooseWorkspace(id, version, workspaceId)
     }
     if (decision.name === 'sessions.archive') {
+      yield* notAHelper(sessions, decision.argument.id)
       return yield* sessions.archive(decision.argument.id, decision.argument.version)
     }
     if (decision.name === 'sessions.restore') {
@@ -278,6 +301,10 @@ export function answer(
     if (decision.name === 'projects.setWorkspacesRoot') {
       const { id, version, path } = decision.argument
       return yield* projects.setWorkspacesRoot(id, version, path)
+    }
+    if (decision.name === 'projects.setHelpersAtOnce') {
+      const { id, version, helpersAtOnce } = decision.argument
+      return yield* projects.setHelpersAtOnce(id, version, helpersAtOnce)
     }
     if (decision.name === 'projects.setBranchPrefix') {
       const { id, version, prefix } = decision.argument
@@ -326,6 +353,7 @@ export function answer(
     }
     if (decision.name === 'agents.setOption') {
       const { sessionId, optionId, value } = decision.argument
+      yield* notAHelper(sessions, sessionId)
       return yield* runtime.setOption(sessionId, optionId, value)
     }
     if (decision.name === 'agents.prompt') {
@@ -337,12 +365,16 @@ export function answer(
       const report = yield* runtime.prompt(sessionId, text, intent)
       return { stopReason: report.stopReason }
     }
-    if (decision.name === 'agents.stop') return yield* runtime.stop(decision.argument.sessionId)
+    if (decision.name === 'agents.stop') {
+      yield* notAHelper(sessions, decision.argument.sessionId)
+      return yield* runtime.stop(decision.argument.sessionId)
+    }
     if (decision.name === 'agents.decide') {
       const { sessionId, toolCallId, optionId } = decision.argument
       return yield* runtime.decide(sessionId, toolCallId, optionId)
     }
     if (decision.name === 'agents.resume') {
+      yield* notAHelper(sessions, decision.argument.sessionId)
       const report = yield* runtime.resume(decision.argument.sessionId)
       return { state: report.state, reason: report.reason }
     }
@@ -633,8 +665,56 @@ export function answer(
       return yield* launches.retry(decision.argument.launchId)
     }
 
-    const { id, version, relativePath } = decision.argument
-    return yield* projects.removeRepository(id, version, relativePath)
+    // The Build section of the Project settings (D10-06): nothing proposed is saved until the
+    // user accepts it.
+    const checks = yield* ProjectChecks
+    if (decision.name === 'checks.list') {
+      const { projectId } = decision.argument
+      return { checks: yield* checks.list(projectId), proposed: yield* checks.proposed(projectId) }
+    }
+    if (decision.name === 'checks.save') {
+      const { projectId, id, draft } = decision.argument
+      return yield* checks.save(projectId, draft, id)
+    }
+    if (decision.name === 'checks.remove') return yield* checks.remove(decision.argument.id)
+    if (decision.name === 'checks.acceptProposed') {
+      const { projectId, drafts } = decision.argument
+      return yield* checks.acceptProposed(projectId, drafts)
+    }
+
+    if (decision.name === 'repositories.remove') {
+      const { id, version, relativePath } = decision.argument
+      return yield* projects.removeRepository(id, version, relativePath)
+    }
+
+    // The helpers of a build (issue #77): read for the line of what goes on, and stopped by the
+    // user's ×, which tells the main agent; both answer the build's helpers as they stand.
+    if (decision.name === 'helpers.list') {
+      return { helpers: [...(yield* (yield* Helpers).list(decision.argument.sessionId))] }
+    }
+    if (decision.name === 'helpers.stop') {
+      return { helpers: [...(yield* (yield* Helpers).stop(decision.argument.sessionId))] }
+    }
+
+    // The build of a `build` Session (D10-04): the window says what the user did, and the engine
+    // decides what follows; every act answers the build it leaves.
+    const builds = yield* Builds
+    const { sessionId } = decision.argument
+    if (decision.name === 'build.pause') return yield* builds.pause(sessionId)
+    if (decision.name === 'build.resume') return yield* builds.resume(sessionId)
+    if (decision.name === 'build.accept') return yield* builds.accept(sessionId)
+    if (decision.name === 'build.stop') return yield* builds.stop(sessionId)
+    if (decision.name === 'build.taskDone')
+      return yield* builds.taskDone(sessionId, decision.argument.taskId)
+    if (decision.name === 'build.taskSkip') {
+      const { taskId, reason, unblock } = decision.argument
+      return yield* builds.taskSkip(sessionId, taskId, reason, unblock)
+    }
+    if (decision.name === 'build.dismissBlocker') {
+      const { blockerId, note } = decision.argument
+      return yield* builds.dismissBlocker(sessionId, blockerId, note)
+    }
+    return yield* builds.view(sessionId)
   })
 }
 
@@ -680,9 +760,16 @@ export type Refusal =
   | InvalidVariableKeyError
   | InvalidWorkspacesRootError
   | InvalidBranchPrefixError
+  | InvalidHelpersAtOnceError
+  | HelperReadOnlyError
   | WorkspaceNotReadyError
   | WorkspaceFixedError
   | UnknownProposalError
   | ProposalDecidedError
+  | CheckRefusedError
+  | UnknownCheckError
+  | BuildRefusedError
+  | UnknownBuildError
+  | LaunchRefusal
   | SetupRefusedError
   | PathOutsideBaseError

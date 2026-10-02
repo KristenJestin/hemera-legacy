@@ -20,6 +20,12 @@ import { registryLayer, updaterLayer } from './agents/installer.ts'
 import { QUALIFIED_VARIABLE, agentDirectoriesLayer, qualifiedBySuite } from './agents/bare.ts'
 import { acpTracesLayer } from './agents/trace.ts'
 import { heldWordsLayer } from './agents/held.ts'
+import {
+  type BuildChecks,
+  type ProjectChecks,
+  buildChecksLayer,
+  projectChecksLayer,
+} from './build/checks.ts'
 import { sessionModesLayer } from './agents/modes.ts'
 import { AgentNotices } from './agents/notices.ts'
 import type { Notice } from './agents/notices.ts'
@@ -30,6 +36,8 @@ import { type Agents, agentsLayer } from './agents/service.ts'
 import { discoveryLayer, machineEnvironmentLayer } from './agents/discovery.ts'
 import type { Discovery } from './agents/discovery.ts'
 import { StderrSink, hostProcessesLayer, processSupervisorLayer } from './agents/supervisor.ts'
+import { BuildNotices, type Builds, buildsLayer, recoveredBuilds } from './build/build.ts'
+import { type Helpers, helpersLayer, recoveredHelpers } from './helpers/helpers.ts'
 import { type Proposals, proposalsLayer } from './commands/proposals.ts'
 import { type Commands, commandsLayer } from './commands/service.ts'
 import { type SetupProposals, setupDeskLayer, setupProposalsLayer } from './setup/proposals.ts'
@@ -85,7 +93,14 @@ export const PUSHED: Record<
   Notice,
   Exclude<
     EngineEventName,
-    'entry' | 'run' | 'spec_changed' | 'launch_changed' | 'workspace' | 'agents_changed'
+    | 'entry'
+    | 'run'
+    | 'spec_changed'
+    | 'launch_changed'
+    | 'workspace'
+    | 'build_changed'
+    | 'helpers_changed'
+    | 'agents_changed'
   >
 > = {
   permission_requested: 'permission',
@@ -182,6 +197,32 @@ function specNoticesTo(
 }
 
 /**
+ * The window, as the builds' notices: a build changed, and the view open on it reads it again
+ * (D10-12). Its own shape, as the Specs' is.
+ */
+function buildNoticesTo(
+  port: MessagePortMain,
+  log: (line: string) => void,
+): Layer.Layer<BuildNotices> {
+  return Layer.succeed(BuildNotices, {
+    changed: (sessionId) => {
+      try {
+        port.postMessage({ event: 'build.changed', sessionId })
+      } catch (died) {
+        log(`pushing build.changed failed: ${named(died)}`)
+      }
+    },
+    helpers: (sessionId) => {
+      try {
+        port.postMessage({ event: 'helpers.changed', sessionId })
+      } catch (died) {
+        log(`pushing helpers.changed failed: ${named(died)}`)
+      }
+    },
+  })
+}
+
+/**
  * Everything this process is, built once.
  *
  * The database layer is underneath the two services, so both stand on the same open file, and
@@ -209,6 +250,10 @@ export type EngineServices =
   | Variables
   | Preparation
   | Launches
+  | ProjectChecks
+  | BuildChecks
+  | Builds
+  | Helpers
   | DomainEvents
   | Database
   | SqliteClient
@@ -259,14 +304,39 @@ function servicesOf(
     Layer.provide(Layer.succeed(WorkspacesRoot, join(start.directory, 'workspaces'))),
     Layer.provide(agents),
   )
+  // The managed commands, built once: the tools run them, and a build's checks run as runs of
+  // those very commands, in the build Session's activity (D10-06). What an agent holds in memory
+  // is the same instance the tools and the runtime are handed.
+  const commands = commandsLayer.pipe(
+    Layer.provide(rows),
+    Layer.provide(processes),
+    Layer.provide(agents),
+    Layer.provide(heldWordsLayer),
+  )
+  // The Project's checks, proposed from the catalogue and run for a build (D10-06).
+  const checks = buildChecksLayer.pipe(
+    Layer.provideMerge(projectChecksLayer),
+    Layer.provide(variablesLayer),
+    Layer.provide(commands),
+  )
+  // The builds (D10-01): one service, which the catalogue asks before a call and the runtime
+  // drives, over the machine's `git` for their snapshots and the Project's checks for verdicts.
+  // The helpers of a build stand on it (issue #77): one service each, handed up together.
+  const builds = helpersLayer.pipe(
+    Layer.provideMerge(
+      buildsLayer.pipe(Layer.provide(git), Layer.provide(checks), Layer.provide(diagnostic)),
+    ),
+    Layer.provide(buildNoticesTo(port, log)),
+  )
   // Hemera's own tools, and the one loopback address they are served on (D6-01 to D6-05). The
   // server and the runtime are handed the very same book of tokens — `provideMerge` hands it up
   // rather than minting a second one, and a token of one book means nothing to the other.
   const tools = toolServerLayer.pipe(
     Layer.provideMerge(toolCatalogueLayer),
+    Layer.provideMerge(builds),
     Layer.provideMerge(toolAccessLayer),
     Layer.provideMerge(toolPermissionsLayer),
-    Layer.provideMerge(commandsLayer),
+    Layer.provideMerge(commands),
     // The variables a run is given are the Project's overridden by the Workspace's (D8-06).
     Layer.provide(variablesLayer),
     // What the setup tools read, and the values of the variables they propose (#218).
@@ -358,6 +428,7 @@ function servicesOf(
     ),
     workspaces,
     runtime,
+    checks,
   ).pipe(
     // One instance for the whole engine: the launches follow the events the Specs commit (#113).
     Layer.provideMerge(
@@ -424,6 +495,11 @@ if (process.parentPort !== undefined) {
           // What the last engine left going is not going any more: its runs are ended and its
           // steps wait for a resume (D8-05, D6-12).
           yield* Effect.provide(recovered, context)
+          // The helpers a stopped engine left running failed, their launchers told (issue #77),
+          // before the builds resume and hand them what was queued.
+          yield* Effect.provide(recoveredHelpers, context)
+          // The builds a stopped engine left: their checks run again, their agents resume (D10-09).
+          yield* Effect.provide(recoveredBuilds, context)
 
           port.on('message', (event) => {
             // SAFETY: what the main process put on the port; `decideRequest` is what reads it.

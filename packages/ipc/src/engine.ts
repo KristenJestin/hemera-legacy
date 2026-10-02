@@ -44,6 +44,8 @@ import {
 } from './workspaces.ts'
 import { LAUNCH_REQUESTS } from './launches.ts'
 import { SPEC_REQUESTS, missionSchema, specSnapshotSchema, specTypeSchema } from './specs.ts'
+import { BUILD_REQUESTS } from './build.ts'
+import { HELPER_REQUESTS, helperPlaceSchema } from './helpers.ts'
 
 /**
  * Which build this is, and therefore which data folder it opens.
@@ -197,6 +199,7 @@ export const entityKindSchema = z.enum([
   'workspace',
   'command',
   'launch',
+  'task',
 ])
 
 export const eventAuthorSchema = z.enum(['human', 'hemera', 'agent', 'mcp', 'system'])
@@ -241,6 +244,8 @@ export const projectSchema = z.object({
   specPrefix: z.string(),
   /** The icon each repository wears, keyed by its path; one that wears none is absent. */
   repositoryIcons: z.record(z.string(), repositoryIconSchema),
+  /** How many helpers of one build may run at once, from 1 to 6 (issue #77). */
+  helpersAtOnce: z.number(),
 })
 
 export type Project = z.infer<typeof projectSchema>
@@ -365,6 +370,8 @@ export const sessionSchema = z.object({
   workspaceId: z.string().nullable(),
   /** Whether that Workspace is fixed: from the first message, or once an agent started (D8-08). */
   workspaceFixed: z.boolean(),
+  /** What makes it a helper, read-only for the user and hidden from the sidebar (#77); null else. */
+  helper: helperPlaceSchema.nullable(),
   /** What the Session is for, and the Spec it defines, independent of each other (D7-07). */
   mission: missionSchema,
   specId: z.string().nullable(),
@@ -493,6 +500,11 @@ export const ENGINE_REQUESTS = {
   },
   'projects.setBranchPrefix': {
     arguments: addressedSchema.extend({ prefix: blankAsDefaultSchema }),
+    response: projectSchema,
+  },
+  // How many helpers of one build may run at once, in the Build section of the settings (#77).
+  'projects.setHelpersAtOnce': {
+    arguments: addressedSchema.extend({ helpersAtOnce: z.number().int().min(1).max(6) }),
     response: projectSchema,
   },
   'projects.setRepositoryIncluded': {
@@ -989,6 +1001,11 @@ export const ENGINE_REQUESTS = {
     arguments: z.object({ specId: z.string(), provider: agentProviderSchema }),
     response: z.object({ session: sessionSchema, snapshot: specSnapshotSchema }),
   },
+
+  // The build of a `build` Session and the Project's checks it is judged by (D10-04 to D10-12).
+  ...BUILD_REQUESTS,
+  // The helpers of a build, read and stopped by the user (issue #77).
+  ...HELPER_REQUESTS,
 } as const
 
 export type EngineRequests = typeof ENGINE_REQUESTS
@@ -1080,6 +1097,23 @@ export const ENGINE_EVENTS = {
     event: z.literal('launch.changed'),
     specId: z.string(),
     projectId: z.string(),
+  }),
+  /**
+   * A build changed (D10-04): a task moved, a check ran, a blocker was raised or dismissed, the
+   * build was paused, resumed, accepted or stopped. Only its Session crosses: the page that shows
+   * that build reads it again, as it stands.
+   */
+  build_changed: z.object({
+    event: z.literal('build.changed'),
+    sessionId: z.string(),
+  }),
+  /**
+   * A helper of a build was launched or settled (issue #77). Only the build Session crosses: the
+   * line of what goes on reads its helpers again, as they stand.
+   */
+  helpers_changed: z.object({
+    event: z.literal('helpers.changed'),
+    sessionId: z.string(),
   }),
   /**
    * What this machine has of the agents changed since the window last listed them: a version

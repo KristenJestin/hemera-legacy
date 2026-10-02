@@ -120,6 +120,7 @@ export type {
   RunState,
 } from './tools.ts'
 export {
+  launchViewSchema,
   planRepositorySchema,
   recipeKindSchema,
   recipeStepSchema,
@@ -132,6 +133,7 @@ export {
   worktreeSchema,
 } from './workspaces.ts'
 export type {
+  LaunchView,
   PlanRepository,
   RecipeStep,
   RepositoryState,
@@ -205,3 +207,41 @@ export type {
   TaskStory,
   UserStory,
 } from './specs.ts'
+export {
+  HELPER_REQUESTS,
+  helperPlaceSchema,
+  helperStateSchema,
+  helperViewSchema,
+} from './helpers.ts'
+export type { HelperPlace, HelperState, HelperView } from './helpers.ts'
+export {
+  BUILD_REQUESTS,
+  attemptFileSchema,
+  attemptResultSchema,
+  attemptScopeSchema,
+  attemptViewSchema,
+  blockerViewSchema,
+  buildPhaseSchema,
+  buildTaskStateSchema,
+  buildTaskViewSchema,
+  buildViewSchema,
+  checkDraftSchema,
+  checkResultViewSchema,
+  checkVerdictSchema,
+  checkWhenSchema,
+  checkWhereSchema,
+  projectCheckSchema,
+  storyViewSchema,
+} from './build.ts'
+export type {
+  AttemptView,
+  BlockerView,
+  BuildPhase,
+  BuildTaskState,
+  BuildTaskView,
+  BuildView,
+  CheckDraft,
+  CheckResultView,
+  ProjectCheck,
+  StoryView,
+} from './build.ts'

@@ -75,6 +75,7 @@ export const CHANNELS = {
   'repositories.update': ENGINE_REQUESTS['repositories.update'],
   'projects.setWorkspacesRoot': ENGINE_REQUESTS['projects.setWorkspacesRoot'],
   'projects.setBranchPrefix': ENGINE_REQUESTS['projects.setBranchPrefix'],
+  'projects.setHelpersAtOnce': ENGINE_REQUESTS['projects.setHelpersAtOnce'],
   'projects.setRepositoryIncluded': ENGINE_REQUESTS['projects.setRepositoryIncluded'],
   'journal.read': ENGINE_REQUESTS['journal.read'],
   'journal.unseen': ENGINE_REQUESTS['journal.unseen'],
@@ -175,6 +176,25 @@ export const CHANNELS = {
   'variables.set': ENGINE_REQUESTS['variables.set'],
   'variables.remove': ENGINE_REQUESTS['variables.remove'],
   'paths.entries': ENGINE_REQUESTS['paths.entries'],
+
+  // The build of a `build` Session and the checks of a Project, relayed the same way: a task's
+  // state, an attempt and a check are the engine's, and the window only says what the user did
+  // (D10-04, D10-06).
+  'build.read': ENGINE_REQUESTS['build.read'],
+  'build.pause': ENGINE_REQUESTS['build.pause'],
+  'build.resume': ENGINE_REQUESTS['build.resume'],
+  'build.accept': ENGINE_REQUESTS['build.accept'],
+  'build.stop': ENGINE_REQUESTS['build.stop'],
+  'build.taskDone': ENGINE_REQUESTS['build.taskDone'],
+  'build.taskSkip': ENGINE_REQUESTS['build.taskSkip'],
+  'build.dismissBlocker': ENGINE_REQUESTS['build.dismissBlocker'],
+  'checks.list': ENGINE_REQUESTS['checks.list'],
+  'checks.save': ENGINE_REQUESTS['checks.save'],
+  'checks.remove': ENGINE_REQUESTS['checks.remove'],
+  'checks.acceptProposed': ENGINE_REQUESTS['checks.acceptProposed'],
+  // The helpers of a build, read and stopped by the user; never launched from the window (#77).
+  'helpers.list': ENGINE_REQUESTS['helpers.list'],
+  'helpers.stop': ENGINE_REQUESTS['helpers.stop'],
 
   /**
    * The four the main process answers itself, because each of them is something only it can do.

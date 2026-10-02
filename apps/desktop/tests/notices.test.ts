@@ -170,3 +170,30 @@ describe('What waits is one list, closed with its turn (#250)', () => {
     expect(waitingAs(asked('pending'), [asked('pending')], null, null)).toBe('permission')
   })
 })
+
+describe("A helper's permission waits among its build's notices (#77)", () => {
+  const turnEnded = entry('turn', JSON.stringify({ stopReason: 'end_turn' }), 'turn')
+  const ofHelper = (state: string): SessionEntry =>
+    entry(
+      'permission_request',
+      JSON.stringify({
+        toolCallId: 'q1',
+        options: OPTIONS,
+        helper: { sessionId: 'helper-1', name: 'Test review' },
+      }),
+      'request',
+      state,
+    )
+
+  test('it waits after the main agent’s turn ended, until it is answered', () => {
+    const thread = [ofHelper('pending'), turnEnded]
+    expect(waitingAs(thread[0]!, thread, null, null)).toBe('permission')
+    const answered = [ofHelper('decided'), turnEnded, decided('allowed')]
+    expect(waitingAs(answered[0]!, answered, null, null)).toBe(null)
+  })
+
+  test('the main agent’s own permission still closes with its turn', () => {
+    const thread = [asked('pending'), turnEnded]
+    expect(waitingAs(thread[0]!, thread, null, null)).toBe(null)
+  })
+})

@@ -64,6 +64,8 @@ import { type Recipe, recipeLayer } from '#engine/workspaces/recipe.ts'
 import { type Variables, variablesLayer } from '#engine/workspaces/variables.ts'
 import { type Workspaces, WorkspacesRoot, workspacesLayer } from '#engine/workspaces/workspaces.ts'
 
+import { idleBuilds } from './build-harness.ts'
+
 export const SHIPPED = join(import.meta.dirname, '..', 'drizzle')
 
 /** The version the shipped migrations are opened with, as the application opens them. */
@@ -229,6 +231,8 @@ export function application(
     > = runtimeLayer.pipe(
       Layer.provideMerge(toolAccessLayer),
       Layer.provideMerge(contextLayer),
+      // No build runs here: a Session that is none passes through the builds untouched.
+      Layer.provide(idleBuilds),
       Layer.provide(
         Layer.mergeAll(server, commandsLayer, toolPermissionsLayer, gitLayer(), variablesLayer),
       ),
@@ -506,6 +510,8 @@ export function toolApplication(
     const places = setupPlaces(dataFolder)
     const tools = toolServerLayer.pipe(
       Layer.provideMerge(toolCatalogueLayer),
+      // One build service, the catalogue's and the runtime's: the runtime drives what it holds.
+      Layer.provideMerge(idleBuilds),
       Layer.provideMerge(toolAccessLayer),
       Layer.provideMerge(toolPermissionsLayer),
       Layer.provideMerge(commandsLayer),

@@ -9,9 +9,9 @@
  *
  * The mission is the seam and not a choice: a Session is offered the set of its mission — a
  * `free` Session the code tools, a `define` one the Spec tools beside a read-only code set
- * (D7-14). The guard is a function of what is offered and what is asked for, so a tool the
- * Session should never have been offered is refused by the same code path as one that was
- * offered and used wrongly (D6-03).
+ * (D7-14), a `build` one the code tools and the build's own (D10-13). The guard is a function of
+ * what is offered and what is asked for, so a tool the Session should never have been offered is
+ * refused by the same code path as one that was offered and used wrongly (D6-03).
  */
 
 import type { Mission } from './session.ts'
@@ -41,6 +41,13 @@ export const TOOL_NAMES = [
   'spec_read',
   'spec_write',
   'spec_propose',
+  'build_read',
+  'task_finished',
+  'task_blocked',
+  'reproduction_replayed',
+  'helper_launch',
+  'helper_stop',
+  'helper_read',
 ] as const
 
 export type ToolName = (typeof TOOL_NAMES)[number]
@@ -68,6 +75,13 @@ export type ToolMark =
   | 'read-spec'
   | 'write-spec'
   | 'propose-spec'
+  | 'read-build'
+  | 'finish-task'
+  | 'block-task'
+  | 'replay-reproduction'
+  | 'launch-helper'
+  | 'stop-helper'
+  | 'read-helper'
 
 /** What a reader calls a tool, the mark it wears, and what the turn is doing while it runs. */
 export interface ToolLabel {
@@ -117,6 +131,17 @@ export const TOOL_LABELS: Readonly<Record<ToolName, ToolLabel>> = {
   spec_read: { label: 'Read Spec', mark: 'read-spec', doing: 'Reading the Spec' },
   spec_write: { label: 'Write Spec', mark: 'write-spec', doing: 'Writing the Spec' },
   spec_propose: { label: 'Propose', mark: 'propose-spec', doing: 'Proposing a Spec' },
+  build_read: { label: 'Read build', mark: 'read-build', doing: 'Reading the build' },
+  task_finished: { label: 'Task finished', mark: 'finish-task', doing: 'Finishing a task' },
+  task_blocked: { label: 'Task blocked', mark: 'block-task', doing: 'Blocking a task' },
+  reproduction_replayed: {
+    label: 'Reproduction replayed',
+    mark: 'replay-reproduction',
+    doing: 'Replaying the reproduction',
+  },
+  helper_launch: { label: 'Launch helper', mark: 'launch-helper', doing: 'Launching a helper' },
+  helper_stop: { label: 'Stop helper', mark: 'stop-helper', doing: 'Stopping a helper' },
+  helper_read: { label: 'Read helper', mark: 'read-helper', doing: 'Reading a helper' },
 }
 
 /** The most `fs_read` hands back in one call, and the page a long file is read in. */
@@ -163,6 +188,30 @@ export interface SearchResult {
   readonly skippedCount: number
 }
 
+/** The Spec tools only a `define` Session writes its Spec with. */
+const SPEC_WRITING: ReadonlySet<ToolName> = new Set(['spec_read', 'spec_write'])
+
+/**
+ * The build's own, which only a `build` Session is offered (D10-13): its three, and the replay of a
+ * bug's reproduction its final checks wait for (issue #203).
+ */
+export const BUILDING: ReadonlySet<ToolName> = new Set([
+  'build_read',
+  'task_finished',
+  'task_blocked',
+  'reproduction_replayed',
+])
+
+/**
+ * How an orchestrator reaches its helpers (issue #77): launch one, stop one, read where one
+ * stands. Only a `build` Session is offered them, and a helper that stands above the depth cap.
+ */
+export const HELPING: ReadonlySet<ToolName> = new Set([
+  'helper_launch',
+  'helper_stop',
+  'helper_read',
+])
+
 /** What a `define` Session reads the code with: nothing that writes a file or runs a command. */
 const READ_ONLY_CODE_TOOLS = [
   'fs_read',
@@ -177,20 +226,27 @@ const READ_ONLY_CODE_TOOLS = [
 /**
  * The tools of a Session, by its mission.
  *
- * A `free` Session is offered the code tools, and of the Spec's only `spec_propose`: it has no
- * Spec to read or write, and proposes one to the human through it (D7-07). A `define` Session
+ * A `free` Session is offered the code tools, the setup tools (#218), and of the Spec's only
+ * `spec_propose`: it has no Spec to read or write, and proposes one to the human through it (D7-07). A `define` Session
  * produces a Spec and not code (D7-14): it reads the Workspace, never writes to it nor runs
- * anything, and writes its Spec through the three Spec tools. A `build` Session is offered what a
- * `free` one is until its own set is written: an agent with no tool at all is not a build.
+ * anything, and writes its Spec through the three Spec tools. A `build` Session executes a frozen
+ * Spec (D10-13): the code tools, the setup tools, and the build's own — `build_read` reads the frozen Spec and
+ * where the build stands, `task_finished` and `task_blocked` are the agent's only words about a
+ * task, and Hemera decides its state; `reproduction_replayed` says what the replay of a bug's
+ * reproduction showed (issue #203). No Spec tool: the contract does not move during a build. The
+ * build's main agent is an orchestrator: it launches, stops and reads helpers (issue #77). Neither
+ * of the other two missions is offered a build tool or a helper tool.
  */
 export function offeredTools(mission: Mission): readonly ToolName[] {
   switch (mission) {
     case 'free':
-      return TOOL_NAMES.filter((name) => name !== 'spec_read' && name !== 'spec_write')
+      return TOOL_NAMES.filter(
+        (name) => !SPEC_WRITING.has(name) && !BUILDING.has(name) && !HELPING.has(name),
+      )
     case 'define':
       return [...READ_ONLY_CODE_TOOLS, 'spec_read', 'spec_write', 'spec_propose']
     case 'build':
-      return TOOL_NAMES.filter((name) => name !== 'spec_read' && name !== 'spec_write')
+      return TOOL_NAMES.filter((name) => !SPEC_WRITING.has(name) && name !== 'spec_propose')
   }
 }
 

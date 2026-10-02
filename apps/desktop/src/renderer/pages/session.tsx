@@ -16,6 +16,7 @@ import type {
 import {
   ActionGroup,
   AgentModelMenu,
+  BuildPanel,
   Button,
   Composer,
   ContextView,
@@ -30,9 +31,11 @@ import {
   SessionDetails,
   SessionHeader,
   SessionNotices,
+  SessionRow,
   SpecPanel,
   TurnLine,
   STUCK_AFTER_MS,
+  type BuildViewProps,
   type MessageLine,
   type MessageState,
   type NoticeGroup,
@@ -46,6 +49,7 @@ import {
   type RunRepository,
   type ScrollerEntry,
   type UsageMeterProps,
+  buildNotices,
 } from '@hemera/ui'
 import {
   IconBookmarkPlus,
@@ -56,6 +60,7 @@ import {
 } from '@hemera/ui/icons'
 
 import {
+  agentOf,
   hasEnded,
   hasTrace,
   heardSince,
@@ -76,6 +81,18 @@ import {
   usageOf,
 } from '../agent-blocks.tsx'
 import { agentShellCallsOf, commandProposalOf, foldedCallsOf } from '../agent-tool-payloads.ts'
+import {
+  acceptBuild,
+  buildSnapshot,
+  dismissBlocker,
+  doneTask,
+  pauseBuild,
+  resumeBuild,
+  skipTask,
+  stopBuild,
+  subscribeToBuild,
+} from '../build-store.ts'
+import { buildViewDataOf } from '../build-views.ts'
 import { callLinksOf } from '../call-links.ts'
 import { whenOf } from '../journal-lines.ts'
 import { type CommandWrite, commandLineOf, commandWriteOf } from '../project-lines.ts'
@@ -89,12 +106,30 @@ import {
 import {
   contextListsOf,
   detailsTabsOf,
+  endedAgentOneOffs,
   goingOnOf,
+  helperOf,
   lineOf,
   openingTabOf,
   overBefore,
+  withHelpers,
 } from '../session-details.ts'
-import { linesSnapshot, marksOf, removeFromLine, subscribeToLines } from '../line-store.ts'
+import {
+  glanceClosed,
+  glanceOpened,
+  glancesLeft,
+  leaveOnTheirOwn,
+  linesSnapshot,
+  marksOf,
+  removeFromLine,
+  subscribeToLines,
+} from '../line-store.ts'
+import {
+  helpersSnapshot,
+  readHelperThread,
+  stopHelper,
+  subscribeToHelpers,
+} from '../helpers-store.ts'
 import { openSessions, type OfferedWorkspace } from '../sessions-store.ts'
 import { selectEntry } from '../shell-store.ts'
 import { type DefinedSpec, questionMarkOf } from '../spec-entries.ts'
@@ -173,6 +208,34 @@ function together(read: readonly SessionEntry[], live: readonly SessionEntry[]):
     ...read.map((entry) => since.get(entry.id) ?? entry),
     ...live.filter((entry) => !known.has(entry.id)),
   ]
+}
+
+/**
+ * A helper's thread, read-only, as its dialog holds it (issue #77): read back once the dialog
+ * opens, with what its agent has said since, drawn block by block as any thread is. Nothing in it
+ * answers anything: a helper's questions wait among its build's notices.
+ */
+function HelperThread({
+  helperId,
+  read,
+  context,
+}: {
+  helperId: string
+  read: readonly SessionEntry[]
+  context: AgentContext
+}): ReactNode {
+  useEffect(() => {
+    void readHelperThread(helperId)
+  }, [helperId])
+  const thread = together(read, agentOf(helperId).entries)
+  return thread.map((entry, at) => {
+    const block = drawEntry(entry, {
+      ...context,
+      nextAt: thread[at + 1]?.createdAt ?? null,
+      spec: { ...context.spec, thread },
+    })
+    return block === null ? null : <Fragment key={entry.id}>{block}</Fragment>
+  })
 }
 
 /** How often a running turn's silence is measured again: the line counts it by fives. */
@@ -450,10 +513,39 @@ export function SessionPage({
     void decision.then(setRefused)
   }
   const stored = useSyncExternalStore(subscribeToSpec, specSnapshot, specSnapshot)
+  // The build of a `build` Session, and the frozen revision it works from (D10-12).
+  const built = useSyncExternalStore(subscribeToBuild, buildSnapshot, buildSnapshot)
+  const build = built.view?.sessionId === session.id ? built.view : null
+  const frozen =
+    build === null || built.spec === null
+      ? null
+      : specViewOf({
+          snapshot: built.spec,
+          revisions: built.revisions,
+          journal: [],
+          readyRefused: null,
+        })
+  // Which task the banner above the composer opened, on the build view's stage: the banner and the
+  // view are two readings of one build, and the view's own choice answers to the same state.
+  const [openBuildTask, setOpenBuildTask] = useState<string | null | undefined>(undefined)
+  // Whether the composer takes the keyboard: the build's review is written there (issue #117).
+  const [composing, setComposing] = useState(false)
   // What the reader did to the line of this Session, and when the Session was opened: a one-off
   // over by then is not news (issue #237).
   const lines = useSyncExternalStore(subscribeToLines, linesSnapshot, linesSnapshot)
   const opened = useRef(Date.now())
+  // The helpers the build's agent launched, each a chip of the line (issue #77).
+  const helping = useSyncExternalStore(subscribeToHelpers, helpersSnapshot, helpersSnapshot)
+  const helpers =
+    helping.sessionId === session.id
+      ? helping.helpers.map((view) => helperOf(view, agentOf(view.id)))
+      : []
+  // An agent's one-off leaves the line 30 s after it ends, as if its × had been pressed (#321).
+  useEffect(() => {
+    leaveOnTheirOwn(session.id, endedAgentOneOffs(commandRuns))
+  }, [session.id, commandRuns])
+  // A glance open as the page goes holds its chip no longer: nothing is left to close it.
+  useEffect(() => () => glancesLeft(session.id), [session.id])
   // Whether this Session was free when the page opened it: its Spec panel, once there, is one the
   // proposal just made, and it arrives rather than standing there (issue #130). The page is
   // keyed by the Session, so this is read once per Session opened.
@@ -694,7 +786,29 @@ export function SessionPage({
       setRefused(null)
     })()
   }
+  // The build's data and its handlers, which both readings of it need: the panel's view, and the
+  // Session's notices, whose Open puts a task on the view's stage (D10-12).
+  const buildView: Omit<BuildViewProps, 'specOpen' | 'onToggleSpec'> | null =
+    // A helper works in a build without being one: it never shows a build (issue #77).
+    session.mission !== 'build' || session.helper !== null || build === null
+      ? null
+      : {
+          build: buildViewDataOf(build),
+          now: new Date(now).toISOString(),
+          onPause: () => void pauseBuild(),
+          onResume: () => void resumeBuild(),
+          onAccept: () => void acceptBuild(),
+          onStop: () => void stopBuild(),
+          onTaskDone: (taskId) => void doneTask(taskId),
+          onTaskSkip: (taskId, reason, unblock) => void skipTask(taskId, reason, unblock),
+          onDismissBlocker: (blockerId, note) => void dismissBlocker(blockerId, note),
+          // The review is written in the composer, which takes the keyboard (issue #117).
+          onOpenChat: () => setComposing(true),
+        }
+
   const itemsOf = (kind: NoticeKind): NoticeItem[] => waitingByKind.get(kind) ?? []
+  // What the build waits for the user on: a kind of the notices of its own.
+  const building = buildView === null ? null : buildNotices(buildView, setOpenBuildTask)
   const notices: NoticeGroup[] = [
     {
       kind: 'permission',
@@ -749,14 +863,15 @@ export function SessionPage({
           </Button>
         ) : undefined,
     },
+    ...(building === null ? [] : [building]),
   ]
   /**
    * The first kind that waits for the reader, in the notices' order, or null: the row above the box
    * says it waits as long as anything does, and its face says what for (issue #140).
    */
   const waitsFor = NOTICE_KINDS.find((kind) => itemsOf(kind).length > 0) ?? null
-  /** Whether anything waits for the reader. */
-  const waitsForYou = waitsFor !== null
+  /** Whether anything waits for the reader, the build among it. */
+  const waitsForYou = waitsFor !== null || (building?.items.length ?? 0) > 0
 
   const scroller: ScrollerEntry[] = []
   /**
@@ -859,6 +974,35 @@ export function SessionPage({
    */
   const activity = turnRowOf(thread, agent.running, agent.latest, waitsFor)
 
+  /** What a helper's thread is drawn with in its dialog: the page's own, answering nothing. */
+  const readOnly: AgentContext = {
+    now,
+    nextAt: null,
+    onDecide: () => undefined,
+    runs: [],
+    workspace: workspace?.name,
+    root,
+    repositories,
+    onOpenUrl,
+    onHandOver: () => undefined,
+    callLink: () => undefined,
+    reportedCall: () => undefined,
+    onAcceptProposal: () => undefined,
+    onDeclineProposal: () => undefined,
+    onAcceptSetup: () => undefined,
+    onDeclineSetup: () => undefined,
+    spec: {
+      thread: [],
+      specId: null,
+      defined: null,
+      asked: null,
+      onAnswer: () => undefined,
+      onCreate: () => undefined,
+      onJoin: () => undefined,
+      onDecline: () => undefined,
+    },
+  }
+
   // What the agent is on is the agent's own answer, read back after every change: this page
   // draws what it was told and never a value it remembers (D5-13).
   const model = modelStage(options)
@@ -878,20 +1022,39 @@ export function SessionPage({
   // Which tabs have something to show, which is what the details open on.
   const tabs = detailsTabsOf(plan.length, touched.length, context)
 
+  // Everything that waits for the reader, as one pill: on the composer's edge, and floated over
+  // the panel of the Session's mission while it lies over the chat (#77).
+  const pill = <SessionNotices groups={notices} />
+
   /**
    * The panel beside the chat, chosen by the Session's mission here and nowhere else. A `define`
    * Session has its Spec. A `free` Session has no panel and nothing that offers one: a Spec begins
-   * with the agent's proposal in the thread (D7-07). `build` plugs in here, with the panel of its
-   * tasks, workers and evidence. The Spec panel is its own slot of the row: folded to a small frame
-   * at the window's edge, and swapped for the open panel, which pushes the chat (issue #164).
+   * with the agent's proposal in the thread (D7-07). A `build` Session has its build: the build
+   * view, and the frozen revision read only in its place when "Spec" opens it (D10-12). The Spec
+   * panel is its own slot of the row: folded to a small frame at the window's edge, and swapped for
+   * the open panel, which pushes the chat (issue #164).
    */
   function missionPanel(): ReactNode {
+    if (buildView !== null) {
+      // Until the build and its revision are read, no panel: the chat alone.
+      if (frozen === null) return null
+      return (
+        <BuildPanel
+          {...buildView}
+          spec={frozen}
+          notices={pill}
+          selected={openBuildTask}
+          onSelect={setOpenBuildTask}
+        />
+      )
+    }
     // New Spec's Spec before it exists (issue #198): the same panel, on a provisional Spec, until
     // the real one is read — it then takes its place in the panel already there, with no jump.
     if (spec === null && provisional !== null) {
       return (
         <SpecPanel
           spec={provisionalViewOf(provisional)}
+          notices={pill}
           arrives={openedFree.current}
           onMarkReady={() => undefined}
           onRework={() => undefined}
@@ -904,6 +1067,7 @@ export function SessionPage({
     return (
       <SpecPanel
         spec={spec}
+        notices={pill}
         arrives={openedFree.current}
         reader={readerOf(defined, session.id, sessions, running)}
         onMarkReady={() => void markReady(session.id)}
@@ -933,177 +1097,207 @@ export function SessionPage({
 
   return (
     /*
-      One column (review of #40, defect 2): the header, the thread and the composer share one
-      width and one left edge, and nothing stands beside them but the Spec of a `define` Session —
-      the Session details are a dialog the reader opens from the head (second review of #18). The
-      screen runs under the frame all the same, and the page's own scroll is the thread's. The row
-      is the container the unfolded Spec panel's width is a share of. The chat takes what the
-      panel leaves it and no more: never wider than that for what it holds, which would push the
-      row past the window and make it scroll sideways (issue #181).
+      The head across the whole page, above the chat and the panel of the Session's mission alike,
+      so it stays in reach while the panel lies over the chat (#77). Under it the row: one column
+      (review of #40, defect 2) where the thread and the composer share one width and one left
+      edge, and beside it the panel of a `define` or a `build` Session — the Session details are a
+      dialog the reader opens from the head (second review of #18). The screen runs under the
+      frame all the same, and the page's own scroll is the thread's. The chat takes what the panel
+      leaves it and no more: never wider than that for what it holds, which would push the row
+      past the window and make it scroll sideways (issue #181).
     */
-    <div className="@container flex h-full min-h-0">
-      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-        <div className="mx-auto w-full max-w-3xl px-6 pt-6 pb-4">
-          {/*
-            One row (issue #241): what goes on in the Session — the runs Hemera holds, the commands
-            the agent ran in its own shell, and the Run a command is started from (issue #219) — and
-            the head's ⓘ and `…` at its end. No title: the sidebar says it. A Session nothing
-            answers has no agent to lend a command to, and offers no Run.
-          */}
-          <SessionHeader
-            title={session.title}
-            onRename={onRename}
-            onArchive={onArchive}
-            // A Session nothing was ever written in is one the user made by mistake far more often
-            // than one they are done with, and putting it away is a press they would come to
-            // regret: the archive is where threads go.
-            archiveDisabled={thread.length === 0}
-            // The one way to the Session details: nothing the agent does opens them.
-            onOpenDetails={() => setDetailsOpen(true)}
-          >
-            <GoingOnLine
-              items={lineOf(goingOn, {
-                ...marksOf(session.id, lines),
-                before: overBefore(commandRuns, shells, opened.current),
-              })}
-              onStop={(run) => onStopRun(run.id)}
-              onRunAgain={(run) => onRunAgain(run.id)}
-              onRemove={(item) => removeFromLine(session.id, item.id)}
-              onOpenUrl={onOpenUrl}
-              onAddToCatalogue={(shown) => {
-                const run = commandRuns.find((one) => one.id === shown.id)
-                if (run !== undefined) deciding(onAddToCatalogue(run))
-              }}
-              end={
-                session.provider === null ? undefined : (
-                  <RunCommand
-                    catalogue={catalogue.map((command) => ({
-                      name: command.name,
-                      command: command.line,
-                      type: command.type,
-                      running: commandRuns.some(
-                        (run) => run.commandId === command.id && run.state === 'running',
-                      ),
-                    }))}
-                    workspace={workspace?.name ?? 'main'}
-                    onRunCommand={(entry) => onRunCommand(entry.name)}
-                    onRunOnce={onRunCommand}
-                    shortcut={runShortcut}
-                    asked={runAsked}
-                  />
-                )
-              }
-            />
-          </SessionHeader>
-        </div>
+    <div className="flex h-full min-h-0 flex-col">
+      <div className="shrink-0 px-6 pt-6 pb-1">
         {/*
-          The thread is given the whole width under the head, and lays its own column on the one
-          the head and the composer are laid on: a wheel anywhere beside the thread scrolls it
-          (trial of 22 September 2026, evening). An empty Session has nothing to scroll, and its
-          sentence stands in the column like everything else.
+          One row (issue #241): what goes on in the Session — the runs Hemera holds, the commands
+          the agent ran in its own shell, and the Run a command is started from (issue #219) — and
+          the head's ⓘ and `…` at its end. No title: the sidebar says it. A Session nothing
+          answers has no agent to lend a command to, and offers no Run.
         */}
-        {thread.length === 0 ? (
-          <div className="mx-auto flex min-h-0 w-full max-w-3xl flex-1 flex-col px-6">
-            {loaded ? <SessionEmpty /> : null}
-          </div>
-        ) : (
-          <MessageScroller
-            className="flex-1"
-            label="The thread of this Session"
-            entries={scroller}
-          />
-        )}
-        {/*
-          What the turn has spent stands above the box: the box has no foot (issue #241), its send
-          is an icon on its own row, and a figure read at a glance is a figure that must not be
-          what makes a row wrap. A Session no agent has accounted for yet shows no meter at all —
-          a meter drawn at zero is a figure that says nothing (D5-20).
-
-          What the turn is doing shares that row, at its other end: the two are one reading of
-          one turn — what it is doing, and what it has cost — and a row drawn for one of them is
-          a row the other would have asked for anyway. The row is drawn as soon as either has
-          something to say, and the meter keeps its end of it whether or not a turn is running.
-        */}
-        <div className="mx-auto flex w-full max-w-3xl flex-col gap-2 px-6 pb-4">
-          <TurnRow
-            activity={activity}
-            usage={usage}
-            since={agent.running ? heardSince(agent, thread) : null}
-            sessionId={session.id}
-            onStop={onStop}
-            notched={waitsForYou}
-          />
-          {/*
-            What the page's last act was refused with — a rename, an archive, a thread that could
-            not be read, a Workspace changed once the agent had started (D8-08) — said here and
-            not on the send: those are refusals of the header and of the opening, and a Session
-            whose archive was refused is one that can still be written in. It stands in the same
-            stack as the meter rather than over the thread, so what it moves is itself and nothing
-            above it (D4b-02). A build that could not be asked for is said here too, as a sentence
-            (#132), until the build's actions have a place of their own to say it.
-          */}
-          {(refused ?? refusal ?? stored.refusal ?? stored.buildRefused) !== null && (
-            <p role="alert" className="text-sm text-muted-foreground">
-              {refused ?? refusal ?? stored.refusal ?? stored.buildRefused}
-            </p>
-          )}
-          <Composer
-            value={value}
-            onValueChange={setValue}
-            files={files}
-            onFilesChange={setFiles}
-            onSearchFiles={onSearchFiles}
-            onPickFiles={onPickFiles}
-            variant="inline"
-            action={session.provider === null ? 'Write' : 'Send'}
-            placeholder={
-              session.provider === null
-                ? 'Write to this Session…'
-                : `Say something to ${session.provider}…`
-            }
-            onSend={write}
-            // Nothing is handed over here: a refusal of this page is not a reason not to write,
-            // and a write that is refused answers `write` itself — which is what the composer
-            // shows under the box, on the sentence that was not written (D4b-02).
-            agentMenu={
-              <AgentModelMenu
-                agents={agents}
-                agent={session.provider}
-                // The agent of a Session is the one it was made with and cannot be changed:
-                // `fixed` takes the agent stage out of the panel altogether, and the panel opens
-                // on the models of the agent that is answering (D17-11).
-                fixed
-                onAgentChange={() => undefined}
-                models={model?.choices ?? []}
-                model={model?.current ?? null}
-                onModelChange={(chosen) => {
-                  if (model !== null) onChooseOption(model.optionId, chosen)
-                }}
-                efforts={effort?.choices ?? []}
-                effort={effort?.current ?? null}
-                onEffortChange={(chosen) => {
-                  if (effort !== null) onChooseOption(effort.optionId, chosen)
-                }}
-                // The level the agent recommends, which the scale marks.
-                effortDefault={effortDefaultOf(options)}
-                // The mode is a row of that same panel since the trial of 22 September 2026: it
-                // is one of the four things the agent is set on, and a control of its own beside
-                // the menu was a second control asking about one agent.
-                modes={mode?.choices ?? []}
-                mode={mode?.current ?? null}
-                onModeChange={(chosen) => {
-                  if (mode !== null) onChooseOption(mode.optionId, chosen)
-                }}
+        <SessionHeader
+          title={session.title}
+          onRename={onRename}
+          onArchive={onArchive}
+          // A Session nothing was ever written in is one the user made by mistake far more often
+          // than one they are done with, and putting it away is a press they would come to
+          // regret: the archive is where threads go.
+          archiveDisabled={thread.length === 0}
+          // The one way to the Session details: nothing the agent does opens them.
+          onOpenDetails={() => setDetailsOpen(true)}
+        >
+          <GoingOnLine
+            items={lineOf(withHelpers(goingOn, helpers), {
+              ...marksOf(session.id, lines),
+              before: overBefore(commandRuns, shells, opened.current, helpers),
+            })}
+            onStop={(run) => onStopRun(run.id)}
+            onRunAgain={(run) => onRunAgain(run.id)}
+            onRemove={(item) => removeFromLine(session.id, item.id)}
+            onStopHelper={(helper) => void stopHelper(helper.id)}
+            helperThread={(helper) => (
+              <HelperThread
+                helperId={helper.id}
+                read={helping.threads.get(helper.id) ?? []}
+                context={readOnly}
               />
+            )}
+            onGlance={(id, glancing) => {
+              if (glancing) glanceOpened(session.id, id)
+              else glanceClosed(session.id, id)
+            }}
+            onOpenUrl={onOpenUrl}
+            onAddToCatalogue={(shown) => {
+              const run = commandRuns.find((one) => one.id === shown.id)
+              if (run !== undefined) deciding(onAddToCatalogue(run))
+            }}
+            end={
+              session.provider === null ? undefined : (
+                <RunCommand
+                  catalogue={catalogue.map((command) => ({
+                    name: command.name,
+                    command: command.line,
+                    type: command.type,
+                    running: commandRuns.some(
+                      (run) => run.commandId === command.id && run.state === 'running',
+                    ),
+                  }))}
+                  workspace={workspace?.name ?? 'main'}
+                  onRunCommand={(entry) => onRunCommand(entry.name)}
+                  onRunOnce={onRunCommand}
+                  shortcut={runShortcut}
+                  asked={runAsked}
+                />
+              )
             }
-            running={agent.running}
-            onStop={onStop}
-            // Everything that waits for the reader, on the box's edge (issue #237): it rises from
-            // behind the box when something starts waiting, and goes back there when nothing does.
-            notices={<SessionNotices groups={notices} />}
           />
-        </div>
+        </SessionHeader>
       </div>
+      <SessionRow
+        chat={
+          <>
+            {/*
+              The thread is given the whole width under the head, and lays its own column on the one
+              the head and the composer are laid on: a wheel anywhere beside the thread scrolls it
+              (trial of 22 September 2026, evening). An empty Session has nothing to scroll, and its
+              sentence stands in the column like everything else.
+            */}
+            {thread.length === 0 ? (
+              <div className="mx-auto flex min-h-0 w-full max-w-3xl flex-1 flex-col px-6">
+                {loaded ? <SessionEmpty /> : null}
+              </div>
+            ) : (
+              <MessageScroller
+                className="flex-1"
+                label="The thread of this Session"
+                entries={scroller}
+              />
+            )}
+            {/*
+              What the turn has spent stands above the box: the box has no foot (issue #241), its send
+              is an icon on its own row, and a figure read at a glance is a figure that must not be
+              what makes a row wrap. A Session no agent has accounted for yet shows no meter at all —
+              a meter drawn at zero is a figure that says nothing (D5-20).
+              
+              What the turn is doing shares that row, at its other end: the two are one reading of
+              one turn — what it is doing, and what it has cost — and a row drawn for one of them is
+              a row the other would have asked for anyway. The row is drawn as soon as either has
+              something to say, and the meter keeps its end of it whether or not a turn is running.
+            */}
+            <div className="mx-auto flex w-full max-w-3xl flex-col gap-2 px-6 pb-4">
+              <TurnRow
+                activity={activity}
+                usage={usage}
+                since={agent.running ? heardSince(agent, thread) : null}
+                sessionId={session.id}
+                onStop={onStop}
+                notched={waitsForYou}
+              />
+              {/*
+                What the page's last act was refused with — a rename, an archive, a thread that could
+                not be read, a Workspace changed once the agent had started (D8-08) — said here and
+                not on the send: those are refusals of the header and of the opening, and a Session
+                whose archive was refused is one that can still be written in. It stands in the same
+                stack as the meter rather than over the thread, so what it moves is itself and nothing
+                above it (D4b-02). A build that could not be asked for is said here too, as a sentence
+                (#132), until the build's actions have a place of their own to say it.
+              */}
+              {(refused ?? refusal ?? stored.refusal ?? stored.buildRefused ?? built.refusal) !==
+                null && (
+                <p role="alert" className="text-sm text-muted-foreground">
+                  {refused ?? refusal ?? stored.refusal ?? stored.buildRefused ?? built.refusal}
+                </p>
+              )}
+              <Composer
+                value={value}
+                onValueChange={setValue}
+                files={files}
+                onFilesChange={setFiles}
+                onSearchFiles={onSearchFiles}
+                onPickFiles={onPickFiles}
+                variant="inline"
+                action={session.provider === null ? 'Write' : 'Send'}
+                placeholder={
+                  session.provider === null
+                    ? 'Write to this Session…'
+                    : `Say something to ${session.provider}…`
+                }
+                onSend={write}
+                // Nothing is handed over here: a refusal of this page is not a reason not to write,
+                // and a write that is refused answers `write` itself — which is what the composer
+                // shows under the box, on the sentence that was not written (D4b-02).
+                agentMenu={
+                  <AgentModelMenu
+                    agents={agents}
+                    agent={session.provider}
+                    // The agent of a Session is the one it was made with and cannot be changed:
+                    // `fixed` takes the agent stage out of the panel altogether, and the panel opens
+                    // on the models of the agent that is answering (D17-11).
+                    fixed
+                    onAgentChange={() => undefined}
+                    models={model?.choices ?? []}
+                    model={model?.current ?? null}
+                    onModelChange={(chosen) => {
+                      if (model !== null) onChooseOption(model.optionId, chosen)
+                    }}
+                    efforts={effort?.choices ?? []}
+                    effort={effort?.current ?? null}
+                    onEffortChange={(chosen) => {
+                      if (effort !== null) onChooseOption(effort.optionId, chosen)
+                    }}
+                    // The level the agent recommends, which the scale marks.
+                    effortDefault={effortDefaultOf(options)}
+                    // The mode is a row of that same panel since the trial of 22 September 2026: it
+                    // is one of the four things the agent is set on, and a control of its own beside
+                    // the menu was a second control asking about one agent.
+                    modes={mode?.choices ?? []}
+                    mode={mode?.current ?? null}
+                    onModeChange={(chosen) => {
+                      if (mode !== null) onChooseOption(mode.optionId, chosen)
+                    }}
+                  />
+                }
+                running={agent.running}
+                onStop={onStop}
+                // Everything that waits for the reader, on the box's edge (issue #237): it rises from
+                // behind the box when something starts waiting, and goes back there when nothing does.
+                notices={pill}
+                takeFocus={composing}
+                onFocusTaken={() => setComposing(false)}
+              />
+            </div>
+          </>
+        }
+      >
+        {/*
+          The panel of the Session's mission, beside the chat: the working surface the thread gave
+          up width for, where the side column stood before the Session details took its plan and
+          its files into a dialog. It opens folded to a small frame at the window's edge, and is
+          swapped for its panel, which pushes the chat aside, when the hand or the agent asks
+          (issue #164). The chat is the row's first child whatever the mission, so a panel that
+          arrives draws nothing of the thread again (#77).
+        */}
+        {missionPanel()}
+      </SessionRow>
       {/*
         The Session details: a centred dialog the reader opens from the head, and nothing else
         opens (second review of #18). A permission, a run or a plan that arrives updates the thread
@@ -1160,13 +1354,6 @@ export function SessionPage({
         // the reader.
         defaultTab={openingTabOf(tabs)}
       />
-      {/*
-        The panel of the Session's mission, beside the chat: the working surface the thread gave
-        up width for, where the side column stood before the Session details took its plan and its
-        files into a dialog. It opens folded to a small frame at the window's edge, and is swapped
-        for its panel, which pushes the chat aside, when the hand or the agent asks (issue #164).
-      */}
-      {missionPanel()}
       {workspacePlan !== null && (
         <CreateWorkspaceDialog
           open={intent !== null}

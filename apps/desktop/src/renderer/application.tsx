@@ -108,6 +108,17 @@ import { lineOf, linesOf, whenOf } from './journal-lines.ts'
 import { folderBasePath, repositoryLinesOf } from './project-lines.ts'
 import { repositoriesOf } from './run-place.ts'
 import {
+  acceptProposed,
+  checksOf,
+  checksSnapshot,
+  discardProposed,
+  proposedOf,
+  readChecks,
+  removeCheck,
+  saveCheck,
+  subscribeToChecks,
+} from './checks-store.ts'
+import {
   addRecipeStep,
   cleanUp,
   createDedicated,
@@ -158,6 +169,8 @@ import {
   listenToSpecs,
   openSpec,
 } from './spec-store.ts'
+import { closeBuild, listenToBuilds, openBuild } from './build-store.ts'
+import { closeHelpers, listenToHelpers, openHelpers } from './helpers-store.ts'
 import {
   closeJournal,
   filterJournal,
@@ -358,6 +371,8 @@ export function Application() {
   const tools = useSyncExternalStore(subscribeToTools, toolsSnapshot, toolsSnapshot)
   // The Workspaces of the Project whose settings are open, and the one shown under them (D8-02).
   const places = useSyncExternalStore(subscribeToWorkspaces, workspacesSnapshot, workspacesSnapshot)
+  // And the checks its build is judged by, with those proposed while it has none (D10-06).
+  const checked = useSyncExternalStore(subscribeToChecks, checksSnapshot, checksSnapshot)
   // What a page holds is a name, and what the channels take is one of the agents the engine
   // knows: resolved among them here rather than asserted at each call, so a name that answers to
   // none of them asks for nothing at all.
@@ -596,7 +611,8 @@ export function Application() {
 
   // A Spec is written by whoever holds its right and read live by every Session on it (D7-11).
   // A Spec step can change a Session too — accepting a proposal makes it `define`, a Session is
-  // opened on a Spec — so the Sessions of the Project in front are read again with it.
+  // opened on a Spec, a build starts one — so the Sessions of the Project in front are read again
+  // with it.
   useEffect(
     () =>
       listenToSpecs((projectId) => {
@@ -610,6 +626,27 @@ export function Application() {
   useEffect(() => {
     forgetSpecRefusal()
   }, [openId])
+
+  // Every build, heard for as long as the window is open: the one on screen is read again as it
+  // moves, and any of them tells the OS when a task becomes the user's or a blocker is raised,
+  // wherever the user is (D10-08).
+  useEffect(() => listenToBuilds(), [])
+
+  // The helpers of the build on screen, read again whenever one is launched or settles (#77).
+  useEffect(() => listenToHelpers(), [])
+
+  // The build of the Session on screen, opened when that Session is a `build` one (D10-12) — and
+  // never a helper's, which works in a build without being one (issue #77) — with its helpers.
+  const openBuildId = open?.mission === 'build' && open.helper === null ? open.id : null
+  useEffect(() => {
+    if (openBuildId === null) {
+      closeBuild()
+      closeHelpers()
+      return
+    }
+    void openBuild(openBuildId)
+    void openHelpers(openBuildId)
+  }, [openBuildId])
 
   // The Spec of the Session on screen, opened when that Session defines one (D7-07).
   useEffect(() => {
@@ -699,6 +736,9 @@ export function Application() {
     void readProjectVariables(settingsOf)
     // And the recipe each dedicated Workspace is prepared with (D8-05).
     void readRecipe(settingsOf)
+    // And the checks of its build, with what the catalogue proposes while there are none: a
+    // proposal put away last time is proposed again (D10-06).
+    void readChecks(settingsOf)
     // The Workspace shown is the page's: leaving it puts the Workspace away.
     return () => void showWorkspace(null)
   }, [settingsOf])
@@ -1328,7 +1368,15 @@ export function Application() {
             await setVariable(current.id, null, key, value)
           }
           onRemoveProjectVariable={(key) => void removeVariable(current.id, null, key)}
-          workspacesRefusal={places.refusal}
+          checks={checksOf(current.id)}
+          proposedChecks={proposedOf(current.id)}
+          checkActions={{
+            onSave: async (id, draft) => await saveCheck(current.id, id, draft),
+            onRemove: (id) => void removeCheck(current.id, id),
+            onAcceptProposed: async (drafts) => await acceptProposed(current.id, drafts),
+            onDiscardProposed: () => discardProposed(current.id),
+          }}
+          workspacesRefusal={places.refusal ?? checked.refusal}
         />
       )
     }

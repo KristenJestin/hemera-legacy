@@ -4,18 +4,25 @@ import { StatusDot, type StatusTone } from '../components/status-dot/status-dot.
 import {
   IconAdjustments,
   IconBookmarkPlus,
+  IconBug,
+  IconCircleCheck,
+  IconCircleX,
+  IconClipboardList,
+  IconEye,
   IconFileDescription,
   IconFilePlus,
   IconFileText,
   IconFlag,
   IconFolder,
   IconFolders,
+  IconHandStop,
   IconListCheck,
   IconListDetails,
   IconMessages,
   IconPencil,
   IconPlayerPlay,
   IconPlayerStop,
+  IconRobot,
   IconSearch,
   IconTerminal2,
   IconWriting,
@@ -104,6 +111,13 @@ export type HemeraToolMark =
   | 'read-spec'
   | 'write-spec'
   | 'propose-spec'
+  | 'read-build'
+  | 'finish-task'
+  | 'block-task'
+  | 'replay-reproduction'
+  | 'launch-helper'
+  | 'stop-helper'
+  | 'read-helper'
 
 const HEMERA_MARKS: Record<HemeraToolMark, ReactNode> = {
   'read-file': <IconFileText size="sm" aria-hidden="true" />,
@@ -123,6 +137,17 @@ const HEMERA_MARKS: Record<HemeraToolMark, ReactNode> = {
   'read-spec': <IconFileDescription size="sm" aria-hidden="true" />,
   'write-spec': <IconWriting size="sm" aria-hidden="true" />,
   'propose-spec': <IconFlag size="sm" aria-hidden="true" />,
+  // The three tools of a build (D10-13): the build read, a task said finished, a task said to
+  // contradict the Spec.
+  'read-build': <IconClipboardList size="sm" aria-hidden="true" />,
+  'finish-task': <IconCircleCheck size="sm" aria-hidden="true" />,
+  'block-task': <IconHandStop size="sm" aria-hidden="true" />,
+  // The replay of a bug's reproduction, which the final checks of a `bug` wait for (issue #203).
+  'replay-reproduction': <IconBug size="sm" aria-hidden="true" />,
+  // An orchestrator's three (issue #77): a helper launched, stopped, and read.
+  'launch-helper': <IconRobot size="sm" aria-hidden="true" />,
+  'stop-helper': <IconCircleX size="sm" aria-hidden="true" />,
+  'read-helper': <IconEye size="sm" aria-hidden="true" />,
 }
 
 /** Where the mark sits on the line, in the tone a native call's mark is drawn in. */

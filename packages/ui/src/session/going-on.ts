@@ -1,5 +1,7 @@
 import type { CommandState } from '../activity/command-run.tsx'
 import type { CommandType } from '../activity/command-type.ts'
+import type { FaceState } from '../components/face/states.ts'
+import type { LiveState } from '../components/live-chip/live-chip.tsx'
 import type { Readiness } from '../workspace/services-model.ts'
 import type { RunRepository } from './run-place.tsx'
 
@@ -11,8 +13,8 @@ import type { RunRepository } from './run-place.tsx'
  *   Stop, because Hemera holds the process.
  * - `shell` · a command the agent ran in its own shell, through its own tool: Hemera only has what
  *   the tool call reported, and holds nothing it could stop.
- * - `agent` · a sub-agent the Session's agent handed a task to: its task, where it stands, its
- *   steps and the last thing it said.
+ * - `agent` · a helper the Session's agent launched (issue #77): its name, where it stands, what it
+ *   is doing and the last thing it said; its live thread is one press away, read-only.
  *
  * Times are the page's to write (`at`, "10:42"): the design system draws them as it is given them.
  */
@@ -48,6 +50,9 @@ export interface GoingOnRun {
   environment: Readonly<Record<string, string>>
   /** When it was started. */
   at: string
+  /** When it was started and when it ended, in milliseconds, which its chip counts seconds from. */
+  startedAt: number
+  endedAt: number | null
 }
 
 export interface GoingOnShell {
@@ -67,21 +72,26 @@ export interface GoingOnAgent {
   kind: 'agent'
   id: string
   name: string
-  task: string
-  state: GoingOnState
-  /** The last thing it said, which is what it is doing. */
-  last: string
-  /** What it has done so far, one line a step. */
-  steps: readonly string[]
-  /** When the agent handed it the task. */
+  /** Running, then done, failed, or stopped — by its launcher or by the reader. */
+  state: LiveState
+  /** What it is doing now, in a few words; undefined when nothing says. */
+  step?: string | undefined
+  /** The last thing it said, or null while it has said nothing. */
+  last: string | null
+  /** The face it wears now, which leads its dialog. */
+  face: FaceState
+  /** When it was launched. */
   at: string
+  /** When it was launched and when it ended, in milliseconds, which its chip counts seconds from. */
+  startedAt: number
+  endedAt: number | null
 }
 
 export type GoingOnItem = GoingOnRun | GoingOnShell | GoingOnAgent
 
 /** How one item stands, whatever its kind: a run the reader stopped is over. */
 export function goingOnStateOf(item: GoingOnItem): GoingOnState {
-  if (item.kind !== 'run') return item.state
+  if (item.kind === 'shell') return item.state
   if (item.state === 'running') return 'running'
   return item.state === 'failed' ? 'failed' : 'finished'
 }

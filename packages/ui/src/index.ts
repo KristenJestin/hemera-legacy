@@ -38,6 +38,14 @@ export {
   type StatusDotProps,
   type StatusTone,
 } from './components/status-dot/status-dot.tsx'
+/** Where a task stands, as one mark that changes in place. */
+export {
+  StatusMark,
+  type MarkState,
+  type StatusMarkProps,
+} from './components/status-mark/status-mark.tsx'
+/** What goes on in a Session — a run, a helper — as one chip, its seconds and its glance. */
+export { LiveChip, type LiveChipProps, type LiveState } from './components/live-chip/live-chip.tsx'
 export {
   Tooltip,
   TooltipProvider,
@@ -94,9 +102,16 @@ export {
 /** The dialogs a repository and a command of the Project are added and edited in. */
 export { CommandDialog, type CommandDialogProps } from './project/command-dialog.tsx'
 export { RepositoryDialog, type RepositoryDialogProps } from './project/repository-dialog.tsx'
+/** The Build section of the Project settings: the checks a build is judged by (lot 22, D10-06). */
+export { BuildChecks, type BuildChecksProps } from './project/build-checks.tsx'
+export { CheckDialog, type CheckDialogProps } from './project/check-dialog.tsx'
 
 export {
   REPOSITORY_ICONS,
+  type CheckExpect,
+  type CheckLine,
+  type CheckWhen,
+  type CheckWhere,
   type CommandLine,
   type ProjectDraft,
   type ProjectSettingsDraft,
@@ -268,6 +283,7 @@ export {
   type SessionHeaderProps,
   type SessionRenaming,
 } from './session/session.tsx'
+export { SessionRow, type SessionRowProps } from './session/session-row.tsx'
 
 /** A turn with an agent, drawn as it happens: what it thought, what it called, what it ran, and
  * what it changed. These are the blocks the thread of a Session with an agent is made of. */
@@ -413,6 +429,7 @@ export {
 export { GoingOnLine, type GoingOnLineProps } from './session/going-on-line.tsx'
 export type { RunRepository } from './session/run-place.tsx'
 export { RunCommand, type RunCatalogueEntry, type RunCommandProps } from './session/run-command.tsx'
+export { HelperAvatar, type HelperAvatarProps, type HelperTone } from './session/helper-avatar.tsx'
 export {
   ContextView,
   type ContextCommand,
@@ -553,3 +570,38 @@ export type {
   StoryView,
   TaskView,
 } from './spec/model.ts'
+
+/**
+ * The build of a `build` Session (lot 22, D10-12): the panel it stands in beside the chat, and the
+ * build view in it — its phase, its actions, the approach, the stories and their tasks — the stage
+ * of one task with its tries, their checks and the files they changed, and the blocks that hand a
+ * task to the user — a task that is theirs, a blocker the agent raised, the review — in the view
+ * and as one kind of the Session's notices; and the frozen Spec, opened read only in the view's
+ * place. View types only, close to the engine's `BuildView`: the renderer maps one onto the other.
+ */
+export { BuildView, type BuildViewProps } from './build/build-view.tsx'
+export { TaskStage, type TaskStageProps } from './build/task-stage.tsx'
+export { YoursBlock, type YoursBlockProps } from './build/yours-block.tsx'
+export { BlockerBlock, type BlockerBlockProps } from './build/blocker-block.tsx'
+export { ReviewCard, type ReviewCardProps } from './build/review-card.tsx'
+export { BuildSpecPanel, type BuildSpecPanelProps } from './build/build-spec-panel.tsx'
+export { BuildPanel, type BuildPanelProps } from './build/build-panel.tsx'
+export { buildNotices, buildNoticeItems } from './build/build-notices.tsx'
+export { waitsOf, waitingOf } from './build/model.ts'
+export type {
+  BuildAttemptResult,
+  BuildAttemptScope,
+  BuildAttemptView,
+  BuildReproductionView,
+  BuildBlockerView,
+  BuildCheckVerdict,
+  BuildCheckView,
+  BuildExecutor,
+  BuildFileView,
+  BuildPhase,
+  BuildStoryState,
+  BuildStoryView,
+  BuildTaskState,
+  BuildTaskView,
+  BuildViewData,
+} from './build/model.ts'

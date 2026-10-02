@@ -444,7 +444,8 @@ export function forgetSpecRefusal(): void {
 /**
  * Listens for `spec.changed`, once for the whole window: the Spec on screen is read again when
  * it is the one that changed, and `changed` hears of every change with its Project — a Spec step
- * can change a Session too (its mission, its Spec, a new Session opened on it).
+ * can change a Session too (its mission, its Spec, a new Session opened on it), and so can a
+ * launch, whose build starts a Session of its own.
  *
  * The end of a turn is heard too: it is when the writer's agent was briefed, so an edit marked
  * "sent to the agent next turn" stops being one (Decided 17).
@@ -452,9 +453,15 @@ export function forgetSpecRefusal(): void {
 export function listenToSpecs(changed: (projectId: string) => void): () => void {
   return window.hemera.on((event: EngineEvent) => {
     if (event.event === 'turn' && shown !== null) void refresh(shown)
-    // The launch of the Spec on screen moved on: asked for, started, refused or taken back
-    // (D8-13). Nothing else crosses — the panel reads the whole of it again, as it stands.
-    if (event.event === 'launch.changed' && event.specId === shown) void refresh(event.specId)
+    // A launch moved on: asked for, started, refused or taken back (D8-13). Nothing else crosses —
+    // the panel of the Spec on screen reads the whole of it again, as it stands. A build is started
+    // in the engine after its request is answered (#132), and the Session it makes is heard of
+    // through its launch alone: its Project is told, whichever Spec is on screen.
+    if (event.event === 'launch.changed') {
+      changed(event.projectId)
+      if (event.specId === shown) void refresh(event.specId)
+      return
+    }
     // The Workspace the Spec is set on moved on — resumed, ready, failed again — and what the
     // panel offers follows where it stands (D8-12).
     if (

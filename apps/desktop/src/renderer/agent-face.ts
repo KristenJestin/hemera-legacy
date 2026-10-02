@@ -34,6 +34,17 @@ const MARK_FACES: Readonly<Record<ToolMark, FaceState>> = {
   'propose-spec': 'writing',
   'read-setup': 'reading',
   'propose-setup': 'writing',
+  // The three tools of a build (D10-13): its read, a task handed to its checks, and a task said
+  // to contradict the Spec, which waits for the user.
+  'read-build': 'reading',
+  'finish-task': 'checking',
+  'block-task': 'blocked',
+  // The replay of a bug's reproduction (issue #203): the agent checking what it built.
+  'replay-reproduction': 'checking',
+  // An orchestrator's three (issue #77): a helper launched or stopped, and where one stands.
+  'launch-helper': 'running',
+  'stop-helper': 'running',
+  'read-helper': 'reading',
 }
 
 /**

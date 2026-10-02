@@ -549,12 +549,26 @@ const CATALOGUE: readonly (readonly [string, string, HemeraToolMark, string | nu
   ['spec_read', 'Read Spec', 'read-spec', 'HEM-7', 'Reading HEM-7'],
   ['spec_write', 'Write Spec', 'write-spec', 'scope', 'Writing the scope'],
   ['spec_propose', 'Propose', 'propose-spec', 'shape', 'Declaring shape finished'],
+  ['build_read', 'Read build', 'read-build', null, 'Reading the build of ATL-7'],
+  ['task_finished', 'Task finished', 'finish-task', 'T2', 'T2 handed to its checks'],
+  ['task_blocked', 'Task blocked', 'block-task', 'T3', 'T3 contradicts the Spec'],
+  [
+    'reproduction_replayed',
+    'Reproduction replayed',
+    'replay-reproduction',
+    null,
+    'The bug is gone',
+  ],
+  ['helper_launch', 'Launch helper', 'launch-helper', 'Test review', 'Launched Test review'],
+  ['helper_stop', 'Stop helper', 'stop-helper', 'Test review', 'Stopped Test review'],
+  ['helper_read', 'Read helper', 'read-helper', 'Test review', 'Test review is running'],
 ]
 
 /**
- * The catalogue as the thread reads it (recette 3 of 23 September 2026): seventeen tools,
- * seventeen marks and seventeen labels, and what each call is about where it is about something. A mark per
- * kind of tool drew `fs_list` as `fs_read` and the four commands as one.
+ * The catalogue as the thread reads it (recette 3 of 23 September 2026): twenty-four tools since
+ * the helper tools (issue #77), twenty-four marks and twenty-four labels, and what each call is about where it
+ * is about something. A mark per kind of tool drew `fs_list` as `fs_read` and the four commands
+ * as one.
  */
 export const EveryTool: Story = {
   args: { status: 'completed' },

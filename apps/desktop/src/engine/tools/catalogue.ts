@@ -29,18 +29,20 @@ import {
   type ToolName,
   admitTool,
   commandPlace,
-  offeredTools,
   runsInMain,
+  sessionTools,
 } from '@hemera/core'
 import { and, eq } from 'drizzle-orm'
 import { Context, Deferred, Effect, Layer } from 'effect'
 import { mkdir, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises'
-import { basename, dirname, join, relative } from 'node:path'
+import { basename, dirname, isAbsolute, join, relative, sep } from 'node:path'
 
 import { HeldWords } from '../agents/held.ts'
 import { SessionModes, modeAsks } from '../agents/modes.ts'
 import { AgentNotices } from '../agents/notices.ts'
+import { Builds } from '../build/build.ts'
 import { Commands } from '../commands/service.ts'
+import { Helpers } from '../helpers/helpers.ts'
 import { Projects } from '../projects.ts'
 import { Sessions, type ThreadWrite } from '../sessions.ts'
 import { Specs } from '../specs/specs.ts'
@@ -278,6 +280,8 @@ export const toolCatalogueLayer: Layer.Layer<
   | Specs
   | Database
   | Variables
+  | Builds
+  | Helpers
   | SetupDesk
 > = Layer.effect(
   ToolCatalogue,
@@ -293,6 +297,8 @@ export const toolCatalogueLayer: Layer.Layer<
     const notices = yield* AgentNotices
     const variables = yield* Variables
     const specs = yield* Specs
+    const builds = yield* Builds
+    const helpers = yield* Helpers
     const desk = yield* SetupDesk
 
     /**
@@ -541,25 +547,39 @@ export const toolCatalogueLayer: Layer.Layer<
     ) =>
       Effect.gen(function* () {
         const id = crypto.randomUUID()
+        // A helper's question is its build's to answer (issue #77): the block, its answer and its
+        // decision are written in the build Session, among its notices, naming the helper; the
+        // helper's own view has nothing to answer with.
+        const answeredIn = yield* helpers.answeredIn(asked.sessionId)
+        const asking =
+          answeredIn === asked.sessionId
+            ? null
+            : yield* answered(sessions.one(asked.sessionId)).pipe(
+                Effect.map((read) => ({
+                  sessionId: asked.sessionId,
+                  name: read?.session.title ?? 'A helper',
+                })),
+              )
         // The block the window already draws for an agent's own permission is the one this is
         // read by: the same two options every time, because the question is always the same one
         // and nothing about it is remembered (D6-05). The request and the decision are two rows
         // under two correlations, so neither is written over the other.
+        const question = {
+          toolCallId: id,
+          options: OUTSIDE_OPTIONS,
+          tool: asked.tool,
+          named,
+          resolved: where,
+          root,
+          inside,
+          line,
+        }
         const request = (state: string) =>
-          inThread(asked.sessionId, {
+          inThread(answeredIn, {
             role: 'hemera',
             kind: 'permission_request',
             body,
-            payload: JSON.stringify({
-              toolCallId: id,
-              options: OUTSIDE_OPTIONS,
-              tool: asked.tool,
-              named,
-              resolved: where,
-              root,
-              inside,
-              line,
-            }),
+            payload: JSON.stringify(asking === null ? question : { ...question, helper: asking }),
             correlationId: `perm:${id}`,
             state,
           }).pipe(Effect.catch(() => Effect.void))
@@ -568,7 +588,8 @@ export const toolCatalogueLayer: Layer.Layer<
         const answer = yield* permissions
           .askOutside({
             id,
-            sessionId: asked.sessionId,
+            sessionId: answeredIn,
+            askedBy: asked.sessionId,
             tool: asked.tool,
             named: where,
             root,
@@ -579,7 +600,7 @@ export const toolCatalogueLayer: Layer.Layer<
             Effect.onInterrupt(() =>
               Effect.gen(function* () {
                 yield* request('cancelled')
-                yield* inThread(asked.sessionId, {
+                yield* inThread(answeredIn, {
                   role: 'hemera',
                   kind: 'permission_decision',
                   body: 'Withdrawn: the agent stopped waiting for this call',
@@ -605,7 +626,7 @@ export const toolCatalogueLayer: Layer.Layer<
           cancelled: { state: 'cancelled', said: 'Stopped' },
         }
         yield* request(closed[answer].state)
-        yield* inThread(asked.sessionId, {
+        yield* inThread(answeredIn, {
           role: 'user',
           kind: 'permission_decision',
           body: closed[answer].said,
@@ -671,6 +692,26 @@ export const toolCatalogueLayer: Layer.Layer<
       }).pipe(Effect.catch(() => Effect.void))
     }
 
+    /**
+     * Whether a write may go where it goes (issue #77): a path inside the root another task holds,
+     * while a helper works on it, is refused naming that task; a write outside the root, which the
+     * human allowed, holds nothing. Null when it may go.
+     */
+    const claimed = (asked: ToolCall, root: string, path: string) => {
+      const inside = relative(root, path)
+      if (inside.startsWith('..') || isAbsolute(inside)) return Effect.succeed(null)
+      return helpers.claim(asked.sessionId, inside.split(sep).join('/'))
+    }
+
+    /** A write refused because another task holds its file. */
+    const heldElsewhere = (reason: string): Answer => ({
+      ok: false,
+      refused: true,
+      summary: reason,
+      text: reason,
+      paths: [],
+    })
+
     /** Which run a call means, when it named none: the only one this Session has going. */
     /**
      * Which run a call is about: the one it names, else the only one running, else — when the
@@ -705,7 +746,11 @@ export const toolCatalogueLayer: Layer.Layer<
         Effect.catch((reason) => Effect.succeed({ ok: false as const, reason })),
       )
 
-    /** One tool, one answer. The arguments are the ones `parseCall` already read. */
+    /**
+     * One tool, one answer. The arguments are the ones `parseCall` already read. `build` is the
+     * Session whose build a build tool acts on — the Session's own, or the build a helper works in —
+     * and `carries` the task a helper was launched on, the only one it signals about (issue #77).
+     */
     const perform = (
       asked: ToolCall,
       root: string,
@@ -714,6 +759,8 @@ export const toolCatalogueLayer: Layer.Layer<
       projectName: string,
       repositories: readonly string[],
       call: ParsedCall,
+      build: string,
+      carries: string | null,
     ): Effect.Effect<Answer> =>
       Effect.gen(function* () {
         switch (call.tool) {
@@ -749,6 +796,8 @@ export const toolCatalogueLayer: Layer.Layer<
           case 'fs_write': {
             const settled = yield* allowed(asked, root, call.arguments.path)
             if (!settled.allowed) return failed(settled.reason, settled.reason)
+            const holder = yield* claimed(asked, root, settled.path)
+            if (holder !== null) return heldElsewhere(holder)
             const written = yield* attempt(() =>
               mkdir(dirname(settled.path), { recursive: true }).then(() =>
                 replaceFile(settled.path, call.arguments.content),
@@ -777,6 +826,8 @@ export const toolCatalogueLayer: Layer.Layer<
             }
             const settled = yield* allowed(asked, root, call.arguments.path)
             if (!settled.allowed) return failed(settled.reason, settled.reason)
+            const holder = yield* claimed(asked, root, settled.path)
+            if (holder !== null) return heldElsewhere(holder)
             const current = yield* attempt(() => readFile(settled.path, 'utf8'))
             if (!current.ok) {
               return failed(`could not read ${call.arguments.path}`, current.reason)
@@ -974,7 +1025,8 @@ export const toolCatalogueLayer: Layer.Layer<
                     }
                     const oneOff = line ?? ''
                     if (place.inside) {
-                      const standing = yield* modes.standing(asked.sessionId)
+                      // A helper follows its build Session's mode (issue #77).
+                      const standing = yield* modes.standing(build)
                       if (standing !== null && !modeAsks(standing)) {
                         yield* unasked(asked, root, place.path, oneOff, standing.name)
                         return { allowed: true as const, path: place.path }
@@ -1254,6 +1306,24 @@ export const toolCatalogueLayer: Layer.Layer<
           case 'spec_write':
           case 'spec_propose':
             return yield* spec(asked.sessionId, call)
+
+          case 'task_finished':
+          case 'task_blocked': {
+            const named = call.arguments.task.trim().toUpperCase()
+            if (carries !== null && named !== carries) {
+              const reason = `you carry ${carries}, and ${named} is not yours: say so in your result instead`
+              return { ok: false, refused: true, summary: reason, text: reason, paths: [] }
+            }
+            return yield* builds.tool(build, call)
+          }
+          case 'build_read':
+          case 'reproduction_replayed':
+            return yield* builds.tool(build, call)
+
+          case 'helper_launch':
+          case 'helper_stop':
+          case 'helper_read':
+            return yield* helpers.tool(asked.sessionId, call)
         }
       })
 
@@ -1301,6 +1371,8 @@ export const toolCatalogueLayer: Layer.Layer<
           }
         }
         const root = workspace.path
+        // The build a helper works in is its build Session's, at any depth (issue #77).
+        const build = session.helper === null ? session.id : yield* helpers.answeredIn(session.id)
         // The agent of the Session is what the thread names as the caller, beside the digest of
         // the token: a Session without one is served all the same, and "agent" is what it says.
         const made = {
@@ -1315,8 +1387,8 @@ export const toolCatalogueLayer: Layer.Layer<
         }
         // What the token was minted with, and no more than the Session's mission offers now: a
         // `free` Session that turned `define` while its agent ran keeps none of the write tools it
-        // was lent, from its very next call (D7-14).
-        const mission = offeredTools(session.mission)
+        // was lent, from its very next call (D7-14). A helper holds its own (issue #77).
+        const mission = sessionTools(session)
         const decision = admitTool(
           asked.offered.filter((name) => mission.includes(name)),
           named,
@@ -1333,8 +1405,10 @@ export const toolCatalogueLayer: Layer.Layer<
         }
 
         // Measured around the tool itself, question to the human included: what the Journal
-        // says a call took is how long the agent waited for it.
-        const run = Effect.gen(function* () {
+        // says a call took is how long the agent waited for it. A build's own rule comes first: a
+        // paused build starts nothing new, and the first call after a delivery handed tasks is
+        // what starts them (D10-04, D10-09).
+        const measured = Effect.gen(function* () {
           // A monotonic clock, to the microsecond: a read inside the root takes less than a
           // millisecond, and a call recorded as taking none is a call that says nothing of itself.
           const began = performance.now()
@@ -1346,6 +1420,8 @@ export const toolCatalogueLayer: Layer.Layer<
             project.name,
             project.repositories,
             parsed.call,
+            build,
+            session.helper?.task ?? null,
           )
           // A tool has no error channel on purpose: everything a tool can be told no by is
           // answered as a value, and what would remain is a defect the engine should hear about.
@@ -1369,6 +1445,10 @@ export const toolCatalogueLayer: Layer.Layer<
               made,
             ),
           ),
+        )
+        // A helper's call is its build's: a paused build starts nothing new, whoever asks (#77).
+        const run = builds.admitted(build, named, measured, (reason) =>
+          refused(asked, made, reason),
         )
         if (asked.key === null) return yield* run
 

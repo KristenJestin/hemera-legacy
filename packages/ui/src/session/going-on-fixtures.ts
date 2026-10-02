@@ -2,8 +2,21 @@ import type { GoingOnAgent, GoingOnItem, GoingOnRun, GoingOnShell } from './goin
 
 /**
  * What goes on in the Session the line's stories are drawn in (issue #219): a server and a test
- * Hemera runs, a check that failed, a one-off, the agent's own shell commands, and two sub-agents.
+ * Hemera runs, a check that failed, a one-off, the agent's own shell commands, and helpers.
  */
+
+/** The moment the stories are drawn from, which the runs' seconds count from. */
+const NOW = Date.now()
+
+/** A run that started `seconds` ago and still runs. */
+function since(seconds: number): Pick<GoingOnRun, 'startedAt' | 'endedAt'> {
+  return { startedAt: NOW - seconds * 1000, endedAt: null }
+}
+
+/** A run that started `ago` seconds ago and took `seconds`. */
+function took(seconds: number, ago: number): Pick<GoingOnRun, 'startedAt' | 'endedAt'> {
+  return { startedAt: NOW - ago * 1000, endedAt: NOW - (ago - seconds) * 1000 }
+}
 
 const DEV: GoingOnRun = {
   kind: 'run',
@@ -21,6 +34,7 @@ const DEV: GoingOnRun = {
   startedBy: 'user',
   environment: { PORT: '5173' },
   at: '10:31',
+  ...since(9 * 60),
 }
 
 const TEST: GoingOnRun = {
@@ -37,6 +51,7 @@ const TEST: GoingOnRun = {
   startedBy: 'agent',
   environment: {},
   at: '10:36',
+  ...since(84),
 }
 
 const LINT: GoingOnRun = {
@@ -53,6 +68,7 @@ const LINT: GoingOnRun = {
   startedBy: 'agent',
   environment: {},
   at: '10:40',
+  ...took(6, 300),
 }
 
 const TYPECHECK: GoingOnRun = {
@@ -70,6 +86,7 @@ const TYPECHECK: GoingOnRun = {
   startedBy: 'agent',
   environment: {},
   at: '10:44',
+  ...took(12, 60),
 }
 
 const ONE_OFF: GoingOnRun = {
@@ -86,6 +103,7 @@ const ONE_OFF: GoingOnRun = {
   startedBy: 'user',
   environment: {},
   at: '10:46',
+  ...since(20),
 }
 
 /** The same one-off, over and well: what a glance offers to run again or keep (issue #237). */
@@ -95,6 +113,7 @@ export const ONE_OFF_DONE: GoingOnRun = {
   state: 'finished',
   exitCode: 0,
   output: '✓ csv.stream (3 tests)',
+  ...took(18, 40),
 }
 
 /** A run in `v2`, which the Project declares as one of its repositories, at its base (#239). */
@@ -112,6 +131,7 @@ const IN_REPOSITORY: GoingOnRun = {
   startedBy: 'user',
   environment: {},
   at: '10:47',
+  ...since(31),
 }
 
 /** A run in `tools`, a folder of the Workspace that is none of the Project's repositories. */
@@ -128,6 +148,7 @@ const IN_FOLDER: GoingOnRun = {
   startedBy: 'user',
   environment: {},
   at: '10:48',
+  ...since(2),
 }
 
 const VITEST: GoingOnShell = {
@@ -168,31 +189,90 @@ const GIT: GoingOnShell = {
   at: '10:33',
 }
 
-const EXPLORE: GoingOnAgent = {
+/** A free helper on a task, at work. */
+const READER: GoingOnAgent = {
   kind: 'agent',
-  id: 'agent-explore',
-  name: 'Explore',
-  task: 'Find every place that reads an invoice’s currency as a string.',
+  id: 'helper-reader',
+  name: 'Write the reader',
   state: 'running',
-  last: 'Found 12 reads of `currency` in 7 files; checking which ones render it.',
-  steps: [
-    'Searched currency in sources/api',
-    'Read src/invoice.ts',
-    'Read src/list/invoice-list.tsx',
-    'Searched toUpperCase() in sources/front',
-  ],
+  step: 'Editing a file',
+  last: 'The reader streams the rows; now the `currency` column.',
+  face: 'writing',
   at: '10:41',
+  ...since(126),
 }
 
+/** A defined helper that has finished. */
 const REVIEW: GoingOnAgent = {
   kind: 'agent',
-  id: 'agent-review',
-  name: 'Review',
-  task: 'Review the CSV stream for rows that could be written twice.',
+  id: 'helper-review',
+  name: 'Test review',
   state: 'finished',
-  last: 'No row is written twice: the cursor advances after each flush.',
-  steps: ['Read src/export/csv.stream.ts', 'Read src/export/export.service.ts'],
+  last: 'Every criterion of T1 has a test named after it.',
+  face: 'done',
   at: '10:37',
+  ...took(48, 300),
+}
+
+/** A helper whose agent died. */
+const SECURITY: GoingOnAgent = {
+  kind: 'agent',
+  id: 'helper-security',
+  name: 'Security review',
+  state: 'failed',
+  last: null,
+  face: 'error',
+  at: '10:38',
+  ...took(12, 200),
+}
+
+/** A helper the reader stopped. */
+const DOCUMENTER: GoingOnAgent = {
+  kind: 'agent',
+  id: 'helper-documenter',
+  name: 'Documenter',
+  state: 'stopped',
+  last: 'Reading the README.',
+  face: 'asleep',
+  at: '10:39',
+  ...took(30, 150),
+}
+
+/** A helper whose initial another one shares: `Write the reader` and `Wire them`. */
+const WIRING: GoingOnAgent = {
+  kind: 'agent',
+  id: 'helper-wiring',
+  name: 'Wire them',
+  state: 'running',
+  step: 'Reading a file',
+  last: 'Reading how the exporter is called.',
+  face: 'reading',
+  at: '10:42',
+  ...since(40),
+}
+
+/** A free helper whose brief is its name, long. */
+const LONG: GoingOnAgent = {
+  kind: 'agent',
+  id: 'helper-long',
+  name: 'Find every place that reads an invoice’s currency as a string and list them',
+  state: 'running',
+  last: 'Found 12 reads of `currency` in 7 files.',
+  face: 'reading',
+  at: '10:43',
+  ...since(9),
+}
+
+/** Helpers alone, at work and over. */
+export const HELPERS: Record<
+  'running' | 'ended' | 'sharedInitials' | 'longName' | 'crowded',
+  readonly GoingOnItem[]
+> = {
+  running: [READER],
+  crowded: [DEV, TEST, READER, VITEST, WIRING, REVIEW, RG],
+  ended: [REVIEW, SECURITY, DOCUMENTER],
+  sharedInitials: [READER, WIRING],
+  longName: [LONG],
 }
 
 /** The cases the line is drawn in, each in the order its items began. */
@@ -201,8 +281,8 @@ export const GOING_ON: Record<
   readonly GoingOnItem[]
 > = {
   few: [DEV, TEST, VITEST],
-  many: [DEV, TEST, LINT, VITEST, RG, GIT, EXPLORE, REVIEW],
-  failed: [DEV, TYPECHECK, VITEST, EXPLORE],
+  many: [DEV, TEST, LINT, VITEST, RG, GIT, READER, REVIEW],
+  failed: [DEV, TYPECHECK, VITEST, READER],
   oneOff: [DEV, ONE_OFF],
   places: [IN_REPOSITORY, IN_FOLDER],
 }

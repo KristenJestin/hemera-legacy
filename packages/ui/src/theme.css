@@ -443,10 +443,11 @@
      is the window it has to leave a margin in: enough for a page of its own, short of the edges. */
   --spacing-dialog-wide: 70vh;
 
-  /* The Spec folded (issue #164): the small frame at the window's edge, the three phases' glyphs
-     in their squares — a square, the room around it and the two borders of a frame. Its width is a
-     token rather than what it holds, because it is one end of the slot the swap moves. */
-  --spacing-spec-frame: 3.5rem;
+  /* A Session's panel folded (issue #164, #77): the small frame at the window's edge — the Spec's
+     three phases' glyphs in their squares, the build's hammer — a square, the room around it and
+     the two borders of a frame. Its width is a token rather than what it holds, because it is one
+     end of the slot the swap moves. */
+  --spacing-panel-frame: 3.5rem;
 
   /* How tall what waits above the composer may grow before it scrolls of its own: several blocking
      questions at once would otherwise push the thread out of the window. A share of the window,
@@ -458,11 +459,11 @@
      thread's column so the panel still reads as the pill's and not as a page of its own. */
   --spacing-notices: 36rem;
 
-  /* The Spec open: a share of the Session's row, the container it is asked of. A length of the
-     row rather than a fraction of the panel's own box, because the panel's box is what slides in
-     while it opens: what the panel holds is laid at this width from the first frame, so nothing
-     inside it reflows on the way. */
-  --spacing-spec-panel: 45cqw;
+  /* A Session's panel open, the Spec's and the build's alike (#77): a share of the Session's row,
+     the container it is asked of. A length of the row rather than a fraction of the panel's own
+     box, because the panel's box is what slides in while it opens: what the panel holds is laid at
+     this width from the first frame, so nothing inside it reflows on the way. */
+  --spacing-panel: 45cqw;
 
   /* The motion personality, CSS side: the same curve and the same durations `src/motion.ts`
      gives the spring, for the transitions Base UI drives through data attributes. */
@@ -578,19 +579,44 @@
   grid-template-columns: var(--sidebar-current-width, var(--spacing-sidebar)) 1fr;
 }
 
-/* The slot the Spec takes in a Session's row (issue #164): its small frame, the open panel, or a
-   width between the two, which the panel writes as `--spec-open` on every frame of the swap — 0
-   folded, 1 open — so the chat beside it is pushed as it moves. A share and not a length, because
+/* The slot a Session's panel takes in its row (issue #164, #77): its small frame, the open panel,
+   or a width between the two, which the panel writes as `--panel-open` on every frame of the swap —
+   0 folded, 1 open — so the chat beside it is pushed as it moves. A share and not a length, because
    the two ends are lengths of different kinds, rems and a share of the row, and only the browser
    can put them on one line; at rest it is one of the two tokens exactly, and stays so while the
-   window is resized. `--spec-in` scales the whole of it, from nothing to 1, while a Spec that has
-   just been created arrives in the row (issue #130); it is 1 for a Spec that was already there. */
-@utility spec-slot {
+   window is resized. `--panel-in` scales the whole of it, from nothing to 1, while a Spec that has
+   just been created arrives in the row (issue #130); it is 1 for a panel that was already there. */
+@utility panel-slot {
   width: calc(
-    (var(--spacing-spec-frame) + (var(--spacing-spec-panel) - var(--spacing-spec-frame)) *
-        var(--spec-open, 0)) *
-      var(--spec-in, 1)
+    (var(--spacing-panel-frame) + (var(--spacing-panel) - var(--spacing-panel-frame)) *
+        var(--panel-open, 0)) *
+      var(--panel-in, 1)
   );
+}
+
+/* What the panel is clipped by, laid against the row so that it can reach over the chat (#77): the
+   panel's open width beside the chat, the whole row less its two margins over it, and a width
+   between the two on the way, which the panel writes as `--panel-over` — 0 beside, 1 over. Only its
+   left edge moves: the chat under it keeps the width its slot leaves it, and nothing reflows. */
+@utility panel-clip {
+  width: calc(
+    var(--spacing-panel) + (100cqw - var(--spacing) * 6 - var(--spacing-panel)) *
+      var(--panel-over, 0)
+  );
+}
+
+/* The edge the Session's notices stand on: the composer's top, named so that they can stand on it
+   from elsewhere (#77). */
+@utility notices-edge {
+  anchor-name: --notices-edge;
+}
+
+/* Where the Session's notices float while the panel covers the chat (#77): on the composer's top
+   edge, under the panel, where they stand over the chat. Anchored to it by the browser, so nothing
+   is measured: the height is the one the theme laid the composer at. */
+@utility notices-over {
+  position-anchor: --notices-edge;
+  bottom: anchor(top);
 }
 
 /* The open panel, drawn from the same shares as its slot: out past its clip by its whole width
@@ -599,8 +625,8 @@
    and a swap turned round half-way turns both round together. The margin is the dock's `pr-3`,
    which the clip reaches across (issue #181): the panel comes in from the content's edge, as the
    small frame leaves by it, and not from inside the margin. */
-@utility spec-panel-in {
-  translate: calc((1 - var(--spec-open, 0) * var(--spec-in, 1)) * (100% + var(--spacing) * 3)) 0;
+@utility panel-in {
+  translate: calc((1 - var(--panel-open, 0) * var(--panel-in, 1)) * (100% + var(--spacing) * 3)) 0;
 }
 
 /* Where the active tab meets the sheet it opens (design D2-02).

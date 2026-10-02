@@ -29,7 +29,13 @@ import { Deferred, Effect, Fiber, Layer } from 'effect'
 import type { Scope } from 'effect'
 import { z } from 'zod'
 
-import { READ_PAGE_BYTES, SEARCH_MATCH_LIMIT, TOOL_NAMES, type ToolName } from '@hemera/core'
+import {
+  offeredTools,
+  READ_PAGE_BYTES,
+  SEARCH_MATCH_LIMIT,
+  TOOL_NAMES,
+  type ToolName,
+} from '@hemera/core'
 
 import {
   StderrSink,
@@ -57,6 +63,8 @@ import { ToolPermissions } from '#engine/tools/permissions.ts'
 import type { OutsideAnswer, OutsideRequest } from '#engine/tools/permissions.ts'
 import { variablesLayer } from '#engine/workspaces/variables.ts'
 import { setupPlaces } from './application.ts'
+
+import { idleBuilds } from './build-harness.ts'
 
 const SHIPPED = join(import.meta.dirname, '..', 'drizzle')
 
@@ -141,6 +149,8 @@ function engine(human: Human) {
     Layer.provideMerge(Layer.mergeAll(hostProcessesLayer, sink)),
   )
   const services: Layer.Layer<Engine> = toolCatalogueLayer.pipe(
+    // No build runs here: a Session that is none passes through the builds untouched.
+    Layer.provide(idleBuilds),
     Layer.provideMerge(journalLayer),
     Layer.provideMerge(toolAccessLayer),
     Layer.provideMerge(Layer.succeed(ToolPermissions, human.service)),
@@ -187,7 +197,7 @@ const opened = Effect.gen(function* () {
   const session = yield* sessions.create(project.id, 'claude')
   // An agent holds the Session's token, as it does once `session/new` has answered.
   const access = yield* ToolAccess
-  yield* access.granted(session.id, 'agent-1', 'free')
+  yield* access.granted(session.id, 'agent-1', offeredTools('free'))
   return { projectId: project.id, sessionId: session.id }
 })
 

@@ -61,6 +61,8 @@ export {
   SEARCH_SCAN_BYTES,
   SEARCH_SKIPS_LISTED,
   SPEC_PAGE_CHARACTERS,
+  BUILDING,
+  HELPING,
   TOOL_LABELS,
   TOOL_NAMES,
   admitTool,
@@ -164,6 +166,48 @@ export type {
   WorkspaceStep,
 } from './domain/workspace.ts'
 export {
+  ATTEMPTS_BEFORE_YOURS,
+  ATTEMPT_RESULTS,
+  ATTEMPT_SCOPES,
+  BUILD_PHASES,
+  CHECK_VERDICTS,
+  CHECK_WHEN,
+  CHECK_WHERE,
+  FILES_PLACEHOLDER,
+  TASK_STATES,
+  attemptResult,
+  checkPlaces,
+  checkProblem,
+  dependantsOf,
+  evaluateExpect,
+  expandFiles,
+  promotions,
+  proposeChecks,
+  readySet,
+  satisfied,
+  stateAfterAttempt,
+  storyDone,
+  taskLabels,
+  tasksSettled,
+} from './domain/build.ts'
+export type {
+  ActiveBuildPhase,
+  AttemptResult,
+  AttemptScope,
+  BuildPhase,
+  BuildTask,
+  ChangedFile,
+  CheckDraft,
+  CheckExpect,
+  CheckJudgement,
+  CheckVerdict,
+  CheckWhen,
+  CheckWhere,
+  ProjectCheck,
+  Promotion,
+  TaskState,
+} from './domain/build.ts'
+export {
   BASE_SECTIONS,
   DEFAULT_SPEC_PREFIX,
   DEFINE_PROTOCOL,
@@ -240,3 +284,42 @@ export {
   renderSpecMarkdown,
 } from './protocols/define/index.ts'
 export type { BriefInput } from './protocols/define/index.ts'
+export {
+  BUILD_MISSION_BRIEF,
+  BUILD_PHASE_BRIEFS,
+  BUILD_PROTOCOL,
+  composeBuildBrief,
+  taskDefinition,
+} from './protocols/build/index.ts'
+export type {
+  BriefAttempt,
+  BriefBlocker,
+  BriefCheck,
+  BriefFailure,
+  BriefFile,
+  BriefSnapshot,
+  BriefTask,
+  BuildBriefInput,
+} from './protocols/build/index.ts'
+export {
+  HELPERS_AT_ONCE,
+  HELPER_DEPTH,
+  HELPER_STATES,
+  HelperReadOnlyError,
+  InvalidHelpersAtOnceError,
+  helpersAtOnce,
+} from './domain/helpers.ts'
+export type { HelperPlace, HelperState } from './domain/helpers.ts'
+export {
+  HELPERS,
+  HELPER_INPUTS,
+  HELPER_MISSION_BRIEF,
+  WRITING_TOOLS,
+  composeHelperBrief,
+  helperDefinition,
+  helperNamed,
+  helperResult,
+  helpersFor,
+  sessionTools,
+} from './protocols/helpers/index.ts'
+export type { HelperBriefInput, HelperDefinition, HelperResult } from './protocols/helpers/index.ts'

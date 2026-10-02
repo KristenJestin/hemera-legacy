@@ -33,6 +33,22 @@ function wired(): Set<string> {
   ])
 }
 
+/** The names of the relay's list, in the order it holds them, repeats included. */
+function relayedInOrder(): string[] {
+  const list = LIST.exec(SOURCE)?.[1] ?? ''
+  return [...list.matchAll(NAME)].map(([, name]) => name ?? '')
+}
+
+describe('A channel is answered once', () => {
+  // `ipcMain.handle` throws on a name it already answers: a repeat in the relay's list aborts the
+  // wiring before the window is loaded, which stays blank, and every name after it goes unanswered.
+  test('no name appears twice in the relay', () => {
+    const names = relayedInOrder()
+    expect(names.filter((name, at) => names.indexOf(name) !== at)).toEqual([])
+    expect(new Set(names).size).toBe(names.length)
+  })
+})
+
 describe('Tout canal déclaré est branché', () => {
   test('every declared channel is relayed to the engine or answered by the main process', () => {
     const known = wired()
@@ -51,5 +67,15 @@ describe('Tout canal déclaré est branché', () => {
     )
     expect(lent).toHaveLength(16)
     expect(lent.filter((channel) => !names.has(channel))).toEqual([])
+  })
+
+  test('the build and the checks reach the engine, relayed and not answered here', () => {
+    const relayed = LIST.exec(SOURCE)?.[1] ?? ''
+    const names = new Set([...relayed.matchAll(NAME)].map(([, name]) => name ?? ''))
+    const built = Object.keys(CHANNELS).filter(
+      (channel) => channel.startsWith('build.') || channel.startsWith('checks.'),
+    )
+    expect(built).toHaveLength(12)
+    expect(built.filter((channel) => !names.has(channel))).toEqual([])
   })
 })

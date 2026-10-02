@@ -25,6 +25,8 @@ import { StderrSink } from '#engine/agents/supervisor.ts'
 import { agentDirectoriesLayer } from '#engine/agents/bare.ts'
 import { acpTracesLayer } from '#engine/agents/trace.ts'
 import { heldWordsLayer } from '#engine/agents/held.ts'
+import type { Builds } from '#engine/build/build.ts'
+import { type ProjectChecks, projectChecksLayer } from '#engine/build/checks.ts'
 import { sessionModesLayer } from '#engine/agents/modes.ts'
 import { type Proposals, proposalsLayer } from '#engine/commands/proposals.ts'
 import { type SetupProposals, setupProposalsLayer } from '#engine/setup/proposals.ts'
@@ -55,6 +57,9 @@ import { type Variables, variablesLayer } from '#engine/workspaces/variables.ts'
 import { type Workspaces, WorkspacesRoot, workspacesLayer } from '#engine/workspaces/workspaces.ts'
 
 import { threadOf, until } from './application.ts'
+import type { Helpers } from '#engine/helpers/helpers.ts'
+
+import { idleBuilds } from './build-harness.ts'
 import { repository } from './repositories.ts'
 
 const SHIPPED = join(import.meta.dirname, '..', 'drizzle')
@@ -105,6 +110,9 @@ function running<A, E>(
     | Preparation
     | Recipe
     | Proposals
+    | ProjectChecks
+    | Builds
+    | Helpers
     | SetupProposals
     | Launches
   >,
@@ -178,6 +186,8 @@ function running<A, E>(
     // Handed up, as the engine hands them up: the settings and the Commands panel ask for the
     // very catalogue and runs the runtime lends.
     Layer.provideMerge(lent),
+    // The builds, which the launches begin and the runtime drives: one service for both.
+    Layer.provideMerge(idleBuilds),
     Layer.provide(poolLayer.pipe(Layer.provide(clockLayer))),
     Layer.provide(agents),
     Layer.provide(heldWordsLayer),
@@ -226,6 +236,9 @@ function running<A, E>(
     | Proposals
     | SetupProposals
     | Launches
+    | ProjectChecks
+    | Builds
+    | Helpers
     | Database
     | SqliteClient
   > = Layer.mergeAll(
@@ -238,6 +251,8 @@ function running<A, E>(
     runtime,
     // What a human decides of the commands the agent proposed, on the very catalogue (D8-11).
     proposalsLayer.pipe(Layer.provide(lent), Layer.provide(rows), Layer.provide(agents)),
+    // The Project's checks, proposed from that very catalogue (D10-06).
+    projectChecksLayer.pipe(Layer.provide(lent)),
     // The Workspaces of the Projects, made under the data folder over the machine's `git`, and
     // prepared in the scope of these services: what a background preparation runs in.
     places,

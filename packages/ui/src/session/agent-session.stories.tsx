@@ -4,6 +4,7 @@ import { expect, userEvent, fn, waitFor, within } from 'storybook/test'
 
 import { onOneLine } from '../../.storybook/one-line.ts'
 import { DiffBlock } from '../activity/diff-block.tsx'
+import { loaded, subscribeToHighlight } from '../activity/highlight.ts'
 import { TerminalOutput } from '../activity/terminal-output.tsx'
 import { ThoughtBlock } from '../activity/thought-block.tsx'
 import { ToolCallCard } from '../activity/tool-call-card.tsx'
@@ -24,6 +25,7 @@ import { MessageDaySeparator, MessageGroup } from '../message/message.tsx'
 import { MessageScroller, type ScrollerEntry } from '../message/scroller/scroller.tsx'
 import type { PlanEntry } from './plan-panel.tsx'
 import { ResumeFallbackBanner } from './resume-fallback-banner.tsx'
+import { SessionRow } from './session-row.tsx'
 import { SessionEmpty, SessionHeader } from './session.tsx'
 import { CommandRun } from '../activity/command-run.tsx'
 import { HemeraToolCall } from '../activity/hemera-tool-call.tsx'
@@ -361,136 +363,141 @@ function Page({
   return (
     <TooltipProvider>
       {/*
-        One column (review of #40, defect 2): the head, the thread and the composer share one width
-        and one left edge, and nothing stands beside them — the details are a dialog the reader
-        opens from the head (second review of #18).
+        The head across the whole page, above the chat and the panel a Session of a mission has
+        (#77); under it, one column (review of #40, defect 2): the thread and the composer share
+        one width and one left edge — the details are a dialog the reader opens from the head
+        (second review of #18).
       */}
-      <div className="flex h-screen min-h-0 bg-background text-foreground">
-        <div className="flex min-h-0 flex-1 flex-col">
-          <div className="mx-auto flex w-full max-w-3xl flex-col gap-4 px-6 pt-6 pb-4">
-            <SessionHeader
-              title={fresh ? 'Untitled' : 'CSV invoice export'}
+      <div className="flex h-screen min-h-0 flex-col bg-background text-foreground">
+        <div className="shrink-0 px-6 pt-6 pb-1">
+          <SessionHeader
+            title={fresh ? 'Untitled' : 'CSV invoice export'}
 
-              onRename={fn()}
-              onArchive={fn()}
-              archiveDisabled={fresh}
-              // What the turn has done and what the agent works from.
-              onOpenDetails={() => setDetails(true)}
-            >
-              {/* What goes on in the Session, on the head's own row (issues #219, #241). */}
-              <GoingOnLine
-                items={goingOn}
-                onStop={fn()}
-                onOpenUrl={fn()}
-                onAddToCatalogue={fn()}
-                end={
-                  <RunCommand
-                    catalogue={[
-                      { name: 'dev', command: 'pnpm dev', type: 'serve', running: true },
-                      { name: 'check', command: 'pnpm check', type: 'test', running: false },
-                    ]}
-                    workspace="main"
-                    onRunCommand={fn()}
-                    onRunOnce={fn()}
-                  />
-                }
-              />
-            </SessionHeader>
-          </div>
-          {fresh ? (
-            <div className="mx-auto flex min-h-0 w-full max-w-3xl flex-1 flex-col px-6">
-              <SessionEmpty />
-            </div>
-          ) : (
-            <>
-              {/* The thread takes the whole width under the head and lays its own column on the
-                  head's and the composer's, so a wheel beside it scrolls it; the banner is not
-                  scrolled, and stands in the column above it. */}
-              <div className="mx-auto w-full max-w-3xl px-6">
-                <ResumeFallbackBanner
-                  agent="claude-code"
-                  session="CSV invoice export"
-                  kept="everything up to the last tool call"
-                  onDismiss={fn()}
-                />
-              </div>
-              <MessageScroller
-                className="flex-1"
-                label="The thread of this Session"
-                entries={THREAD}
-              />
-            </>
-          )}
-          {/* What the turn has spent stands above the box rather than in its foot: the foot is
-              the Workspace and the send alone since the trial of 22 September 2026, and a figure
-              read at a glance is a figure that must not be what makes a row wrap. What the turn
-              is *doing* shares that row, at its other end: one reading of one turn, what it is
-              doing on the left where the agent writes, what it has cost on the right. */}
-          <div className="mx-auto flex w-full max-w-3xl flex-col gap-2 px-6 pb-4">
-            {!fresh && (
-              <TurnLine
-                activity={{ state: 'waiting' }}
-                usage={{ used: 12400, size: 200000, cost: { amount: 0.42, currency: 'EUR' } }}
-                notched
-              />
-            )}
-            <Composer
-              value={value}
-              onValueChange={setValue}
-              files={files}
-              onFilesChange={setFiles}
-              onSearchFiles={() => Promise.resolve([])}
-              variant="inline"
-              action="Send"
-              placeholder="Say something to claude-code…"
-              onSend={() => Promise.resolve(null)}
-              running={!fresh}
+            onRename={fn()}
+            onArchive={fn()}
+            archiveDisabled={fresh}
+            // What the turn has done and what the agent works from.
+            onOpenDetails={() => setDetails(true)}
+          >
+            {/* What goes on in the Session, on the head's own row (issues #219, #241). */}
+            <GoingOnLine
+              items={goingOn}
               onStop={fn()}
-              notices={
-                fresh ? undefined : (
-                  <SessionNotices
-                    groups={[
-                      {
-                        kind: 'permission',
-                        label: 'Permissions',
-                        title: 'Run once',
-                        icon: <IconShield size="md" aria-hidden="true" />,
-                        urgent: true,
-                        tone: 'warning',
-                        items: [{ id: 'permission', content: ASKED }],
-                      },
-                    ]}
-                  />
-                )
-              }
-              agentMenu={
-                // A Session runs the agent it was made with, so the panel opens on that agent's
-                // models and offers no way back to a list of agents. No `spec` either: a Spec
-                // is made from the question that starts a Session, on the Home.
-                <AgentModelMenu
-                  fixed
-                  agents={AGENTS}
-                  agent={agent}
-                  onAgentChange={(id) => {
-                    setAgent(id)
-                    setModel(null)
-                    setEffort(null)
-                    setMode(null)
-                  }}
-                  models={MODELS}
-                  model={model}
-                  onModelChange={setModel}
-                  efforts={EFFORTS}
-                  effort={effort}
-                  onEffortChange={setEffort}
-                  modes={MODES}
-                  mode={mode}
-                  onModeChange={setMode}
+              onOpenUrl={fn()}
+              onAddToCatalogue={fn()}
+              end={
+                <RunCommand
+                  catalogue={[
+                    { name: 'dev', command: 'pnpm dev', type: 'serve', running: true },
+                    { name: 'check', command: 'pnpm check', type: 'test', running: false },
+                  ]}
+                  workspace="main"
+                  onRunCommand={fn()}
+                  onRunOnce={fn()}
                 />
               }
             />
-          </div>
+          </SessionHeader>
         </div>
+        <SessionRow
+          chat={
+            <>
+              {fresh ? (
+                <div className="mx-auto flex min-h-0 w-full max-w-3xl flex-1 flex-col px-6">
+                  <SessionEmpty />
+                </div>
+              ) : (
+                <>
+                  {/* The thread takes the whole width under the head and lays its own column on the
+                      head's and the composer's, so a wheel beside it scrolls it; the banner is not
+                      scrolled, and stands in the column above it. */}
+                  <div className="mx-auto w-full max-w-3xl px-6">
+                    <ResumeFallbackBanner
+                      agent="claude-code"
+                      session="CSV invoice export"
+                      kept="everything up to the last tool call"
+                      onDismiss={fn()}
+                    />
+                  </div>
+                  <MessageScroller
+                    className="flex-1"
+                    label="The thread of this Session"
+                    entries={THREAD}
+                  />
+                </>
+              )}
+              {/* What the turn has spent stands above the box rather than in its foot: the foot is
+                  the Workspace and the send alone since the trial of 22 September 2026, and a figure
+                  read at a glance is a figure that must not be what makes a row wrap. What the turn
+                  is *doing* shares that row, at its other end: one reading of one turn, what it is
+                  doing on the left where the agent writes, what it has cost on the right. */}
+              <div className="mx-auto flex w-full max-w-3xl flex-col gap-2 px-6 pb-4">
+                {!fresh && (
+                  <TurnLine
+                    activity={{ state: 'waiting' }}
+                    usage={{ used: 12400, size: 200000, cost: { amount: 0.42, currency: 'EUR' } }}
+                    notched
+                  />
+                )}
+                <Composer
+                  value={value}
+                  onValueChange={setValue}
+                  files={files}
+                  onFilesChange={setFiles}
+                  onSearchFiles={() => Promise.resolve([])}
+                  variant="inline"
+                  action="Send"
+                  placeholder="Say something to claude-code…"
+                  onSend={() => Promise.resolve(null)}
+                  running={!fresh}
+                  onStop={fn()}
+                  notices={
+                    fresh ? undefined : (
+                      <SessionNotices
+                        groups={[
+                          {
+                            kind: 'permission',
+                            label: 'Permissions',
+                            title: 'Run once',
+                            icon: <IconShield size="md" aria-hidden="true" />,
+                            urgent: true,
+                            tone: 'warning',
+                            items: [{ id: 'permission', content: ASKED }],
+                          },
+                        ]}
+                      />
+                    )
+                  }
+                  agentMenu={
+                    // A Session runs the agent it was made with, so the panel opens on that agent's
+                    // models and offers no way back to a list of agents. No `spec` either: a Spec
+                    // is made from the question that starts a Session, on the Home.
+                    <AgentModelMenu
+                      fixed
+                      agents={AGENTS}
+                      agent={agent}
+                      onAgentChange={(id) => {
+                        setAgent(id)
+                        setModel(null)
+                        setEffort(null)
+                        setMode(null)
+                      }}
+                      models={MODELS}
+                      model={model}
+                      onModelChange={setModel}
+                      efforts={EFFORTS}
+                      effort={effort}
+                      onEffortChange={setEffort}
+                      modes={MODES}
+                      mode={mode}
+                      onModeChange={setMode}
+                    />
+                  }
+                />
+              </div>
+            </>
+          }
+        />
         <SessionDetails
           open={details}
           onOpenChange={setDetails}
@@ -515,6 +522,21 @@ const meta = {
 export default meta
 
 type Story = StoryObj<typeof meta>
+
+/** Answers once the grammar of a language has arrived, however long its import takes. */
+function grammarOf(language: string): Promise<void> {
+  return new Promise((arrived) => {
+    if (loaded(language)) {
+      arrived()
+      return
+    }
+    const stop = subscribeToHighlight(() => {
+      if (!loaded(language)) return
+      stop()
+      arrived()
+    })
+  })
+}
 
 /**
  * Everything the lot draws, in one page: the reader's turn, the agent's answer, what it thought,
@@ -543,15 +565,14 @@ export const Complete: Story = {
     expect(canvas.queryByText('2 of 4')).toBeNull()
     // The change is read in the language of its file, which is what the extension bought. The
     // grammar of that language is a module loaded on demand, so the first diff of a session is
-    // drawn plain and coloured once the grammar has arrived. On a machine busy with the rest of
-    // the run that import outlasts the default patience of a wait, so it is given ten seconds;
-    // a draw kept plain would never be coloured, and would fail the wait however long it is.
-    await waitFor(
-      () => {
-        expect(canvasElement.querySelectorAll('.tok-keyword').length).toBeGreaterThan(0)
-      },
-      { timeout: 10_000 },
-    )
+    // drawn plain and coloured once the grammar has arrived. That import is the dev server's to
+    // answer, and a server busy with the rest of the run was seen to take longer than any
+    // patience given to a wait: the play waits for the grammar itself, and then for the colour.
+    // A draw kept plain once it is there would never be coloured, and fails the wait.
+    await grammarOf('typescript')
+    await waitFor(() => {
+      expect(canvasElement.querySelectorAll('.tok-keyword').length).toBeGreaterThan(0)
+    })
     // A call to one of Hemera's own tools wears the mark of its kind, as a native call does, and
     // is announced as Hemera's, so it is not read as a native call.
     await expect(canvas.getByRole('button', { name: /^Hemera Read file/ })).toBeVisible()

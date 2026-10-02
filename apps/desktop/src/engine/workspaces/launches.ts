@@ -9,7 +9,7 @@
  *
  * The Workspace becomes ready when its preparation writes its last step, and that is what starts
  * a launch waiting on it: the build Session is created on the launch's revision, in that
- * Workspace, with the Spec of that revision rendered as its brief in its thread, and the agent
+ * Workspace, its build begun and its `prepare` brief written in its thread (D10-02), and the agent
  * the Spec's writer Session runs is started in the Workspace's folder (D8-09: started is what the
  * agent's own handshake answered). A start that fails says `failed` with what the agent answered
  * and stays on screen, and `retry` starts that same Session's agent again without touching the
@@ -33,14 +33,14 @@ import {
   type SpecSnapshot,
   WORKSPACE_STATES,
   type WorkspaceState,
-  focusOf,
-  renderSpecMarkdown,
 } from '@hemera/core'
 import { type SQL, and, desc, eq, inArray, ne } from 'drizzle-orm'
 import { Context, Data, Duration, Effect, Layer, Result } from 'effect'
 
 import { AgentNotices } from '../agents/notices.ts'
 import { AgentRuntime } from '../agents/runtime.ts'
+import { Builds } from '../build/build.ts'
+import { slotHolder } from '../build/tasks.ts'
 import { StderrSink } from '../agents/supervisor.ts'
 import { DomainEvents } from '../domain-events.ts'
 import { type InvalidCursorError, type NewEvent } from '../journal.ts'
@@ -323,6 +323,7 @@ export const launchesLayer = Layer.effect(
     const sessions = yield* Sessions
     const preferences = yield* Preferences
     const runtime = yield* AgentRuntime
+    const builds = yield* Builds
     const notices = yield* AgentNotices
     /** The engine's diagnostic log: where a start run in the background says what it could not. */
     const diagnostic = yield* StderrSink
@@ -437,7 +438,7 @@ export const launchesLayer = Layer.effect(
         // left a launch `starting` whose Session holds none: written here again, before its agent
         // is asked, so a build is never resumed blind (D8-13).
         if ((yield* briefs(sessionId)).length === 0) {
-          yield* writeBrief(sessionId, yield* readLaunched(launch.specId, launch.revisionId))
+          yield* brief(sessionId, yield* readLaunched(launch.specId, launch.revisionId))
         }
         // Bounded by the agent's start deadline (#132): an agent that never answers its handshake
         // is a launch `failed` that offers `Retry`, not one "Starting the agent…" for ever.
@@ -455,6 +456,8 @@ export const launchesLayer = Layer.effect(
             }),
           ),
         )
+        // No message of the user's starts a build: its agent is handed its brief at once (D10-02).
+        if (Result.isSuccess(handshake)) yield* builds.wake(sessionId)
         const at = now()
         const answered: LaunchView = Result.isSuccess(handshake)
           ? { ...launch, state: 'started', sessionId, detail: null, updatedAt: at }
@@ -515,20 +518,25 @@ export const launchesLayer = Layer.effect(
       )
 
     /**
-     * The brief of a build: the Spec as it stood on the revision the launch names, folded in the
-     * Session's thread as the brief the window reads (3a's renderer, D7-09). Written by the
-     * start, and again by `settled` for a Session that holds none: an agent asked for a build
-     * whose Session holds no brief is asked to run it blind (D8-13).
+     * The build begun and its brief written, before its agent starts (D8-13, D10-02): `prepare`
+     * and its tasks on the revision the launch names, then the build's `prepare` brief folded in
+     * the Session's thread as the brief the window reads. It is the only brief a build Session is
+     * given at its start — the Spec reaches the agent through it — and its first delivery hands
+     * it over without writing it again. A brief that cannot be written fails the start, so a
+     * launch never says `started` for an agent that was given nothing. Written by the start, and
+     * again by `settled` for a Session that holds none: the build is begun once whatever the
+     * number of times it is asked.
      */
-    const writeBrief = (sessionId: string, snapshot: SpecSnapshot) =>
-      sessions
-        .write(sessionId, {
+    const brief = (sessionId: string, snapshot: SpecSnapshot) =>
+      Effect.gen(function* () {
+        const opening = yield* builds.begin(sessionId, snapshot)
+        yield* sessions.write(sessionId, {
           role: 'hemera',
           kind: 'mission_brief',
-          body: renderSpecMarkdown(snapshot),
-          payload: JSON.stringify({ phase: focusOf(snapshot.phases) }),
+          body: opening.text,
+          payload: JSON.stringify({ phase: opening.phase }),
         })
-        .pipe(Effect.asVoid)
+      })
 
     /**
      * The build itself: the Session on the launch's revision, its brief, then the agent.
@@ -648,7 +656,7 @@ export const launchesLayer = Layer.effect(
         // between the two reads: what it said of the build is not this caller's to say again, and
         // a launch it holds `starting` is its own, not this one's (#121).
         if (starting.state !== 'starting' || starting.sessionId !== claim) return starting
-        yield* writeBrief(sessionId, snapshot)
+        yield* brief(sessionId, snapshot)
         return yield* settled(starting, sessionId, projectId)
       })
 
@@ -972,6 +980,9 @@ export const launchesLayer = Layer.effect(
       one,
       request: (specId, workspaceId) =>
         Effect.gen(function* () {
+          // A build whose revision the Spec left is stopped first, which frees its slot (D10-04):
+          // whether the Spec's one build is held is read in the transaction that writes the launch.
+          yield* builds.holder(specId)
           // The Spec's status and its current revision are read in the very transaction that
           // writes the launch (D8-13), as the Workspace is: read outside it, a Rework may revise
           // the Spec in between, and the launch would be written on a revision the Spec no longer
@@ -997,6 +1008,17 @@ export const launchesLayer = Layer.effect(
                 const spec = specRows[0]
                 if (spec === undefined) {
                   return yield* Effect.fail(new UnknownSpecError({ id: specId }))
+                }
+                // One build of a Spec at a time, read in the transaction that writes the launch:
+                // two requests at once never both find the Spec's one build free. A paused,
+                // verifying or accepted build keeps the slot.
+                const held = yield* slotHolder(transaction, specId)
+                if (held !== null) {
+                  return yield* Effect.fail(
+                    new LaunchRefusedError({
+                      reason: `“${spec.key}” already has a build: ${held}.`,
+                    }),
+                  )
                 }
                 if (spec.status !== 'ready') {
                   return yield* Effect.fail(

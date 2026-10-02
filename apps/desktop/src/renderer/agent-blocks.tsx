@@ -68,7 +68,7 @@ import {
   questionEntryOf,
 } from './spec-entries.ts'
 import type { CallLink } from './call-links.ts'
-import { decidesARequest, decisionOf, permissionStandingOf } from './notices.ts'
+import { decidesARequest, decisionOf, helperAsking, permissionStandingOf } from './notices.ts'
 
 /**
  * What each entry of a thread is drawn as (design D5-11, D5-14, D5-16).
@@ -830,6 +830,8 @@ export function drawNotice(entry: SessionEntry, context: AgentContext): ReactNod
         command={asked.command}
         options={asked.options}
         scope={asked.scope}
+        // A helper's question waits among its build's notices, naming it (issue #77).
+        helper={helperAsking(entry)?.name}
         onDecide={(option) => context.onDecide(asked.toolCallId, option)}
       />
     )

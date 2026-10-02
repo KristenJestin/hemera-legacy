@@ -28,6 +28,15 @@ describe('Options de plateforme refusées', () => {
     expect(refusalsOf('src/main/environment.ts', source)).toEqual([])
   })
 
+  test('the keyring a Linux start asks for is the one switch the application adds', () => {
+    const source = "app.commandLine.appendSwitch('password-store', store)\n"
+    expect(refusalsOf('src/main/index.ts', source)).toEqual([])
+    const other = "app.commandLine.appendSwitch('enable-features', 'X')\n"
+    expect(refusalsOf('src/main/index.ts', other).map((refusal) => refusal.found)).toEqual([
+      'commandLine.appendSwitch',
+    ])
+  })
+
   test.each([
     [
       'an ozone hint',

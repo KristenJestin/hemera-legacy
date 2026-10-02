@@ -43,6 +43,8 @@ export const CHANNELS = {
     response: z.object({
       mode: ENGINE_REQUESTS['classifier.state'].response.shape.mode,
       credential: z.enum(['missing', 'saved', 'invalid', 'storage-unavailable']),
+      /** What the system lacks for protected storage, when it can be named. */
+      storageMissing: z.string().nullable(),
       consent: z.boolean(),
       generation: z.number().int(),
     }),

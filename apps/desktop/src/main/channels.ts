@@ -15,7 +15,11 @@ import { readSidecar, writeSidecar } from './display-sidecar.ts'
 import { DIAGNOSTIC_FILE, traceFileOf } from './diagnostic.ts'
 import { collectReport } from './environment.ts'
 import { handle } from './handle.ts'
-import { encryptClassifierKey, protectedStorageReady } from './classifier-key.ts'
+import {
+  encryptClassifierKey,
+  protectedStorageMissing,
+  protectedStorageReady,
+} from './classifier-key.ts'
 import { credentialStatus } from './classifier-storage.ts'
 import type { EngineConversation } from './engine-conversation.ts'
 import { wearPreference } from './window.ts'
@@ -48,6 +52,7 @@ export function registerChannels(
       return {
         mode: state.mode,
         credential: credentialStatus({ ready, hasKey: state.hasKey, ciphertext }),
+        storageMissing: protectedStorageMissing(),
         consent: state.consent,
         generation: state.generation,
       }

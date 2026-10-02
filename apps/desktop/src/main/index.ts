@@ -28,11 +28,16 @@ import {
   readCheckout,
 } from './channel.ts'
 import { registerChannels } from './channels.ts'
-import { restoreClassifierKey } from './classifier-key.ts'
+import {
+  protectedStorageBackend,
+  rememberBusNames,
+  restoreClassifierKey,
+} from './classifier-key.ts'
 import { openDiagnosticLog, reported, writeDiagnosticTo } from './diagnostic.ts'
 import { readSidecar } from './display-sidecar.ts'
 import { collectReport } from './environment.ts'
 import { startEngine } from './engine-client.ts'
+import { passwordStoreSwitch, readBusNames } from './secret-service.ts'
 import { headless } from './window-options.ts'
 import { createWindow, loadWindow } from './window.ts'
 
@@ -99,6 +104,26 @@ log(
 )
 
 /**
+ * The keyring the Jev key is sealed with, chosen before `ready` because Chromium reads it then
+ * (#293): on a Linux desktop Electron does not recognise, a running Secret Service is asked for
+ * rather than the plain-text fallback. A `--password-store` the user passed is left alone.
+ */
+if (process.platform === 'linux') {
+  const busNames = readBusNames()
+  rememberBusNames(busNames)
+  const store = passwordStoreSwitch({
+    platform: process.platform,
+    env: process.env,
+    argv: process.argv,
+    busNames,
+  })
+  if (store !== null) {
+    app.commandLine.appendSwitch('password-store', store)
+    log(`no keyring for this desktop; asking the Secret Service with --password-store=${store}`)
+  }
+}
+
+/**
  * No menu at all, which also takes its keystrokes with it.
  *
  * Electron gives a window a default menu, and the default menu owns Ctrl+W — so a frameless
@@ -133,6 +158,7 @@ if (!app.requestSingleInstanceLock()) {
     // The database is opened in its own process, and only once the application is ready: it is
     // the one program that holds the database file, and the main process never touches it.
     const engine = startEngine(main, data, identity, MIGRATIONS)
+    log(`protected storage backend ${protectedStorageBackend()}`)
     await restoreClassifierKey(engine)
 
     // Where the data folder turned out to stand, written down once (design D3-09). It is asked

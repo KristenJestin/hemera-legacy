@@ -100,9 +100,7 @@ export const States: Story = {
     await userEvent.click(within(dialog).getByRole('button', { name: 'Browse…' }))
 
     await waitFor(() => {
-      expect(within(dialog).getByRole('textbox', { name: /Folder/ })).toHaveValue(
-        'D:\\Work\\atlas',
-      )
+      expect(within(dialog).getByRole('textbox', { name: /Folder/ })).toHaveValue('D:\\Work\\atlas')
     })
 
     await userEvent.click(within(dialog).getByRole('button', { name: 'Create Project' }))
@@ -161,9 +159,7 @@ export const TheFolderComesFromTheSystem: Story = {
     await userEvent.click(within(dialog).getByRole('button', { name: 'Browse…' }))
     expect(args.onBrowse).toHaveBeenCalled()
     await waitFor(() => {
-      expect(within(dialog).getByRole('textbox', { name: /Folder/ })).toHaveValue(
-        'D:\\Work\\atlas',
-      )
+      expect(within(dialog).getByRole('textbox', { name: /Folder/ })).toHaveValue('D:\\Work\\atlas')
     })
   },
 }

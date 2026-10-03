@@ -576,7 +576,9 @@ async function aWorkspaceOnAChosenFolderTakesTheFoldersName({ canvasElement, arg
   await userEvent.click(dialog.getByRole('button', { name: 'Browse' }))
   await expect(args.onBrowse).toHaveBeenCalled()
   await waitFor(() => {
-    expect(dialog.getByRole('textbox', { name: 'Folder' })).toHaveValue('/home/someone/Projects/spike')
+    expect(dialog.getByRole('textbox', { name: 'Folder' })).toHaveValue(
+      '/home/someone/Projects/spike',
+    )
   })
   await expect(dialog.getByRole('textbox', { name: 'Name' })).toHaveValue('spike')
   await userEvent.click(dialog.getByRole('button', { name: 'Map' }))

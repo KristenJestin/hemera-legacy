@@ -76,9 +76,7 @@ describe('The folder picker opens where a command runs', () => {
   })
 
   test('a base is joined the way its own system writes a path', () => {
-    expect(folderBasePath('D:\\Work\\atlas', './sources/api')).toBe(
-      'D:\\Work\\atlas\\sources\\api',
-    )
+    expect(folderBasePath('D:\\Work\\atlas', './sources/api')).toBe('D:\\Work\\atlas\\sources\\api')
   })
 })
 
